@@ -23,9 +23,10 @@ Rules (for all messages):
 
 Order (envelope + payload, NO authority):
 - Envelope: envelope_pubkey(2), envelope_block_hash(3), envelope_difficulty(4),
-            envelope_pow(5), envelope_timestamp(6)
+            envelope_pow(5), envelope_timestamp(6), envelope_nonce(7)
 - Payload starts at 100: target(100), username(101), etc.
 - envelope_pow tag is 5 when present for signature canonical; not included in base
+- envelope_nonce (tag 7) is ALWAYS included (v1.20.0: mandatory, must be >0)
 """
 
 from __future__ import annotations
@@ -85,8 +86,7 @@ def canon_base_set_username(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, username)
     return bytes(out)
@@ -106,8 +106,7 @@ def canon_base_set_biography(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, biography)
     return bytes(out)
@@ -137,8 +136,7 @@ def canon_base_post(
     if pow_val > 0:
         out += _enc_u64(5, pow_val)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic or "")
     out += _enc_str(102, title)
@@ -168,8 +166,7 @@ def canon_base_edit(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic or "")
     out += _enc_str(102, title)
@@ -200,8 +197,7 @@ def canon_base_annotate(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(101, topic or "")
     out += _enc_str(102, title)
     out += _enc_str(103, content)
@@ -227,8 +223,7 @@ def canon_base_vote(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     # Direction is int32 in proto, but Go converts to uint32 before encoding
     # int32(-1) -> uint32(4294967295)
@@ -251,8 +246,7 @@ def canon_base_enable_agent(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, agent)
     return bytes(out)
@@ -272,8 +266,7 @@ def canon_base_disable_agent(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, agent)
     return bytes(out)
@@ -293,8 +286,7 @@ def canon_base_set_agents(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     for a in agents or []:
         out += _enc_str(101, a)
@@ -315,8 +307,7 @@ def canon_base_follow_user(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, user)
     return bytes(out)
@@ -336,8 +327,7 @@ def canon_base_unfollow_user(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, user)
     return bytes(out)
@@ -357,8 +347,7 @@ def canon_base_follow_topic(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -378,8 +367,7 @@ def canon_base_unfollow_topic(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -398,8 +386,7 @@ def canon_base_block_post(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -417,8 +404,7 @@ def canon_base_unblock_post(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -436,8 +422,7 @@ def canon_base_block_user(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -455,8 +440,7 @@ def canon_base_unblock_user(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -475,8 +459,7 @@ def canon_base_block_topic(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -496,8 +479,7 @@ def canon_base_unblock_topic(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -516,8 +498,7 @@ def canon_base_delete(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -535,8 +516,7 @@ def canon_base_delete_user(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -556,8 +536,7 @@ def canon_base_send_tokens(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, sender)
     out += _enc_str(101, target)
     out += _enc_u64(102, amount)
@@ -578,8 +557,7 @@ def canon_base_report(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, reason)
     return bytes(out)
@@ -598,8 +576,7 @@ def canon_base_upgrade_level(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_u64(100, level)
     return bytes(out)
 
@@ -617,8 +594,7 @@ def canon_base_set_auto_renewal(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_u64(100, 1 if auto_renew else 0)
     return bytes(out)
 
@@ -637,8 +613,7 @@ def canon_base_award(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, award_type)
     return bytes(out)
@@ -659,8 +634,7 @@ def canon_base_bridge_burn(
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
-    if nonce:
-        out += _enc_u64(7, nonce)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, destination_chain)
     out += _enc_str(101, destination_address)
     out += _enc_u64(102, amount)
@@ -674,7 +648,7 @@ def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
 
     Envelope layout in *base* (no pow) is always:
       prefix, tag2(pubkey bytes), tag3(last_block_hash bytes),
-      tag4(difficulty uvarint), tag6(timestamp uvarint), tag7(nonce uvarint, optional), payload tags (100+)
+      tag4(difficulty uvarint), tag6(timestamp uvarint), tag7(nonce uvarint), payload tags (100+)
     """
     base_arr = bytearray(base)
 

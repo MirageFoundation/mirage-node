@@ -17,8 +17,26 @@ import (
 )
 
 func main() {
+	// -------------------------------------------------------------------------
+	// HARD DISABLE (v1.20.0)
+	// The bridge is offline and the current orchestrator is intentionally blocked
+	// from running. This is a safety lock to prevent accidental startup on any
+	// node while the replacement is being designed and validated.
+	//
+	// To re-enable:
+	// 1) Remove this panic guard.
+	// 2) Revisit verify_upgrade.py checks that enforce the guard.
+	// 3) Re-enable ORCHESTRATOR_ENABLED in orchestrator.env only after approval.
+	// -------------------------------------------------------------------------
 	logger := log.New(os.Stdout, "orchestrator: ", log.LstdFlags|log.Lmicroseconds)
+	logger.Println("ORCHESTRATOR_HARD_DISABLED: bridge is offline; do not run this binary")
+	panic("ORCHESTRATOR_HARD_DISABLED: bridge is offline; do not run this binary")
 
+	// NOTE: When re-enabling, remove the panic guard above and call:
+	// runOrchestrator(logger)
+}
+
+func runOrchestrator(logger *log.Logger) {
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		logger.Printf("ERROR failed to load config: %v", err)
@@ -67,7 +85,7 @@ func main() {
 	}
 
 	logger.Printf("INFO orchestrator started")
-	
+
 	if err := runner.Run(ctx); err != nil {
 		if err == context.Canceled {
 			logger.Printf("INFO orchestrator stopped")

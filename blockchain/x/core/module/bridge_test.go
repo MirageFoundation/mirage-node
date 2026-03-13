@@ -1118,7 +1118,8 @@ func TestBridgeAttestationStorage(t *testing.T) {
 	}
 }
 
-// TestBridgeAttestationAmbiguous ensures multiple attestations for same burn_id fail fast.
+// TestBridgeAttestationAmbiguous ensures multiple attestations for same burn_id
+// returns the first one found (DoS-resistant) rather than erroring.
 func TestBridgeAttestationAmbiguous(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -1135,9 +1136,15 @@ func TestBridgeAttestationAmbiguous(t *testing.T) {
 		t.Fatalf("SetBridgeAttestation error: %v", err)
 	}
 
-	_, _, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
-	if err == nil {
-		t.Fatal("Expected error for ambiguous attestation lookup")
+	att, found, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
+	if err != nil {
+		t.Fatalf("GetBridgeAttestation should not error on duplicates: %v", err)
+	}
+	if !found {
+		t.Fatal("Expected to find an attestation")
+	}
+	if att.SourceChain != sourceChain || att.BurnID != burnID {
+		t.Fatalf("Returned attestation has wrong identity: %s/%s", att.SourceChain, att.BurnID)
 	}
 }
 

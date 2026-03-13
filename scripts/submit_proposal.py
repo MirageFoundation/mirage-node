@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import getpass
 import json
 import logging
@@ -371,6 +372,100 @@ def get_current_block_height(rpc_endpoint: str) -> int:
     except Exception as e:
         log_debug(f"Could not get block height: {e}")
     return 0
+
+
+def is_tx_index_disabled(rpc_endpoint: str) -> bool:
+    """Check if CometBFT tx indexing is disabled (indexer=null)."""
+    try:
+        response = requests.get(f"{rpc_endpoint}/status", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            tx_index = data.get("result", {}).get("node_info", {}).get("other", {}).get("tx_index", "")
+            return str(tx_index).lower() == "off"
+    except Exception as e:
+        log_debug(f"Could not read tx_index from status: {e}")
+    return False
+
+
+def _decode_attr(raw: str) -> str:
+    """Decode an event attribute that may be base64-encoded or plain text."""
+    if not raw:
+        return ""
+    try:
+        decoded = base64.b64decode(raw).decode("utf-8")
+        if decoded.isprintable():
+            return decoded
+        return raw
+    except Exception:
+        return raw
+
+
+def _extract_proposal_ids(events: list[dict]) -> list[str]:
+    ids: list[str] = []
+    for ev in events or []:
+        ev_type = ev.get("type") or ""
+        if "submit_proposal" not in ev_type and "EventSubmitProposal" not in ev_type:
+            continue
+        attrs = ev.get("attributes") or []
+        decoded: dict[str, str] = {}
+        for attr in attrs:
+            k_raw = attr.get("key") or ""
+            v_raw = attr.get("value") or ""
+            k = _decode_attr(k_raw)
+            v = _decode_attr(v_raw)
+            decoded[k] = v
+        proposal_id = decoded.get("proposal_id")
+        if proposal_id:
+            ids.append(proposal_id)
+    return ids
+
+
+def _scan_block_for_proposals(result: dict) -> list[str]:
+    ids: list[str] = []
+    events = result.get("end_block_events") or result.get("finalize_block_events") or []
+    ids.extend(_extract_proposal_ids(events))
+    for tx_res in result.get("txs_results") or []:
+        ids.extend(_extract_proposal_ids(tx_res.get("events") or []))
+    return ids
+
+
+def _get_block_results(rpc_endpoint: str, height: int) -> dict:
+    url = f"{rpc_endpoint}/block_results?height={height}"
+    r = requests.get(url, timeout=5)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("result", {})
+
+
+def wait_for_proposal_id_from_blocks(rpc_endpoint: str, expected_title: str, max_seconds: int) -> str | None:
+    """Scan each new block for submit_proposal events and return matching proposal_id."""
+    start_height = get_current_block_height(rpc_endpoint)
+    if start_height <= 0:
+        raise RuntimeError("Could not determine current block height")
+    deadline = time.time() + max_seconds
+    last_height = max(1, start_height - 1)
+    log_debug(f"Block scan start_height={start_height} last_height={last_height} max_seconds={max_seconds}")
+    while time.time() < deadline:
+        current_height = get_current_block_height(rpc_endpoint)
+        if current_height < last_height:
+            log_debug(f"Block height regressed: current={current_height} last={last_height}")
+            time.sleep(1)
+            continue
+        for height in range(last_height + 1, current_height + 1):
+            result = _get_block_results(rpc_endpoint, height)
+            proposal_ids = _scan_block_for_proposals(result)
+            if proposal_ids:
+                log_debug(f"height={height} proposal_ids={proposal_ids}")
+            for proposal_id in dict.fromkeys(proposal_ids):
+                # Confirm title matches the proposal we just submitted
+                prop_result = query_json_rpc(rpc_endpoint, ["q", "gov", "proposal", str(proposal_id)], fatal=False)
+                proposal = prop_result.get("proposal", prop_result)
+                if proposal.get("title") == expected_title:
+                    log_debug(f"Matched proposal_id={proposal_id} title={expected_title!r} height={height}")
+                    return str(proposal_id)
+        last_height = current_height
+        time.sleep(1)
+    return None
 
 
 def key_exists(account_name: str) -> bool:
@@ -889,6 +984,10 @@ def main():
     gas_price = 5000
     fee_amount = estimated_gas * gas_price
 
+    tx_index_off = is_tx_index_disabled(rpc_endpoint)
+    if tx_index_off:
+        info("ℹ️  tx_index is off — tx lookup by hash is unavailable")
+
     submit_cmd = [
         bin_path,
         "tx",
@@ -911,7 +1010,6 @@ def main():
         f"{fee_amount}umirage",
         "--yes",
     ]
-
     exit_status, output = run_with_pexpect(submit_cmd, timeout=60)
     log(f"Broadcast output:\n{output}")
 
@@ -942,69 +1040,18 @@ def main():
         sys.exit(1)
 
     # Verify transaction and extract proposal ID from events
-    txhash_match = re.search(r"txhash:\s*([A-F0-9]{64})", output, re.IGNORECASE)
     proposal_id_from_tx: str | None = None
+    txhash: str | None = None
 
+    txhash_match = re.search(r"txhash:\s*([A-F0-9]{64})", output, re.IGNORECASE)
     if txhash_match:
         txhash = txhash_match.group(1)
+
+    if txhash:
         log(f"TX hash: {txhash}")
         info(f"TX hash: {txhash}")
 
-        # Retry tx query - it may take a few seconds to be included in a block
-        tx_verified = False
-        max_attempts = 15
-        for attempt in range(1, max_attempts + 1):
-            print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
-            time.sleep(1)
-            try:
-                tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
-                if _is_local_mode:
-                    tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
-                else:
-                    miraged = get_miraged_path()
-                    bin_path = str(miraged) if miraged else "miraged"
-                    tx_cmd = [bin_path] + tx_args
-                log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
-                result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
-                if result.returncode == 0:
-                    tx_result = json.loads(result.stdout)
-                    tx_code = tx_result.get("code", 0)
-                    print()  # newline after progress
-                    if tx_code != 0:
-                        raw_log = tx_result.get("raw_log", "unknown error")
-                        log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
-                        info(f"ERROR: Transaction failed on-chain: {raw_log}")
-                        sys.exit(1)
-
-                    # Extract proposal_id from tx events
-                    for event in tx_result.get("events", []):
-                        if event.get("type") == "submit_proposal":
-                            for attr in event.get("attributes", []):
-                                if attr.get("key") == "proposal_id":
-                                    proposal_id_from_tx = attr.get("value")
-                                    log(f"Extracted proposal_id from tx events: {proposal_id_from_tx}")
-                                    break
-
-                    info("✅ Proposal submitted")
-                    tx_verified = True
-                    break
-                else:
-                    # Check if it's just "not found" (still pending)
-                    if "not found" in result.stderr.lower():
-                        log_debug(f"TX not found yet (attempt {attempt}), retrying...")
-                        continue
-                    else:
-                        print()  # newline after progress
-                        log(f"TX query error: {result.stderr}")
-                        break
-            except Exception as e:
-                print()  # newline after progress
-                log(f"TX verification error: {e}")
-                break
-
-        if not tx_verified:
-            print()  # newline after progress
-            info("⚠️  Could not verify TX after 15s")
+        def _show_tx_debug() -> None:
             # Check if tx is in mempool
             try:
                 mempool_resp = requests.get(f"{rpc_endpoint}/unconfirmed_txs?limit=100", timeout=5)
@@ -1021,6 +1068,83 @@ def main():
                 line = line.strip()
                 if line:
                     info(f"     {line}")
+
+        if tx_index_off:
+            max_wait = 70 if is_expedited else 45
+            info(f"ℹ️  tx_index off — scanning blocks for submit_proposal (up to {max_wait}s)")
+            try:
+                proposal_id_from_tx = wait_for_proposal_id_from_blocks(rpc_endpoint, title, max_wait)
+            except Exception as e:
+                info(f"ERROR: {e}")
+                sys.exit(1)
+            if not proposal_id_from_tx:
+                info(f"ERROR: Proposal not found in blocks within {max_wait}s")
+                _show_tx_debug()
+                sys.exit(1)
+        else:
+            # Retry tx query - it may take a few seconds to be included in a block.
+            # NOTE: If CometBFT tx indexing is disabled (indexer="null"), `q tx`
+            # will always fail. In that case we skip verification and fall back
+            # to finding the proposal by title after waiting for block inclusion.
+            tx_verified = False
+            max_attempts = 15
+            for attempt in range(1, max_attempts + 1):
+                print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
+                time.sleep(1)
+                try:
+                    tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
+                    if _is_local_mode:
+                        tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
+                    else:
+                        miraged = get_miraged_path()
+                        bin_path = str(miraged) if miraged else "miraged"
+                        tx_cmd = [bin_path] + tx_args
+                    log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
+                    result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
+                    if result.returncode == 0:
+                        tx_result = json.loads(result.stdout)
+                        tx_code = tx_result.get("code", 0)
+                        print()  # newline after progress
+                        if tx_code != 0:
+                            raw_log = tx_result.get("raw_log", "unknown error")
+                            log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
+                            info(f"ERROR: Transaction failed on-chain: {raw_log}")
+                            sys.exit(1)
+
+                        # Extract proposal_id from tx events
+                        for event in tx_result.get("events", []):
+                            if event.get("type") == "submit_proposal":
+                                for attr in event.get("attributes", []):
+                                    if attr.get("key") == "proposal_id":
+                                        proposal_id_from_tx = attr.get("value")
+                                        log(f"Extracted proposal_id from tx events: {proposal_id_from_tx}")
+                                        break
+
+                        info("✅ Proposal submitted")
+                        tx_verified = True
+                        break
+                    else:
+                        combined_err = (result.stderr + result.stdout).lower()
+                        if "indexing is disabled" in combined_err:
+                            print()
+                            info("ERROR: tx indexing is disabled but tx_index_off=false; cannot verify")
+                            sys.exit(1)
+                        elif "not found" in combined_err:
+                            log_debug(f"TX not found yet (attempt {attempt}), retrying...")
+                            continue
+                        else:
+                            print()  # newline after progress
+                            log(f"TX query error: {result.stderr}")
+                            break
+                except Exception as e:
+                    print()  # newline after progress
+                    log(f"TX verification error: {e}")
+                    break
+
+            if not tx_verified:
+                print()  # newline after progress
+                info("⚠️  Could not verify TX after 15s")
+                _show_tx_debug()
     else:
         log(f"Could not extract txhash from: {output}")
         info("⚠️  No txhash in output - continuing anyway")
@@ -1048,12 +1172,32 @@ def main():
             proposal_id = proposal_id_from_tx
 
     if not proposal:
-        # Fallback: find proposal by matching title (must be exact match and recent)
-        proposals_result = query_json_rpc(rpc_endpoint, ["q", "gov", "proposals"])
-        proposals_list = proposals_result.get("proposals", [])
+        # Fallback: find proposal by matching title in active proposals.
+        # Filter by status to avoid deserializing old passed/rejected proposals
+        # that may contain message types no longer in the protobuf registry
+        # (e.g. MsgMintTo removed after v1.20.0).
+        proposals_list: list[dict] = []
+        max_prop_attempts = 10 if tx_index_off else 1
+        for attempt in range(1, max_prop_attempts + 1):
+            for status_filter in ["voting_period", "deposit_period", ""]:
+                try:
+                    cmd = ["q", "gov", "proposals"]
+                    if status_filter:
+                        cmd += ["--status", status_filter]
+                    proposals_result = query_json_rpc(rpc_endpoint, cmd, fatal=False)
+                    proposals_list = proposals_result.get("proposals", [])
+                    if proposals_list:
+                        break
+                except (QueryError, Exception) as e:
+                    log(f"q gov proposals (status={status_filter or 'all'}): {e}")
+                    continue
+            if proposals_list:
+                break
+            if attempt < max_prop_attempts:
+                time.sleep(2)
 
         if not proposals_list:
-            info("ERROR: No proposals found")
+            info("ERROR: No proposals found (all queries failed or returned empty)")
             return 1
 
         # Search backwards (most recent first) for matching title

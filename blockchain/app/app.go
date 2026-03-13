@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -132,6 +133,27 @@ func init() {
 	DefaultNodeHome = filepath.Join(os.Getenv("HOME"), ".mirage", "node")
 }
 
+// isRelayMessage returns true if the message is a relay-routed core message
+// (uses envelope PoW + signature instead of standard SDK signatures).
+func isRelayMessage(m sdk.Msg) bool {
+	switch m.(type) {
+	case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
+		*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
+		*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
+		*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
+		*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
+		*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+		*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
+		*coretypes.MsgDelete, *coretypes.MsgDeleteUser, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+		*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+		*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
+		*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
+		return true
+	default:
+		return false
+	}
+}
+
 // AppConfig returns the default app config.
 func AppConfig() depinject.Config {
 	return depinject.Configs(
@@ -232,6 +254,7 @@ func New(
 			accDec := RelayAccountingDecorator{Keeper: app.CoreKeeper}
 			logDec := LoggingDecorator{}
 			disableDel := DisableDelegatorStakingDecorator{}
+			validateBasic := authante.NewValidateBasicDecorator()
 
 			// Build the standard SDK ante handler for normal (signed) txs
 			stdOpts := authante.HandlerOptions{
@@ -249,39 +272,39 @@ func New(
 			}
 
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
-				// Detect if this tx contains any relay core messages
-				containsMeta := false
+				// Classify each message as relay or non-relay.
+				isRelayTx := false
+				hasNonRelay := false
 				msgTypes := make([]string, 0, len(tx.GetMsgs()))
 				govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 				for _, m := range tx.GetMsgs() {
 					msgTypes = append(msgTypes, sdk.MsgTypeURL(m))
 					// Governance messages must NEVER flow through the signature-less relay ante chain.
-					// If any message claims gov authority, force the standard ante handler which enforces tx signatures.
 					if am, ok := m.(interface{ GetAuthority() string }); ok {
 						if strings.TrimSpace(am.GetAuthority()) == govAuthority {
-							containsMeta = false
+							isRelayTx = false
+							hasNonRelay = false
 							break
 						}
 					}
-					switch m.(type) {
-					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-						*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
-						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-						*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
-						*coretypes.MsgDelete, *coretypes.MsgDeleteUser, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-						*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
-						*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
-						containsMeta = true
+					if isRelayMessage(m) {
+						isRelayTx = true
+					} else {
+						hasNonRelay = true
 					}
 				}
 
-				if !containsMeta {
+				// Reject transactions that mix relay and non-relay messages.
+				// Without this, a non-relay message (e.g. bank.MsgSend) would bypass
+				// SDK signature verification entirely since the relay ante chain does
+				// not include SigVerificationDecorator.
+				if isRelayTx && hasNonRelay {
+					ctx.Logger().Error("ante: rejected mixed relay + non-relay tx", "msg_types", msgTypes)
+					return ctx, fmt.Errorf("transactions cannot mix relay and non-relay messages")
+				}
+
+				if !isRelayTx {
 					ctx.Logger().Debug("Relay ante: using standard ante", "msg_types", msgTypes)
-					// Use the standard SDK ante chain for normal signed txs (gas + fees + sig checks)
 					ctxStd, err := stdAnte(ctx, tx, simulate)
 					if err != nil {
 						codespace, code, log := errorsmod.ABCIInfo(err, false)
@@ -291,6 +314,7 @@ func New(
 				}
 
 				ctx.Logger().Debug("Relay ante: using relay ante", "msg_types", msgTypes)
+
 				// Relay flow for core messages
 				// 1. Setup Context (Must be first)
 				ctx1, err := setup.AnteHandle(ctx, tx, simulate, terminator)
@@ -298,8 +322,17 @@ func New(
 					return ctx1, err
 				}
 
+				// 1.5. ValidateBasic — structural tx validation (proto validity,
+				// len(signatures)==len(signers)). Defense-in-depth against mixed-message
+				// attacks: a piggybacked bank.MsgSend would add a second signer that
+				// doesn't have a matching signature entry.
+				ctx1b, err := validateBasic.AnteHandle(ctx1, tx, simulate, terminator)
+				if err != nil {
+					return ctx1b, err
+				}
+
 				// 2. Timeout (Cheap check)
-				ctx2, err := timeout.AnteHandle(ctx1, tx, simulate, terminator)
+				ctx2, err := timeout.AnteHandle(ctx1b, tx, simulate, terminator)
 				if err != nil {
 					return ctx2, err
 				}

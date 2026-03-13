@@ -46,17 +46,19 @@ curl "${RPC_HTTP}/block" | jq
 curl "${RPC_HTTP}/block_results?height=12345" | jq
 ```
 
-#### Transaction by hash
+#### Transaction by hash (unavailable)
+
+> **Since v1.20.0:** CometBFT transaction indexing is disabled (`indexer = "null"`).
+> The `/tx` and `/tx_search` endpoints are **not available** on standard nodes.
+> Use the application-level indexer or block results for transaction data.
 
 ```bash
-curl "${RPC_HTTP}/tx?hash=0xABC123DEF456..." | jq
-```
+# These will return errors on nodes with indexer="null":
+# curl "${RPC_HTTP}/tx?hash=0xABC123DEF456..." | jq
+# curl "${RPC_HTTP}/tx_search?query=\"tx.height=12345\"" | jq
 
-#### Search transactions
-
-```bash
-curl "${RPC_HTTP}/tx_search?query=\"tx.height=12345\"" | jq
-curl "${RPC_HTTP}/tx_search?query=\"message.action='/mirage.core.v1.MsgPost'\"" | jq
+# Instead, use block_results to inspect transactions at a known height:
+curl "${RPC_HTTP}/block_results?height=12345" | jq
 ```
 
 #### Validators

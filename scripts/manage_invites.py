@@ -3,18 +3,17 @@
 Manage invite codes: replenish for all users, add codes to a specific user, or list codes.
 
 Modes:
-1. Replenish all users: Top up every user to a target number of unused codes (default: 3).
-2. Replenish single user: Top up one user to the target number of unused codes.
+1. Replenish all users: Top up every user to N unused codes.
+2. Replenish single user: Top up one user to N unused codes.
 3. Add codes to a user: Create a specific number of new codes for one user.
 4. List codes for a user: Shows unused codes without creating new ones.
 
 Usage:
-    python3 scripts/manage_invites.py                          # Top up all users to 3 unused codes
-    python3 scripts/manage_invites.py --target 5               # Top up all users to 5 unused codes
-    python3 scripts/manage_invites.py --dry-run                # Show what would happen without making changes
-    python3 scripts/manage_invites.py --user Santa             # List Santa's unused codes
-    python3 scripts/manage_invites.py --user Santa --add 10    # Create 10 new codes for Santa
-    python3 scripts/manage_invites.py --user Santa --replenish # Top up Santa to target (default: 3)
+    python3 scripts/manage_invites.py --replenish 3               # Top up all users to 3 unused codes
+    python3 scripts/manage_invites.py --replenish 5 --dry-run     # Show what would happen without making changes
+    python3 scripts/manage_invites.py --user Santa                 # List Santa's unused codes
+    python3 scripts/manage_invites.py --user Santa --add 10        # Create 10 new codes for Santa
+    python3 scripts/manage_invites.py --user Santa --replenish 5   # Top up Santa to 5 unused codes
 """
 
 import argparse
@@ -284,12 +283,6 @@ def replenish_all(conn, target: int, dry_run: bool) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Manage invite codes: replenish, add, or list")
     parser.add_argument(
-        "--target",
-        type=int,
-        default=3,
-        help="Target number of unused codes per user for replenish (default: 3)",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would happen without making changes",
@@ -297,7 +290,7 @@ def main():
     parser.add_argument(
         "--user",
         type=str,
-        help="Username to operate on (without this, replenishes all users)",
+        help="Username to operate on",
     )
     parser.add_argument(
         "--add",
@@ -307,8 +300,9 @@ def main():
     )
     parser.add_argument(
         "--replenish",
-        action="store_true",
-        help="Top up --user to --target unused codes (like the global mode, but for one user)",
+        type=int,
+        metavar="N",
+        help="Top up to N unused codes (all users, or --user if specified)",
     )
     args = parser.parse_args()
 
@@ -319,14 +313,14 @@ def main():
     if args.add and args.add < 1:
         print("Error: --add must be at least 1", file=sys.stderr)
         sys.exit(1)
-    if args.add and args.replenish:
+    if args.add and args.replenish is not None:
         print("Error: --add and --replenish cannot be used together", file=sys.stderr)
         sys.exit(1)
-    if args.replenish and not args.user:
-        print("Error: --user is required when using --replenish", file=sys.stderr)
+    if args.replenish is not None and args.replenish < 1:
+        print("Error: --replenish must be at least 1", file=sys.stderr)
         sys.exit(1)
-    if args.target < 1:
-        print("Error: --target must be at least 1", file=sys.stderr)
+    if not args.user and args.replenish is None and not args.add:
+        print("Error: specify --replenish N (with or without --user), --user USERNAME, or --user USERNAME --add N", file=sys.stderr)
         sys.exit(1)
 
     db_url = os.environ.get("INDEXER_DB_URL", "").strip()
@@ -342,12 +336,12 @@ def main():
 
     if args.user and args.add:
         add_codes_to_user(conn, args.user, args.add, args.dry_run)
-    elif args.user and args.replenish:
-        replenish_user(conn, args.user, args.target, args.dry_run)
+    elif args.user and args.replenish is not None:
+        replenish_user(conn, args.user, args.replenish, args.dry_run)
     elif args.user:
         list_codes_for_user(conn, args.user)
     else:
-        replenish_all(conn, args.target, args.dry_run)
+        replenish_all(conn, args.replenish, args.dry_run)
 
     conn.close()
 

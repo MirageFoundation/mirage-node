@@ -41,13 +41,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 	params := d.Keeper.GetParams(ctx)
 	maxAge := params.MaxEnvelopeAge
 
-	// LEGACY_NONCE_COMPAT: when EnvelopeNonce==0 (pre-1.18 clients), skip replay
-	// protection and omit tag 7 from canonical bytes.  When EnvelopeNonce>0 (1.18+
-	// clients), include tag 7 in canonical bytes and enforce replay protection.
+	// v1.20.0: envelope_nonce is mandatory. Nonce==0 is rejected.
 	// Nonce generation (for clients):
 	//   nonce = (Date.now() * 1_000_000) ^ (rand32)
-	//   Must be >0; for JS keep <=2^53-1.  Include in signature.
-	// Remove the nonce==0 legacy path after all clients send envelope_nonce.
+	//   Must be >0; for JS keep <=2^53-1. Include in signature.
 	for _, msg := range tx.GetMsgs() {
 		switch m := msg.(type) {
 		case *coretypes.MsgPost:
@@ -59,10 +56,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgPost", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -70,9 +68,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Topic)
 				w.writeString(102, m.Title)
@@ -85,13 +81,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgPost", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgPost", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgVote:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -101,10 +95,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgVote", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -112,22 +107,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeUvarint(101, uint64(uint32(m.Direction)))
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgVote", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgVote", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgVote", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgSetUsername:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -137,10 +128,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgSetUsername", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -148,22 +140,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Username)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetUsername", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetUsername", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgSetBiography:
 			if m.Authority == govAuthority {
 				continue
@@ -173,10 +161,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgSetBiography", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -184,22 +173,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Biography)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetBiography", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetBiography", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgEnableAgent:
 			if m.Authority == govAuthority {
 				continue
@@ -209,10 +194,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgEnableAgent", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -220,22 +206,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Agent)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEnableAgent", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEnableAgent", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgDisableAgent:
 			if m.Authority == govAuthority {
 				continue
@@ -245,10 +227,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgDisableAgent", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -256,22 +239,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Agent)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDisableAgent", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDisableAgent", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDisableAgent", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgSetAgents:
 			if m.Authority == govAuthority {
 				continue
@@ -281,10 +260,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgSetAgents", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -292,9 +272,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				for _, agent := range m.Agents {
 					w.writeString(101, agent)
@@ -303,13 +281,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetAgents", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAgents", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAgents", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgFollowUser:
 			if m.Authority == govAuthority {
 				continue
@@ -319,10 +295,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgFollowUser", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -330,22 +307,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.User)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgFollowUser", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowUser", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowUser", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgUnfollowUser:
 			if m.Authority == govAuthority {
 				continue
@@ -355,10 +328,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgUnfollowUser", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -366,22 +340,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.User)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowUser", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowUser", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgFollowTopic:
 			if m.Authority == govAuthority {
 				continue
@@ -391,10 +361,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgFollowTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -402,22 +373,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Topic)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgFollowTopic", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowTopic", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowTopic", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgUnfollowTopic:
 			if m.Authority == govAuthority {
 				continue
@@ -427,10 +394,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgUnfollowTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -438,22 +406,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Topic)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowTopic", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowTopic", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgBlockPost:
 			if m.Authority == govAuthority {
 				continue
@@ -463,10 +427,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgBlockPost", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -474,21 +439,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockPost", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockPost", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockPost", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgUnblockPost:
 			if m.Authority == govAuthority {
 				continue
@@ -498,10 +459,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgUnblockPost", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -509,21 +471,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockPost", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockPost", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockPost", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgBlockUser:
 			if m.Authority == govAuthority {
 				continue
@@ -533,10 +491,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgBlockUser", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -544,21 +503,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockUser", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockUser", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockUser", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgUnblockUser:
 			if m.Authority == govAuthority {
 				continue
@@ -568,10 +523,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgUnblockUser", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -579,21 +535,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockUser", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockUser", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgBlockTopic:
 			if m.Authority == govAuthority {
 				continue
@@ -603,10 +555,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgBlockTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -614,22 +567,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Topic)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockTopic", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockTopic", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockTopic", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgUnblockTopic:
 			if m.Authority == govAuthority {
 				continue
@@ -639,10 +588,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgUnblockTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -650,22 +600,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Topic)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockTopic", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockTopic", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockTopic", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgDelete:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -675,10 +621,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgDelete", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -686,21 +633,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDelete", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDelete", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDelete", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgDeleteUser:
 			if m.Authority == govAuthority {
 				continue
@@ -710,10 +653,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgDeleteUser", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -721,21 +665,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDeleteUser", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDeleteUser", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDeleteUser", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgSendTokens:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -745,10 +685,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgSendTokens", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -756,9 +697,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Sender)
 				w.writeString(101, m.Target)
 				w.writeUvarint(102, m.Amount)
@@ -766,13 +705,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSendTokens", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSendTokens", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSendTokens", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgEdit:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -782,10 +719,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgEdit", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -793,9 +731,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.Topic)
 				w.writeString(102, m.Title)
@@ -809,13 +745,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEdit", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEdit", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgAnnotate:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -825,10 +759,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgAnnotate", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -836,9 +771,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(101, m.Topic)
 				w.writeString(102, m.Title)
 				w.writeString(103, m.Content)
@@ -852,13 +785,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAnnotate", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAnnotate", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgSetLevel:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -868,10 +799,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgSetLevel", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -879,22 +811,18 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeUvarint(101, uint64(uint32(m.Level)))
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetLevel", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetLevel", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetLevel", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgUpgradeLevel:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -904,10 +832,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgUpgradeLevel", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -915,21 +844,17 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeUvarint(100, uint64(uint32(m.Level)))
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUpgradeLevel", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUpgradeLevel", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUpgradeLevel", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgSetAutoRenewal:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -939,10 +864,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgSetAutoRenewal", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -950,9 +876,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				if m.AutoRenew {
 					w.writeUvarint(100, 1)
 				} else {
@@ -962,13 +886,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetAutoRenewal", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAutoRenewal", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAutoRenewal", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgBridgeBurn:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -978,10 +900,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgBridgeBurn", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -989,9 +912,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.DestinationChain)
 				w.writeString(101, m.DestinationAddress)
 				w.writeUvarint(102, m.Amount)
@@ -999,13 +920,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBridgeBurn", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBridgeBurn", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBridgeBurn", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
 		case *coretypes.MsgAward:
 			if m.Authority == govAuthority {
 				continue
@@ -1015,10 +934,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip replay check when nonce==0
-				if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-					return ctx, fmt.Errorf("envelope replay: nonce already used")
-				}
+			if m.EnvelopeNonce == 0 {
+				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
+			}
+			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
+				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
 			if err := verifyRelaySignature("MsgAward", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
@@ -1026,23 +946,19 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
-				if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: omit tag 7 when nonce==0
-					w.writeUvarint(7, m.EnvelopeNonce)
-				}
+				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
 				w.writeString(101, m.AwardType)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAward", "err", err.Error())
 				return ctx, err
 			}
-			if m.EnvelopeNonce > 0 { // LEGACY_NONCE_COMPAT: skip nonce recording when nonce==0
-				nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-				if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-					ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAward", "err", err.Error())
-					return ctx, fmt.Errorf("failed to record nonce: %w", err)
-				}
-			} // LEGACY_NONCE_COMPAT end
-		// Note: MsgBridgeAttest does NOT use envelope - it's signed directly by validators
+			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAward", "err", err.Error())
+				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
+			// Note: MsgBridgeAttest does NOT use envelope - it's signed directly by validators
 		default:
 			// ignore others
 		}

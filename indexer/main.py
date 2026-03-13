@@ -54,7 +54,9 @@ def _resolve_validator_address() -> str:
         node_cfg = config.get_node_config()
         home = node_cfg["home"]
         keyring_backend = config.get_keyring_backend()
-        bin_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "blockchain", "bin", "miraged"))
+        bin_path = os.path.abspath(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "blockchain", "bin", "miraged")
+        )
         cmd = [bin_path, "keys", "list", "--output", "json", "--home", home, "--keyring-backend", keyring_backend]
         out = subprocess.check_output(cmd, timeout=5, stderr=subprocess.DEVNULL).decode("utf-8").strip()
         for entry in json.loads(out) or []:
@@ -227,6 +229,30 @@ class Indexer:
                     if idx < len(txs_results):
                         code = int(txs_results[idx].get("code", 0))
                         if code != 0:
+                            tx_type = "unknown"
+                            for any_msg in tx_body.messages:
+                                if any_msg.type_url == "/mirage.core.v1.MsgVote":
+                                    tx_type = "vote"
+                                    break
+                                if any_msg.type_url == "/mirage.core.v1.MsgPost":
+                                    tx_type = "post"
+                                    break
+                            raw_log = str(txs_results[idx].get("log", "") or "")
+                            self.db.upsert_tx_receipt_failure(
+                                tx_hash,
+                                height,
+                                code,
+                                raw_log,
+                                tx_type,
+                                ts,
+                            )
+                            logger.debug(
+                                "Recorded failed tx receipt (height=%s code=%s tx_type=%s txhash=%s)",
+                                height,
+                                code,
+                                tx_type,
+                                tx_hash,
+                            )
                             continue
 
                     pending_proposals: list[list[dict]] = []
@@ -330,7 +356,11 @@ class Indexer:
                     self.processor.update_profile_subscription(address, level, new_expiry, ts)
 
     def _process_governance_events(self, result_obj: dict, ts: int, height: int):
-        """Process governance events for passed proposals."""
+        """Process governance events for passed proposals.
+
+        Resolution order: proposal cache → gRPC query.
+        No tx_search fallback — indexer="null" means tx_search is unavailable.
+        """
         events = result_obj.get("end_block_events") or result_obj.get("finalize_block_events")
         if events is None:
             events = []
@@ -339,66 +369,27 @@ class Indexer:
 
         passed_ids = self.processor.extract_passed_proposals(events)
         for proposal_id in passed_ids:
-            # Skip proposals we've already tried and failed to resolve
             if proposal_id in self._skipped_proposals:
                 continue
             try:
                 messages = self._proposal_cache.pop(proposal_id, None)
                 if not messages:
-                    if self._catch_up_mode:
-                        try:
-                            messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
-                        except RuntimeError as grpc_err:
-                            if "no trackable messages" in str(grpc_err).lower():
-                                logger.warning(
-                                    "Skipping proposal %s - contains only governance-only messages (not tracked by indexer)",
-                                    proposal_id,
-                                )
-                                self._skipped_proposals.add(proposal_id)
-                                continue
-                            try:
-                                messages = self.chain.fetch_submit_proposal_messages_via_tx_search(
-                                    proposal_id,
-                                    MessageProcessor.decode_events,
-                                    MessageProcessor.extract_proposal_id,
-                                    MessageProcessor.extract_inner_messages,
-                                )
-                            except RuntimeError as tx_err:
-                                logger.warning(
-                                    "Skipping proposal %s - unable to resolve messages during catch-up (gRPC error: %s, tx_search error: %s)",
-                                    proposal_id,
-                                    grpc_err,
-                                    tx_err,
-                                )
-                                self._skipped_proposals.add(proposal_id)
-                                continue
-                    else:
-                        try:
-                            messages = self.chain.fetch_submit_proposal_messages_via_tx_search(
+                    try:
+                        messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
+                    except RuntimeError as grpc_err:
+                        if "no trackable messages" in str(grpc_err).lower():
+                            logger.warning(
+                                "Skipping proposal %s — governance-only messages (not tracked by indexer)",
                                 proposal_id,
-                                MessageProcessor.decode_events,
-                                MessageProcessor.extract_proposal_id,
-                                MessageProcessor.extract_inner_messages,
                             )
-                        except RuntimeError as tx_err:
-                            try:
-                                messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
-                            except RuntimeError as grpc_err:
-                                if "no trackable messages" in str(grpc_err).lower():
-                                    logger.warning(
-                                        "Skipping proposal %s - contains only governance-only messages (not tracked by indexer)",
-                                        proposal_id,
-                                    )
-                                    self._skipped_proposals.add(proposal_id)
-                                    continue
-                                logger.warning(
-                                    "Skipping proposal %s - unable to resolve messages (tx_search error: %s, gRPC error: %s)",
-                                    proposal_id,
-                                    tx_err,
-                                    grpc_err,
-                                )
-                                self._skipped_proposals.add(proposal_id)
-                                continue
+                        else:
+                            logger.error(
+                                "Failed to resolve proposal %s via gRPC: %s",
+                                proposal_id,
+                                grpc_err,
+                            )
+                        self._skipped_proposals.add(proposal_id)
+                        continue
 
                 for entry in messages or []:
                     type_url = entry.get("type_url")

@@ -120,7 +120,7 @@ if [ "${APP_DB_BACKEND:-}" != "pebbledb" ] || [ "${COMET_DB_BACKEND:-}" != "pebb
 fi
 
 echo "==> Compacting PebbleDB databases (startup)..."
-"$COMPACT_DB_BIN" "$NODE_HOME/data" application blockstore state tx_index evidence
+"$COMPACT_DB_BIN" "$NODE_HOME/data" application blockstore state evidence
 echo "✓ Compaction complete"
 
 # Ensure Caddyfile exists and is correct
@@ -362,15 +362,20 @@ echo "✓ Maintenance mode disabled"
 # tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
-# Bridge Orchestrator - always starts, handles enabled/disabled internally via ORCHESTRATOR_ENABLED env var
+# Bridge Orchestrator - gated by ORCHESTRATOR_ENABLED
 ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/bin/orchestrator"
-if [ -f "$ORCHESTRATOR_BIN" ]; then
-  echo "==> Starting bridge orchestrator..."
-  mkdir -p "$DATA_DIR/orchestrator"
-  tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
-  tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
+echo "==> Orchestrator enabled? ${ORCHESTRATOR_ENABLED:-<unset>}"
+if [ "${ORCHESTRATOR_ENABLED:-}" = "true" ]; then
+  if [ -f "$ORCHESTRATOR_BIN" ]; then
+    echo "==> Starting bridge orchestrator..."
+    mkdir -p "$DATA_DIR/orchestrator"
+    tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
+    tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
+  else
+    echo "WARNING: Orchestrator binary not found at $ORCHESTRATOR_BIN"
+  fi
 else
-  echo "WARNING: Orchestrator binary not found at $ORCHESTRATOR_BIN"
+  echo "==> Orchestrator disabled (set ORCHESTRATOR_ENABLED=true to run)"
 fi
 
 # Unified Status Dashboard (last window)

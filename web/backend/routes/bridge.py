@@ -371,13 +371,6 @@ def bridge_burn():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
-        # Nonce generation (for clients):
-        #   nonce = (Date.now() * 1_000_000) ^ (rand32)
-        #   Must be >0; for JS keep <=2^53-1. Include in signature.
-        # LEGACY_NONCE_COMPAT: accept missing nonce for pre-1.18 clients.
-        # Remove this legacy path after all clients send envelope_nonce.
-        if "envelope_nonce" not in data:
-            log_event(rid, "legacy_nonce_missing", route="bridge_burn")
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]

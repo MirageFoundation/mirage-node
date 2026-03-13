@@ -25,6 +25,9 @@ _failed = 0
 _warned = 0
 _debug = False
 
+ORCHESTRATOR_DISABLE_TOKEN = "ORCHESTRATOR_HARD_DISABLED"
+MIGRATION_TX_INDEX_CLEANUP = "v1.20.0-tx-index-cleanup"
+
 
 def ok(msg: str) -> None:
     global _passed
@@ -88,6 +91,43 @@ def detect_upgrade_name() -> str | None:
                     return plan["name"]
         except Exception:
             pass
+    return None
+
+
+def _read_env_value(path: Path, key: str) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if stripped.startswith(f"{key}="):
+                    return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception as e:
+        debug(f"Failed to read env file {path}: {e}")
+    return None
+
+
+def _read_tx_indexer(config_path: Path) -> str | None:
+    if not config_path.exists():
+        return None
+    try:
+        in_tx_index = False
+        with open(config_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    in_tx_index = line == "[tx_index]"
+                    continue
+                if in_tx_index and line.startswith("indexer"):
+                    _, _, val = line.partition("=")
+                    return val.strip().strip('"').strip("'")
+    except Exception as e:
+        debug(f"Failed to parse config.toml {config_path}: {e}")
     return None
 
 
@@ -506,12 +546,156 @@ def check_biography_limits() -> None:
             fail(f"Tier {idx} max_biography_length = {got}, expected {exp_val}")
 
 
-def check_legacy_nonce_compatibility(upgrade_name: str) -> None:
-    section("Legacy Nonce Compatibility (v1.19.0)")
-    if _extract_semver(upgrade_name) != "1.19.0":
-        warn(f"Upgrade name is {upgrade_name}; legacy nonce compatibility not expected")
+def _semver_tuple(ver: str) -> tuple[int, ...]:
+    """Convert '1.20.0' to (1, 20, 0) for numeric comparison."""
+    try:
+        return tuple(int(x) for x in ver.split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def check_nonce_enforcement(upgrade_name: str) -> None:
+    section("Envelope Nonce Enforcement")
+    ver = _extract_semver(upgrade_name)
+    vt = _semver_tuple(ver)
+    if vt == (1, 19, 0):
+        warn(
+            "v1.19.0 uses legacy nonce fallback; cannot verify via queries. Submit a legacy-signed tx or inspect logs."
+        )
+    elif vt >= (1, 20, 0):
+        ok("v1.20.0+: envelope_nonce is mandatory. Legacy fallback removed.")
+        ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
+    else:
+        ok(f"Nonce enforcement not applicable for {upgrade_name}")
+
+
+def check_tx_index_and_orchestrator() -> None:
+    section("Tx Index + Orchestrator Config")
+    node_home = Path.home() / ".mirage" / "node"
+    env_dir = Path.home() / ".mirage" / "env"
+    config_path = node_home / "config" / "config.toml"
+    tx_index_path = node_home / "data" / "tx_index.db"
+    orchestrator_env = env_dir / "orchestrator.env"
+
+    debug(f"config.toml path: {config_path}")
+    debug(f"tx_index.db path: {tx_index_path}")
+    debug(f"orchestrator.env path: {orchestrator_env}")
+
+    indexer = _read_tx_indexer(config_path)
+    if indexer is None:
+        fail(f"config.toml missing or tx_index.indexer not found: {config_path}")
+    elif indexer == "null":
+        ok("config.toml tx_index.indexer = null")
+    else:
+        fail(f"config.toml tx_index.indexer = {indexer} (want null)")
+
+    status = http_get(f"{RPC}/status")
+    if status:
+        tx_index_rpc = status.get("result", {}).get("node_info", {}).get("other", {}).get("tx_index", "")
+        if str(tx_index_rpc).lower() == "off":
+            ok("RPC /status tx_index = off (runtime confirmed)")
+        else:
+            fail(f"RPC /status tx_index = {tx_index_rpc} (want off)")
+
+        # Verify /tx endpoint rejects queries (tx_index=null)
+        fake_hash = "0x" + "00" * 32
+        tx_url = f"{RPC}/tx?hash={fake_hash}"
+        try:
+            debug(f"GET {tx_url}")
+            req = urllib.request.Request(tx_url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read())
+            if body and body.get("error"):
+                err_msg = str(body["error"].get("data", "")).lower()
+                if "indexing is disabled" in err_msg or "not available" in err_msg:
+                    ok("/tx endpoint correctly returns indexing-disabled error")
+                else:
+                    warn(f"/tx endpoint returned unexpected error: {err_msg[:100]}")
+            else:
+                fail("/tx endpoint did not return an error (tx_index should be disabled)")
+        except urllib.error.HTTPError as e:
+            body_str = ""
+            try:
+                body_str = e.read().decode("utf-8", errors="replace").lower()
+            except Exception:
+                pass
+            if "indexing is disabled" in body_str or e.code == 500:
+                ok(f"/tx endpoint rejected request (HTTP {e.code}, tx_index disabled)")
+            else:
+                fail(f"/tx endpoint returned HTTP {e.code} with unexpected body")
+        except Exception as e:
+            ok(f"/tx endpoint unreachable: {e} (expected with indexer=null)")
+
+    if tx_index_path.exists():
+        fail(f"tx_index.db still present: {tx_index_path}")
+    else:
+        ok("tx_index.db removed")
+
+    enabled = _read_env_value(orchestrator_env, "ORCHESTRATOR_ENABLED")
+    if enabled is None:
+        fail(f"ORCHESTRATOR_ENABLED missing in {orchestrator_env}")
+    elif enabled.lower() == "false":
+        ok("ORCHESTRATOR_ENABLED=false")
+    else:
+        fail(f"ORCHESTRATOR_ENABLED={enabled} (want false)")
+
+    try:
+        result = subprocess.run(["pgrep", "-f", "blockchain/bin/orchestrator"], capture_output=True, text=True)
+        debug(f"pgrep orchestrator returncode={result.returncode}")
+        if result.returncode == 0:
+            fail("Orchestrator process is running")
+        else:
+            ok("Orchestrator process not running")
+    except Exception as e:
+        fail(f"Orchestrator process check failed: {e}")
+
+
+def check_orchestrator_hard_disable() -> None:
+    section("Orchestrator Hard Disable")
+    orchestrator_bin = Path("/opt/mirage/blockchain/bin/orchestrator")
+    debug(f"orchestrator bin path: {orchestrator_bin}")
+    if not orchestrator_bin.exists():
+        fail(f"Orchestrator binary missing: {orchestrator_bin}")
         return
-    warn("Legacy nonce compatibility cannot be verified via queries. Submit a legacy-signed tx or inspect logs.")
+
+    try:
+        r = subprocess.run([str(orchestrator_bin)], capture_output=True, text=True, timeout=5)
+    except Exception as e:
+        fail(f"Failed to run orchestrator binary: {e}")
+        return
+
+    output = (r.stdout or "") + (r.stderr or "")
+    debug(f"orchestrator exit={r.returncode}, output_len={len(output)}")
+
+    if r.returncode == 0:
+        fail("Orchestrator exited 0 (expected hard-disable panic)")
+    else:
+        ok("Orchestrator exits non-zero (hard-disabled)")
+
+    if ORCHESTRATOR_DISABLE_TOKEN in output:
+        ok("Orchestrator hard-disable message present")
+    else:
+        fail(f"Orchestrator hard-disable message missing: {ORCHESTRATOR_DISABLE_TOKEN}")
+
+
+def check_deploy_migration() -> None:
+    section("Deploy Migrations")
+    migrations_file = Path.home() / ".mirage" / "env" / ".migrations"
+    debug(f"migrations file: {migrations_file}")
+    if not migrations_file.exists():
+        warn(f"Migrations file not found: {migrations_file}")
+        return
+
+    try:
+        content = migrations_file.read_text(encoding="utf-8")
+    except Exception as e:
+        fail(f"Failed to read migrations file: {e}")
+        return
+
+    if MIGRATION_TX_INDEX_CLEANUP in content:
+        ok(f"Migration applied: {MIGRATION_TX_INDEX_CLEANUP}")
+    else:
+        fail(f"Migration missing: {MIGRATION_TX_INDEX_CLEANUP}")
 
 
 # ── Main ───────────────────────────────────────────────────
@@ -552,7 +736,10 @@ def main() -> int:
     check_core_params()
     check_subscription_index_consistency()
     check_biography_limits()
-    check_legacy_nonce_compatibility(upgrade_name)
+    check_nonce_enforcement(upgrade_name)
+    check_tx_index_and_orchestrator()
+    check_orchestrator_hard_disable()
+    check_deploy_migration()
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")

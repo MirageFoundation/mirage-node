@@ -346,8 +346,8 @@ func (c *Client) waitForTx(ctx context.Context, txHash string, maxWait time.Dura
 
 		// Tx found - check result
 		if resp.TxResponse.Code != 0 {
-		err := fmt.Errorf("tx execution failed: code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
-		return wrapBridgeMintAlreadyRecorded(err)
+			err := fmt.Errorf("tx execution failed: code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+			return wrapBridgeMintAlreadyRecorded(err)
 		}
 
 		// Success

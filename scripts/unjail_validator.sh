@@ -485,54 +485,30 @@ else
   fi
 fi
 
-# If we got a txhash, poll for the result until we get final status
+# Poll jailed flag directly (no tx index dependency)
 if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
   say "Transaction submitted: $TXHASH"
-  # Code 19 means "tx already in mempool" - transaction was accepted, wait for inclusion
   if [ "$CODE" = "19" ] || [ "$CODE" = "0" ]; then
     say "Transaction accepted into mempool. Waiting for block inclusion..."
   fi
-  say "Polling for final result (up to 12 seconds)..."
-  FINAL_CODE=""
-  FINAL_RAW=""
-          for i in $(seq 1 12); do
+  say "Polling validator state (up to 24 seconds)..."
+  STATE_OK=false
+  for i in $(seq 1 24); do
     sleep 1
-    TX_RESULT="$($BIN q tx "$TXHASH" --node "$RPC" -o json 2>/dev/null || echo "{}")"
-    TX_CODE="$(echo "$TX_RESULT" | jq -r '.tx_response.code // empty' 2>/dev/null || echo "")"
-    if [ -n "$TX_CODE" ] && [ "$TX_CODE" != "" ] && [ "$TX_CODE" != "null" ]; then
-      FINAL_CODE="$TX_CODE"
-      FINAL_RAW="$(echo "$TX_RESULT" | jq -r '.tx_response.raw_log // empty' 2>/dev/null || echo "")"
-      # If we got a non-19 code, transaction was included (success or failure)
-      if [ "$FINAL_CODE" != "19" ]; then
-        CODE="$FINAL_CODE"
-        RAW="$FINAL_RAW"
-        say "Transaction included in block (code=$CODE)"
-        break
-      fi
+    CUR_JAILED="$($BIN q staking validator "$VALOPER" --node "$RPC" -o json 2>/dev/null | jq -r '.validator.jailed // empty')"
+    if [ "$CUR_JAILED" = "false" ]; then
+      STATE_OK=true
+      break
     fi
   done
-  # If still code 19 or no result, transaction is stuck in mempool or was rejected
-  if [ "$FINAL_CODE" = "19" ] || [ -z "$FINAL_CODE" ] || [ "$FINAL_CODE" = "" ] || [ "$FINAL_CODE" = "null" ]; then
-    say "Tx not indexed within 12s; falling back to state polling..."
-    # Fall back to polling jailed flag directly in case tx indexer is disabled
-    STATE_OK=false
-    for i in $(seq 1 12); do
-      sleep 1
-      CUR_JAILED="$($BIN q staking validator "$VALOPER" --node "$RPC" -o json 2>/dev/null | jq -r '.validator.jailed // empty')"
-      if [ "$CUR_JAILED" = "false" ]; then
-        STATE_OK=true
-        break
-      fi
-    done
-    if [ "$STATE_OK" = "true" ]; then
-      CODE="0"
-      RAW=""
-      say "Validator jail flag cleared; treating as success."
-    else
-      say "Validator still jailed after 12s; treating as failure."
-      CODE="1"
-      RAW="Validator still jailed after broadcast"
-    fi
+  if [ "$STATE_OK" = "true" ]; then
+    CODE="0"
+    RAW=""
+    say "Validator jail flag cleared; treating as success."
+  else
+    say "Validator still jailed after 24s; treating as failure."
+    CODE="1"
+    RAW="Validator still jailed after broadcast"
   fi
 fi
 
@@ -595,49 +571,27 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
       RAW="$(echo "$RESP" | grep -i "error\|fatal" | head -1 || echo "$RESP")"
     fi
   fi
-  # Poll for retry result until we get final status
+  # Poll jailed flag directly (no tx index dependency)
   if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
     say "Retry transaction submitted: $TXHASH"
-    say "Polling for final result (up to 12 seconds)..."
-    FINAL_CODE=""
-    FINAL_RAW=""
-          for i in $(seq 1 12); do
+    say "Polling validator state (up to 24 seconds)..."
+    STATE_OK=false
+    for i in $(seq 1 24); do
       sleep 1
-      TX_RESULT="$($BIN q tx "$TXHASH" --node "$RPC" -o json 2>/dev/null || echo "{}")"
-      TX_CODE="$(echo "$TX_RESULT" | jq -r '.tx_response.code // empty' 2>/dev/null || echo "")"
-      if [ -n "$TX_CODE" ] && [ "$TX_CODE" != "" ] && [ "$TX_CODE" != "null" ]; then
-        FINAL_CODE="$TX_CODE"
-        FINAL_RAW="$(echo "$TX_RESULT" | jq -r '.tx_response.raw_log // empty' 2>/dev/null || echo "")"
-        # If we got a non-19 code, transaction was included (success or failure)
-        if [ "$FINAL_CODE" != "19" ]; then
-          CODE="$FINAL_CODE"
-          RAW="$FINAL_RAW"
-          say "Retry transaction included in block (code=$CODE)"
-          break
-        fi
+      CUR_JAILED="$($BIN q staking validator "$VALOPER" --node "$RPC" -o json 2>/dev/null | jq -r '.validator.jailed // empty')"
+      if [ "$CUR_JAILED" = "false" ]; then
+        STATE_OK=true
+        break
       fi
     done
-    # If still code 19 or no result, transaction is stuck in mempool
-    if [ "$FINAL_CODE" = "19" ] || [ -z "$FINAL_CODE" ] || [ "$FINAL_CODE" = "" ] || [ "$FINAL_CODE" = "null" ]; then
-      say "Retry tx not indexed within 12s; falling back to state polling..."
-      STATE_OK=false
-      for i in $(seq 1 12); do
-        sleep 1
-        CUR_JAILED="$($BIN q staking validator "$VALOPER" --node "$RPC" -o json 2>/dev/null | jq -r '.validator.jailed // empty')"
-        if [ "$CUR_JAILED" = "false" ]; then
-          STATE_OK=true
-          break
-        fi
-      done
-      if [ "$STATE_OK" = "true" ]; then
-        CODE="0"
-        RAW=""
-        say "Validator jail flag cleared; treating as success."
-      else
-        say "Validator still jailed after retry; treating as failure."
-        CODE="1"
-        RAW="Validator still jailed after retry broadcast"
-      fi
+    if [ "$STATE_OK" = "true" ]; then
+      CODE="0"
+      RAW=""
+      say "Validator jail flag cleared; treating as success."
+    else
+      say "Validator still jailed after retry; treating as failure."
+      CODE="1"
+      RAW="Validator still jailed after retry broadcast"
     fi
   fi
 fi

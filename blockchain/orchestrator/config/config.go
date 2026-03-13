@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +25,7 @@ type MirageConfig struct {
 	KeyringBackend string
 	KeyName        string
 	FeeDenom       string // Gas limit and fee are determined via simulation
+	TLS            bool   // Use TLS for gRPC (default: false for localhost)
 }
 
 type ChainsConfig struct {
@@ -152,6 +155,12 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("solana keypair not found: %s\n\nRun setup script first:\n  python3 deploy/setup_orchestrator.py", solanaKeypair)
 	}
 
+	// TLS defaults to true unless explicitly disabled or endpoint is localhost
+	mirageTLS := !isLocalhost(mirageGRPC)
+	if v := os.Getenv("ORCHESTRATOR_MIRAGE_TLS"); v != "" {
+		mirageTLS = envBool("ORCHESTRATOR_MIRAGE_TLS", mirageTLS)
+	}
+
 	cfg := &Config{
 		Enabled: true,
 		Mirage: MirageConfig{
@@ -162,20 +171,21 @@ func LoadFromEnv() (*Config, error) {
 			KeyringBackend: keyringBackend,
 			KeyName:        keyName,
 			FeeDenom:       "umirage",
+			TLS:            mirageTLS,
 		},
 		Chains: ChainsConfig{
-		Solana: SolanaConfig{
-			Enabled:         true,
-			RPC:             solanaRPC,
-			WS:              solanaWS,
-			Cluster:         solanaCluster,
-			ProgramID:       solanaProgramID,
-			Keypair:         solanaKeypair,
-			Confirmations:   solanaConfirmations,
-			PollIntervalMin: solanaPollIntervalMin,
-			PollIntervalMax: solanaPollIntervalMax,
-			StateDir:        home + "/.mirage/orchestrator",
-		},
+			Solana: SolanaConfig{
+				Enabled:         true,
+				RPC:             solanaRPC,
+				WS:              solanaWS,
+				Cluster:         solanaCluster,
+				ProgramID:       solanaProgramID,
+				Keypair:         solanaKeypair,
+				Confirmations:   solanaConfirmations,
+				PollIntervalMin: solanaPollIntervalMin,
+				PollIntervalMax: solanaPollIntervalMax,
+				StateDir:        home + "/.mirage/orchestrator",
+			},
 		},
 		Attestor: AttestorConfig{
 			BatchSize:     batchSize,
@@ -259,4 +269,36 @@ func envRequiredDuration(key string) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a valid duration (e.g., '5s', '10m'): %v", key, err)
 	}
 	return d, nil
+}
+
+func isLocalhost(addr string) bool {
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" {
+		return false
+	}
+	host := trimmed
+
+	if strings.Contains(trimmed, "://") {
+		if u, err := url.Parse(trimmed); err == nil {
+			host = u.Host
+		}
+	} else if strings.Contains(trimmed, "/") {
+		if u, err := url.Parse("scheme://" + trimmed); err == nil {
+			host = u.Host
+		}
+	}
+
+	if at := strings.LastIndex(host, "@"); at >= 0 {
+		host = host[at+1:]
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }

@@ -236,8 +236,6 @@ The first request should succeed (200). The second should fail with an error con
 
 ## 6. Timeline
 
-- **v1.19.0 (current)**: `envelope_nonce` is optional. Missing nonce falls back to
-  legacy verification (no replay protection). Your app works without it, but has no
-  replay protection.
-- **v1.20.0 (next)**: `envelope_nonce` becomes **mandatory**. Requests without it will
-  be rejected with HTTP 400. Make sure your app sends it before this release.
+- **v1.19.0**: `envelope_nonce` was optional with legacy fallback.
+- **v1.20.0 (current)**: `envelope_nonce` is **mandatory**. Requests without it are
+  rejected with HTTP 400. All clients must include a valid nonce in every request.

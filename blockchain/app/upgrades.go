@@ -90,7 +90,9 @@ func (app *App) RegisterUpgradeHandlers() {
 					}
 				}
 				if nbz, err := json.Marshal(m); err == nil {
-					_ = app.CoreKeeper.SetProfile(sdkCtx, owner, nbz)
+					if err := app.CoreKeeper.SetProfile(sdkCtx, owner, nbz); err != nil {
+						return nil, fmt.Errorf("v1.2.0: SetProfile failed for %s: %w", owner, err)
+					}
 				}
 			}
 
@@ -184,7 +186,9 @@ func (app *App) RegisterUpgradeHandlers() {
 							items = v
 						}
 						if len(items) > 0 {
-							_ = lm.setter(sdkCtx, owner, items)
+							if err := lm.setter(sdkCtx, owner, items); err != nil {
+								return nil, fmt.Errorf("v1.3.0: list setter %s failed for %s: %w", lm.field, owner, err)
+							}
 						}
 					}
 					// Remove list from core profile (whether it had data or not)
@@ -193,7 +197,9 @@ func (app *App) RegisterUpgradeHandlers() {
 
 				// Save the core profile without lists
 				if nbz, err := json.Marshal(m); err == nil {
-					_ = app.CoreKeeper.SetProfileCore(sdkCtx, owner, nbz)
+					if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, nbz); err != nil {
+						return nil, fmt.Errorf("v1.3.0: SetProfileCore failed for %s: %w", owner, err)
+					}
 					migratedCount++
 				}
 			}
@@ -244,10 +250,9 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			if needsUpdate {
 				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
-					sdkCtx.Logger().Error("v1.3.0-tiers: failed to update params", "err", err)
-				} else {
-					sdkCtx.Logger().Info("v1.3.0-tiers: params updated successfully")
+					return nil, fmt.Errorf("v1.3.0-tiers: failed to update params: %w", err)
 				}
+				sdkCtx.Logger().Info("v1.3.0-tiers: params updated successfully")
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.3.0-tiers complete")
@@ -1436,7 +1441,9 @@ func (app *App) RegisterUpgradeHandlers() {
 						if err != nil || owner == "" {
 							continue
 						}
-						_ = app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz)
+						if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz); err != nil {
+							return nil, fmt.Errorf("v1.16.0: SetProfileCore failed for %s: %w", owner, err)
+						}
 						migrated++
 					}
 				}
@@ -1815,6 +1822,27 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.19.0 complete")
+			return toVM, nil
+		},
+	)
+
+	// ── v1.20.0 ──
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.20.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.20.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.20.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("v1.20.0: operator action required (off-chain)")
+			sdkCtx.Logger().Info("v1.20.0: disable tx_index (set config.toml indexer=null) and remove tx_index.db")
+			sdkCtx.Logger().Info("v1.20.0: orchestrator hard-disabled (panic guard) until bridge replacement is ready")
+
+			sdkCtx.Logger().Info("Upgrade to v1.20.0 complete")
 			return toVM, nil
 		},
 	)

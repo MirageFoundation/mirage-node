@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import hashlib
 import math
 import os
 import random
@@ -517,36 +518,34 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
         except Exception as e:
             print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
             return False
-        # Wait for tx to be committed so the next send gets the right sequence number
+        # Wait for tx to be committed by polling the recipient's balance
+        # (tx_index is disabled, so we cannot look up by hash)
         if tx_hash:
+            bal_args = [
+                "q",
+                "bank",
+                "balances",
+                address,
+                "--home",
+                "/root/.mirage/node",
+                "--node",
+                "tcp://127.0.0.1:26657",
+                "-o",
+                "json",
+            ]
             for _ in range(15):
                 time.sleep(1)
-                query_args = [
-                    "q",
-                    "tx",
-                    tx_hash,
-                    "--home",
-                    "/root/.mirage/node",
-                    "--node",
-                    "tcp://127.0.0.1:26657",
-                    "-o",
-                    "json",
-                ]
-                qcode, qout = _run_miraged(query_args, timeout=10)
+                qcode, qout = _run_miraged(bal_args, timeout=10)
                 if qcode == 0 and qout:
                     try:
                         json_str = qout[qout.index("{") :]
-                        tx_resp = json.loads(json_str)
-                        on_chain_code = int(tx_resp.get("code", -1))
-                        if on_chain_code == 0:
-                            return True
-                        print(
-                            f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
-                        )
-                        return False
+                        bal_resp = json.loads(json_str)
+                        for coin in bal_resp.get("balances", []):
+                            if coin.get("denom") == "umirage" and int(coin.get("amount", 0)) >= amount:
+                                return True
                     except (json.JSONDecodeError, ValueError):
                         pass
-            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
+            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s (balance never reached {amount}umirage)")
         return False
     print(f"    [faucet] exhausted {max_retries} retries on sequence mismatch")
     return False
@@ -712,7 +711,15 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: {err}")
             return False
 
-    time.sleep(4)
+    # Wait until usernames are visible on-chain to avoid downstream failures
+    for name, w in WALLETS.items():
+        addr = str(w.address())
+        resolved = _wait_username(backend, addr)
+        if resolved:
+            print(f"  Username {name:4s}: resolved {resolved}")
+        else:
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: not visible on-chain")
+            return False
 
     # Faucet all wallets (sub wallets need tokens for subscription fees)
     # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 500K MIRAGE
@@ -798,24 +805,29 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to level {level}: {err}")
             return False
 
-    # Wait for subscription transactions
-    time.sleep(6)
-
-    # Verify subscription levels
+    # Wait for subscription levels to be reflected in BOTH chain and indexer DB
+    # (is_subscriber() checks the indexer, not the chain — must wait for indexer to catch up)
     for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
         addr = str(w.address())
-        try:
-            us = get_user_status(backend, addr)
-            actual_level = int(us.get("user_level", 0) or 0)
-            if actual_level != level:
-                print(
-                    f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  {name} level={actual_level}, expected {level} (may need more time)"
-                )
-            else:
-                print(f"  Verified {name} level={actual_level}")
-        except Exception as e:
-            print(f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  Cannot verify {name} level: {e}")
+        deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+        verified = False
+        while time.perf_counter() < deadline:
+            try:
+                status = get_user_status(backend, addr)
+                actual_level = int(status.get("user_level", 0) or 0)
+                if actual_level >= level:
+                    print(f"  Verified {name} level={actual_level}")
+                    verified = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+        if not verified:
+            print(
+                f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} level not reflected in indexer after {int(INDEX_TIMEOUT_SEC)}s"
+            )
+            return False
 
     # Set biographies on the dedicated agent wallets
     AGENT_BIOS = {
@@ -914,6 +926,49 @@ def _do_post(
     return txh if txh else None
 
 
+def _do_post_with_nonce(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    nonce: int,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/post", payload)
+    return resp or {}
+
+
 def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool = False) -> dict:
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -945,6 +1000,43 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
     return resp
 
 
+def _do_vote_with_nonce(
+    backend: str,
+    wallet,
+    target: str,
+    direction: int,
+    nonce: int,
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_vote_raw(pub, _lb_bytes(lb), d, ts, target, int(direction), nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "direction": direction,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/vote", payload)
+    return resp or {}
+
+
 def _do_edit(
     backend: str,
     wallet,
@@ -974,7 +1066,9 @@ def _do_edit(
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_edit_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce)
+    base = _canon_base_edit_raw(
+        pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce
+    )
     if skip_pow:
         proof = 0
     else:
@@ -1565,12 +1659,88 @@ def _wait_tx_status(
     return None
 
 
+def _wait_tx_status_failure(
+    backend: str,
+    tx_hash: str,
+    expect_type: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and data:
+            if not data.get("found"):
+                time.sleep(0.5)
+                continue
+            if data.get("success") is True:
+                time.sleep(0.5)
+                continue
+            if expect_type and data.get("tx_type") != expect_type:
+                time.sleep(0.5)
+                continue
+            return data
+        time.sleep(0.5)
+    return None
+
+
+def _wait_tx_deliver(tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> tuple[int, str] | None:
+    """Scan blocks for tx_hash and return (code, log) from DeliverTx."""
+    if not tx_hash:
+        return None
+    h = tx_hash.strip().lower().removeprefix("0x")
+    deadline = time.perf_counter() + timeout
+    try:
+        last_height = max(1, _rpc_latest_height() - 1)
+    except Exception:
+        last_height = 1
+    while time.perf_counter() < deadline:
+        cur = _rpc_latest_height()
+        for height in range(last_height + 1, cur + 1):
+            block = requests.get(f"http://127.0.0.1:26657/block?height={height}", timeout=3).json()
+            txs = block.get("result", {}).get("block", {}).get("data", {}).get("txs") or []
+            tx_index = None
+            for idx, tx_b64 in enumerate(txs):
+                raw = base64.b64decode(tx_b64)
+                if hashlib.sha256(raw).hexdigest().lower() == h:
+                    tx_index = idx
+                    break
+            if tx_index is not None:
+                while time.perf_counter() < deadline:
+                    br = requests.get(f"http://127.0.0.1:26657/block_results?height={height}", timeout=3).json()
+                    deliver = br.get("result", {}).get("txs_results") or []
+                    if tx_index < len(deliver):
+                        tx_result = deliver[tx_index]
+                        code = int(tx_result.get("code", 0) or 0)
+                        log = str(tx_result.get("log", "") or "")
+                        return code, log
+                    time.sleep(0.5)
+                return None
+        last_height = cur
+        time.sleep(0.5)
+    return None
+
+
+def _wait_username(backend: str, address: str, timeout: float = INDEX_TIMEOUT_SEC) -> str | None:
+    """Wait until a username is visible on-chain (via get_profile)."""
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        try:
+            uname = get_username_from_address(backend, address)
+            if uname:
+                return uname
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return None
+
+
 def _wait_blocked_topic_state(
     backend: str,
     address: str,
     topic: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     topic_lower = (topic or "").strip().lower()
@@ -1593,7 +1763,7 @@ def _wait_blocked_topic_state(
     return False
 
 
-def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = 15.0) -> bool:
+def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     return _wait_blocked_topic_state(backend, address, topic, True, timeout)
 
 
@@ -1602,7 +1772,7 @@ def _wait_followed_topic(
     address: str,
     topic: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     topic_lower = (topic or "").strip().lower()
@@ -1622,7 +1792,7 @@ def _wait_followed_user(
     address: str,
     user: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     user_lower = (user or "").strip().lower()
@@ -1642,7 +1812,7 @@ def _wait_blocked_user(
     address: str,
     user: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     user_lower = (user or "").strip().lower()
@@ -2451,25 +2621,37 @@ def test_social_graph(backend: str):
         "body",
         skip_pow=True,
     )
-    if topic_only_post and _wait_indexed(backend, sub_addr, topic_only_post, timeout=10.0):
-        code, follow_feed = _get(
-            f"{backend}/api/get_posts",
-            {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
-        )
-        if code == 200:
-            posts = (follow_feed or {}).get("posts") or []
-            leaked = any(str(p.get("post_id", "")).lower() == topic_only_post for p in posts)
-            if leaked:
-                _fail(
-                    "social.following_magic excludes topic-only non-followed authors",
-                    f"found_nonfollowed_topic_post={topic_only_post}",
-                )
-            else:
-                _pass("social.following_magic excludes topic-only non-followed authors")
-        else:
-            _fail("social.following_magic excludes topic-only non-followed authors", f"code={code}")
+    if not topic_only_post:
+        _fail("social.following_magic excludes topic-only non-followed authors", "post creation failed")
     else:
-        _fail("social.following_magic excludes topic-only non-followed authors", "topic-only post not indexed")
+        deliver = _wait_tx_deliver(topic_only_post)
+        if deliver and deliver[0] != 0:
+            _fail(
+                "social.following_magic excludes topic-only non-followed authors",
+                f"deliver_code={deliver[0]} log={deliver[1][:200]}",
+            )
+        elif not _wait_indexed(backend, sub_addr, topic_only_post):
+            _fail(
+                "social.following_magic excludes topic-only non-followed authors",
+                f"post {topic_only_post[:16]} not indexed after timeout",
+            )
+        else:
+            code, follow_feed = _get(
+                f"{backend}/api/get_posts",
+                {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
+            )
+            if code == 200:
+                posts = (follow_feed or {}).get("posts") or []
+                leaked = any(str(p.get("post_id", "")).lower() == topic_only_post for p in posts)
+                if leaked:
+                    _fail(
+                        "social.following_magic excludes topic-only non-followed authors",
+                        f"found_nonfollowed_topic_post={topic_only_post}",
+                    )
+                else:
+                    _pass("social.following_magic excludes topic-only non-followed authors")
+            else:
+                _fail("social.following_magic excludes topic-only non-followed authors", f"code={code}")
 
     # 5.5 unfollow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=False)
@@ -2487,10 +2669,16 @@ def test_social_graph(backend: str):
         _pass("social.follow_topic for block-removal setup")
     else:
         _fail("social.follow_topic for block-removal setup", f"resp={resp}")
-    if _wait_followed_topic(backend, addr, mutual_topic_fb, True):
-        _pass("social.follow_topic reflected before block")
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.follow_topic reflected before block", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        elif _wait_followed_topic(backend, addr, mutual_topic_fb, True):
+            _pass("social.follow_topic reflected before block")
+        else:
+            _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
     else:
-        _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
+        _fail("social.follow_topic reflected before block", "no tx_hash")
 
     resp = _do_block_topic(backend, wallet, mutual_topic_fb, block=True)
     txh = str(resp.get("tx_hash", "")).lower()
@@ -2498,14 +2686,21 @@ def test_social_graph(backend: str):
         _pass("social.block_topic after follow succeeds")
     else:
         _fail("social.block_topic after follow succeeds", f"resp={resp}")
-    if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
-        _pass("social.block_topic removes followed topic")
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.block_topic removes followed topic", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        else:
+            if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
+                _pass("social.block_topic removes followed topic")
+            else:
+                _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
+            if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
+                _pass("social.block_topic reflected in get_user_blocked (mutual)")
+            else:
+                _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
     else:
-        _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
-    if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
-        _pass("social.block_topic reflected in get_user_blocked (mutual)")
-    else:
-        _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
+        _fail("social.block_topic removes followed topic", "no tx_hash")
 
     # 5.5b block->follow topic removes block
     mutual_topic_bf = f"mutualtopic{_rand_str(4)}"
@@ -2515,10 +2710,16 @@ def test_social_graph(backend: str):
         _pass("social.block_topic for follow-removal setup")
     else:
         _fail("social.block_topic for follow-removal setup", f"resp={resp}")
-    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
-        _pass("social.block_topic reflected before follow")
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.block_topic reflected before follow", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        elif _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
+            _pass("social.block_topic reflected before follow")
+        else:
+            _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
     else:
-        _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
+        _fail("social.block_topic reflected before follow", "no tx_hash")
 
     resp = _do_follow_topic(backend, wallet, mutual_topic_bf, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
@@ -2596,8 +2797,10 @@ def test_social_graph(backend: str):
         _pass("social.block_topic succeeds")
     else:
         _fail("social.block_topic succeeds", f"resp={resp}")
-
-    if _wait_blocked_topic(backend, addr, block_topic):
+    deliver = _wait_tx_deliver(txh) if txh else None
+    if deliver and deliver[0] != 0:
+        _fail("social.block_topic reflected in get_user_blocked", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+    elif _wait_blocked_topic(backend, addr, block_topic):
         _pass("social.block_topic reflected in get_user_blocked")
     else:
         _fail("social.block_topic reflected in get_user_blocked", f"topic={block_topic}")
@@ -2620,7 +2823,11 @@ def test_social_graph(backend: str):
         "body",
         skip_pow=True,  # subscriber should post without PoW
     )
-    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post, timeout=10.0):
+    if not blocked_post:
+        _fail("social.block_topic filters get_posts", "post creation failed (sub_wallet may not be subscriber)")
+    elif not _wait_indexed(backend, sub_addr, blocked_post):
+        _fail("social.block_topic filters get_posts", f"post {blocked_post[:16]} not indexed after timeout")
+    else:
         code, feed = _get(
             f"{backend}/api/get_posts",
             {"limit": 50, "by": "newest", "address": addr},
@@ -2633,8 +2840,6 @@ def test_social_graph(backend: str):
                 _fail("social.block_topic filters get_posts", f"found blocked post {blocked_post}")
         else:
             _fail("social.block_topic filters get_posts", f"code={code}")
-    else:
-        _fail("social.block_topic filters get_posts", "post not indexed")
 
     # 5.13a wildcard block_topic filters get_posts
     wildcard_mid = f"m{_rand_str(4)}"
@@ -2646,7 +2851,13 @@ def test_social_graph(backend: str):
         _pass("social.block_topic wildcard succeeds")
     else:
         _fail("social.block_topic wildcard succeeds", f"resp={resp}")
-    if _wait_blocked_topic(backend, addr, wildcard_pattern):
+    deliver = _wait_tx_deliver(txh) if txh else None
+    if deliver and deliver[0] != 0:
+        _fail(
+            "social.block_topic wildcard reflected in get_user_blocked",
+            f"deliver_code={deliver[0]} log={deliver[1][:200]}",
+        )
+    elif _wait_blocked_topic(backend, addr, wildcard_pattern):
         _pass("social.block_topic wildcard reflected in get_user_blocked")
     else:
         _fail("social.block_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
@@ -2674,8 +2885,8 @@ def test_social_graph(backend: str):
     if (
         match_post
         and nonmatch_post
-        and _wait_indexed(backend, sub_addr, match_post, timeout=10.0)
-        and _wait_indexed(backend, sub_addr, nonmatch_post, timeout=10.0)
+        and _wait_indexed(backend, sub_addr, match_post)
+        and _wait_indexed(backend, sub_addr, nonmatch_post)
     ):
         code, feed = _get(
             f"{backend}/api/get_posts",
@@ -2854,8 +3065,17 @@ def test_subscriber(backend: str):
     ]:
         txh = _do_post(backend, w, "test", f"Tier{level} post {_rand_str(4)}", f"tier {level} body", skip_pow=True)
         if txh:
-            _pass(f"tiers.{name}_post_without_pow succeeds")
-            tier_posts[name] = txh
+            deliver = _wait_tx_deliver(txh)
+            if deliver and deliver[0] == 0:
+                _pass(f"tiers.{name}_post_without_pow succeeds")
+                tier_posts[name] = txh
+            elif deliver:
+                _fail(
+                    f"tiers.{name}_post_without_pow succeeds",
+                    f"deliver_code={deliver[0]} log={deliver[1][:200]}",
+                )
+            else:
+                _fail(f"tiers.{name}_post_without_pow succeeds", "deliver timeout")
         else:
             _fail(f"tiers.{name}_post_without_pow succeeds")
 
@@ -2894,7 +3114,9 @@ def test_subscriber(backend: str):
             pub_s = w.public_key().public_key_bytes
             ts = _now_ms()
             nonce = _fresh_nonce()
-            base = _canon_base_post_raw(pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0, None, nonce)
+            base = _canon_base_post_raw(
+                pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0, None, nonce
+            )
             proof = compute_pow(base, 1, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(w, signed)
@@ -2925,7 +3147,9 @@ def test_subscriber(backend: str):
         pub_free = free_wallet.public_key().public_key_bytes
         ts2 = _now_ms()
         nonce2 = _fresh_nonce()
-        base2 = _canon_base_post_raw(pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0, None, nonce2)
+        base2 = _canon_base_post_raw(
+            pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0, None, nonce2
+        )
         signed2 = canon_signed_with_pow(base2, 0)
         sig2 = sign_canonical(free_wallet, signed2)
         payload2 = {
@@ -2951,21 +3175,23 @@ def test_subscriber(backend: str):
     # 7.9 All tiers can edit their own posts
     for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
         if name in tier_posts:
-            time.sleep(2)
-            resp = _do_edit(
-                backend,
-                w,
-                tier_posts[name],
-                "test",
-                f"Edited {name} {_rand_str(4)}",
-                f"edited body {name}",
-                skip_pow=True,
-            )
-            txh_e = str(resp.get("tx_hash", "")).lower()
-            if txh_e:
-                _pass(f"tiers.{name}_edit_own_post succeeds")
+            if _wait_indexed(backend, str(w.address()), tier_posts[name]):
+                resp = _do_edit(
+                    backend,
+                    w,
+                    tier_posts[name],
+                    "test",
+                    f"Edited {name} {_rand_str(4)}",
+                    f"edited body {name}",
+                    skip_pow=True,
+                )
+                txh_e = str(resp.get("tx_hash", "")).lower()
+                if txh_e:
+                    _pass(f"tiers.{name}_edit_own_post succeeds")
+                else:
+                    _fail(f"tiers.{name}_edit_own_post succeeds", f"resp={resp}")
             else:
-                _fail(f"tiers.{name}_edit_own_post succeeds", f"resp={resp}")
+                _fail(f"tiers.{name}_edit_own_post succeeds", "post not indexed after timeout")
 
 
 # =========================================================================
@@ -3112,7 +3338,9 @@ def test_edge_cases(backend: str):
     # 9.6 Timestamp too old rejected
     ts_old = _now_ms() - 120_000  # 2 minutes ago
     nonce_old = _fresh_nonce()
-    base_old = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0, None, nonce_old)
+    base_old = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0, None, nonce_old
+    )
     proof_old = compute_pow(base_old, diff, base_bits, pow_factor, lb)
     signed_old = canon_signed_with_pow(base_old, int(proof_old))
     sig_old = sign_canonical(wallet, signed_old)
@@ -3140,7 +3368,9 @@ def test_edge_cases(backend: str):
     # 9.7 Timestamp too far in future rejected
     ts_future = _now_ms() + 120_000  # 2 minutes in future
     nonce_fut = _fresh_nonce()
-    base_fut = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0, None, nonce_fut)
+    base_fut = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0, None, nonce_fut
+    )
     proof_fut = compute_pow(base_fut, diff, base_bits, pow_factor, lb)
     signed_fut = canon_signed_with_pow(base_fut, int(proof_fut))
     sig_fut = sign_canonical(wallet, signed_fut)
@@ -3211,7 +3441,9 @@ def test_edge_cases(backend: str):
     pub_b = wallet_b.public_key().public_key_bytes
     ts_mis = _now_ms()
     nonce_mis = _fresh_nonce()
-    base_mis = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0, None, nonce_mis)
+    base_mis = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0, None, nonce_mis
+    )
     proof_mis = compute_pow(base_mis, diff, base_bits, pow_factor, lb)
     signed_mis = canon_signed_with_pow(base_mis, int(proof_mis))
     sig_mis = sign_canonical(wallet, signed_mis)  # signed by wallet A
@@ -3267,11 +3499,12 @@ def test_edge_cases(backend: str):
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
-    # 9.11b LEGACY_NONCE_COMPAT: missing envelope_nonce accepted (pre-1.18 clients).
-    # Sign with nonce=0 canonical bytes (no tag 7) to match the chain's legacy path.
-    # Remove this legacy test after all clients send envelope_nonce.
+    # 9.11b Missing envelope_nonce must be rejected (v1.20.0+)
+    # Chain rejects nonce==0 before signature verification.
     ts_legacy = _now_ms()
-    base_legacy = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_legacy, "", "test", "legacy no nonce", "body", "", 0, None, 0)
+    base_legacy = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_legacy, "", "test", "legacy no nonce", "body", "", 0, None, 0
+    )
     proof_legacy = compute_pow(base_legacy, diff, base_bits, pow_factor, lb)
     signed_legacy = canon_signed_with_pow(base_legacy, int(proof_legacy))
     sig_legacy = sign_canonical(wallet, signed_legacy)
@@ -3288,10 +3521,10 @@ def test_edge_cases(backend: str):
         "content": "body",
     }
     code_no_nonce, resp_no_nonce = _post(f"{backend}/api/core/post", payload_no_nonce)
-    if code_no_nonce == 200:
-        _pass("edge.missing_envelope_nonce_legacy_accepted")
+    if code_no_nonce >= 400:
+        _pass("edge.missing_envelope_nonce_rejected")
     else:
-        _fail("edge.missing_envelope_nonce_legacy_accepted", f"code={code_no_nonce} resp={resp_no_nonce}")
+        _fail("edge.missing_envelope_nonce_rejected", f"code={code_no_nonce} resp={resp_no_nonce}")
 
     # 9.11c Zero envelope_nonce explicitly sent is still rejected
     ts_z = _now_ms()
@@ -3318,11 +3551,84 @@ def test_edge_cases(backend: str):
     else:
         _fail("edge.zero_envelope_nonce_rejected", f"code={code_zero} expected 400")
 
-    # 9.11d 1.18+ path: nonce present → replay protection active
+    # 9.11c2 Garbage / invalid envelope_nonce values — must all be rejected (400)
+    invalid_nonces_expect_reject = [
+        ("string", "hello", "edge.nonce_string_rejected"),
+        ("empty_string", "", "edge.nonce_empty_string_rejected"),
+        ("null", None, "edge.nonce_null_rejected"),
+        ("negative", "-1", "edge.nonce_negative_rejected"),
+        ("float_str", "3.14", "edge.nonce_float_str_rejected"),
+        ("overflow_u64", "99999999999999999999", "edge.nonce_overflow_rejected"),
+        ("array", [1, 2, 3], "edge.nonce_array_rejected"),
+        ("object", {"n": 1}, "edge.nonce_object_rejected"),
+        ("sql_inject", "1; DROP TABLE nonces", "edge.nonce_sqli_rejected"),
+        ("whitespace", "  ", "edge.nonce_whitespace_rejected"),
+        ("hex_prefix", "0xDEADBEEF", "edge.nonce_hex_rejected"),
+        ("negative_big", "-99999999999999999999", "edge.nonce_negative_big_rejected"),
+    ]
+    for label, bad_val, test_name in invalid_nonces_expect_reject:
+        bad_payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(b"\x00" * 64),
+            "last_block_hash": lb,
+            "timestamp": _now_ms(),
+            "envelope_nonce": bad_val,
+            "pow_difficulty": diff,
+            "pow": 0,
+            "target": "",
+            "topic": "test",
+            "title": "bad nonce",
+            "content": "body",
+        }
+        code_bad, resp_bad = _post(f"{backend}/api/core/post", bad_payload)
+        if code_bad >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_bad} resp={resp_bad}")
+
+    # 9.11c3 Coercible values that resolve to a valid positive int — should be accepted
+    #         (signature/PoW will fail downstream, but nonce parsing itself must succeed)
+    coercible_nonces_expect_accept = [
+        ("bool_true", True, "edge.nonce_bool_true_accepted"),
+        ("float_num", 42.9, "edge.nonce_float_num_accepted"),
+        ("str_int", "999", "edge.nonce_str_int_accepted"),
+    ]
+    nonce_reject_errors = {
+        "invalid envelope_nonce",
+        "envelope_nonce is required (v1.20.0)",
+        "envelope_nonce must be > 0",
+        "envelope_nonce exceeds uint64 range",
+    }
+    for label, ok_val, test_name in coercible_nonces_expect_accept:
+        ok_payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(b"\x00" * 64),
+            "last_block_hash": lb,
+            "timestamp": _now_ms(),
+            "envelope_nonce": ok_val,
+            "pow_difficulty": diff,
+            "pow": 0,
+            "target": "",
+            "topic": "test",
+            "title": "coercible nonce",
+            "content": "body",
+        }
+        code_ok, resp_ok = _post(f"{backend}/api/core/post", ok_payload)
+        err_msg = str(resp_ok.get("error", ""))
+        if code_ok >= 500:
+            _fail(test_name, f"server error: code={code_ok} resp={resp_ok}")
+        elif err_msg in nonce_reject_errors:
+            _fail(test_name, f"nonce={ok_val!r} rejected by nonce parser: {err_msg}")
+        else:
+            _pass(test_name)
+
+    # 9.11d v1.20+ path: nonce present → replay protection active
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     ts_new = _now_ms()
     nonce_new = _fresh_nonce()
-    base_new = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_new, "", "test", "nonce present", "body", "", 0, None, nonce_new)
+    base_new = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_new, "", "test", "nonce present", "body", "", 0, None, nonce_new
+    )
     proof_new = compute_pow(base_new, diff, base_bits, pow_factor, lb)
     signed_new = canon_signed_with_pow(base_new, int(proof_new))
     sig_new = sign_canonical(wallet, signed_new)
@@ -3346,6 +3652,238 @@ def test_edge_cases(backend: str):
         _fail("edge.envelope_nonce_present_accepted", f"code={code_with_nonce} resp={resp_with_nonce}")
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+
+    # ── 9.20 Garbage / invalid envelope fields (non-nonce) ────────────
+    # For each field we submit a payload with ONE corrupted field and
+    # verify the backend returns >= 400 (ideally 400, but 500 for
+    # uncaught coercion failures is still a rejection).
+
+    def _make_valid_payload() -> dict:
+        """Build a structurally valid (but unsigned) payload for /api/core/post."""
+        return {
+            "pubkey": _b64(pub),
+            "signature": _b64(b"\x00" * 64),
+            "last_block_hash": lb,
+            "timestamp": _now_ms(),
+            "envelope_nonce": str(_fresh_nonce()),
+            "pow_difficulty": diff,
+            "pow": 0,
+            "target": "",
+            "topic": "test",
+            "title": "field test",
+            "content": "body",
+        }
+
+    # --- 9.20a: timestamp ---
+    timestamp_cases_reject = [
+        ("missing", "_OMIT_", "edge.ts_missing_rejected"),
+        ("null", None, "edge.ts_null_rejected"),
+        ("string", "not-a-number", "edge.ts_string_rejected"),
+        ("empty", "", "edge.ts_empty_rejected"),
+        ("array", [1, 2], "edge.ts_array_rejected"),
+        ("object", {"t": 1}, "edge.ts_object_rejected"),
+        ("negative", -9999999999999, "edge.ts_negative_rejected"),
+        ("bool", True, "edge.ts_bool_rejected"),
+        ("zero", 0, "edge.ts_zero_rejected"),
+    ]
+    for label, bad_val, test_name in timestamp_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["timestamp"]
+        else:
+            p["timestamp"] = bad_val
+        code_t, resp_t = _post(f"{backend}/api/core/post", p)
+        if code_t >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_t} resp={resp_t}")
+
+    # --- 9.20b: pubkey ---
+    pubkey_cases_reject = [
+        ("missing", "_OMIT_", "edge.pubkey_missing_rejected"),
+        ("empty", "", "edge.pubkey_empty_rejected"),
+        ("null", None, "edge.pubkey_null_rejected"),
+        ("not_base64", "!!!notbase64!!!", "edge.pubkey_not_base64_rejected"),
+        ("wrong_len_32", _b64(b"\x01" * 32), "edge.pubkey_wrong_len32_rejected"),
+        ("wrong_len_64", _b64(b"\x01" * 64), "edge.pubkey_wrong_len64_rejected"),
+        ("array", [1, 2, 3], "edge.pubkey_array_rejected"),
+        ("object", {"k": "v"}, "edge.pubkey_object_rejected"),
+        ("int", 12345, "edge.pubkey_int_rejected"),
+    ]
+    for label, bad_val, test_name in pubkey_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["pubkey"]
+        else:
+            p["pubkey"] = bad_val
+        code_p, resp_p = _post(f"{backend}/api/core/post", p)
+        if code_p >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_p} resp={resp_p}")
+
+    # --- 9.20c: signature ---
+    sig_cases_reject = [
+        ("missing", "_OMIT_", "edge.sig_missing_rejected"),
+        ("empty", "", "edge.sig_empty_rejected"),
+        ("null", None, "edge.sig_null_rejected"),
+        ("not_base64", "***bad-b64***", "edge.sig_not_base64_rejected"),
+        ("wrong_len_32", _b64(b"\x01" * 32), "edge.sig_wrong_len32_rejected"),
+        ("too_long", _b64(b"\x01" * 128), "edge.sig_too_long_rejected"),
+        ("array", [1, 2, 3], "edge.sig_array_rejected"),
+        ("object", {"s": "v"}, "edge.sig_object_rejected"),
+    ]
+    for label, bad_val, test_name in sig_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["signature"]
+        else:
+            p["signature"] = bad_val
+        code_s, resp_s = _post(f"{backend}/api/core/post", p)
+        if code_s >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_s} resp={resp_s}")
+
+    # --- 9.20d: last_block_hash ---
+    lbh_cases_reject = [
+        ("missing", "_OMIT_", "edge.lbh_missing_rejected"),
+        ("not_hex", "ZZZZ-not-hex", "edge.lbh_not_hex_rejected"),
+        ("wrong_len", "aabb", "edge.lbh_wrong_len_rejected"),
+        ("null", None, "edge.lbh_null_rejected"),
+        ("array", [1], "edge.lbh_array_rejected"),
+        ("object", {"h": 1}, "edge.lbh_object_rejected"),
+        ("int", 999, "edge.lbh_int_rejected"),
+    ]
+    for label, bad_val, test_name in lbh_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["last_block_hash"]
+        else:
+            p["last_block_hash"] = bad_val
+        code_l, resp_l = _post(f"{backend}/api/core/post", p)
+        if code_l >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_l} resp={resp_l}")
+
+    # --- 9.20e: pow_difficulty ---
+    pwd_cases_reject = [
+        ("string", "abc", "edge.pwd_string_rejected"),
+        ("null", None, "edge.pwd_null_rejected"),
+        ("array", [1], "edge.pwd_array_rejected"),
+        ("object", {"d": 1}, "edge.pwd_object_rejected"),
+        ("negative", -5, "edge.pwd_negative_rejected"),
+    ]
+    for label, bad_val, test_name in pwd_cases_reject:
+        p = _make_valid_payload()
+        p["pow_difficulty"] = bad_val
+        code_d, resp_d = _post(f"{backend}/api/core/post", p)
+        if code_d >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_d} resp={resp_d}")
+
+    # --- 9.20f: pow ---
+    pow_cases_reject = [
+        ("string", "xyz", "edge.pow_string_rejected"),
+        ("null", None, "edge.pow_null_rejected"),
+        ("array", [9], "edge.pow_array_rejected"),
+        ("object", {"p": 1}, "edge.pow_object_rejected"),
+        ("negative", -1, "edge.pow_negative_rejected"),
+    ]
+    for label, bad_val, test_name in pow_cases_reject:
+        p = _make_valid_payload()
+        p["pow"] = bad_val
+        code_pw, resp_pw = _post(f"{backend}/api/core/post", p)
+        if code_pw >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_pw} resp={resp_pw}")
+
+    # --- 9.20g: topic ---
+    topic_cases_reject = [
+        ("too_short", "ab", "edge.topic_too_short_rejected"),
+        ("too_long", "a" * 60, "edge.topic_too_long_rejected"),
+        ("uppercase", "INVALID", "edge.topic_uppercase_rejected"),
+        ("spaces", "has spaces", "edge.topic_spaces_rejected"),
+        ("special", "top!@#$", "edge.topic_special_rejected"),
+        ("unicode", "\u00e9\u00e8\u00ea", "edge.topic_unicode_rejected"),
+        ("null", None, "edge.topic_null_rejected"),
+    ]
+    for label, bad_val, test_name in topic_cases_reject:
+        p = _make_valid_payload()
+        p["topic"] = bad_val
+        code_tp, resp_tp = _post(f"{backend}/api/core/post", p)
+        if code_tp >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_tp} resp={resp_tp}")
+
+    # --- 9.20h: title / content size limits ---
+    title_oversize = "A" * 1000
+    p_big_title = _make_valid_payload()
+    p_big_title["title"] = title_oversize
+    code_bt, resp_bt = _post(f"{backend}/api/core/post", p_big_title)
+    if code_bt >= 400:
+        _pass("edge.title_oversize_1k_rejected")
+    else:
+        _fail("edge.title_oversize_1k_rejected", f"code={code_bt} resp={resp_bt}")
+
+    content_oversize = "X" * 200_000
+    p_big_content = _make_valid_payload()
+    p_big_content["content"] = content_oversize
+    code_bc, resp_bc = _post(f"{backend}/api/core/post", p_big_content)
+    if code_bc >= 400:
+        _pass("edge.content_oversize_200k_rejected")
+    else:
+        _fail("edge.content_oversize_200k_rejected", f"code={code_bc} resp={resp_bc}")
+
+    # --- 9.20i: media ---
+    media_cases_reject = [
+        ("not_list", "https://a.com/x.jpg", "edge.media_not_list_rejected"),
+        ("http_not_https", ["http://a.com/x.jpg"], "edge.media_http_rejected"),
+        ("too_many", [f"https://a.com/{i}.jpg" for i in range(15)], "edge.media_too_many_rejected"),
+        ("item_too_long", ["https://a.com/" + "a" * 2100], "edge.media_item_too_long_rejected"),
+        ("no_scheme", ["just-a-string"], "edge.media_no_scheme_rejected"),
+    ]
+    for label, bad_val, test_name in media_cases_reject:
+        p = _make_valid_payload()
+        p["media"] = bad_val
+        code_m, resp_m = _post(f"{backend}/api/core/post", p)
+        if code_m >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_m} resp={resp_m}")
+
+    # --- 9.20j: tag ---
+    tag_cases_reject = [
+        ("invalid", "notarealltag", "edge.tag_invalid_rejected"),
+        ("too_long", "x" * 60, "edge.tag_too_long_rejected"),
+    ]
+    for label, bad_val, test_name in tag_cases_reject:
+        p = _make_valid_payload()
+        p["tag"] = bad_val
+        code_tg, resp_tg = _post(f"{backend}/api/core/post", p)
+        if code_tg >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_tg} resp={resp_tg}")
+
+    # --- 9.20k: completely empty payload ---
+    code_empty, resp_empty = _post(f"{backend}/api/core/post", {})
+    if code_empty >= 400:
+        _pass("edge.empty_payload_rejected")
+    else:
+        _fail("edge.empty_payload_rejected", f"code={code_empty} resp={resp_empty}")
+
+    # --- 9.20l: completely bogus payload (random keys) ---
+    bogus = {"foo": "bar", "baz": 42, "qux": [1, 2, 3]}
+    code_bogus, resp_bogus = _post(f"{backend}/api/core/post", bogus)
+    if code_bogus >= 400:
+        _pass("edge.bogus_payload_rejected")
+    else:
+        _fail("edge.bogus_payload_rejected", f"code={code_bogus} resp={resp_bogus}")
 
     # 9.12 XSS injection in content — should not cause server error
     xss_content = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
@@ -3452,7 +3990,9 @@ def test_edge_cases(backend: str):
             ts = _now_ms()
             nonce = _fresh_nonce()
             topic = f"vtag{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0, None, nonce)
+            base = _canon_base_post_raw(
+                pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0, None, nonce
+            )
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(wallet, signed)
@@ -3621,7 +4161,9 @@ def test_security(backend: str):
         nonce = _fresh_nonce()
         topic_a = f"topic{_rand_str(4)}"
 
-        base_a = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0, None, nonce)
+        base_a = _canon_base_post_raw(
+            pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0, None, nonce
+        )
         proof = compute_pow(base_a, diff, base_bits, pow_factor, lb)
         signed_a = canon_signed_with_pow(base_a, int(proof))
         sig = sign_canonical(free_wallet, signed_a)
@@ -3656,14 +4198,18 @@ def test_security(backend: str):
         nonce1 = _fresh_nonce()
         topic1 = f"topic{_rand_str(4)}"
 
-        base1 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0, None, nonce1)
+        base1 = _canon_base_post_raw(
+            pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0, None, nonce1
+        )
         proof1 = compute_pow(base1, diff, base_bits, pow_factor, lb)
 
         # Build a different message and reuse proof1
         ts2 = _now_ms()
         nonce2 = _fresh_nonce()
         topic2 = f"topic{_rand_str(4)}"
-        base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0, None, nonce2)
+        base2 = _canon_base_post_raw(
+            pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0, None, nonce2
+        )
         signed2 = canon_signed_with_pow(base2, int(proof1))
         sig2 = sign_canonical(free_wallet, signed2)
 
@@ -4205,7 +4751,9 @@ def test_validation(backend: str):
             ts = _now_ms()
             nonce = _fresh_nonce()
             topic = f"topic{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
+            base = _canon_base_post_raw(
+                pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0, None, nonce
+            )
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(free_wallet, signed)
@@ -4806,7 +5354,18 @@ def test_media(backend: str):
             topic = edit_media_topic
             media_list = ["https://example.com/edited.jpg"]
             base = _canon_base_edit_raw(
-                pub, _lb_bytes(lb), 0, ts, "", topic, "Edit media test", "updated body", "", base_post, media_list, nonce
+                pub,
+                _lb_bytes(lb),
+                0,
+                ts,
+                "",
+                topic,
+                "Edit media test",
+                "updated body",
+                "",
+                base_post,
+                media_list,
+                nonce,
             )
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub1, signed)
@@ -5961,7 +6520,7 @@ def test_profile_fields(backend: str):
 # ---------------------------------------------------------------------------
 
 
-def _feed_has_post(backend: str, viewer_addr: str, post_id: str, timeout: float = 10.0) -> bool:
+def _feed_has_post(backend: str, viewer_addr: str, post_id: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     """Check if a post appears in the newest feed for the given viewer."""
     deadline = time.perf_counter() + timeout
     pid = (post_id or "").lower()
@@ -6054,7 +6613,7 @@ def test_agent_behavior(backend: str):
     if not blocked_post:
         _fail("agent_behavior.setup_blocked_post", "could not create post")
         return
-    if not _wait_indexed(backend, victim_addr, blocked_post, timeout=15.0):
+    if not _wait_indexed(backend, victim_addr, blocked_post):
         _fail("agent_behavior.setup_blocked_post_indexed", "not indexed")
         return
 
@@ -6063,7 +6622,7 @@ def test_agent_behavior(backend: str):
     if not topic_post:
         _fail("agent_behavior.setup_topic_post", "could not create post")
         return
-    if not _wait_indexed(backend, victim_addr, topic_post, timeout=15.0):
+    if not _wait_indexed(backend, victim_addr, topic_post):
         _fail("agent_behavior.setup_topic_post_indexed", "not indexed")
         return
 
@@ -6074,7 +6633,7 @@ def test_agent_behavior(backend: str):
     if not control_post:
         _fail("agent_behavior.setup_control_post", "could not create post")
         return
-    if not _wait_indexed(backend, victim_addr, control_post, timeout=15.0):
+    if not _wait_indexed(backend, victim_addr, control_post):
         _fail("agent_behavior.setup_control_post_indexed", "not indexed")
         return
 
@@ -6087,7 +6646,7 @@ def test_agent_behavior(backend: str):
     if not author_post:
         _fail("agent_behavior.setup_author_post", "could not create post")
         return
-    if not _wait_indexed(backend, agent2_addr, author_post, timeout=15.0):
+    if not _wait_indexed(backend, agent2_addr, author_post):
         _fail("agent_behavior.setup_author_post_indexed", "not indexed")
         return
 
@@ -6529,6 +7088,211 @@ def test_edit_target_immutability(backend: str):
         _fail("edit_target.mismatch_rejected", f"expected rejection, got {resp}")
 
 
+def test_tx_status(backend: str):
+    """Test indexer-only get_tx_status (no CometBFT tx_index dependency)."""
+    print(f"\n{_COLOR_BOLD}[28] Indexer-Only TX Status{_COLOR_RESET}")
+
+    free = WALLETS.get("free")
+    if not free:
+        _skip("tx_status.setup", "free wallet not available")
+        return
+
+    # 28.1 Non-existent txhash returns found=false
+    fake_hash = "00" * 32
+    code, data = _get(f"{backend}/api/get_tx_status", {"hash": fake_hash})
+    if code == 200 and data and not data.get("found"):
+        _pass("tx_status.nonexistent_returns_not_found")
+    else:
+        _fail("tx_status.nonexistent_returns_not_found", f"code={code} data={data}")
+
+    # 28.2 Invalid hash (too short) returns 400
+    code2, data2 = _get(f"{backend}/api/get_tx_status", {"hash": "abc"})
+    if code2 == 400:
+        _pass("tx_status.invalid_hash_rejected")
+    else:
+        _fail("tx_status.invalid_hash_rejected", f"code={code2}")
+
+    # 28.3 Missing hash returns 400
+    code3, data3 = _get(f"{backend}/api/get_tx_status", {})
+    if code3 == 400:
+        _pass("tx_status.missing_hash_rejected")
+    else:
+        _fail("tx_status.missing_hash_rejected", f"code={code3}")
+
+    # 28.4 Submit a post, wait for indexer, verify found=true with details
+    topic = "test"
+    title = f"TxStatus Test {_rand_str(6)}"
+    content = f"Content {_rand_str(10)}"
+    txh = _do_post(backend, free, topic, title, content)
+    if not txh:
+        _fail("tx_status.post_submit")
+        return
+    _pass("tx_status.post_submit", tx=txh)
+
+    status = _wait_tx_status(backend, txh, expect_type="post")
+    if status and status.get("found") and status.get("indexed"):
+        details = status.get("details") or {}
+        if details.get("topic", "").lower() == topic.lower() and details.get("title") == title:
+            _pass("tx_status.post_found_indexed")
+        else:
+            _fail("tx_status.post_found_indexed", f"details={details}")
+    else:
+        _fail("tx_status.post_found_indexed", f"status={status}")
+
+    # 28.5 Submit a vote, wait for indexer, verify found=true with vote details
+    vote_resp = _do_vote(backend, free, txh, 1)
+    vote_txh = str((vote_resp or {}).get("tx_hash", "") or "").lower() if vote_resp else ""
+    if vote_txh:
+        vote_status = _wait_tx_status(backend, vote_txh, expect_type="vote")
+        if vote_status and vote_status.get("found") and vote_status.get("indexed"):
+            vote_details = vote_status.get("details") or {}
+            if vote_details.get("target", "").lower() == txh.lower():
+                _pass("tx_status.vote_found_indexed")
+            else:
+                _fail("tx_status.vote_found_indexed", f"details={vote_details}")
+        else:
+            _fail("tx_status.vote_found_indexed", f"status={vote_status}")
+    else:
+        _fail("tx_status.vote_found_indexed", "vote submission failed")
+
+    # 28.6 Response shape: found=true always includes success, indexed, tx_type
+    if status:
+        has_keys = all(k in status for k in ("found", "success", "indexed", "tx_type", "tx_hash"))
+        if has_keys and status["success"] is True and status["tx_type"] == "post":
+            _pass("tx_status.response_shape")
+        else:
+            _fail("tx_status.response_shape", f"keys={list(status.keys())}")
+    else:
+        _fail("tx_status.response_shape", "no status data")
+
+
+def _rpc_latest_height() -> int:
+    r = requests.get("http://127.0.0.1:26657/status", timeout=2)
+    if not r.ok:
+        raise RuntimeError(f"rpc status failed: http={r.status_code}")
+    data = r.json()
+    return int(data["result"]["sync_info"]["latest_block_height"])
+
+
+def _wait_next_block(timeout: float = 8.0) -> int:
+    start = _rpc_latest_height()
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        cur = _rpc_latest_height()
+        if cur > start:
+            return cur
+        time.sleep(0.2)
+    raise RuntimeError(f"timeout waiting for next block (start={start})")
+
+
+def test_failed_tx_status(backend: str):
+    """Test indexer receipts for failed vote/post transactions."""
+    print(f"\n{_COLOR_BOLD}[29] Failed TX Status Receipts{_COLOR_RESET}")
+
+    free = WALLETS.get("free")
+    if not free:
+        _skip("failed_tx.setup", "free wallet not available")
+        return
+
+    free_addr = str(free.address())
+
+    # Create a valid post to vote on
+    base_post = _do_post(backend, free, "test", f"Fail Base {_rand_str(6)}", f"Body {_rand_str(8)}")
+    if not base_post:
+        _fail("failed_tx.base_post_submit")
+        return
+    _pass("failed_tx.base_post_submit", tx=base_post)
+    if not _wait_indexed(backend, free_addr, base_post):
+        _fail("failed_tx.base_post_indexed")
+        return
+
+    # ── Failed vote: two txs with same nonce in the same block
+    try:
+        blk = _wait_next_block()
+        _debug(f"failed_tx.vote next_block={blk}")
+    except Exception as e:
+        _fail("failed_tx.vote.block_sync", str(e))
+        return
+
+    vote_nonce = _fresh_nonce()
+    vote_resp1 = _do_vote_with_nonce(backend, free, base_post, 1, vote_nonce)
+    vote_resp2 = _do_vote_with_nonce(backend, free, base_post, 1, vote_nonce)
+    vote_tx1 = str(vote_resp1.get("tx_hash", "") or "").lower()
+    vote_tx2 = str(vote_resp2.get("tx_hash", "") or "").lower()
+    _debug(f"failed_tx.vote tx1={vote_tx1} tx2={vote_tx2} nonce={vote_nonce}")
+    if not vote_tx1 or not vote_tx2:
+        _fail("failed_tx.vote.submit", f"tx1={vote_tx1} tx2={vote_tx2}")
+        return
+
+    fail1 = _wait_tx_status_failure(backend, vote_tx1, expect_type="vote")
+    fail2 = _wait_tx_status_failure(backend, vote_tx2, expect_type="vote")
+    if bool(fail1) == bool(fail2):
+        _fail("failed_tx.vote.failure_detected", f"fail1={bool(fail1)} fail2={bool(fail2)}")
+    else:
+        fail_vote = fail1 or fail2
+        ok_vote = vote_tx2 if fail1 else vote_tx1
+        _pass("failed_tx.vote.failure_detected", tx=fail_vote.get("tx_hash"))
+        ok_status = _wait_tx_status(backend, ok_vote, expect_type="vote")
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_tx.vote.success_detected", tx=ok_vote)
+        else:
+            _fail("failed_tx.vote.success_detected", f"status={ok_status}")
+        if fail_vote.get("code", 0) and fail_vote.get("error_details"):
+            _pass("failed_tx.vote.error_details_present")
+        else:
+            _fail("failed_tx.vote.error_details_present", f"fail={fail_vote}")
+
+    # ── Failed post: two txs with same nonce in the same block
+    try:
+        blk = _wait_next_block()
+        _debug(f"failed_tx.post next_block={blk}")
+    except Exception as e:
+        _fail("failed_tx.post.block_sync", str(e))
+        return
+
+    post_nonce = _fresh_nonce()
+    post_resp1 = _do_post_with_nonce(
+        backend,
+        free,
+        "test",
+        f"Fail Post A {_rand_str(6)}",
+        f"Body {_rand_str(8)}",
+        post_nonce,
+    )
+    post_resp2 = _do_post_with_nonce(
+        backend,
+        free,
+        "test",
+        f"Fail Post B {_rand_str(6)}",
+        f"Body {_rand_str(8)}",
+        post_nonce,
+    )
+    post_tx1 = str(post_resp1.get("tx_hash", "") or "").lower()
+    post_tx2 = str(post_resp2.get("tx_hash", "") or "").lower()
+    _debug(f"failed_tx.post tx1={post_tx1} tx2={post_tx2} nonce={post_nonce}")
+    if not post_tx1 or not post_tx2:
+        _fail("failed_tx.post.submit", f"tx1={post_tx1} tx2={post_tx2}")
+        return
+
+    pfail1 = _wait_tx_status_failure(backend, post_tx1, expect_type="post")
+    pfail2 = _wait_tx_status_failure(backend, post_tx2, expect_type="post")
+    if bool(pfail1) == bool(pfail2):
+        _fail("failed_tx.post.failure_detected", f"fail1={bool(pfail1)} fail2={bool(pfail2)}")
+    else:
+        fail_post = pfail1 or pfail2
+        ok_post = post_tx2 if pfail1 else post_tx1
+        _pass("failed_tx.post.failure_detected", tx=fail_post.get("tx_hash"))
+        ok_status = _wait_tx_status(backend, ok_post, expect_type="post")
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_tx.post.success_detected", tx=ok_post)
+        else:
+            _fail("failed_tx.post.success_detected", f"status={ok_status}")
+        if fail_post.get("code", 0) and fail_post.get("error_details"):
+            _pass("failed_tx.post.error_details_present")
+        else:
+            _fail("failed_tx.post.error_details_present", f"fail={fail_post}")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -6560,6 +7324,8 @@ ALL_CATEGORIES = {
     "agent_behavior": test_agent_behavior,
     "annotate": test_annotate,
     "edit_target": test_edit_target_immutability,
+    "tx_status": test_tx_status,
+    "failed_tx": test_failed_tx_status,
 }
 
 STATELESS_CATEGORIES = {

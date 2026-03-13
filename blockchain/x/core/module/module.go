@@ -295,13 +295,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 			return nil
 		}
 		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
-			ctx.Logger().Warn("relay gas fee (admin): failed to burn from module after deduction",
-				"owner", owner,
-				"level", userLevel,
-				"reason", reason,
-				"gas_used", gasUsed,
-				"fee", fee,
-				"err", err)
+			return fmt.Errorf("relay gas fee (admin): burn from module failed: %w", err)
 		} else {
 			ctx.Logger().Info("relay gas fee deducted from admin balance",
 				"owner", owner,
@@ -334,7 +328,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		reserveBefore := core.ReserveFunds
 		core.ReserveFunds -= fee
 		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
-			ctx.Logger().Warn("deductRelayGasFee: failed to burn from module", "owner", owner, "fee", fee, "err", err)
+			return fmt.Errorf("deductRelayGasFee: burn from module failed: %w", err)
 		}
 		ctx.Logger().Info("relay gas fee deducted from reserve",
 			"owner", owner,
@@ -352,7 +346,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		reserveBefore := core.ReserveFunds
 		if core.ReserveFunds > 0 {
 			if err := am.k.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
-				ctx.Logger().Warn("deductRelayGasFee: failed to burn remaining reserve", "owner", owner, "reserve", core.ReserveFunds, "err", err)
+				return fmt.Errorf("deductRelayGasFee: burn remaining reserve failed: %w", err)
 			}
 		}
 		ctx.Logger().Info("deductRelayGasFee: reserve exhausted, downgrading to free",
@@ -368,7 +362,9 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 
 		// Remove subscription index
 		if core.SubscriptionExpiry > 0 {
-			_ = am.k.RemoveSubscription(ctx, owner, core.SubscriptionExpiry)
+			if err := am.k.RemoveSubscription(ctx, owner, core.SubscriptionExpiry); err != nil {
+				return fmt.Errorf("deductRelayGasFee: remove subscription failed for %s: %w", owner, err)
+			}
 		}
 
 		// Downgrade to free tier
@@ -479,13 +475,17 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 		addr := authtypes.NewModuleAddress(modName).String()
 		username := reservedUsernameForModule(modName)
 
-		// Best-effort claim; ignore error if already taken by same owner
-		_ = am.k.ClaimUsername(sdkCtx, username, addr)
+		if err := am.k.ClaimUsername(sdkCtx, username, addr); err != nil {
+			sdkCtx.Logger().Warn("InitGenesis: ClaimUsername failed (may already exist)", "username", username, "err", err)
+		}
 
-		// Store only core profile data (no lists for module accounts)
 		core := types.ProfileCore{Owner: addr, Username: username}
-		if bz, err := json.Marshal(core); err == nil {
-			_ = am.k.SetProfileCore(sdkCtx, addr, bz)
+		bz, err := json.Marshal(core)
+		if err != nil {
+			panic(fmt.Errorf("InitGenesis: marshal module profile failed: %w", err))
+		}
+		if err := am.k.SetProfileCore(sdkCtx, addr, bz); err != nil {
+			panic(fmt.Errorf("InitGenesis: SetProfileCore for module %s failed: %w", modName, err))
 		}
 	}
 
@@ -494,30 +494,32 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 	if err := am.cdc.UnmarshalJSON(gs, &genState); err != nil {
 		panic(fmt.Errorf("failed to unmarshal core genesis state: %w", err))
 	}
-	// Default params if missing in genesis
 	p := genState.Params
 	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 {
 		p = types.DefaultParams()
 	}
-	_ = am.k.SetParams(sdkCtx, p)
+	if err := am.k.SetParams(sdkCtx, p); err != nil {
+		panic(fmt.Errorf("InitGenesis: SetParams failed: %w", err))
+	}
 
 	// Import raw state if present (complete KV store restore from export)
 	if len(genState.RawState) > 0 {
 		for _, kv := range genState.RawState {
 			key, err := base64.StdEncoding.DecodeString(kv.Key)
 			if err != nil {
-				continue
+				panic(fmt.Errorf("InitGenesis: base64 decode key failed: %w", err))
 			}
 			value, err := base64.StdEncoding.DecodeString(kv.Value)
 			if err != nil {
-				continue
+				panic(fmt.Errorf("InitGenesis: base64 decode value failed: %w", err))
 			}
-			_ = am.k.SetRawKVPair(sdkCtx, key, value)
+			if err := am.k.SetRawKVPair(sdkCtx, key, value); err != nil {
+				panic(fmt.Errorf("InitGenesis: SetRawKVPair failed: %w", err))
+			}
 		}
 	}
 
 	// Create any initial profiles specified in genesis (e.g., validators, faucet)
-	// This also handles legacy genesis files without raw_state
 	for _, ip := range genState.InitialProfiles {
 		if ip.Core == nil {
 			continue
@@ -527,35 +529,50 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 		if owner == "" {
 			continue
 		}
-		// claim username if present
 		if username != "" {
-			_ = am.k.ClaimUsername(sdkCtx, username, owner)
+			if err := am.k.ClaimUsername(sdkCtx, username, owner); err != nil {
+				sdkCtx.Logger().Warn("InitGenesis: ClaimUsername failed", "username", username, "err", err)
+			}
 		}
-		// Store core profile data ONLY if not already present (e.g., when importing raw_state)
 		if _, found, _ := am.k.GetProfileCore(sdkCtx, owner); !found {
-			// Use the core directly from InitialProfile
-			bz, _ := json.Marshal(ip.Core)
-			_ = am.k.SetProfileCore(sdkCtx, owner, bz)
+			bz, err := json.Marshal(ip.Core)
+			if err != nil {
+				panic(fmt.Errorf("InitGenesis: marshal profile for %s failed: %w", owner, err))
+			}
+			if err := am.k.SetProfileCore(sdkCtx, owner, bz); err != nil {
+				panic(fmt.Errorf("InitGenesis: SetProfileCore for %s failed: %w", owner, err))
+			}
 		}
 
-		// Store all list fields as per-entry keys
 		if len(ip.EnabledAgents) > 0 {
-			_ = am.k.ReplaceAllEnabledAgents(sdkCtx, owner, ip.EnabledAgents)
+			if err := am.k.ReplaceAllEnabledAgents(sdkCtx, owner, ip.EnabledAgents); err != nil {
+				panic(fmt.Errorf("InitGenesis: ReplaceAllEnabledAgents for %s failed: %w", owner, err))
+			}
 		}
 		for _, u := range ip.FollowedUsers {
-			_, _ = am.k.AddFollowedUser(sdkCtx, owner, u)
+			if _, err := am.k.AddFollowedUser(sdkCtx, owner, u); err != nil {
+				panic(fmt.Errorf("InitGenesis: AddFollowedUser for %s failed: %w", owner, err))
+			}
 		}
 		for _, t := range ip.FollowedTopics {
-			_, _ = am.k.AddFollowedTopic(sdkCtx, owner, t)
+			if _, err := am.k.AddFollowedTopic(sdkCtx, owner, t); err != nil {
+				panic(fmt.Errorf("InitGenesis: AddFollowedTopic for %s failed: %w", owner, err))
+			}
 		}
 		for _, u := range ip.BlockedUsers {
-			_, _ = am.k.AddBlockedUserDeque(sdkCtx, owner, u, 0) // 0 = no cap during genesis import
+			if _, err := am.k.AddBlockedUserDeque(sdkCtx, owner, u, 0); err != nil {
+				panic(fmt.Errorf("InitGenesis: AddBlockedUserDeque for %s failed: %w", owner, err))
+			}
 		}
 		for _, p := range ip.BlockedPosts {
-			_, _ = am.k.AddBlockedPostDeque(sdkCtx, owner, p, 0)
+			if _, err := am.k.AddBlockedPostDeque(sdkCtx, owner, p, 0); err != nil {
+				panic(fmt.Errorf("InitGenesis: AddBlockedPostDeque for %s failed: %w", owner, err))
+			}
 		}
 		for _, t := range ip.BlockedTopics {
-			_, _ = am.k.AddBlockedTopicDeque(sdkCtx, owner, t, 0)
+			if _, err := am.k.AddBlockedTopicDeque(sdkCtx, owner, t, 0); err != nil {
+				panic(fmt.Errorf("InitGenesis: AddBlockedTopicDeque for %s failed: %w", owner, err))
+			}
 		}
 	}
 }
@@ -725,8 +742,7 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 	for _, sub := range expired {
 		// Remove old subscription index
 		if err := am.k.RemoveSubscription(sdkCtx, sub.Address, sub.Expiry); err != nil {
-			sdkCtx.Logger().Error("processSubscriptions: failed to remove old index",
-				"address", sub.Address, "err", err)
+			return fmt.Errorf("processSubscriptions: failed to remove old index for %s: %w", sub.Address, err)
 		}
 
 		// If subscription_period is 0, it's one-time payment, no renewal needed
@@ -752,8 +768,7 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 		// Burn any remaining reserve from module account before renewal/downgrade
 		if core.ReserveFunds > 0 {
 			if err := am.k.BurnFromModuleAmount(sdkCtx, core.ReserveFunds); err != nil {
-				sdkCtx.Logger().Warn("processSubscriptions: failed to burn reserve",
-					"address", sub.Address, "reserve", core.ReserveFunds, "err", err)
+				return fmt.Errorf("processSubscriptions: failed to burn reserve for %s: %w", sub.Address, err)
 			}
 			sdkCtx.Logger().Info("processSubscriptions: burned leftover reserve",
 				"address", sub.Address, "reserve", core.ReserveFunds)
@@ -804,12 +819,13 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
 			if balance.GTE(sdkmath.NewIntFromUint64(periodFee)) {
-				// Calculate reserve for new period (SubscriptionReservePercent is fraction [0,1])
-				reserveFrac := params.SubscriptionReservePercent
-				if reserveFrac > 1 {
-					reserveFrac = 1
+				// Integer reserve calculation: basis points to avoid float64 precision loss.
+				// SubscriptionReservePercent is [0,1]; multiply by 10000 for basis-point math.
+				reserveBps := uint64(params.SubscriptionReservePercent * 10000)
+				if reserveBps > 10000 {
+					reserveBps = 10000
 				}
-				reserveAmount := uint64(float64(periodFee) * reserveFrac)
+				reserveAmount := periodFee * reserveBps / 10000
 				burnAmount := periodFee - reserveAmount
 
 				// Burn non-reserve portion
@@ -2264,6 +2280,10 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		return nil, err
 	}
 
+	if owner == target {
+		return nil, fmt.Errorf("cannot block yourself")
+	}
+
 	// Mutual exclusion: blocking a user removes them from followed list (O(1))
 	_ = am.k.RemoveFollowedUser(sdkCtx, owner, target)
 
@@ -2479,6 +2499,10 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 
 	if _, err := sdk.AccAddressFromBech32(user); err != nil {
 		return nil, fmt.Errorf("invalid user address: %s", user)
+	}
+
+	if owner == user {
+		return nil, fmt.Errorf("cannot follow yourself")
 	}
 
 	var userLevel int
@@ -3140,7 +3164,7 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 	// Burn any existing reserve from module account before charging new fee
 	if core.ReserveFunds > 0 {
 		if err := am.k.BurnFromModuleAmount(sdkCtx, core.ReserveFunds); err != nil {
-			sdkCtx.Logger().Warn("UpgradeLevel: failed to burn old reserve", "owner", owner, "reserve", core.ReserveFunds, "err", err)
+			return nil, fmt.Errorf("UpgradeLevel: failed to burn old reserve: %w", err)
 		}
 		core.ReserveFunds = 0
 	}
@@ -3154,12 +3178,12 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 			return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
 		}
 
-		// Calculate reserve (subscription_reserve_percent is fraction [0,1])
-		reserveFrac := params.SubscriptionReservePercent
-		if reserveFrac > 1 {
-			reserveFrac = 1
+		// Integer reserve calculation: basis points to avoid float64 precision loss.
+		reserveBps := uint64(params.SubscriptionReservePercent * 10000)
+		if reserveBps > 10000 {
+			reserveBps = 10000
 		}
-		reserveAmount = uint64(float64(periodFee) * reserveFrac)
+		reserveAmount = periodFee * reserveBps / 10000
 		burnAmount := periodFee - reserveAmount
 
 		// Burn the non-reserve portion directly from user

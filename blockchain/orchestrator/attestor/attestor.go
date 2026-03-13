@@ -430,8 +430,8 @@ func (a *Attestor) retry(ctx context.Context, fn func() error) error {
 }
 
 // isPermanentError returns true for errors that should not be retried.
-// Checks both sentinel errors (via errors.Is) and string patterns as fallback
-// for errors originating from external RPC responses.
+// ErrTransactionTooOld is NOT permanent — it means the Solana blockhash
+// expired and a retry with a fresh blockhash should succeed.
 func isPermanentError(err error) bool {
-	return errors.Is(err, chains.ErrTransactionTooOld) || errors.Is(err, chains.ErrBridgeMintAlreadyRecorded)
+	return errors.Is(err, chains.ErrBridgeMintAlreadyRecorded)
 }

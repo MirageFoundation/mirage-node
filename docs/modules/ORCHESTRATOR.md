@@ -642,13 +642,14 @@ chains:
 
 ### Startup Checklist
 
+> **Note (v1.20.0):** The orchestrator is currently **hard-disabled** (panic guard in `main.go`) because the bridge is not live. The checklist below applies when the bridge replacement is ready and the guard is removed.
+
 1. Verify validator key access
 2. Verify Solana keypair access
 3. Test Solana RPC connectivity
 4. Test Mirage gRPC connectivity
-5. Ensure CometBFT tx indexing is enabled (`tx_index = "on"`)
-6. Verify state directory is writable
-7. Check sequence initialization logs
+5. Verify state directory is writable
+6. Check sequence initialization logs
 
 ### Failure Modes
 
