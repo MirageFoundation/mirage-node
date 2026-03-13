@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import hashlib
 import math
 import os
 import random
@@ -710,7 +711,15 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: {err}")
             return False
 
-    time.sleep(4)
+    # Wait until usernames are visible on-chain to avoid downstream failures
+    for name, w in WALLETS.items():
+        addr = str(w.address())
+        resolved = _wait_username(backend, addr)
+        if resolved:
+            print(f"  Username {name:4s}: resolved {resolved}")
+        else:
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: not visible on-chain")
+            return False
 
     # Faucet all wallets (sub wallets need tokens for subscription fees)
     # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 500K MIRAGE
@@ -1666,6 +1675,57 @@ def _wait_tx_status_failure(
                 time.sleep(0.5)
                 continue
             return data
+        time.sleep(0.5)
+    return None
+
+
+def _wait_tx_deliver(tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> tuple[int, str] | None:
+    """Scan blocks for tx_hash and return (code, log) from DeliverTx."""
+    if not tx_hash:
+        return None
+    h = tx_hash.strip().lower().removeprefix("0x")
+    deadline = time.perf_counter() + timeout
+    try:
+        last_height = max(1, _rpc_latest_height() - 1)
+    except Exception:
+        last_height = 1
+    while time.perf_counter() < deadline:
+        cur = _rpc_latest_height()
+        for height in range(last_height + 1, cur + 1):
+            block = requests.get(f"http://127.0.0.1:26657/block?height={height}", timeout=3).json()
+            txs = block.get("result", {}).get("block", {}).get("data", {}).get("txs") or []
+            tx_index = None
+            for idx, tx_b64 in enumerate(txs):
+                raw = base64.b64decode(tx_b64)
+                if hashlib.sha256(raw).hexdigest().lower() == h:
+                    tx_index = idx
+                    break
+            if tx_index is not None:
+                while time.perf_counter() < deadline:
+                    br = requests.get(f"http://127.0.0.1:26657/block_results?height={height}", timeout=3).json()
+                    deliver = br.get("result", {}).get("txs_results") or []
+                    if tx_index < len(deliver):
+                        tx_result = deliver[tx_index]
+                        code = int(tx_result.get("code", 0) or 0)
+                        log = str(tx_result.get("log", "") or "")
+                        return code, log
+                    time.sleep(0.5)
+                return None
+        last_height = cur
+        time.sleep(0.5)
+    return None
+
+
+def _wait_username(backend: str, address: str, timeout: float = INDEX_TIMEOUT_SEC) -> str | None:
+    """Wait until a username is visible on-chain (via get_profile)."""
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        try:
+            uname = get_username_from_address(backend, address)
+            if uname:
+                return uname
+        except Exception:
+            pass
         time.sleep(0.5)
     return None
 
@@ -2701,8 +2761,10 @@ def test_social_graph(backend: str):
         _pass("social.block_topic succeeds")
     else:
         _fail("social.block_topic succeeds", f"resp={resp}")
-
-    if _wait_blocked_topic(backend, addr, block_topic):
+    deliver = _wait_tx_deliver(txh) if txh else None
+    if deliver and deliver[0] != 0:
+        _fail("social.block_topic reflected in get_user_blocked", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+    elif _wait_blocked_topic(backend, addr, block_topic):
         _pass("social.block_topic reflected in get_user_blocked")
     else:
         _fail("social.block_topic reflected in get_user_blocked", f"topic={block_topic}")
@@ -2753,7 +2815,13 @@ def test_social_graph(backend: str):
         _pass("social.block_topic wildcard succeeds")
     else:
         _fail("social.block_topic wildcard succeeds", f"resp={resp}")
-    if _wait_blocked_topic(backend, addr, wildcard_pattern):
+    deliver = _wait_tx_deliver(txh) if txh else None
+    if deliver and deliver[0] != 0:
+        _fail(
+            "social.block_topic wildcard reflected in get_user_blocked",
+            f"deliver_code={deliver[0]} log={deliver[1][:200]}",
+        )
+    elif _wait_blocked_topic(backend, addr, wildcard_pattern):
         _pass("social.block_topic wildcard reflected in get_user_blocked")
     else:
         _fail("social.block_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
@@ -2961,8 +3029,17 @@ def test_subscriber(backend: str):
     ]:
         txh = _do_post(backend, w, "test", f"Tier{level} post {_rand_str(4)}", f"tier {level} body", skip_pow=True)
         if txh:
-            _pass(f"tiers.{name}_post_without_pow succeeds")
-            tier_posts[name] = txh
+            deliver = _wait_tx_deliver(txh)
+            if deliver and deliver[0] == 0:
+                _pass(f"tiers.{name}_post_without_pow succeeds")
+                tier_posts[name] = txh
+            elif deliver:
+                _fail(
+                    f"tiers.{name}_post_without_pow succeeds",
+                    f"deliver_code={deliver[0]} log={deliver[1][:200]}",
+                )
+            else:
+                _fail(f"tiers.{name}_post_without_pow succeeds", "deliver timeout")
         else:
             _fail(f"tiers.{name}_post_without_pow succeeds")
 
@@ -3062,21 +3139,23 @@ def test_subscriber(backend: str):
     # 7.9 All tiers can edit their own posts
     for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
         if name in tier_posts:
-            _wait_indexed(backend, str(w.address()), tier_posts[name])
-            resp = _do_edit(
-                backend,
-                w,
-                tier_posts[name],
-                "test",
-                f"Edited {name} {_rand_str(4)}",
-                f"edited body {name}",
-                skip_pow=True,
-            )
-            txh_e = str(resp.get("tx_hash", "")).lower()
-            if txh_e:
-                _pass(f"tiers.{name}_edit_own_post succeeds")
+            if _wait_indexed(backend, str(w.address()), tier_posts[name]):
+                resp = _do_edit(
+                    backend,
+                    w,
+                    tier_posts[name],
+                    "test",
+                    f"Edited {name} {_rand_str(4)}",
+                    f"edited body {name}",
+                    skip_pow=True,
+                )
+                txh_e = str(resp.get("tx_hash", "")).lower()
+                if txh_e:
+                    _pass(f"tiers.{name}_edit_own_post succeeds")
+                else:
+                    _fail(f"tiers.{name}_edit_own_post succeeds", f"resp={resp}")
             else:
-                _fail(f"tiers.{name}_edit_own_post succeeds", f"resp={resp}")
+                _fail(f"tiers.{name}_edit_own_post succeeds", "post not indexed after timeout")
 
 
 # =========================================================================
