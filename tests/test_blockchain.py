@@ -4463,25 +4463,22 @@ def test_envelope_replay(backend: str) -> None:
     _check_deliver_accept("envelope_replay.different_nonce_ok", ccode, dcode, dlog)
 
 
-def test_legacy_nonce(backend: str) -> None:
-    """LEGACY_NONCE_COMPAT: verify nonce==0 (legacy) path succeeds without replay protection.
+def test_mandatory_nonce(backend: str) -> None:
+    """v1.20.0: envelope_nonce is mandatory. nonce=0 (legacy) is rejected.
 
     Nonce generation (for clients):
         nonce = (Date.now() * 1_000_000) ^ (rand32)
         Must be >0; for JS keep <=2^53-1. Include in signature.
-        Legacy missing-nonce path is temporary.
-
-    Remove this test after all clients send envelope_nonce.
     """
-    print(f"\n{_COLOR_BOLD}[LEGACY_NONCE] Legacy Nonce Compatibility{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[MANDATORY_NONCE] Mandatory Envelope Nonce (v1.20.0){_COLOR_RESET}")
     sub = WALLETS["sub1"]
     fee_payer = _VALIDATOR_ADDR or ""
     pub = sub.public_key().public_key_bytes
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(sub.address()))
+    topic = f"nonce{_rand_str(4)}"
 
-    # 1. nonce=0 (legacy) should succeed — canonical bytes omit tag 7
+    # 1. nonce=0 explicit — REJECTED (no legacy fallback)
     ts1 = _now_ms()
-    topic = f"legacy{_rand_str(4)}"
     msg1 = _build_msg_post(sub, lb, 0, ts1, topic, "Legacy Post", "content", nonce=0)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg1, "/mirage.core.v1.MsgPost")],
@@ -4490,27 +4487,38 @@ def test_legacy_nonce(backend: str) -> None:
         pub,
         wait_deliver=True,
     )
-    _check_deliver_accept("legacy_nonce.zero_nonce_accepted", ccode, dcode, dlog)
+    _check_deliver_reject("nonce.zero_nonce_rejected", ccode, dcode, dlog)
 
-    # 1b. nonce=0 with mismatched signature should be rejected
-    bad_nonce = _gen_nonce()
-    base_bad = _canon_base_post_raw(
-        pub, _lb_bytes(lb), 0, ts1, "", topic, "Legacy Post", "content", "", 0, [], nonce=bad_nonce
-    )
-    bad_sig = _sign_relay(sub, base_bad, 0)
-    msg_bad = _build_msg_post(sub, lb, 0, ts1, topic, "Legacy Post", "content", nonce=0, sig_override=bad_sig)
+    # 2. nonce omitted (default=0 in proto3) — also REJECTED
+    ts1b = _now_ms()
+    msg1b = _build_msg_post(sub, lb, 0, ts1b, topic, "Omitted Nonce", "content_omit")
+    assert msg1b.envelope_nonce == 0, "default nonce must be 0"
     _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg_bad, "/mirage.core.v1.MsgPost")],
+        [(msg1b, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         pub,
         wait_deliver=True,
     )
-    _check_deliver_reject("legacy_nonce.zero_nonce_bad_sig_rejected", ccode, dcode, dlog)
+    _check_deliver_reject("nonce.omitted_nonce_rejected", ccode, dcode, dlog)
 
-    # 2. nonce=0 submitted again should also succeed (no replay protection for legacy)
+    # 3. MsgVote with nonce=0 — REJECTED (all msg types enforce mandatory nonce)
+    ts1c = _now_ms()
+    dummy_target = "aa" * 32
+    msg1c = _build_msg_vote(sub, lb, 0, ts1c, dummy_target, 1, nonce=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg1c, "/mirage.core.v1.MsgVote")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("nonce.vote_zero_nonce_rejected", ccode, dcode, dlog)
+
+    # 4. nonce>0 accepted with replay protection
     ts2 = _now_ms()
-    msg2 = _build_msg_post(sub, lb, 0, ts2, topic, "Legacy Post 2", "content2", nonce=0)
+    nonce2 = _gen_nonce()
+    msg2 = _build_msg_post(sub, lb, 0, ts2, topic, "Nonce Post", "content2", nonce=nonce2)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg2, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -4518,12 +4526,10 @@ def test_legacy_nonce(backend: str) -> None:
         pub,
         wait_deliver=True,
     )
-    _check_deliver_accept("legacy_nonce.zero_nonce_no_replay_block", ccode, dcode, dlog)
+    _check_deliver_accept("nonce.nonzero_nonce_accepted", ccode, dcode, dlog)
 
-    # 3. nonce>0 (1.18+) path still works with replay protection
-    ts3 = _now_ms()
-    nonce3 = _gen_nonce()
-    msg3 = _build_msg_post(sub, lb, 0, ts3, topic, "New Path Post", "content3", nonce=nonce3)
+    # 5. nonce>0 replay must be rejected
+    msg3 = _build_msg_post(sub, lb, 0, ts2, topic, "Nonce Post", "content2", nonce=nonce2)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg3, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -4531,18 +4537,165 @@ def test_legacy_nonce(backend: str) -> None:
         pub,
         wait_deliver=True,
     )
-    _check_deliver_accept("legacy_nonce.nonzero_nonce_accepted", ccode, dcode, dlog)
+    _check_deliver_reject("nonce.nonzero_nonce_replay_rejected", ccode, dcode, dlog)
 
-    # 4. nonce>0 replay should be rejected
-    msg4 = _build_msg_post(sub, lb, 0, ts3, topic, "New Path Post", "content3", nonce=nonce3)
+    # 6. MsgVote with valid nonce — accepted (chain allows votes on any target)
+    ts4 = _now_ms()
+    nonce4 = _gen_nonce()
+    msg4 = _build_msg_vote(sub, lb, 0, ts4, dummy_target, 1, nonce=nonce4)
     _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg4, "/mirage.core.v1.MsgPost")],
+        [(msg4, "/mirage.core.v1.MsgVote")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         pub,
         wait_deliver=True,
     )
-    _check_deliver_reject("legacy_nonce.nonzero_nonce_replay_rejected", ccode, dcode, dlog)
+    _check_deliver_accept("nonce.vote_nonzero_nonce_accepted", ccode, dcode, dlog)
+
+
+def test_envelope_fields(backend: str) -> None:
+    """Verify that every envelope field is validated at the chain level.
+
+    Tests garbage, empty, and out-of-range values for each field submitted
+    directly to the chain via protobuf (bypassing the backend HTTP layer).
+    """
+    print(f"\n{_COLOR_BOLD}[ENVELOPE_FIELDS] Envelope Field Validation{_COLOR_RESET}")
+    wallet = WALLETS["sub1"]
+    fee_payer = _VALIDATOR_ADDR or ""
+    pub = wallet.public_key().public_key_bytes
+    lb, diff, _, _ = _get_pow_params(backend, str(wallet.address()))
+
+    # --- F.1: timestamp=0 → rejected ("envelope_timestamp is required") ---
+    msg = _build_msg_post(wallet, lb, 0, 0, f"ef{_rand_str(4)}", "Title", "content", nonce=_gen_nonce())
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.timestamp_zero_rejected", code, dcode, dlog)
+
+    # --- F.2: timestamp=1 (epoch ms=1, ~1970) → rejected ("too old") ---
+    msg = _build_msg_post(wallet, lb, 0, 1, f"ef{_rand_str(4)}", "Title", "content", nonce=_gen_nonce())
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.timestamp_epoch_rejected", code, dcode, dlog)
+
+    # --- F.3: timestamp far in the future → rejected ("in future") ---
+    ts_far_future = _now_ms() + (3600 * 1000 * 24)
+    msg = _build_msg_post(wallet, lb, 0, ts_far_future, f"ef{_rand_str(4)}", "Title", "content", nonce=_gen_nonce())
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.timestamp_far_future_rejected", code, dcode, dlog)
+
+    # --- F.4: empty pubkey (0 bytes) → rejected ("invalid relay fields") ---
+    # NOTE: pub_override=b"" is falsy so _build_msg_post would ignore it.
+    # We set envelope_pubkey directly after construction.
+    ts = _now_ms()
+    msg = _build_msg_post(wallet, lb, 0, ts, f"ef{_rand_str(4)}", "Title", "content", nonce=_gen_nonce())
+    msg.envelope_pubkey = b""
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.pubkey_empty_rejected", code, dcode, dlog)
+
+    # --- F.5: wrong-length pubkey (32 bytes) → rejected ---
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        pub_override=b"\x02" + b"\x01" * 31, nonce=_gen_nonce()
+    )
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.pubkey_wrong_len32_rejected", code, dcode, dlog)
+
+    # --- F.6: oversized pubkey (65 bytes) → rejected ---
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        pub_override=b"\x04" + b"\x01" * 64, nonce=_gen_nonce()
+    )
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.pubkey_oversized65_rejected", code, dcode, dlog)
+
+    # --- F.7: random 33-byte pubkey (not on curve) → rejected ---
+    import os as _os
+    fake_pub = b"\x02" + _os.urandom(32)
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        pub_override=fake_pub, nonce=_gen_nonce()
+    )
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.pubkey_random_bytes_rejected", code, dcode, dlog)
+
+    # --- F.8: truncated signature (32 bytes) → rejected ("invalid relay fields") ---
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        sig_override=b"\x01" * 32, nonce=_gen_nonce()
+    )
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.sig_truncated32_rejected", code, dcode, dlog)
+
+    # --- F.9: oversized signature (128 bytes) → rejected ---
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        sig_override=b"\x01" * 128, nonce=_gen_nonce()
+    )
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.sig_oversized128_rejected", code, dcode, dlog)
+
+    # --- F.10: all-zero signature (64 bytes) → rejected (bad sig) ---
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        sig_override=b"\x00" * 64, nonce=_gen_nonce()
+    )
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.sig_all_zeros_rejected", code, dcode, dlog)
+
+    # --- F.11: empty block_hash → rejected (signature mismatch since canonical bytes used real lb) ---
+    # NOTE: lb_override="" is falsy so _build_msg_post would ignore it.
+    # We set envelope_block_hash directly after construction, causing a
+    # mismatch between the canonical bytes (which used the real lb) and
+    # the block_hash field on the message.
+    msg = _build_msg_post(
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
+        nonce=_gen_nonce()
+    )
+    msg.envelope_block_hash = b""
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.empty_block_hash_rejected", code, dcode, dlog)
+
+    # --- F.12: MsgVote with timestamp=0 → rejected ---
+    msg = _build_msg_vote(wallet, lb, 0, 0, _rand_hex(64), 1, nonce=_gen_nonce())
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgVote")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.vote_timestamp_zero_rejected", code, dcode, dlog)
+
+    # --- F.13: MsgVote with empty pubkey → rejected ---
+    msg = _build_msg_vote(wallet, lb, 0, _now_ms(), _rand_hex(64), 1, nonce=_gen_nonce())
+    msg.envelope_pubkey = b""
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgVote")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.vote_empty_pubkey_rejected", code, dcode, dlog)
+
+    # --- F.14: MsgVote with all-zero sig → rejected ---
+    msg = _build_msg_vote(wallet, lb, 0, _now_ms(), _rand_hex(64), 1, sig_override=b"\x00" * 64, nonce=_gen_nonce())
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgVote")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
+    )
+    _check_deliver_reject("envelope.vote_zero_sig_rejected", code, dcode, dlog)
 
 
 # =========================================================================
@@ -4569,7 +4722,8 @@ ALL_CATEGORIES = {
     "annotate_chain": test_annotate_chain,
     "security": test_security,
     "envelope_replay": test_envelope_replay,
-    "legacy_nonce": test_legacy_nonce,
+    "mandatory_nonce": test_mandatory_nonce,
+    "envelope_fields": test_envelope_fields,
 }
 
 
@@ -4587,6 +4741,7 @@ STATELESS_CATEGORIES = {
     "direct_bank",
     "biography",
     "annotate_chain",
+    "envelope_fields",
 }
 
 

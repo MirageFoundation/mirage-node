@@ -292,10 +292,15 @@ def _parse_envelope_nonce(data: dict):
     """
     if "envelope_nonce" not in data:
         return 0, (jsonify({"error": "envelope_nonce is required (v1.20.0)"}), 400)
+    raw = data.get("envelope_nonce")
+    if not isinstance(raw, (str, int, float)):
+        return 0, (jsonify({"error": "invalid envelope_nonce"}), 400)
     try:
-        nonce = int(data.get("envelope_nonce"))
+        nonce = int(raw)
         if nonce <= 0:
             return 0, (jsonify({"error": "envelope_nonce must be > 0"}), 400)
+        if nonce > 0xFFFFFFFFFFFFFFFF:
+            return 0, (jsonify({"error": "envelope_nonce exceeds uint64 range"}), 400)
         return nonce, None
     except (TypeError, ValueError):
         return 0, (jsonify({"error": "invalid envelope_nonce"}), 400)

@@ -546,14 +546,23 @@ def check_biography_limits() -> None:
             fail(f"Tier {idx} max_biography_length = {got}, expected {exp_val}")
 
 
+def _semver_tuple(ver: str) -> tuple[int, ...]:
+    """Convert '1.20.0' to (1, 20, 0) for numeric comparison."""
+    try:
+        return tuple(int(x) for x in ver.split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
 def check_nonce_enforcement(upgrade_name: str) -> None:
     section("Envelope Nonce Enforcement")
     ver = _extract_semver(upgrade_name)
-    if ver == "1.19.0":
+    vt = _semver_tuple(ver)
+    if vt == (1, 19, 0):
         warn(
             "v1.19.0 uses legacy nonce fallback; cannot verify via queries. Submit a legacy-signed tx or inspect logs."
         )
-    elif ver >= "1.20.0":
+    elif vt >= (1, 20, 0):
         ok("v1.20.0+: envelope_nonce is mandatory. Legacy fallback removed.")
         ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
     else:

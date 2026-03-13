@@ -3280,7 +3280,7 @@ def test_edge_cases(backend: str):
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.11b Missing envelope_nonce must be rejected (v1.20.0+)
-    # Sign with nonce=0 canonical bytes (no tag 7) to match the legacy path.
+    # Chain rejects nonce==0 before signature verification.
     ts_legacy = _now_ms()
     base_legacy = _canon_base_post_raw(
         pub, _lb_bytes(lb), diff, ts_legacy, "", "test", "legacy no nonce", "body", "", 0, None, 0
@@ -3331,6 +3331,68 @@ def test_edge_cases(backend: str):
     else:
         _fail("edge.zero_envelope_nonce_rejected", f"code={code_zero} expected 400")
 
+    # 9.11c2 Garbage / invalid envelope_nonce values — must all be rejected (400)
+    invalid_nonces_expect_reject = [
+        ("string",        "hello",                 "edge.nonce_string_rejected"),
+        ("empty_string",  "",                      "edge.nonce_empty_string_rejected"),
+        ("null",          None,                    "edge.nonce_null_rejected"),
+        ("negative",      "-1",                    "edge.nonce_negative_rejected"),
+        ("float_str",     "3.14",                  "edge.nonce_float_str_rejected"),
+        ("overflow_u64",  "99999999999999999999",   "edge.nonce_overflow_rejected"),
+        ("array",         [1, 2, 3],               "edge.nonce_array_rejected"),
+        ("object",        {"n": 1},                "edge.nonce_object_rejected"),
+        ("sql_inject",    "1; DROP TABLE nonces",  "edge.nonce_sqli_rejected"),
+        ("whitespace",    "  ",                    "edge.nonce_whitespace_rejected"),
+        ("hex_prefix",    "0xDEADBEEF",            "edge.nonce_hex_rejected"),
+        ("negative_big",  "-99999999999999999999",  "edge.nonce_negative_big_rejected"),
+    ]
+    for label, bad_val, test_name in invalid_nonces_expect_reject:
+        bad_payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(b"\x00" * 64),
+            "last_block_hash": lb,
+            "timestamp": _now_ms(),
+            "envelope_nonce": bad_val,
+            "pow_difficulty": diff,
+            "pow": 0,
+            "target": "",
+            "topic": "test",
+            "title": "bad nonce",
+            "content": "body",
+        }
+        code_bad, resp_bad = _post(f"{backend}/api/core/post", bad_payload)
+        if code_bad >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_bad} resp={resp_bad}")
+
+    # 9.11c3 Coercible values that resolve to a valid positive int — should be accepted
+    #         (signature will fail downstream, but nonce parsing itself must succeed → not 400)
+    coercible_nonces_expect_accept = [
+        ("bool_true",  True,   "edge.nonce_bool_true_accepted"),
+        ("float_num",  42.9,   "edge.nonce_float_num_accepted"),
+        ("str_int",    "999",  "edge.nonce_str_int_accepted"),
+    ]
+    for label, ok_val, test_name in coercible_nonces_expect_accept:
+        ok_payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(b"\x00" * 64),
+            "last_block_hash": lb,
+            "timestamp": _now_ms(),
+            "envelope_nonce": ok_val,
+            "pow_difficulty": diff,
+            "pow": 0,
+            "target": "",
+            "topic": "test",
+            "title": "coercible nonce",
+            "content": "body",
+        }
+        code_ok, resp_ok = _post(f"{backend}/api/core/post", ok_payload)
+        if code_ok != 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"nonce={ok_val!r} got 400 (nonce parse should accept): resp={resp_ok}")
+
     # 9.11d v1.20+ path: nonce present → replay protection active
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     ts_new = _now_ms()
@@ -3361,6 +3423,238 @@ def test_edge_cases(backend: str):
         _fail("edge.envelope_nonce_present_accepted", f"code={code_with_nonce} resp={resp_with_nonce}")
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+
+    # ── 9.20 Garbage / invalid envelope fields (non-nonce) ────────────
+    # For each field we submit a payload with ONE corrupted field and
+    # verify the backend returns >= 400 (ideally 400, but 500 for
+    # uncaught coercion failures is still a rejection).
+
+    def _make_valid_payload() -> dict:
+        """Build a structurally valid (but unsigned) payload for /api/core/post."""
+        return {
+            "pubkey": _b64(pub),
+            "signature": _b64(b"\x00" * 64),
+            "last_block_hash": lb,
+            "timestamp": _now_ms(),
+            "envelope_nonce": str(_fresh_nonce()),
+            "pow_difficulty": diff,
+            "pow": 0,
+            "target": "",
+            "topic": "test",
+            "title": "field test",
+            "content": "body",
+        }
+
+    # --- 9.20a: timestamp ---
+    timestamp_cases_reject = [
+        ("missing",     "_OMIT_",               "edge.ts_missing_rejected"),
+        ("null",        None,                    "edge.ts_null_rejected"),
+        ("string",      "not-a-number",          "edge.ts_string_rejected"),
+        ("empty",       "",                      "edge.ts_empty_rejected"),
+        ("array",       [1, 2],                  "edge.ts_array_rejected"),
+        ("object",      {"t": 1},                "edge.ts_object_rejected"),
+        ("negative",    -9999999999999,           "edge.ts_negative_rejected"),
+        ("bool",        True,                    "edge.ts_bool_rejected"),
+        ("zero",        0,                       "edge.ts_zero_rejected"),
+    ]
+    for label, bad_val, test_name in timestamp_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["timestamp"]
+        else:
+            p["timestamp"] = bad_val
+        code_t, resp_t = _post(f"{backend}/api/core/post", p)
+        if code_t >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_t} resp={resp_t}")
+
+    # --- 9.20b: pubkey ---
+    pubkey_cases_reject = [
+        ("missing",       "_OMIT_",             "edge.pubkey_missing_rejected"),
+        ("empty",         "",                    "edge.pubkey_empty_rejected"),
+        ("null",          None,                  "edge.pubkey_null_rejected"),
+        ("not_base64",    "!!!notbase64!!!",     "edge.pubkey_not_base64_rejected"),
+        ("wrong_len_32",  _b64(b"\x01" * 32),   "edge.pubkey_wrong_len32_rejected"),
+        ("wrong_len_64",  _b64(b"\x01" * 64),   "edge.pubkey_wrong_len64_rejected"),
+        ("array",         [1, 2, 3],             "edge.pubkey_array_rejected"),
+        ("object",        {"k": "v"},            "edge.pubkey_object_rejected"),
+        ("int",           12345,                 "edge.pubkey_int_rejected"),
+    ]
+    for label, bad_val, test_name in pubkey_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["pubkey"]
+        else:
+            p["pubkey"] = bad_val
+        code_p, resp_p = _post(f"{backend}/api/core/post", p)
+        if code_p >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_p} resp={resp_p}")
+
+    # --- 9.20c: signature ---
+    sig_cases_reject = [
+        ("missing",       "_OMIT_",             "edge.sig_missing_rejected"),
+        ("empty",         "",                    "edge.sig_empty_rejected"),
+        ("null",          None,                  "edge.sig_null_rejected"),
+        ("not_base64",    "***bad-b64***",       "edge.sig_not_base64_rejected"),
+        ("wrong_len_32",  _b64(b"\x01" * 32),   "edge.sig_wrong_len32_rejected"),
+        ("too_long",      _b64(b"\x01" * 128),   "edge.sig_too_long_rejected"),
+        ("array",         [1, 2, 3],             "edge.sig_array_rejected"),
+        ("object",        {"s": "v"},            "edge.sig_object_rejected"),
+    ]
+    for label, bad_val, test_name in sig_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["signature"]
+        else:
+            p["signature"] = bad_val
+        code_s, resp_s = _post(f"{backend}/api/core/post", p)
+        if code_s >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_s} resp={resp_s}")
+
+    # --- 9.20d: last_block_hash ---
+    lbh_cases_reject = [
+        ("missing",       "_OMIT_",               "edge.lbh_missing_rejected"),
+        ("not_hex",       "ZZZZ-not-hex",          "edge.lbh_not_hex_rejected"),
+        ("wrong_len",     "aabb",                  "edge.lbh_wrong_len_rejected"),
+        ("null",          None,                    "edge.lbh_null_rejected"),
+        ("array",         [1],                     "edge.lbh_array_rejected"),
+        ("object",        {"h": 1},                "edge.lbh_object_rejected"),
+        ("int",           999,                     "edge.lbh_int_rejected"),
+    ]
+    for label, bad_val, test_name in lbh_cases_reject:
+        p = _make_valid_payload()
+        if bad_val == "_OMIT_":
+            del p["last_block_hash"]
+        else:
+            p["last_block_hash"] = bad_val
+        code_l, resp_l = _post(f"{backend}/api/core/post", p)
+        if code_l >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_l} resp={resp_l}")
+
+    # --- 9.20e: pow_difficulty ---
+    pwd_cases_reject = [
+        ("string",   "abc",      "edge.pwd_string_rejected"),
+        ("null",     None,       "edge.pwd_null_rejected"),
+        ("array",    [1],        "edge.pwd_array_rejected"),
+        ("object",   {"d": 1},   "edge.pwd_object_rejected"),
+        ("negative", -5,         "edge.pwd_negative_rejected"),
+    ]
+    for label, bad_val, test_name in pwd_cases_reject:
+        p = _make_valid_payload()
+        p["pow_difficulty"] = bad_val
+        code_d, resp_d = _post(f"{backend}/api/core/post", p)
+        if code_d >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_d} resp={resp_d}")
+
+    # --- 9.20f: pow ---
+    pow_cases_reject = [
+        ("string",   "xyz",      "edge.pow_string_rejected"),
+        ("null",     None,       "edge.pow_null_rejected"),
+        ("array",    [9],        "edge.pow_array_rejected"),
+        ("object",   {"p": 1},   "edge.pow_object_rejected"),
+        ("negative", -1,         "edge.pow_negative_rejected"),
+    ]
+    for label, bad_val, test_name in pow_cases_reject:
+        p = _make_valid_payload()
+        p["pow"] = bad_val
+        code_pw, resp_pw = _post(f"{backend}/api/core/post", p)
+        if code_pw >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_pw} resp={resp_pw}")
+
+    # --- 9.20g: topic ---
+    topic_cases_reject = [
+        ("too_short",     "ab",                  "edge.topic_too_short_rejected"),
+        ("too_long",      "a" * 60,              "edge.topic_too_long_rejected"),
+        ("uppercase",     "INVALID",             "edge.topic_uppercase_rejected"),
+        ("spaces",        "has spaces",          "edge.topic_spaces_rejected"),
+        ("special",       "top!@#$",             "edge.topic_special_rejected"),
+        ("unicode",       "\u00e9\u00e8\u00ea",  "edge.topic_unicode_rejected"),
+        ("null",          None,                  "edge.topic_null_rejected"),
+    ]
+    for label, bad_val, test_name in topic_cases_reject:
+        p = _make_valid_payload()
+        p["topic"] = bad_val
+        code_tp, resp_tp = _post(f"{backend}/api/core/post", p)
+        if code_tp >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_tp} resp={resp_tp}")
+
+    # --- 9.20h: title / content size limits ---
+    title_oversize = "A" * 1000
+    p_big_title = _make_valid_payload()
+    p_big_title["title"] = title_oversize
+    code_bt, resp_bt = _post(f"{backend}/api/core/post", p_big_title)
+    if code_bt >= 400:
+        _pass("edge.title_oversize_1k_rejected")
+    else:
+        _fail("edge.title_oversize_1k_rejected", f"code={code_bt} resp={resp_bt}")
+
+    content_oversize = "X" * 200_000
+    p_big_content = _make_valid_payload()
+    p_big_content["content"] = content_oversize
+    code_bc, resp_bc = _post(f"{backend}/api/core/post", p_big_content)
+    if code_bc >= 400:
+        _pass("edge.content_oversize_200k_rejected")
+    else:
+        _fail("edge.content_oversize_200k_rejected", f"code={code_bc} resp={resp_bc}")
+
+    # --- 9.20i: media ---
+    media_cases_reject = [
+        ("not_list",       "https://a.com/x.jpg",             "edge.media_not_list_rejected"),
+        ("http_not_https", ["http://a.com/x.jpg"],            "edge.media_http_rejected"),
+        ("too_many",       [f"https://a.com/{i}.jpg" for i in range(15)], "edge.media_too_many_rejected"),
+        ("item_too_long",  ["https://a.com/" + "a" * 2100],   "edge.media_item_too_long_rejected"),
+        ("no_scheme",      ["just-a-string"],                  "edge.media_no_scheme_rejected"),
+    ]
+    for label, bad_val, test_name in media_cases_reject:
+        p = _make_valid_payload()
+        p["media"] = bad_val
+        code_m, resp_m = _post(f"{backend}/api/core/post", p)
+        if code_m >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_m} resp={resp_m}")
+
+    # --- 9.20j: tag ---
+    tag_cases_reject = [
+        ("invalid",    "notarealltag",           "edge.tag_invalid_rejected"),
+        ("too_long",   "x" * 60,                 "edge.tag_too_long_rejected"),
+    ]
+    for label, bad_val, test_name in tag_cases_reject:
+        p = _make_valid_payload()
+        p["tag"] = bad_val
+        code_tg, resp_tg = _post(f"{backend}/api/core/post", p)
+        if code_tg >= 400:
+            _pass(test_name)
+        else:
+            _fail(test_name, f"code={code_tg} resp={resp_tg}")
+
+    # --- 9.20k: completely empty payload ---
+    code_empty, resp_empty = _post(f"{backend}/api/core/post", {})
+    if code_empty >= 400:
+        _pass("edge.empty_payload_rejected")
+    else:
+        _fail("edge.empty_payload_rejected", f"code={code_empty} resp={resp_empty}")
+
+    # --- 9.20l: completely bogus payload (random keys) ---
+    bogus = {"foo": "bar", "baz": 42, "qux": [1, 2, 3]}
+    code_bogus, resp_bogus = _post(f"{backend}/api/core/post", bogus)
+    if code_bogus >= 400:
+        _pass("edge.bogus_payload_rejected")
+    else:
+        _fail("edge.bogus_payload_rejected", f"code={code_bogus} resp={resp_bogus}")
 
     # 9.12 XSS injection in content — should not cause server error
     xss_content = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
