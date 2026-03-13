@@ -1675,7 +1675,7 @@ def _wait_blocked_topic_state(
     address: str,
     topic: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     topic_lower = (topic or "").strip().lower()
@@ -1698,7 +1698,7 @@ def _wait_blocked_topic_state(
     return False
 
 
-def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = 15.0) -> bool:
+def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     return _wait_blocked_topic_state(backend, address, topic, True, timeout)
 
 
@@ -2556,7 +2556,7 @@ def test_social_graph(backend: str):
         "body",
         skip_pow=True,
     )
-    if topic_only_post and _wait_indexed(backend, sub_addr, topic_only_post, timeout=10.0):
+    if topic_only_post and _wait_indexed(backend, sub_addr, topic_only_post):
         code, follow_feed = _get(
             f"{backend}/api/get_posts",
             {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
@@ -2725,7 +2725,7 @@ def test_social_graph(backend: str):
         "body",
         skip_pow=True,  # subscriber should post without PoW
     )
-    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post, timeout=10.0):
+    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post):
         code, feed = _get(
             f"{backend}/api/get_posts",
             {"limit": 50, "by": "newest", "address": addr},
@@ -2779,8 +2779,8 @@ def test_social_graph(backend: str):
     if (
         match_post
         and nonmatch_post
-        and _wait_indexed(backend, sub_addr, match_post, timeout=10.0)
-        and _wait_indexed(backend, sub_addr, nonmatch_post, timeout=10.0)
+        and _wait_indexed(backend, sub_addr, match_post)
+        and _wait_indexed(backend, sub_addr, nonmatch_post)
     ):
         code, feed = _get(
             f"{backend}/api/get_posts",
@@ -3060,7 +3060,7 @@ def test_subscriber(backend: str):
     # 7.9 All tiers can edit their own posts
     for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
         if name in tier_posts:
-            time.sleep(2)
+            _wait_indexed(backend, str(w.address()), tier_posts[name])
             resp = _do_edit(
                 backend,
                 w,
@@ -6487,7 +6487,7 @@ def test_agent_behavior(backend: str):
     if not blocked_post:
         _fail("agent_behavior.setup_blocked_post", "could not create post")
         return
-    if not _wait_indexed(backend, victim_addr, blocked_post, timeout=15.0):
+    if not _wait_indexed(backend, victim_addr, blocked_post):
         _fail("agent_behavior.setup_blocked_post_indexed", "not indexed")
         return
 
@@ -6496,7 +6496,7 @@ def test_agent_behavior(backend: str):
     if not topic_post:
         _fail("agent_behavior.setup_topic_post", "could not create post")
         return
-    if not _wait_indexed(backend, victim_addr, topic_post, timeout=15.0):
+    if not _wait_indexed(backend, victim_addr, topic_post):
         _fail("agent_behavior.setup_topic_post_indexed", "not indexed")
         return
 
@@ -6507,7 +6507,7 @@ def test_agent_behavior(backend: str):
     if not control_post:
         _fail("agent_behavior.setup_control_post", "could not create post")
         return
-    if not _wait_indexed(backend, victim_addr, control_post, timeout=15.0):
+    if not _wait_indexed(backend, victim_addr, control_post):
         _fail("agent_behavior.setup_control_post_indexed", "not indexed")
         return
 
@@ -6520,7 +6520,7 @@ def test_agent_behavior(backend: str):
     if not author_post:
         _fail("agent_behavior.setup_author_post", "could not create post")
         return
-    if not _wait_indexed(backend, agent2_addr, author_post, timeout=15.0):
+    if not _wait_indexed(backend, agent2_addr, author_post):
         _fail("agent_behavior.setup_author_post_indexed", "not indexed")
         return
 
