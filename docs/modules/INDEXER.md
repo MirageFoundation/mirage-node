@@ -589,19 +589,17 @@ Proposal Lifecycle:
  _proposal_cache[pid] = messages           process_core_message(type_url, value, ...)
 ```
 
-**Challenge:** By the time a proposal passes, the submission transaction may be pruned from node history. The indexer uses multiple resolution strategies:
+**Challenge:** By the time a proposal passes, the submission transaction may be pruned from node history. The indexer uses two resolution strategies:
 
-1. **Cache on submission:** During live mode, cache proposal messages when `MsgSubmitProposal` is seen
-2. **gRPC query:** Fetch proposal content via governance gRPC endpoint
-3. **tx_search fallback:** Search for submission transaction by proposal ID
+1. **Cache on submission:** During live mode, cache proposal messages when `MsgSubmitProposal` is seen in a block
+2. **gRPC query:** Fetch proposal content via governance gRPC endpoint (works in both live and catch-up modes)
+
+> **Since v1.20.0:** CometBFT tx indexing is disabled (`indexer = "null"`), so `tx_search` is no longer available. Proposal resolution is gRPC-only when the cache is empty. The `tx_search` fallback has been removed.
 
 ```python
 messages = self._proposal_cache.pop(proposal_id, None)
 if not messages:
-    if self._catch_up_mode:
-        messages = self.chain.fetch_proposal_messages(proposal_id)
-    else:
-        messages = self.chain.fetch_submit_proposal_messages_via_tx_search(proposal_id)
+    messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
 ```
 
 ---

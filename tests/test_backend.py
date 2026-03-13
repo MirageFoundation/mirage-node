@@ -914,6 +914,49 @@ def _do_post(
     return txh if txh else None
 
 
+def _do_post_with_nonce(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    nonce: int,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/post", payload)
+    return resp or {}
+
+
 def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool = False) -> dict:
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -944,6 +987,42 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
     code, resp = _post(f"{backend}/api/core/vote", payload)
     return resp
 
+
+def _do_vote_with_nonce(
+    backend: str,
+    wallet,
+    target: str,
+    direction: int,
+    nonce: int,
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_vote_raw(pub, _lb_bytes(lb), d, ts, target, int(direction), nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "direction": direction,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/vote", payload)
+    return resp or {}
 
 def _do_edit(
     backend: str,
@@ -1563,6 +1642,31 @@ def _wait_tx_status(
                 continue
             if data.get("indexed") and data.get("details"):
                 return data
+        time.sleep(0.5)
+    return None
+
+
+def _wait_tx_status_failure(
+    backend: str,
+    tx_hash: str,
+    expect_type: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and data:
+            if not data.get("found"):
+                time.sleep(0.5)
+                continue
+            if data.get("success") is True:
+                time.sleep(0.5)
+                continue
+            if expect_type and data.get("tx_type") != expect_type:
+                time.sleep(0.5)
+                continue
+            return data
         time.sleep(0.5)
     return None
 
@@ -6859,6 +6963,211 @@ def test_edit_target_immutability(backend: str):
         _fail("edit_target.mismatch_rejected", f"expected rejection, got {resp}")
 
 
+def test_tx_status(backend: str):
+    """Test indexer-only get_tx_status (no CometBFT tx_index dependency)."""
+    print(f"\n{_COLOR_BOLD}[28] Indexer-Only TX Status{_COLOR_RESET}")
+
+    free = WALLETS.get("free")
+    if not free:
+        _skip("tx_status.setup", "free wallet not available")
+        return
+
+    # 28.1 Non-existent txhash returns found=false
+    fake_hash = "00" * 32
+    code, data = _get(f"{backend}/api/get_tx_status", {"hash": fake_hash})
+    if code == 200 and data and not data.get("found"):
+        _pass("tx_status.nonexistent_returns_not_found")
+    else:
+        _fail("tx_status.nonexistent_returns_not_found", f"code={code} data={data}")
+
+    # 28.2 Invalid hash (too short) returns 400
+    code2, data2 = _get(f"{backend}/api/get_tx_status", {"hash": "abc"})
+    if code2 == 400:
+        _pass("tx_status.invalid_hash_rejected")
+    else:
+        _fail("tx_status.invalid_hash_rejected", f"code={code2}")
+
+    # 28.3 Missing hash returns 400
+    code3, data3 = _get(f"{backend}/api/get_tx_status", {})
+    if code3 == 400:
+        _pass("tx_status.missing_hash_rejected")
+    else:
+        _fail("tx_status.missing_hash_rejected", f"code={code3}")
+
+    # 28.4 Submit a post, wait for indexer, verify found=true with details
+    topic = "test"
+    title = f"TxStatus Test {_rand_str(6)}"
+    content = f"Content {_rand_str(10)}"
+    txh = _do_post(backend, free, topic, title, content)
+    if not txh:
+        _fail("tx_status.post_submit")
+        return
+    _pass("tx_status.post_submit", tx=txh)
+
+    status = _wait_tx_status(backend, txh, expect_type="post")
+    if status and status.get("found") and status.get("indexed"):
+        details = status.get("details") or {}
+        if details.get("topic", "").lower() == topic.lower() and details.get("title") == title:
+            _pass("tx_status.post_found_indexed")
+        else:
+            _fail("tx_status.post_found_indexed", f"details={details}")
+    else:
+        _fail("tx_status.post_found_indexed", f"status={status}")
+
+    # 28.5 Submit a vote, wait for indexer, verify found=true with vote details
+    vote_resp = _do_vote(backend, free, txh, 1)
+    vote_txh = str((vote_resp or {}).get("tx_hash", "") or "").lower() if vote_resp else ""
+    if vote_txh:
+        vote_status = _wait_tx_status(backend, vote_txh, expect_type="vote")
+        if vote_status and vote_status.get("found") and vote_status.get("indexed"):
+            vote_details = vote_status.get("details") or {}
+            if vote_details.get("target", "").lower() == txh.lower():
+                _pass("tx_status.vote_found_indexed")
+            else:
+                _fail("tx_status.vote_found_indexed", f"details={vote_details}")
+        else:
+            _fail("tx_status.vote_found_indexed", f"status={vote_status}")
+    else:
+        _fail("tx_status.vote_found_indexed", "vote submission failed")
+
+    # 28.6 Response shape: found=true always includes success, indexed, tx_type
+    if status:
+        has_keys = all(k in status for k in ("found", "success", "indexed", "tx_type", "tx_hash"))
+        if has_keys and status["success"] is True and status["tx_type"] == "post":
+            _pass("tx_status.response_shape")
+        else:
+            _fail("tx_status.response_shape", f"keys={list(status.keys())}")
+    else:
+        _fail("tx_status.response_shape", "no status data")
+
+
+def _rpc_latest_height() -> int:
+    r = requests.get("http://127.0.0.1:26657/status", timeout=2)
+    if not r.ok:
+        raise RuntimeError(f"rpc status failed: http={r.status_code}")
+    data = r.json()
+    return int(data["result"]["sync_info"]["latest_block_height"])
+
+
+def _wait_next_block(timeout: float = 8.0) -> int:
+    start = _rpc_latest_height()
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        cur = _rpc_latest_height()
+        if cur > start:
+            return cur
+        time.sleep(0.2)
+    raise RuntimeError(f"timeout waiting for next block (start={start})")
+
+
+def test_failed_tx_status(backend: str):
+    """Test indexer receipts for failed vote/post transactions."""
+    print(f"\n{_COLOR_BOLD}[29] Failed TX Status Receipts{_COLOR_RESET}")
+
+    free = WALLETS.get("free")
+    if not free:
+        _skip("failed_tx.setup", "free wallet not available")
+        return
+
+    free_addr = str(free.address())
+
+    # Create a valid post to vote on
+    base_post = _do_post(backend, free, "test", f"Fail Base {_rand_str(6)}", f"Body {_rand_str(8)}")
+    if not base_post:
+        _fail("failed_tx.base_post_submit")
+        return
+    _pass("failed_tx.base_post_submit", tx=base_post)
+    if not _wait_indexed(backend, free_addr, base_post):
+        _fail("failed_tx.base_post_indexed")
+        return
+
+    # ── Failed vote: two txs with same nonce in the same block
+    try:
+        blk = _wait_next_block()
+        _debug(f"failed_tx.vote next_block={blk}")
+    except Exception as e:
+        _fail("failed_tx.vote.block_sync", str(e))
+        return
+
+    vote_nonce = _fresh_nonce()
+    vote_resp1 = _do_vote_with_nonce(backend, free, base_post, 1, vote_nonce)
+    vote_resp2 = _do_vote_with_nonce(backend, free, base_post, 1, vote_nonce)
+    vote_tx1 = str(vote_resp1.get("tx_hash", "") or "").lower()
+    vote_tx2 = str(vote_resp2.get("tx_hash", "") or "").lower()
+    _debug(f"failed_tx.vote tx1={vote_tx1} tx2={vote_tx2} nonce={vote_nonce}")
+    if not vote_tx1 or not vote_tx2:
+        _fail("failed_tx.vote.submit", f"tx1={vote_tx1} tx2={vote_tx2}")
+        return
+
+    fail1 = _wait_tx_status_failure(backend, vote_tx1, expect_type="vote")
+    fail2 = _wait_tx_status_failure(backend, vote_tx2, expect_type="vote")
+    if bool(fail1) == bool(fail2):
+        _fail("failed_tx.vote.failure_detected", f"fail1={bool(fail1)} fail2={bool(fail2)}")
+    else:
+        fail_vote = fail1 or fail2
+        ok_vote = vote_tx2 if fail1 else vote_tx1
+        _pass("failed_tx.vote.failure_detected", tx=fail_vote.get("tx_hash"))
+        ok_status = _wait_tx_status(backend, ok_vote, expect_type="vote")
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_tx.vote.success_detected", tx=ok_vote)
+        else:
+            _fail("failed_tx.vote.success_detected", f"status={ok_status}")
+        if fail_vote.get("code", 0) and fail_vote.get("error_details"):
+            _pass("failed_tx.vote.error_details_present")
+        else:
+            _fail("failed_tx.vote.error_details_present", f"fail={fail_vote}")
+
+    # ── Failed post: two txs with same nonce in the same block
+    try:
+        blk = _wait_next_block()
+        _debug(f"failed_tx.post next_block={blk}")
+    except Exception as e:
+        _fail("failed_tx.post.block_sync", str(e))
+        return
+
+    post_nonce = _fresh_nonce()
+    post_resp1 = _do_post_with_nonce(
+        backend,
+        free,
+        "test",
+        f"Fail Post A {_rand_str(6)}",
+        f"Body {_rand_str(8)}",
+        post_nonce,
+    )
+    post_resp2 = _do_post_with_nonce(
+        backend,
+        free,
+        "test",
+        f"Fail Post B {_rand_str(6)}",
+        f"Body {_rand_str(8)}",
+        post_nonce,
+    )
+    post_tx1 = str(post_resp1.get("tx_hash", "") or "").lower()
+    post_tx2 = str(post_resp2.get("tx_hash", "") or "").lower()
+    _debug(f"failed_tx.post tx1={post_tx1} tx2={post_tx2} nonce={post_nonce}")
+    if not post_tx1 or not post_tx2:
+        _fail("failed_tx.post.submit", f"tx1={post_tx1} tx2={post_tx2}")
+        return
+
+    pfail1 = _wait_tx_status_failure(backend, post_tx1, expect_type="post")
+    pfail2 = _wait_tx_status_failure(backend, post_tx2, expect_type="post")
+    if bool(pfail1) == bool(pfail2):
+        _fail("failed_tx.post.failure_detected", f"fail1={bool(pfail1)} fail2={bool(pfail2)}")
+    else:
+        fail_post = pfail1 or pfail2
+        ok_post = post_tx2 if pfail1 else post_tx1
+        _pass("failed_tx.post.failure_detected", tx=fail_post.get("tx_hash"))
+        ok_status = _wait_tx_status(backend, ok_post, expect_type="post")
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_tx.post.success_detected", tx=ok_post)
+        else:
+            _fail("failed_tx.post.success_detected", f"status={ok_status}")
+        if fail_post.get("code", 0) and fail_post.get("error_details"):
+            _pass("failed_tx.post.error_details_present")
+        else:
+            _fail("failed_tx.post.error_details_present", f"fail={fail_post}")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -6890,6 +7199,8 @@ ALL_CATEGORIES = {
     "agent_behavior": test_agent_behavior,
     "annotate": test_annotate,
     "edit_target": test_edit_target_immutability,
+    "tx_status": test_tx_status,
+    "failed_tx": test_failed_tx_status,
 }
 
 STATELESS_CATEGORIES = {

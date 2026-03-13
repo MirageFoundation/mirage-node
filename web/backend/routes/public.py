@@ -2345,43 +2345,23 @@ def _get_guest_feed_magic(
 
 @public_bp.route("/api/get_tx_status")
 def get_tx_status():
-    """Unified transaction status endpoint with type-specific enrichment."""
+    """Indexer-only tx status. No CometBFT tx_index dependency.
+
+    Queries the indexer DB for the txhash. If found in posts or votes,
+    returns details. If not found, returns {found:false} — the frontend
+    treats this as "not indexed yet" and keeps polling.
+    """
     rid = next_request_id()
     try:
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
         tx_hash = str(request.args.get("hash", "") or "").strip().lower()
-        address = str(request.args.get("address", "") or "").strip().lower()
         if not tx_hash or len(tx_hash) != 64:
             return jsonify({"error": "invalid or missing hash"}), 400
 
         log_event(rid, "get_tx_status.begin", tx_hash=tx_hash)
 
-        # Check RPC for tx confirmation
-        import urllib.request as _url
-
-        rpc = require_runtime().rpc_url
-        url = f"{rpc}/tx?hash=0x{tx_hash.upper()}&prove=false"
-        try:
-            with _url.urlopen(url, timeout=2) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except Exception as fetch_err:
-            log_event(rid, "get_tx_status.rpc_error", tx_hash=tx_hash, error=str(fetch_err))
-            return jsonify({"found": False})
-
-        txr = (data or {}).get("result", {})
-        height = int(txr.get("height", 0) or 0)
-        if height <= 0:
-            log_event(rid, "get_tx_status.not_found", tx_hash=tx_hash)
-            return jsonify({"found": False})
-
-        code = int(txr.get("tx_result", {}).get("code", 0) or 0)
-        raw_log = str(txr.get("tx_result", {}).get("log", ""))
-        success = code == 0
-
-        # Check if indexed and detect tx type
-        indexed = False
         tx_type = "unknown"
         details = None
         conn = None
@@ -2390,63 +2370,84 @@ def get_tx_status():
             conn = connect_db(timeout=5.0, busy_timeout_ms=15000)
             cur = conn.cursor()
 
-            # Check indexer height
-            cur.execute("SELECT value FROM meta WHERE key='last_height'")
-            row = cur.fetchone()
-            last_indexed_height = int(row[0]) if row and row[0] is not None else 0
-            indexed = last_indexed_height >= height
+            # Check votes table
+            cur.execute(
+                """
+                SELECT v.owner, v.target, v.user_vote, v.user_weight, v.created_at, COALESCE(v.relayer, '')
+                FROM votes v WHERE LOWER(v.txhash) = %s
+                """,
+                (tx_hash,),
+            )
+            vote_row = cur.fetchone()
+            if vote_row:
+                tx_type = "vote"
+                owner, target, user_vote_val, user_weight_val, created_at, relayer = vote_row
+                target_points = None
+                if target:
+                    cur.execute(
+                        "SELECT COALESCE(SUM(user_weight), 0) FROM votes WHERE LOWER(target) = %s",
+                        (target.lower(),),
+                    )
+                    pts_row = cur.fetchone()
+                    if pts_row:
+                        target_points = float(pts_row[0])
+                details = {
+                    "owner": owner,
+                    "relayer": (relayer or "").strip().lower(),
+                    "target": target,
+                    "user_vote": user_vote_val,
+                    "user_weight": round(user_weight_val, 3) if user_weight_val else 0,
+                    "target_points": target_points,
+                }
+            else:
+                # Check posts table
+                cur.execute(
+                    "SELECT txhash, topic, title, COALESCE(relayer, '') FROM posts WHERE LOWER(txhash) = %s",
+                    (tx_hash,),
+                )
+                post_row = cur.fetchone()
+                if post_row:
+                    tx_type = "post"
+                    details = {
+                        "post_id": post_row[0],
+                        "topic": post_row[1] or "",
+                        "title": post_row[2] or "",
+                        "relayer": (post_row[3] or "").strip().lower(),
+                    }
 
-            if indexed and success:
-                # Detect tx type and get details
-
-                # Check votes table
+            if tx_type == "unknown":
                 cur.execute(
                     """
-                    SELECT v.owner, v.target, v.user_vote, v.user_weight, v.created_at, COALESCE(v.relayer, '')
-                    FROM votes v WHERE LOWER(v.txhash) = %s
+                    SELECT height, code, raw_log, tx_type
+                    FROM tx_receipts WHERE LOWER(txhash) = %s
                     """,
                     (tx_hash,),
                 )
-                vote_row = cur.fetchone()
-                if vote_row:
-                    tx_type = "vote"
-                    owner, target, user_vote_val, user_weight_val, created_at, relayer = vote_row
-                    # Get target post's current points
-                    target_points = None
-                    if target:
-                        cur.execute(
-                            "SELECT COALESCE(SUM(user_weight), 0) FROM votes WHERE LOWER(target) = %s",
-                            (target.lower(),),
-                        )
-                        pts_row = cur.fetchone()
-                        if pts_row:
-                            target_points = float(pts_row[0])
-                    details = {
-                        "owner": owner,
-                        "relayer": (relayer or "").strip().lower(),
-                        "target": target,
-                        "user_vote": user_vote_val,
-                        "user_weight": round(user_weight_val, 3) if user_weight_val else 0,
-                        "target_points": target_points,
+                fail_row = cur.fetchone()
+                if fail_row:
+                    fail_height, fail_code, fail_log, fail_type = fail_row
+                    out = {
+                        "found": True,
+                        "tx_hash": tx_hash,
+                        "height": int(fail_height or 0),
+                        "code": int(fail_code or 0),
+                        "success": False,
+                        "indexed": True,
+                        "tx_type": str(fail_type or "unknown"),
+                        "error_details": _classify_reject(str(fail_log or "")),
                     }
-                else:
-                    # Check posts table
-                    cur.execute(
-                        "SELECT txhash, topic, title, COALESCE(relayer, '') FROM posts WHERE LOWER(txhash) = %s",
-                        (tx_hash,),
+                    log_event(
+                        rid,
+                        "get_tx_status.failed",
+                        tx_hash=tx_hash,
+                        tx_type=out["tx_type"],
+                        code=out["code"],
                     )
-                    post_row = cur.fetchone()
-                    if post_row:
-                        tx_type = "post"
-                        details = {
-                            "post_id": post_row[0],
-                            "topic": post_row[1] or "",
-                            "title": post_row[2] or "",
-                            "relayer": (post_row[3] or "").strip().lower(),
-                        }
+                    return jsonify(out)
 
         except Exception as db_err:
             log_event(rid, "get_tx_status.db_error", tx_hash=tx_hash, error=str(db_err))
+            return safe_error(db_err)
         finally:
             try:
                 if conn:
@@ -2454,21 +2455,21 @@ def get_tx_status():
             except Exception:
                 pass
 
+        if tx_type == "unknown":
+            log_event(rid, "get_tx_status.not_indexed", tx_hash=tx_hash)
+            return jsonify({"found": False})
+
         out = {
             "found": True,
             "tx_hash": tx_hash,
-            "height": height,
-            "code": code,
-            "success": success,
-            "indexed": indexed,
+            "success": True,
+            "indexed": True,
             "tx_type": tx_type,
         }
         if details:
             out["details"] = details
-        if code != 0:
-            out["error_details"] = _classify_reject(raw_log)
 
-        log_event(rid, "get_tx_status.ok", tx_hash=tx_hash, tx_type=tx_type, indexed=indexed)
+        log_event(rid, "get_tx_status.ok", tx_hash=tx_hash, tx_type=tx_type)
         return jsonify(out)
 
     except Exception as e:

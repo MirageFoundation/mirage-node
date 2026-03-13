@@ -11,9 +11,6 @@ import websocket
 import grpc
 from datetime import datetime, timezone
 import urllib.parse as _up
-from google.protobuf.json_format import MessageToDict
-from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxRaw, TxBody
-from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
 from cosmpy.protos.cosmos.gov.v1beta1 import query_pb2 as gov_query_pb2
 from cosmpy.protos.cosmos.gov.v1beta1 import query_pb2_grpc as gov_query_pb2_grpc
 from indexer.settings import (
@@ -41,7 +38,7 @@ class ChainClient:
     def _derive_grpc_target(jsonrpc_url: str) -> str:
         """Derive gRPC target from RPC URL (same host, port 9090)."""
         base_rpc = jsonrpc_url
-        for path in ["/block_results", "/block", "/status", "/abci_query", "/tx_search"]:
+        for path in ["/block_results", "/block", "/status", "/abci_query"]:
             if path in base_rpc:
                 base_rpc = base_rpc.replace(path, "")
         if "://" in base_rpc:
@@ -58,7 +55,7 @@ class ChainClient:
     def _derive_rest_url(jsonrpc_url: str) -> str:
         """Derive REST API URL from RPC URL (same host, port 1317)."""
         base_rpc = jsonrpc_url
-        for path in ["/block_results", "/block", "/status", "/abci_query", "/tx_search"]:
+        for path in ["/block_results", "/block", "/status", "/abci_query"]:
             if path in base_rpc:
                 base_rpc = base_rpc.replace(path, "")
         parsed = _up.urlparse(base_rpc)
@@ -229,29 +226,6 @@ class ChainClient:
 
         return profiles
 
-    def tx_search(self, query: str, page: int = 1, per_page: int = 100, order_by: str = "asc") -> dict:
-        """Search transactions."""
-        base_rpc = self._strip_rpc_paths(self.jsonrpc_url)
-        tx_search_url = f"{base_rpc}/tx_search"
-        r = requests.get(
-            tx_search_url,
-            params={"query": query, "page": str(page), "per_page": str(per_page), "order_by": order_by},
-            timeout=HTTP_TIMEOUT_LONG,
-        )
-        r.raise_for_status()
-        return r.json()
-
-    @staticmethod
-    def _strip_rpc_paths(url: str, paths: list[str] | None = None) -> str:
-        """Strip RPC endpoint paths from URL."""
-        if paths is None:
-            paths = ["/block_results", "/block", "/status", "/abci_query", "/tx_search"]
-        base = url
-        for path in paths:
-            if path in base:
-                base = base.replace(path, "")
-        return base
-
     def fetch_proposal_messages(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
         """Fetch proposal messages from gRPC, handling both v1beta1 (content) and v1 (messages) formats."""
         try:
@@ -296,106 +270,6 @@ class ChainClient:
                 return messages
         except Exception as e:
             raise RuntimeError(f"Failed to fetch proposal {proposal_id} messages: {e}") from e
-
-    def fetch_submit_proposal_messages_via_tx_search(
-        self, proposal_id: int, decode_events_fn, extract_proposal_id_fn, extract_inner_messages_fn
-    ) -> list[dict]:
-        """
-        Resolve proposal messages by searching the Tendermint RPC for the submit tx.
-        This avoids REST/ABCI dependencies and works during catch-up when cache is missing.
-        """
-        base_rpc = self._strip_rpc_paths(self.jsonrpc_url)
-        tx_search_url = f"{base_rpc}/tx_search"
-
-        queries = [
-            f"proposal_id='{proposal_id}'",
-            f"proposal_id={proposal_id}",
-            f"submit_proposal.proposal_id='{proposal_id}'",
-            f"submit_proposal.proposal_id={proposal_id}",
-            f"cosmos.gov.v1.EventSubmitProposal.proposal_id='{proposal_id}'",
-            f"cosmos.gov.v1.EventSubmitProposal.proposal_id={proposal_id}",
-            f"cosmos.gov.v1beta1.EventSubmitProposal.proposal_id='{proposal_id}'",
-            f"cosmos.gov.v1beta1.EventSubmitProposal.proposal_id={proposal_id}",
-            "message.action='/cosmos.gov.v1.MsgSubmitProposal'",
-            "message.action='/cosmos.gov.v1beta1.MsgSubmitProposal'",
-            "message.action='submit_proposal'",
-        ]
-
-        max_pages = 10
-        for q in queries:
-            pages_to_search = max_pages if "message.action=" in q else 1
-            for page in range(1, pages_to_search + 1):
-                try:
-                    resp = requests.get(
-                        tx_search_url,
-                        params={"query": q, "page": str(page), "per_page": "100", "order_by": "asc"},
-                        timeout=HTTP_TIMEOUT_LONG,
-                    )
-                    if resp.status_code != 200:
-                        continue
-                    data = resp.json()
-                    if not data:
-                        continue
-                    result_obj = data.get("result")
-                    if not result_obj:
-                        continue
-                    txs = result_obj.get("txs", [])
-                    if not txs:
-                        continue
-
-                    for tx_entry in txs:
-                        if "message.action=" in q or "message.action" in q:
-                            tx_result = tx_entry.get("tx_result")
-                            if not tx_result:
-                                continue
-                            events = tx_result.get("events", [])
-                            found_match = False
-                            try:
-                                for ev_type, attrs in decode_events_fn(events):
-                                    pid = extract_proposal_id_fn(attrs)
-                                    if pid is not None and pid == proposal_id:
-                                        found_match = True
-                                        break
-                                if not found_match:
-                                    continue
-                            except Exception:
-                                continue
-
-                        tx_b64 = tx_entry.get("tx")
-                        if not tx_b64:
-                            continue
-                        raw_tx_bytes = base64.b64decode(tx_b64)
-                        tx_raw = TxRaw()
-                        tx_raw.ParseFromString(raw_tx_bytes)
-                        tx_body = TxBody()
-                        tx_body.ParseFromString(tx_raw.body_bytes)
-
-                        for any_msg in tx_body.messages:
-                            if any_msg.type_url in (
-                                "/cosmos.gov.v1beta1.MsgSubmitProposal",
-                                "/cosmos.gov.v1.MsgSubmitProposal",
-                            ):
-                                parsed = MsgSubmitProposal()
-                                parsed.ParseFromString(any_msg.value)
-                                inner_msgs = extract_inner_messages_fn(parsed)
-                                messages: list[dict] = []
-                                for inner in inner_msgs:
-                                    if not inner.type_url:
-                                        raise RuntimeError("Inner message missing type_url in tx_search result")
-                                    if not inner.value:
-                                        raise RuntimeError("Inner message missing value in tx_search result")
-                                    messages.append(
-                                        {
-                                            "type_url": inner.type_url,
-                                            "value": base64.b64encode(inner.value).decode("ascii"),
-                                        }
-                                    )
-                                if messages:
-                                    return messages
-                except Exception:
-                    continue
-
-        raise RuntimeError(f"Submit tx not found for proposal {proposal_id}")
 
     @staticmethod
     def parse_header_time(ts_str: str) -> int:

@@ -153,20 +153,8 @@ if [ -z "$MATCH" ] || [ "$MATCH" = "null" ] || [ "$MATCH" = "" ]; then
   echo ""
   echo "ERROR: Validator not visible in validator set after 60 seconds" >&2
   if [ -n "$TXHASH" ]; then
-    echo "   Checking transaction status..." >&2
-    TX_STATUS=$($BIN q tx "$TXHASH" --home "$NODE_HOME" --node tcp://127.0.0.1:26657 -o json 2>/dev/null || echo "{}")
-    TX_CODE=$(echo "$TX_STATUS" | jq -r '.code // "unknown"' 2>/dev/null || echo "unknown")
-    if [ "$TX_CODE" != "unknown" ] && [ "$TX_CODE" != "null" ]; then
-      if [ "$TX_CODE" = "0" ]; then
-        echo "   Transaction succeeded but validator not yet visible (may need more time)" >&2
-      else
-        TX_LOG=$(echo "$TX_STATUS" | jq -r '.raw_log // .logs[0].log // "No log available"' 2>/dev/null || echo "No log available")
-        echo "   Transaction failed with code $TX_CODE" >&2
-        echo "   Error: $TX_LOG" >&2
-      fi
-    else
-      echo "   Transaction may still be pending or not found" >&2
-    fi
+    echo "   TX hash: $TXHASH" >&2
+    echo "   (tx index is disabled — cannot query tx status directly)" >&2
   fi
   echo "---- Full transaction output ----" >&2
   cat /tmp/create_validator.out >&2 || true

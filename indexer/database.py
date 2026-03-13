@@ -10,6 +10,7 @@ import psycopg
 logger = logging.getLogger(__name__)
 
 INDEXER_LIST_CAP = 100_000
+TX_RECEIPTS_CAP = 1000
 
 
 class DatabaseManager:
@@ -174,6 +175,22 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_target_lower ON votes(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_created_at ON votes(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_relayer_lower ON votes(LOWER(relayer))")
+
+                # tx receipts (failed txs only)
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS tx_receipts (
+                        txhash TEXT PRIMARY KEY,
+                        height BIGINT NOT NULL,
+                        code INTEGER NOT NULL,
+                        raw_log TEXT,
+                        tx_type TEXT NOT NULL DEFAULT 'unknown',
+                        created_at BIGINT NOT NULL
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_receipts_txhash_lower ON tx_receipts(LOWER(txhash))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_receipts_created_at ON tx_receipts(created_at DESC)")
 
                 # Awards (burn-only signals on posts/comments)
                 cur.execute(
@@ -1484,6 +1501,47 @@ class DatabaseManager:
                     """,
                     (txhash, owner, target, float(user_vote), float(user_weight), int(created_at), bool(paid), relayer),
                 )
+
+    def upsert_tx_receipt_failure(
+        self,
+        txhash: str,
+        height: int,
+        code: int,
+        raw_log: str,
+        tx_type: str,
+        created_at: int,
+    ) -> None:
+        """Insert or update a failed transaction receipt."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO tx_receipts(txhash, height, code, raw_log, tx_type, created_at)
+                    VALUES(%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(txhash) DO UPDATE SET
+                      height=EXCLUDED.height,
+                      code=EXCLUDED.code,
+                      raw_log=EXCLUDED.raw_log,
+                      tx_type=EXCLUDED.tx_type,
+                      created_at=EXCLUDED.created_at
+                    """,
+                    (txhash, int(height), int(code), str(raw_log or ""), str(tx_type or "unknown"), int(created_at)),
+                )
+                cur.execute("SELECT COUNT(*) FROM tx_receipts")
+                total = int((cur.fetchone() or [0])[0] or 0)
+                if total > TX_RECEIPTS_CAP:
+                    cur.execute(
+                        """
+                        DELETE FROM tx_receipts
+                        WHERE txhash NOT IN (
+                            SELECT txhash FROM tx_receipts
+                            ORDER BY created_at DESC, height DESC
+                            LIMIT %s
+                        )
+                        """,
+                        (TX_RECEIPTS_CAP,),
+                    )
+                    logger.debug("Pruned tx_receipts to cap=%s (total=%s)", TX_RECEIPTS_CAP, total)
 
     def is_topic_followed(self, owner: str, topic: str) -> bool:
         """Return True if the owner currently follows the given topic."""
