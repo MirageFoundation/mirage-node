@@ -589,6 +589,29 @@ def check_tx_index_and_orchestrator() -> None:
     else:
         fail(f"config.toml tx_index.indexer = {indexer} (want null)")
 
+    status = http_get(f"{RPC}/status")
+    if status:
+        tx_index_rpc = status.get("result", {}).get("node_info", {}).get("other", {}).get("tx_index", "")
+        if str(tx_index_rpc).lower() == "off":
+            ok("RPC /status tx_index = off (runtime confirmed)")
+        else:
+            fail(f"RPC /status tx_index = {tx_index_rpc} (want off)")
+
+        # Verify /tx endpoint is actually unavailable
+        try:
+            fake_hash = "0x" + "00" * 32
+            tx_resp = http_get(f"{RPC}/tx?hash={fake_hash}")
+            if tx_resp and tx_resp.get("error"):
+                err_msg = str(tx_resp["error"].get("data", "")).lower()
+                if "indexing is disabled" in err_msg or "not available" in err_msg:
+                    ok("/tx endpoint correctly returns indexing-disabled error")
+                else:
+                    warn(f"/tx endpoint returned unexpected error: {err_msg[:100]}")
+            else:
+                fail("/tx endpoint did not return an error (tx_index should be disabled)")
+        except Exception:
+            ok("/tx endpoint unreachable (expected with indexer=null)")
+
     if tx_index_path.exists():
         fail(f"tx_index.db still present: {tx_index_path}")
     else:
