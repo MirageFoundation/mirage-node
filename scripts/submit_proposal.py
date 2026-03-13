@@ -387,9 +387,17 @@ def is_tx_index_disabled(rpc_endpoint: str) -> bool:
     return False
 
 
-def _decode_b64_attr(raw: str) -> str:
-    """Decode base64-encoded event attribute value."""
-    return base64.b64decode(raw).decode("utf-8")
+def _decode_attr(raw: str) -> str:
+    """Decode an event attribute that may be base64-encoded or plain text."""
+    if not raw:
+        return ""
+    try:
+        decoded = base64.b64decode(raw).decode("utf-8")
+        if decoded.isprintable():
+            return decoded
+        return raw
+    except Exception:
+        return raw
 
 
 def _extract_proposal_ids(events: list[dict]) -> list[str]:
@@ -403,12 +411,21 @@ def _extract_proposal_ids(events: list[dict]) -> list[str]:
         for attr in attrs:
             k_raw = attr.get("key") or ""
             v_raw = attr.get("value") or ""
-            k = _decode_b64_attr(k_raw)
-            v = _decode_b64_attr(v_raw)
+            k = _decode_attr(k_raw)
+            v = _decode_attr(v_raw)
             decoded[k] = v
         proposal_id = decoded.get("proposal_id")
         if proposal_id:
             ids.append(proposal_id)
+    return ids
+
+
+def _scan_block_for_proposals(result: dict) -> list[str]:
+    ids: list[str] = []
+    events = result.get("end_block_events") or result.get("finalize_block_events") or []
+    ids.extend(_extract_proposal_ids(events))
+    for tx_res in result.get("txs_results") or []:
+        ids.extend(_extract_proposal_ids(tx_res.get("events") or []))
     return ids
 
 
@@ -426,21 +443,25 @@ def wait_for_proposal_id_from_blocks(rpc_endpoint: str, expected_title: str, max
     if start_height <= 0:
         raise RuntimeError("Could not determine current block height")
     deadline = time.time() + max_seconds
-    last_height = start_height
+    last_height = max(1, start_height - 1)
+    log_debug(f"Block scan start_height={start_height} last_height={last_height} max_seconds={max_seconds}")
     while time.time() < deadline:
         current_height = get_current_block_height(rpc_endpoint)
-        if current_height <= last_height:
+        if current_height < last_height:
+            log_debug(f"Block height regressed: current={current_height} last={last_height}")
             time.sleep(1)
             continue
         for height in range(last_height + 1, current_height + 1):
             result = _get_block_results(rpc_endpoint, height)
-            events = result.get("end_block_events") or result.get("finalize_block_events") or []
-            proposal_ids = _extract_proposal_ids(events)
-            for proposal_id in proposal_ids:
+            proposal_ids = _scan_block_for_proposals(result)
+            if proposal_ids:
+                log_debug(f"height={height} proposal_ids={proposal_ids}")
+            for proposal_id in dict.fromkeys(proposal_ids):
                 # Confirm title matches the proposal we just submitted
                 prop_result = query_json_rpc(rpc_endpoint, ["q", "gov", "proposal", str(proposal_id)], fatal=False)
                 proposal = prop_result.get("proposal", prop_result)
                 if proposal.get("title") == expected_title:
+                    log_debug(f"Matched proposal_id={proposal_id} title={expected_title!r} height={height}")
                     return str(proposal_id)
         last_height = current_height
         time.sleep(1)
