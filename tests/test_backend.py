@@ -517,36 +517,34 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
         except Exception as e:
             print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
             return False
-        # Wait for tx to be committed so the next send gets the right sequence number
+        # Wait for tx to be committed by polling the recipient's balance
+        # (tx_index is disabled, so we cannot look up by hash)
         if tx_hash:
+            bal_args = [
+                "q",
+                "bank",
+                "balances",
+                address,
+                "--home",
+                "/root/.mirage/node",
+                "--node",
+                "tcp://127.0.0.1:26657",
+                "-o",
+                "json",
+            ]
             for _ in range(15):
                 time.sleep(1)
-                query_args = [
-                    "q",
-                    "tx",
-                    tx_hash,
-                    "--home",
-                    "/root/.mirage/node",
-                    "--node",
-                    "tcp://127.0.0.1:26657",
-                    "-o",
-                    "json",
-                ]
-                qcode, qout = _run_miraged(query_args, timeout=10)
+                qcode, qout = _run_miraged(bal_args, timeout=10)
                 if qcode == 0 and qout:
                     try:
                         json_str = qout[qout.index("{") :]
-                        tx_resp = json.loads(json_str)
-                        on_chain_code = int(tx_resp.get("code", -1))
-                        if on_chain_code == 0:
-                            return True
-                        print(
-                            f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
-                        )
-                        return False
+                        bal_resp = json.loads(json_str)
+                        for coin in bal_resp.get("balances", []):
+                            if coin.get("denom") == "umirage" and int(coin.get("amount", 0)) >= amount:
+                                return True
                     except (json.JSONDecodeError, ValueError):
                         pass
-            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
+            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s (balance never reached {amount}umirage)")
         return False
     print(f"    [faucet] exhausted {max_retries} retries on sequence mismatch")
     return False
@@ -1023,6 +1021,7 @@ def _do_vote_with_nonce(
         payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/vote", payload)
     return resp or {}
+
 
 def _do_edit(
     backend: str,
@@ -3437,18 +3436,18 @@ def test_edge_cases(backend: str):
 
     # 9.11c2 Garbage / invalid envelope_nonce values — must all be rejected (400)
     invalid_nonces_expect_reject = [
-        ("string",        "hello",                 "edge.nonce_string_rejected"),
-        ("empty_string",  "",                      "edge.nonce_empty_string_rejected"),
-        ("null",          None,                    "edge.nonce_null_rejected"),
-        ("negative",      "-1",                    "edge.nonce_negative_rejected"),
-        ("float_str",     "3.14",                  "edge.nonce_float_str_rejected"),
-        ("overflow_u64",  "99999999999999999999",   "edge.nonce_overflow_rejected"),
-        ("array",         [1, 2, 3],               "edge.nonce_array_rejected"),
-        ("object",        {"n": 1},                "edge.nonce_object_rejected"),
-        ("sql_inject",    "1; DROP TABLE nonces",  "edge.nonce_sqli_rejected"),
-        ("whitespace",    "  ",                    "edge.nonce_whitespace_rejected"),
-        ("hex_prefix",    "0xDEADBEEF",            "edge.nonce_hex_rejected"),
-        ("negative_big",  "-99999999999999999999",  "edge.nonce_negative_big_rejected"),
+        ("string", "hello", "edge.nonce_string_rejected"),
+        ("empty_string", "", "edge.nonce_empty_string_rejected"),
+        ("null", None, "edge.nonce_null_rejected"),
+        ("negative", "-1", "edge.nonce_negative_rejected"),
+        ("float_str", "3.14", "edge.nonce_float_str_rejected"),
+        ("overflow_u64", "99999999999999999999", "edge.nonce_overflow_rejected"),
+        ("array", [1, 2, 3], "edge.nonce_array_rejected"),
+        ("object", {"n": 1}, "edge.nonce_object_rejected"),
+        ("sql_inject", "1; DROP TABLE nonces", "edge.nonce_sqli_rejected"),
+        ("whitespace", "  ", "edge.nonce_whitespace_rejected"),
+        ("hex_prefix", "0xDEADBEEF", "edge.nonce_hex_rejected"),
+        ("negative_big", "-99999999999999999999", "edge.nonce_negative_big_rejected"),
     ]
     for label, bad_val, test_name in invalid_nonces_expect_reject:
         bad_payload = {
@@ -3473,9 +3472,9 @@ def test_edge_cases(backend: str):
     # 9.11c3 Coercible values that resolve to a valid positive int — should be accepted
     #         (signature will fail downstream, but nonce parsing itself must succeed → not 400)
     coercible_nonces_expect_accept = [
-        ("bool_true",  True,   "edge.nonce_bool_true_accepted"),
-        ("float_num",  42.9,   "edge.nonce_float_num_accepted"),
-        ("str_int",    "999",  "edge.nonce_str_int_accepted"),
+        ("bool_true", True, "edge.nonce_bool_true_accepted"),
+        ("float_num", 42.9, "edge.nonce_float_num_accepted"),
+        ("str_int", "999", "edge.nonce_str_int_accepted"),
     ]
     for label, ok_val, test_name in coercible_nonces_expect_accept:
         ok_payload = {
@@ -3551,15 +3550,15 @@ def test_edge_cases(backend: str):
 
     # --- 9.20a: timestamp ---
     timestamp_cases_reject = [
-        ("missing",     "_OMIT_",               "edge.ts_missing_rejected"),
-        ("null",        None,                    "edge.ts_null_rejected"),
-        ("string",      "not-a-number",          "edge.ts_string_rejected"),
-        ("empty",       "",                      "edge.ts_empty_rejected"),
-        ("array",       [1, 2],                  "edge.ts_array_rejected"),
-        ("object",      {"t": 1},                "edge.ts_object_rejected"),
-        ("negative",    -9999999999999,           "edge.ts_negative_rejected"),
-        ("bool",        True,                    "edge.ts_bool_rejected"),
-        ("zero",        0,                       "edge.ts_zero_rejected"),
+        ("missing", "_OMIT_", "edge.ts_missing_rejected"),
+        ("null", None, "edge.ts_null_rejected"),
+        ("string", "not-a-number", "edge.ts_string_rejected"),
+        ("empty", "", "edge.ts_empty_rejected"),
+        ("array", [1, 2], "edge.ts_array_rejected"),
+        ("object", {"t": 1}, "edge.ts_object_rejected"),
+        ("negative", -9999999999999, "edge.ts_negative_rejected"),
+        ("bool", True, "edge.ts_bool_rejected"),
+        ("zero", 0, "edge.ts_zero_rejected"),
     ]
     for label, bad_val, test_name in timestamp_cases_reject:
         p = _make_valid_payload()
@@ -3575,15 +3574,15 @@ def test_edge_cases(backend: str):
 
     # --- 9.20b: pubkey ---
     pubkey_cases_reject = [
-        ("missing",       "_OMIT_",             "edge.pubkey_missing_rejected"),
-        ("empty",         "",                    "edge.pubkey_empty_rejected"),
-        ("null",          None,                  "edge.pubkey_null_rejected"),
-        ("not_base64",    "!!!notbase64!!!",     "edge.pubkey_not_base64_rejected"),
-        ("wrong_len_32",  _b64(b"\x01" * 32),   "edge.pubkey_wrong_len32_rejected"),
-        ("wrong_len_64",  _b64(b"\x01" * 64),   "edge.pubkey_wrong_len64_rejected"),
-        ("array",         [1, 2, 3],             "edge.pubkey_array_rejected"),
-        ("object",        {"k": "v"},            "edge.pubkey_object_rejected"),
-        ("int",           12345,                 "edge.pubkey_int_rejected"),
+        ("missing", "_OMIT_", "edge.pubkey_missing_rejected"),
+        ("empty", "", "edge.pubkey_empty_rejected"),
+        ("null", None, "edge.pubkey_null_rejected"),
+        ("not_base64", "!!!notbase64!!!", "edge.pubkey_not_base64_rejected"),
+        ("wrong_len_32", _b64(b"\x01" * 32), "edge.pubkey_wrong_len32_rejected"),
+        ("wrong_len_64", _b64(b"\x01" * 64), "edge.pubkey_wrong_len64_rejected"),
+        ("array", [1, 2, 3], "edge.pubkey_array_rejected"),
+        ("object", {"k": "v"}, "edge.pubkey_object_rejected"),
+        ("int", 12345, "edge.pubkey_int_rejected"),
     ]
     for label, bad_val, test_name in pubkey_cases_reject:
         p = _make_valid_payload()
@@ -3599,14 +3598,14 @@ def test_edge_cases(backend: str):
 
     # --- 9.20c: signature ---
     sig_cases_reject = [
-        ("missing",       "_OMIT_",             "edge.sig_missing_rejected"),
-        ("empty",         "",                    "edge.sig_empty_rejected"),
-        ("null",          None,                  "edge.sig_null_rejected"),
-        ("not_base64",    "***bad-b64***",       "edge.sig_not_base64_rejected"),
-        ("wrong_len_32",  _b64(b"\x01" * 32),   "edge.sig_wrong_len32_rejected"),
-        ("too_long",      _b64(b"\x01" * 128),   "edge.sig_too_long_rejected"),
-        ("array",         [1, 2, 3],             "edge.sig_array_rejected"),
-        ("object",        {"s": "v"},            "edge.sig_object_rejected"),
+        ("missing", "_OMIT_", "edge.sig_missing_rejected"),
+        ("empty", "", "edge.sig_empty_rejected"),
+        ("null", None, "edge.sig_null_rejected"),
+        ("not_base64", "***bad-b64***", "edge.sig_not_base64_rejected"),
+        ("wrong_len_32", _b64(b"\x01" * 32), "edge.sig_wrong_len32_rejected"),
+        ("too_long", _b64(b"\x01" * 128), "edge.sig_too_long_rejected"),
+        ("array", [1, 2, 3], "edge.sig_array_rejected"),
+        ("object", {"s": "v"}, "edge.sig_object_rejected"),
     ]
     for label, bad_val, test_name in sig_cases_reject:
         p = _make_valid_payload()
@@ -3622,13 +3621,13 @@ def test_edge_cases(backend: str):
 
     # --- 9.20d: last_block_hash ---
     lbh_cases_reject = [
-        ("missing",       "_OMIT_",               "edge.lbh_missing_rejected"),
-        ("not_hex",       "ZZZZ-not-hex",          "edge.lbh_not_hex_rejected"),
-        ("wrong_len",     "aabb",                  "edge.lbh_wrong_len_rejected"),
-        ("null",          None,                    "edge.lbh_null_rejected"),
-        ("array",         [1],                     "edge.lbh_array_rejected"),
-        ("object",        {"h": 1},                "edge.lbh_object_rejected"),
-        ("int",           999,                     "edge.lbh_int_rejected"),
+        ("missing", "_OMIT_", "edge.lbh_missing_rejected"),
+        ("not_hex", "ZZZZ-not-hex", "edge.lbh_not_hex_rejected"),
+        ("wrong_len", "aabb", "edge.lbh_wrong_len_rejected"),
+        ("null", None, "edge.lbh_null_rejected"),
+        ("array", [1], "edge.lbh_array_rejected"),
+        ("object", {"h": 1}, "edge.lbh_object_rejected"),
+        ("int", 999, "edge.lbh_int_rejected"),
     ]
     for label, bad_val, test_name in lbh_cases_reject:
         p = _make_valid_payload()
@@ -3644,11 +3643,11 @@ def test_edge_cases(backend: str):
 
     # --- 9.20e: pow_difficulty ---
     pwd_cases_reject = [
-        ("string",   "abc",      "edge.pwd_string_rejected"),
-        ("null",     None,       "edge.pwd_null_rejected"),
-        ("array",    [1],        "edge.pwd_array_rejected"),
-        ("object",   {"d": 1},   "edge.pwd_object_rejected"),
-        ("negative", -5,         "edge.pwd_negative_rejected"),
+        ("string", "abc", "edge.pwd_string_rejected"),
+        ("null", None, "edge.pwd_null_rejected"),
+        ("array", [1], "edge.pwd_array_rejected"),
+        ("object", {"d": 1}, "edge.pwd_object_rejected"),
+        ("negative", -5, "edge.pwd_negative_rejected"),
     ]
     for label, bad_val, test_name in pwd_cases_reject:
         p = _make_valid_payload()
@@ -3661,11 +3660,11 @@ def test_edge_cases(backend: str):
 
     # --- 9.20f: pow ---
     pow_cases_reject = [
-        ("string",   "xyz",      "edge.pow_string_rejected"),
-        ("null",     None,       "edge.pow_null_rejected"),
-        ("array",    [9],        "edge.pow_array_rejected"),
-        ("object",   {"p": 1},   "edge.pow_object_rejected"),
-        ("negative", -1,         "edge.pow_negative_rejected"),
+        ("string", "xyz", "edge.pow_string_rejected"),
+        ("null", None, "edge.pow_null_rejected"),
+        ("array", [9], "edge.pow_array_rejected"),
+        ("object", {"p": 1}, "edge.pow_object_rejected"),
+        ("negative", -1, "edge.pow_negative_rejected"),
     ]
     for label, bad_val, test_name in pow_cases_reject:
         p = _make_valid_payload()
@@ -3678,13 +3677,13 @@ def test_edge_cases(backend: str):
 
     # --- 9.20g: topic ---
     topic_cases_reject = [
-        ("too_short",     "ab",                  "edge.topic_too_short_rejected"),
-        ("too_long",      "a" * 60,              "edge.topic_too_long_rejected"),
-        ("uppercase",     "INVALID",             "edge.topic_uppercase_rejected"),
-        ("spaces",        "has spaces",          "edge.topic_spaces_rejected"),
-        ("special",       "top!@#$",             "edge.topic_special_rejected"),
-        ("unicode",       "\u00e9\u00e8\u00ea",  "edge.topic_unicode_rejected"),
-        ("null",          None,                  "edge.topic_null_rejected"),
+        ("too_short", "ab", "edge.topic_too_short_rejected"),
+        ("too_long", "a" * 60, "edge.topic_too_long_rejected"),
+        ("uppercase", "INVALID", "edge.topic_uppercase_rejected"),
+        ("spaces", "has spaces", "edge.topic_spaces_rejected"),
+        ("special", "top!@#$", "edge.topic_special_rejected"),
+        ("unicode", "\u00e9\u00e8\u00ea", "edge.topic_unicode_rejected"),
+        ("null", None, "edge.topic_null_rejected"),
     ]
     for label, bad_val, test_name in topic_cases_reject:
         p = _make_valid_payload()
@@ -3716,11 +3715,11 @@ def test_edge_cases(backend: str):
 
     # --- 9.20i: media ---
     media_cases_reject = [
-        ("not_list",       "https://a.com/x.jpg",             "edge.media_not_list_rejected"),
-        ("http_not_https", ["http://a.com/x.jpg"],            "edge.media_http_rejected"),
-        ("too_many",       [f"https://a.com/{i}.jpg" for i in range(15)], "edge.media_too_many_rejected"),
-        ("item_too_long",  ["https://a.com/" + "a" * 2100],   "edge.media_item_too_long_rejected"),
-        ("no_scheme",      ["just-a-string"],                  "edge.media_no_scheme_rejected"),
+        ("not_list", "https://a.com/x.jpg", "edge.media_not_list_rejected"),
+        ("http_not_https", ["http://a.com/x.jpg"], "edge.media_http_rejected"),
+        ("too_many", [f"https://a.com/{i}.jpg" for i in range(15)], "edge.media_too_many_rejected"),
+        ("item_too_long", ["https://a.com/" + "a" * 2100], "edge.media_item_too_long_rejected"),
+        ("no_scheme", ["just-a-string"], "edge.media_no_scheme_rejected"),
     ]
     for label, bad_val, test_name in media_cases_reject:
         p = _make_valid_payload()
@@ -3733,8 +3732,8 @@ def test_edge_cases(backend: str):
 
     # --- 9.20j: tag ---
     tag_cases_reject = [
-        ("invalid",    "notarealltag",           "edge.tag_invalid_rejected"),
-        ("too_long",   "x" * 60,                 "edge.tag_too_long_rejected"),
+        ("invalid", "notarealltag", "edge.tag_invalid_rejected"),
+        ("too_long", "x" * 60, "edge.tag_too_long_rejected"),
     ]
     for label, bad_val, test_name in tag_cases_reject:
         p = _make_valid_payload()

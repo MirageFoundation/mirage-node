@@ -597,20 +597,34 @@ def check_tx_index_and_orchestrator() -> None:
         else:
             fail(f"RPC /status tx_index = {tx_index_rpc} (want off)")
 
-        # Verify /tx endpoint is actually unavailable
+        # Verify /tx endpoint rejects queries (tx_index=null)
+        fake_hash = "0x" + "00" * 32
+        tx_url = f"{RPC}/tx?hash={fake_hash}"
         try:
-            fake_hash = "0x" + "00" * 32
-            tx_resp = http_get(f"{RPC}/tx?hash={fake_hash}")
-            if tx_resp and tx_resp.get("error"):
-                err_msg = str(tx_resp["error"].get("data", "")).lower()
+            debug(f"GET {tx_url}")
+            req = urllib.request.Request(tx_url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read())
+            if body and body.get("error"):
+                err_msg = str(body["error"].get("data", "")).lower()
                 if "indexing is disabled" in err_msg or "not available" in err_msg:
                     ok("/tx endpoint correctly returns indexing-disabled error")
                 else:
                     warn(f"/tx endpoint returned unexpected error: {err_msg[:100]}")
             else:
                 fail("/tx endpoint did not return an error (tx_index should be disabled)")
-        except Exception:
-            ok("/tx endpoint unreachable (expected with indexer=null)")
+        except urllib.error.HTTPError as e:
+            body_str = ""
+            try:
+                body_str = e.read().decode("utf-8", errors="replace").lower()
+            except Exception:
+                pass
+            if "indexing is disabled" in body_str or e.code == 500:
+                ok(f"/tx endpoint rejected request (HTTP {e.code}, tx_index disabled)")
+            else:
+                fail(f"/tx endpoint returned HTTP {e.code} with unexpected body")
+        except Exception as e:
+            ok(f"/tx endpoint unreachable: {e} (expected with indexer=null)")
 
     if tx_index_path.exists():
         fail(f"tx_index.db still present: {tx_index_path}")

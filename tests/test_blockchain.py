@@ -567,38 +567,45 @@ def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
 
 
 def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
+    """Wait for a tx to land in a block by scanning block_results (tx_index disabled)."""
     if not tx_hash:
         raise RuntimeError("missing tx_hash for wait")
-    h = tx_hash.strip().lower().removeprefix("0x")
-    hash_b64 = base64.b64encode(bytes.fromhex(h)).decode()
+    h = tx_hash.strip().upper().removeprefix("0X")
     start = time.monotonic()
     deadline = start + timeout
-    while True:
-        now = time.monotonic()
-        if now >= deadline:
-            break
-        remaining = deadline - now
-        payload = {"jsonrpc": "2.0", "id": 1, "method": "tx", "params": {"hash": hash_b64, "prove": False}}
-        resp = requests.post(COMET_RPC_URL, json=payload, timeout=min(1.0, remaining)).json()
-        if "result" in resp:
-            tx_result = (resp.get("result") or {}).get("tx_result") or {}
-            code = int(tx_result.get("code", 0) or 0)
-            log = str(tx_result.get("log", "") or "")
-            return code, log
-        if "error" in resp:
-            err = str(resp["error"])
-            if "not found" in err.lower():
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                time.sleep(min(1.0, remaining))
-                continue
-            raise RuntimeError(f"tx query error: {err}")
+
+    # Get the current height as our scan starting point
+    status_resp = requests.get(f"{COMET_RPC_URL}/status", timeout=5).json()
+    last_height = int(status_resp["result"]["sync_info"]["latest_block_height"]) - 1
+
+    while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        time.sleep(min(1.0, remaining))
-    raise RuntimeError(f"tx not found after {timeout}s: {tx_hash}")
+        status_resp = requests.get(f"{COMET_RPC_URL}/status", timeout=min(3.0, remaining)).json()
+        current_height = int(status_resp["result"]["sync_info"]["latest_block_height"])
+        for height in range(last_height + 1, current_height + 1):
+            # Fetch the block to get tx hashes
+            block_resp = requests.get(f"{COMET_RPC_URL}/block?height={height}", timeout=5).json()
+            txs = block_resp.get("result", {}).get("block", {}).get("data", {}).get("txs") or []
+            tx_index_in_block = None
+            for idx, tx_b64 in enumerate(txs):
+                tx_bytes = base64.b64decode(tx_b64)
+                if hashlib.sha256(tx_bytes).hexdigest().upper() == h:
+                    tx_index_in_block = idx
+                    break
+            if tx_index_in_block is not None:
+                br = requests.get(f"{COMET_RPC_URL}/block_results?height={height}", timeout=5).json()
+                deliver_txs = br.get("result", {}).get("txs_results") or []
+                if tx_index_in_block < len(deliver_txs):
+                    tx_result = deliver_txs[tx_index_in_block]
+                    code = int(tx_result.get("code", 0) or 0)
+                    log = str(tx_result.get("log", "") or "")
+                    return code, log
+                raise RuntimeError(f"tx found at height={height} idx={tx_index_in_block} but no deliver result")
+        last_height = current_height
+        time.sleep(min(1.0, deadline - time.monotonic()))
+    raise RuntimeError(f"tx not found in blocks after {timeout}s: {tx_hash}")
 
 
 def _submit_tx(
@@ -4600,8 +4607,15 @@ def test_envelope_fields(backend: str) -> None:
 
     # --- F.5: wrong-length pubkey (32 bytes) → rejected ---
     msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        pub_override=b"\x02" + b"\x01" * 31, nonce=_gen_nonce()
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        f"ef{_rand_str(4)}",
+        "Title",
+        "content",
+        pub_override=b"\x02" + b"\x01" * 31,
+        nonce=_gen_nonce(),
     )
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
@@ -4610,8 +4624,15 @@ def test_envelope_fields(backend: str) -> None:
 
     # --- F.6: oversized pubkey (65 bytes) → rejected ---
     msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        pub_override=b"\x04" + b"\x01" * 64, nonce=_gen_nonce()
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        f"ef{_rand_str(4)}",
+        "Title",
+        "content",
+        pub_override=b"\x04" + b"\x01" * 64,
+        nonce=_gen_nonce(),
     )
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
@@ -4620,10 +4641,10 @@ def test_envelope_fields(backend: str) -> None:
 
     # --- F.7: random 33-byte pubkey (not on curve) → rejected ---
     import os as _os
+
     fake_pub = b"\x02" + _os.urandom(32)
     msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        pub_override=fake_pub, nonce=_gen_nonce()
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content", pub_override=fake_pub, nonce=_gen_nonce()
     )
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
@@ -4632,8 +4653,7 @@ def test_envelope_fields(backend: str) -> None:
 
     # --- F.8: truncated signature (32 bytes) → rejected ("invalid relay fields") ---
     msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        sig_override=b"\x01" * 32, nonce=_gen_nonce()
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content", sig_override=b"\x01" * 32, nonce=_gen_nonce()
     )
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
@@ -4642,8 +4662,15 @@ def test_envelope_fields(backend: str) -> None:
 
     # --- F.9: oversized signature (128 bytes) → rejected ---
     msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        sig_override=b"\x01" * 128, nonce=_gen_nonce()
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        f"ef{_rand_str(4)}",
+        "Title",
+        "content",
+        sig_override=b"\x01" * 128,
+        nonce=_gen_nonce(),
     )
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
@@ -4652,8 +4679,7 @@ def test_envelope_fields(backend: str) -> None:
 
     # --- F.10: all-zero signature (64 bytes) → rejected (bad sig) ---
     msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        sig_override=b"\x00" * 64, nonce=_gen_nonce()
+        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content", sig_override=b"\x00" * 64, nonce=_gen_nonce()
     )
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
@@ -4665,10 +4691,7 @@ def test_envelope_fields(backend: str) -> None:
     # We set envelope_block_hash directly after construction, causing a
     # mismatch between the canonical bytes (which used the real lb) and
     # the block_hash field on the message.
-    msg = _build_msg_post(
-        wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content",
-        nonce=_gen_nonce()
-    )
+    msg = _build_msg_post(wallet, lb, 0, _now_ms(), f"ef{_rand_str(4)}", "Title", "content", nonce=_gen_nonce())
     msg.envelope_block_hash = b""
     _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True
