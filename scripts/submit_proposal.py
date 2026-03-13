@@ -373,6 +373,31 @@ def get_current_block_height(rpc_endpoint: str) -> int:
     return 0
 
 
+def is_tx_index_disabled(rpc_endpoint: str) -> bool:
+    """Check if CometBFT tx indexing is disabled (indexer=null)."""
+    try:
+        response = requests.get(f"{rpc_endpoint}/status", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            tx_index = data.get("result", {}).get("node_info", {}).get("other", {}).get("tx_index", "")
+            return str(tx_index).lower() == "off"
+    except Exception as e:
+        log_debug(f"Could not read tx_index from status: {e}")
+    return False
+
+
+def extract_json_from_output(output: str) -> dict | None:
+    """Best-effort JSON extraction from mixed stdout/stderr."""
+    start = output.find("{")
+    end = output.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(output[start : end + 1])
+    except Exception:
+        return None
+
+
 def key_exists(account_name: str) -> bool:
     """Check if a key exists in the keyring"""
     result = run_miraged_cmd(
@@ -889,6 +914,12 @@ def main():
     gas_price = 5000
     fee_amount = estimated_gas * gas_price
 
+    tx_index_off = is_tx_index_disabled(rpc_endpoint)
+    broadcast_mode = "block" if tx_index_off else "sync"
+    output_json = tx_index_off
+    if tx_index_off:
+        info("ℹ️  tx_index is off — using broadcast-mode=block to capture tx result")
+
     submit_cmd = [
         bin_path,
         "tx",
@@ -904,30 +935,42 @@ def main():
         "--node",
         rpc_endpoint,
         "--broadcast-mode",
-        "sync",
+        broadcast_mode,
         "--gas",
         str(estimated_gas),
         "--fees",
         f"{fee_amount}umirage",
         "--yes",
     ]
+    if output_json:
+        submit_cmd += ["-o", "json"]
 
     exit_status, output = run_with_pexpect(submit_cmd, timeout=60)
     log(f"Broadcast output:\n{output}")
 
-    # Check for non-zero code in broadcast response (sync mode returns code immediately)
-    code_match = re.search(r"code:\s*(\d+)", output)
-    if code_match and code_match.group(1) != "0":
-        error_code = code_match.group(1)
-        # Extract raw_log which contains the actual error message
-        raw_log_match = re.search(r"raw_log:\s*['\"]?(.+?)['\"]?\s*(?:\n|$)", output, re.DOTALL)
-        raw_log = raw_log_match.group(1).strip() if raw_log_match else "unknown error"
-        # Clean up the raw_log (remove trailing quotes, newlines)
-        raw_log = raw_log.rstrip("'\"").strip()
-        # Convert umirage amounts to MIRAGE for display
-        raw_log = _format_umirage_in_text(raw_log)
-        info(f"ERROR: TX rejected (code {error_code}): {raw_log}")
-        sys.exit(1)
+    submit_resp = extract_json_from_output(output) if output_json else None
+    if submit_resp:
+        tx_resp = submit_resp.get("tx_response", submit_resp)
+        tx_code = int(tx_resp.get("code", 0))
+        if tx_code != 0:
+            raw_log = tx_resp.get("raw_log", "unknown error")
+            raw_log = _format_umirage_in_text(str(raw_log))
+            info(f"ERROR: TX rejected (code {tx_code}): {raw_log}")
+            sys.exit(1)
+    else:
+        # Check for non-zero code in broadcast response (sync mode returns code immediately)
+        code_match = re.search(r"code:\s*(\d+)", output)
+        if code_match and code_match.group(1) != "0":
+            error_code = code_match.group(1)
+            # Extract raw_log which contains the actual error message
+            raw_log_match = re.search(r"raw_log:\s*['\"]?(.+?)['\"]?\s*(?:\n|$)", output, re.DOTALL)
+            raw_log = raw_log_match.group(1).strip() if raw_log_match else "unknown error"
+            # Clean up the raw_log (remove trailing quotes, newlines)
+            raw_log = raw_log.rstrip("'\"").strip()
+            # Convert umirage amounts to MIRAGE for display
+            raw_log = _format_umirage_in_text(raw_log)
+            info(f"ERROR: TX rejected (code {error_code}): {raw_log}")
+            sys.exit(1)
 
     if exit_status != 0:
         log(f"Submission failed: {output}")
@@ -942,86 +985,107 @@ def main():
         sys.exit(1)
 
     # Verify transaction and extract proposal ID from events
-    txhash_match = re.search(r"txhash:\s*([A-F0-9]{64})", output, re.IGNORECASE)
     proposal_id_from_tx: str | None = None
+    txhash: str | None = None
 
-    if txhash_match:
-        txhash = txhash_match.group(1)
+    # If we have a tx_response from block mode, extract txhash + events directly
+    if submit_resp:
+        tx_resp = submit_resp.get("tx_response", submit_resp)
+        txhash = tx_resp.get("txhash")
+        logs = tx_resp.get("logs", [])
+        for log_item in logs:
+            for event in log_item.get("events", []):
+                if event.get("type") == "submit_proposal":
+                    for attr in event.get("attributes", []):
+                        if attr.get("key") == "proposal_id":
+                            proposal_id_from_tx = attr.get("value")
+                            log(f"Extracted proposal_id from tx events: {proposal_id_from_tx}")
+                            break
+    else:
+        txhash_match = re.search(r"txhash:\s*([A-F0-9]{64})", output, re.IGNORECASE)
+        if txhash_match:
+            txhash = txhash_match.group(1)
+
+    if txhash:
         log(f"TX hash: {txhash}")
         info(f"TX hash: {txhash}")
 
-        # Retry tx query - it may take a few seconds to be included in a block.
-        # NOTE: If CometBFT tx indexing is disabled (indexer="null"), `q tx`
-        # will always fail. In that case we skip verification and fall back
-        # to finding the proposal by title after waiting for block inclusion.
-        tx_verified = False
-        tx_index_disabled = False
-        max_attempts = 15
-        for attempt in range(1, max_attempts + 1):
-            print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
-            time.sleep(1)
-            try:
-                tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
-                if _is_local_mode:
-                    tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
-                else:
-                    miraged = get_miraged_path()
-                    bin_path = str(miraged) if miraged else "miraged"
-                    tx_cmd = [bin_path] + tx_args
-                log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
-                result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
-                if result.returncode == 0:
-                    tx_result = json.loads(result.stdout)
-                    tx_code = tx_result.get("code", 0)
-                    print()  # newline after progress
-                    if tx_code != 0:
-                        raw_log = tx_result.get("raw_log", "unknown error")
-                        log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
-                        info(f"ERROR: Transaction failed on-chain: {raw_log}")
-                        sys.exit(1)
-
-                    # Extract proposal_id from tx events
-                    for event in tx_result.get("events", []):
-                        if event.get("type") == "submit_proposal":
-                            for attr in event.get("attributes", []):
-                                if attr.get("key") == "proposal_id":
-                                    proposal_id_from_tx = attr.get("value")
-                                    log(f"Extracted proposal_id from tx events: {proposal_id_from_tx}")
-                                    break
-
-                    info("✅ Proposal submitted")
-                    tx_verified = True
-                    break
-                else:
-                    combined_err = (result.stderr + result.stdout).lower()
-                    if "indexing is disabled" in combined_err:
-                        print()
-                        log("TX indexing is disabled (indexer=null) — cannot verify via q tx")
-                        info("ℹ️  TX indexing disabled — waiting for block inclusion instead")
-                        tx_index_disabled = True
-                        break
-                    elif "not found" in combined_err:
-                        log_debug(f"TX not found yet (attempt {attempt}), retrying...")
-                        continue
+        # If we already have a block-mode tx_response, avoid q tx lookups entirely.
+        if submit_resp:
+            tx_verified = True
+        else:
+            # Retry tx query - it may take a few seconds to be included in a block.
+            # NOTE: If CometBFT tx indexing is disabled (indexer="null"), `q tx`
+            # will always fail. In that case we skip verification and fall back
+            # to finding the proposal by title after waiting for block inclusion.
+            tx_verified = False
+            tx_index_disabled = False
+            max_attempts = 15
+            for attempt in range(1, max_attempts + 1):
+                print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
+                time.sleep(1)
+                try:
+                    tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
+                    if _is_local_mode:
+                        tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
                     else:
+                        miraged = get_miraged_path()
+                        bin_path = str(miraged) if miraged else "miraged"
+                        tx_cmd = [bin_path] + tx_args
+                    log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
+                    result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
+                    if result.returncode == 0:
+                        tx_result = json.loads(result.stdout)
+                        tx_code = tx_result.get("code", 0)
                         print()  # newline after progress
-                        log(f"TX query error: {result.stderr}")
+                        if tx_code != 0:
+                            raw_log = tx_result.get("raw_log", "unknown error")
+                            log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
+                            info(f"ERROR: Transaction failed on-chain: {raw_log}")
+                            sys.exit(1)
+
+                        # Extract proposal_id from tx events
+                        for event in tx_result.get("events", []):
+                            if event.get("type") == "submit_proposal":
+                                for attr in event.get("attributes", []):
+                                    if attr.get("key") == "proposal_id":
+                                        proposal_id_from_tx = attr.get("value")
+                                        log(f"Extracted proposal_id from tx events: {proposal_id_from_tx}")
+                                        break
+
+                        info("✅ Proposal submitted")
+                        tx_verified = True
                         break
-            except Exception as e:
+                    else:
+                        combined_err = (result.stderr + result.stdout).lower()
+                        if "indexing is disabled" in combined_err:
+                            print()
+                            log("TX indexing is disabled (indexer=null) — cannot verify via q tx")
+                            info("ℹ️  TX indexing disabled — waiting for block inclusion instead")
+                            tx_index_disabled = True
+                            break
+                        elif "not found" in combined_err:
+                            log_debug(f"TX not found yet (attempt {attempt}), retrying...")
+                            continue
+                        else:
+                            print()  # newline after progress
+                            log(f"TX query error: {result.stderr}")
+                            break
+                except Exception as e:
+                    print()  # newline after progress
+                    log(f"TX verification error: {e}")
+                    break
+
+            if tx_index_disabled:
+                # Wait a few blocks for the TX to be committed, then proceed
+                # to proposal discovery by title
+                info("   Waiting for TX to be included in a block...")
+                time.sleep(5)
+                tx_verified = True  # assume success; proposal lookup will confirm
+
+            if not tx_verified:
                 print()  # newline after progress
-                log(f"TX verification error: {e}")
-                break
-
-        if tx_index_disabled:
-            # Wait a few blocks for the TX to be committed, then proceed
-            # to proposal discovery by title
-            info("   Waiting for TX to be included in a block...")
-            time.sleep(5)
-            tx_verified = True  # assume success; proposal lookup will confirm
-
-        if not tx_verified:
-            print()  # newline after progress
-            info("⚠️  Could not verify TX after 15s")
+                info("⚠️  Could not verify TX after 15s")
             # Check if tx is in mempool
             try:
                 mempool_resp = requests.get(f"{rpc_endpoint}/unconfirmed_txs?limit=100", timeout=5)
