@@ -3587,12 +3587,18 @@ def test_edge_cases(backend: str):
             _fail(test_name, f"code={code_bad} resp={resp_bad}")
 
     # 9.11c3 Coercible values that resolve to a valid positive int — should be accepted
-    #         (signature will fail downstream, but nonce parsing itself must succeed → not 400)
+    #         (signature/PoW will fail downstream, but nonce parsing itself must succeed)
     coercible_nonces_expect_accept = [
         ("bool_true", True, "edge.nonce_bool_true_accepted"),
         ("float_num", 42.9, "edge.nonce_float_num_accepted"),
         ("str_int", "999", "edge.nonce_str_int_accepted"),
     ]
+    nonce_reject_errors = {
+        "invalid envelope_nonce",
+        "envelope_nonce is required (v1.20.0)",
+        "envelope_nonce must be > 0",
+        "envelope_nonce exceeds uint64 range",
+    }
     for label, ok_val, test_name in coercible_nonces_expect_accept:
         ok_payload = {
             "pubkey": _b64(pub),
@@ -3608,10 +3614,13 @@ def test_edge_cases(backend: str):
             "content": "body",
         }
         code_ok, resp_ok = _post(f"{backend}/api/core/post", ok_payload)
-        if code_ok != 400:
-            _pass(test_name)
+        err_msg = str(resp_ok.get("error", ""))
+        if code_ok >= 500:
+            _fail(test_name, f"server error: code={code_ok} resp={resp_ok}")
+        elif err_msg in nonce_reject_errors:
+            _fail(test_name, f"nonce={ok_val!r} rejected by nonce parser: {err_msg}")
         else:
-            _fail(test_name, f"nonce={ok_val!r} got 400 (nonce parse should accept): resp={resp_ok}")
+            _pass(test_name)
 
     # 9.11d v1.20+ path: nonce present → replay protection active
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)

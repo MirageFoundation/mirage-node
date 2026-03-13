@@ -10,6 +10,7 @@ Functions:
 """
 
 from typing import Tuple
+import logging
 import hashlib as _hashlib
 import math as _math
 
@@ -82,10 +83,18 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
 
 
 def simulate_gas(tx_bytes: bytes) -> int:
-    stub = ServiceStub(get_grpc_channel())
-    req = SimulateRequest(tx_bytes=tx_bytes)
-    resp = stub.Simulate(req)
-    return int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+    """Simulate tx to refine gas estimate."""
+    try:
+        stub = ServiceStub(get_grpc_channel())
+        req = SimulateRequest(tx_bytes=tx_bytes)
+        resp = stub.Simulate(req)
+        return int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+    except Exception as exc:
+        msg = str(exc)
+        if "envelope replay: nonce already used" in msg:
+            logging.getLogger("mirage-backend").info("simulate_gas replay; using estimate")
+            return 0
+        raise
 
 
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
