@@ -1707,7 +1707,7 @@ def _wait_followed_topic(
     address: str,
     topic: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     topic_lower = (topic or "").strip().lower()
@@ -1727,7 +1727,7 @@ def _wait_followed_user(
     address: str,
     user: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     user_lower = (user or "").strip().lower()
@@ -1747,7 +1747,7 @@ def _wait_blocked_user(
     address: str,
     user: str,
     expect_present: bool = True,
-    timeout: float = 15.0,
+    timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
     user_lower = (user or "").strip().lower()
@@ -2725,7 +2725,11 @@ def test_social_graph(backend: str):
         "body",
         skip_pow=True,  # subscriber should post without PoW
     )
-    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post):
+    if not blocked_post:
+        _fail("social.block_topic filters get_posts", "post creation failed (sub_wallet may not be subscriber)")
+    elif not _wait_indexed(backend, sub_addr, blocked_post):
+        _fail("social.block_topic filters get_posts", f"post {blocked_post[:16]} not indexed after timeout")
+    else:
         code, feed = _get(
             f"{backend}/api/get_posts",
             {"limit": 50, "by": "newest", "address": addr},
@@ -2738,8 +2742,6 @@ def test_social_graph(backend: str):
                 _fail("social.block_topic filters get_posts", f"found blocked post {blocked_post}")
         else:
             _fail("social.block_topic filters get_posts", f"code={code}")
-    else:
-        _fail("social.block_topic filters get_posts", "post not indexed")
 
     # 5.13a wildcard block_topic filters get_posts
     wildcard_mid = f"m{_rand_str(4)}"
@@ -6394,7 +6396,7 @@ def test_profile_fields(backend: str):
 # ---------------------------------------------------------------------------
 
 
-def _feed_has_post(backend: str, viewer_addr: str, post_id: str, timeout: float = 10.0) -> bool:
+def _feed_has_post(backend: str, viewer_addr: str, post_id: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     """Check if a post appears in the newest feed for the given viewer."""
     deadline = time.perf_counter() + timeout
     pid = (post_id or "").lower()

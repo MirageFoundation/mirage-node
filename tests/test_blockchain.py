@@ -595,14 +595,17 @@ def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
                     tx_index_in_block = idx
                     break
             if tx_index_in_block is not None:
-                br = requests.get(f"{COMET_RPC_URL}/block_results?height={height}", timeout=5).json()
-                deliver_txs = br.get("result", {}).get("txs_results") or []
-                if tx_index_in_block < len(deliver_txs):
-                    tx_result = deliver_txs[tx_index_in_block]
-                    code = int(tx_result.get("code", 0) or 0)
-                    log = str(tx_result.get("log", "") or "")
-                    return code, log
-                raise RuntimeError(f"tx found at height={height} idx={tx_index_in_block} but no deliver result")
+                # block_results may lag behind block data; retry until deadline
+                while time.monotonic() < deadline:
+                    br = requests.get(f"{COMET_RPC_URL}/block_results?height={height}", timeout=5).json()
+                    deliver_txs = br.get("result", {}).get("txs_results") or []
+                    if tx_index_in_block < len(deliver_txs):
+                        tx_result = deliver_txs[tx_index_in_block]
+                        code = int(tx_result.get("code", 0) or 0)
+                        log = str(tx_result.get("log", "") or "")
+                        return code, log
+                    time.sleep(0.5)
+                raise RuntimeError(f"tx at height={height} idx={tx_index_in_block}: block_results never populated")
         last_height = current_height
         time.sleep(min(1.0, deadline - time.monotonic()))
     raise RuntimeError(f"tx not found in blocks after {timeout}s: {tx_hash}")
