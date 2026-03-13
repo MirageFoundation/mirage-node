@@ -33,7 +33,7 @@
 - **Disk growth was NOT from PebbleDB.** The real culprits were:
   1. **CometBFT consensus WAL (`cs.wal/`)**: Rotated segments (`wal.NNN`) were never cleaned. ~200MB/day of unbounded growth. Fixed in `entrypoint.sh` — periodic cleanup now deletes rotated WAL segments older than 1 day.
   2. **Node logs**: 43MB/day with 30-day retention = ~1.3GB steady state. Acceptable.
-  3. **tx_index.db**: `indexer = "kv"` grows forever. Consider switching to `null` on non-query nodes if disk becomes a concern again.
+  3. **tx_index.db**: Switched to `indexer = "null"` — no longer grows. Existing `tx_index.db/` dirs can be deleted on each node after deploy.
 
 ## Short-term cleanup (remove after March)
 - Remove legacy handling of embedding image/media when the first line is a link. The `media` field already covers this.

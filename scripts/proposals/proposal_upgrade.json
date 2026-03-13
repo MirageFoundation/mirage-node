@@ -1,6 +1,6 @@
 {
     "title": "Upgrade to v1.20.0 (Mandatory Envelope Nonce)",
-    "summary": "Remove the legacy nonce fallback introduced in v1.19.0. Envelope nonce is now mandatory for all relay transactions, restoring strict replay protection across all clients. Includes bridge attestation query hardening and orchestrator concurrency fixes.",
+    "summary": "Remove the legacy nonce fallback introduced in v1.19.0. Envelope nonce is now mandatory for all relay transactions, restoring strict replay protection across all clients. Includes bridge attestation query hardening and orchestrator concurrency fixes. Disables CometBFT tx indexing (tx_index.db) and ships a migration that deletes the existing index. Orchestrator is hard-disabled (panic guard) until the bridge replacement is ready.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",

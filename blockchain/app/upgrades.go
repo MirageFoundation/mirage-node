@@ -1435,17 +1435,17 @@ func (app *App) RegisterUpgradeHandlers() {
 							changed = true
 						}
 					}
-				if changed {
-					owner, _ := m["owner"].(string)
-					newBz, err := json.Marshal(m)
-					if err != nil || owner == "" {
-						continue
+					if changed {
+						owner, _ := m["owner"].(string)
+						newBz, err := json.Marshal(m)
+						if err != nil || owner == "" {
+							continue
+						}
+						if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz); err != nil {
+							return nil, fmt.Errorf("v1.16.0: SetProfileCore failed for %s: %w", owner, err)
+						}
+						migrated++
 					}
-					if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz); err != nil {
-						return nil, fmt.Errorf("v1.16.0: SetProfileCore failed for %s: %w", owner, err)
-					}
-					migrated++
-				}
 				}
 				sdkCtx.Logger().Info("v1.16.0: migrated profiles (is_moderator removal + level remap)", "count", migrated)
 			}
@@ -1837,6 +1837,10 @@ func (app *App) RegisterUpgradeHandlers() {
 			if err != nil {
 				return nil, fmt.Errorf("v1.20.0: RunMigrations failed: %w", err)
 			}
+
+			sdkCtx.Logger().Info("v1.20.0: operator action required (off-chain)")
+			sdkCtx.Logger().Info("v1.20.0: disable tx_index (set config.toml indexer=null) and remove tx_index.db")
+			sdkCtx.Logger().Info("v1.20.0: orchestrator hard-disabled (panic guard) until bridge replacement is ready")
 
 			sdkCtx.Logger().Info("Upgrade to v1.20.0 complete")
 			return toVM, nil
