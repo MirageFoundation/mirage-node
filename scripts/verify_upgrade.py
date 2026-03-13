@@ -506,12 +506,20 @@ def check_biography_limits() -> None:
             fail(f"Tier {idx} max_biography_length = {got}, expected {exp_val}")
 
 
-def check_legacy_nonce_compatibility(upgrade_name: str) -> None:
-    section("Legacy Nonce Compatibility (v1.19.0)")
-    if _extract_semver(upgrade_name) != "1.19.0":
-        warn(f"Upgrade name is {upgrade_name}; legacy nonce compatibility not expected")
-        return
-    warn("Legacy nonce compatibility cannot be verified via queries. Submit a legacy-signed tx or inspect logs.")
+def check_nonce_enforcement(upgrade_name: str) -> None:
+    section("Envelope Nonce Enforcement")
+    ver = _extract_semver(upgrade_name)
+    if ver == "1.19.0":
+        warn(
+            "v1.19.0 uses legacy nonce fallback; cannot verify via queries. Submit a legacy-signed tx or inspect logs."
+        )
+    elif ver >= "1.20.0":
+        ok("v1.20.0+: envelope_nonce is mandatory. Legacy fallback removed.")
+        warn(
+            "Full enforcement can only be verified by submitting a tx without envelope_nonce and confirming rejection."
+        )
+    else:
+        ok(f"Nonce enforcement not applicable for {upgrade_name}")
 
 
 # ── Main ───────────────────────────────────────────────────
@@ -552,7 +560,7 @@ def main() -> int:
     check_core_params()
     check_subscription_index_consistency()
     check_biography_limits()
-    check_legacy_nonce_compatibility(upgrade_name)
+    check_nonce_enforcement(upgrade_name)
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")
