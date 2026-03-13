@@ -1858,21 +1858,18 @@ func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string
 	}
 	defer it.Close()
 
-	var attestation *types.BridgeAttestation
+	// If multiple attestations exist (e.g. malicious validator created conflicting params),
+	// we return the first one found to prevent DoS of this query endpoint.
+	// The consensus logic uses GetBridgeAttestationWithParams so it is unaffected.
 	for ; it.Valid(); it.Next() {
-		if attestation != nil {
-			return nil, false, fmt.Errorf("multiple attestations found for %s/%s", sourceChain, burnID)
-		}
 		parsed, err := types.UnmarshalBridgeAttestation(it.Value())
 		if err != nil {
 			return nil, false, err
 		}
-		attestation = parsed
+		// Return the first valid attestation found
+		return parsed, true, nil
 	}
-	if attestation == nil {
-		return nil, false, nil
-	}
-	return attestation, true, nil
+	return nil, false, nil
 }
 
 // GetBridgeAttestationWithParams retrieves a bridge attestation with parameter-scoped key.

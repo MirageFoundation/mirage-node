@@ -28,10 +28,10 @@ import (
 
 const (
 	// Rate limiting for Solana RPC calls
-	rpcMinDelay     = 100 * time.Millisecond // Minimum delay between RPC calls
-	rpcMaxRetries   = 3                      // Max retries for rate-limited requests
-	rpcRetryBaseMs  = 1000                   // Base retry delay in milliseconds
-	rpcRetryJitter  = 500                    // Random jitter added to retry delay
+	rpcMinDelay    = 100 * time.Millisecond // Minimum delay between RPC calls
+	rpcMaxRetries  = 3                      // Max retries for rate-limited requests
+	rpcRetryBaseMs = 1000                   // Base retry delay in milliseconds
+	rpcRetryJitter = 500                    // Random jitter added to retry delay
 )
 
 const (
@@ -43,18 +43,19 @@ const (
 )
 
 type Watcher struct {
-	cfg        config.SolanaConfig
-	logger     *log.Logger
-	rpcClient  *rpc.Client
-	wsClient   *ws.Client
-	programID  solana.PublicKey
-	keypair    solana.PrivateKey
-	lastSig    string
-	seenSig    map[string]time.Time
-	discBurn   [8]byte
-	discMint   [8]byte
-	ready      bool
-	rng        *rand.Rand
+	cfg       config.SolanaConfig
+	logger    *log.Logger
+	rpcClient *rpc.Client
+	wsClient  *ws.Client
+	programID solana.PublicKey
+	keypair   solana.PrivateKey
+	lastSig   string
+	seenSig   map[string]time.Time
+	seenSigMu sync.Mutex
+	discBurn  [8]byte
+	discMint  [8]byte
+	ready     bool
+	rng       *rand.Rand
 
 	// Rate limiting
 	rpcMu       sync.Mutex
@@ -256,7 +257,7 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 		stopIndex := -1
 		for i, sig := range sigs {
 			sigStr := sig.Signature.String()
-			if sigStr == w.lastSig || !w.seenSig[sigStr].IsZero() {
+			if sigStr == w.lastSig || w.hasSeenSig(sigStr) {
 				stopIndex = i
 				break
 			}
@@ -295,14 +296,14 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 		if sigStr == "" || sig.Signature.IsZero() {
 			continue
 		}
-		if !w.seenSig[sigStr].IsZero() {
+		if w.hasSeenSig(sigStr) {
 			continue
 		}
 
 		burns, err := w.parseBurnsFromSignature(ctx, sigStr)
 		if err != nil {
 			w.logger.Printf("ERROR parsing burns from signature %s: %v", sigStr, err)
-			w.seenSig[sigStr] = time.Now()
+			w.markSeenSig(sigStr)
 			continue
 		}
 		for _, burn := range burns {
@@ -313,7 +314,7 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 				return ctx.Err()
 			}
 		}
-		w.seenSig[sigStr] = time.Now()
+		w.markSeenSig(sigStr)
 	}
 
 	// Update lastSig to the most recent signature and persist
@@ -328,7 +329,7 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 	}
 
 	// Prune seenSig map to prevent unbounded growth (keep last 10000)
-	if len(w.seenSig) > 10000 {
+	if w.seenSigCount() > 10000 {
 		w.pruneSeenSigs()
 	}
 
@@ -340,12 +341,32 @@ func ptr[T any](v T) *T {
 }
 
 func (w *Watcher) pruneSeenSigs() {
+	w.seenSigMu.Lock()
+	defer w.seenSigMu.Unlock()
 	cutoff := time.Now().Add(-30 * time.Minute)
 	for k, t := range w.seenSig {
 		if t.Before(cutoff) {
 			delete(w.seenSig, k)
 		}
 	}
+}
+
+func (w *Watcher) hasSeenSig(sig string) bool {
+	w.seenSigMu.Lock()
+	defer w.seenSigMu.Unlock()
+	return !w.seenSig[sig].IsZero()
+}
+
+func (w *Watcher) markSeenSig(sig string) {
+	w.seenSigMu.Lock()
+	defer w.seenSigMu.Unlock()
+	w.seenSig[sig] = time.Now()
+}
+
+func (w *Watcher) seenSigCount() int {
+	w.seenSigMu.Lock()
+	defer w.seenSigMu.Unlock()
+	return len(w.seenSig)
 }
 
 // stateFilePath returns the path to the state file
