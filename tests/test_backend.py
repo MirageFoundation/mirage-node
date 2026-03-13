@@ -2616,25 +2616,37 @@ def test_social_graph(backend: str):
         "body",
         skip_pow=True,
     )
-    if topic_only_post and _wait_indexed(backend, sub_addr, topic_only_post):
-        code, follow_feed = _get(
-            f"{backend}/api/get_posts",
-            {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
-        )
-        if code == 200:
-            posts = (follow_feed or {}).get("posts") or []
-            leaked = any(str(p.get("post_id", "")).lower() == topic_only_post for p in posts)
-            if leaked:
-                _fail(
-                    "social.following_magic excludes topic-only non-followed authors",
-                    f"found_nonfollowed_topic_post={topic_only_post}",
-                )
-            else:
-                _pass("social.following_magic excludes topic-only non-followed authors")
-        else:
-            _fail("social.following_magic excludes topic-only non-followed authors", f"code={code}")
+    if not topic_only_post:
+        _fail("social.following_magic excludes topic-only non-followed authors", "post creation failed")
     else:
-        _fail("social.following_magic excludes topic-only non-followed authors", "topic-only post not indexed")
+        deliver = _wait_tx_deliver(topic_only_post)
+        if deliver and deliver[0] != 0:
+            _fail(
+                "social.following_magic excludes topic-only non-followed authors",
+                f"deliver_code={deliver[0]} log={deliver[1][:200]}",
+            )
+        elif not _wait_indexed(backend, sub_addr, topic_only_post):
+            _fail(
+                "social.following_magic excludes topic-only non-followed authors",
+                f"post {topic_only_post[:16]} not indexed after timeout",
+            )
+        else:
+            code, follow_feed = _get(
+                f"{backend}/api/get_posts",
+                {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
+            )
+            if code == 200:
+                posts = (follow_feed or {}).get("posts") or []
+                leaked = any(str(p.get("post_id", "")).lower() == topic_only_post for p in posts)
+                if leaked:
+                    _fail(
+                        "social.following_magic excludes topic-only non-followed authors",
+                        f"found_nonfollowed_topic_post={topic_only_post}",
+                    )
+                else:
+                    _pass("social.following_magic excludes topic-only non-followed authors")
+            else:
+                _fail("social.following_magic excludes topic-only non-followed authors", f"code={code}")
 
     # 5.5 unfollow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=False)
@@ -2652,10 +2664,16 @@ def test_social_graph(backend: str):
         _pass("social.follow_topic for block-removal setup")
     else:
         _fail("social.follow_topic for block-removal setup", f"resp={resp}")
-    if _wait_followed_topic(backend, addr, mutual_topic_fb, True):
-        _pass("social.follow_topic reflected before block")
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.follow_topic reflected before block", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        elif _wait_followed_topic(backend, addr, mutual_topic_fb, True):
+            _pass("social.follow_topic reflected before block")
+        else:
+            _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
     else:
-        _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
+        _fail("social.follow_topic reflected before block", "no tx_hash")
 
     resp = _do_block_topic(backend, wallet, mutual_topic_fb, block=True)
     txh = str(resp.get("tx_hash", "")).lower()
@@ -2663,14 +2681,21 @@ def test_social_graph(backend: str):
         _pass("social.block_topic after follow succeeds")
     else:
         _fail("social.block_topic after follow succeeds", f"resp={resp}")
-    if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
-        _pass("social.block_topic removes followed topic")
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.block_topic removes followed topic", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        else:
+            if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
+                _pass("social.block_topic removes followed topic")
+            else:
+                _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
+            if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
+                _pass("social.block_topic reflected in get_user_blocked (mutual)")
+            else:
+                _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
     else:
-        _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
-    if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
-        _pass("social.block_topic reflected in get_user_blocked (mutual)")
-    else:
-        _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
+        _fail("social.block_topic removes followed topic", "no tx_hash")
 
     # 5.5b block->follow topic removes block
     mutual_topic_bf = f"mutualtopic{_rand_str(4)}"
@@ -2680,10 +2705,16 @@ def test_social_graph(backend: str):
         _pass("social.block_topic for follow-removal setup")
     else:
         _fail("social.block_topic for follow-removal setup", f"resp={resp}")
-    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
-        _pass("social.block_topic reflected before follow")
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.block_topic reflected before follow", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        elif _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
+            _pass("social.block_topic reflected before follow")
+        else:
+            _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
     else:
-        _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
+        _fail("social.block_topic reflected before follow", "no tx_hash")
 
     resp = _do_follow_topic(backend, wallet, mutual_topic_bf, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
