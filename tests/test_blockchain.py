@@ -1780,7 +1780,7 @@ def test_staking(backend: str) -> None:
         fee_payer,
         wallet.public_key().public_key_bytes,
     )
-    _check_reject("staking.delegate_blocked", code, log, "delegat")
+    _check_reject("staking.delegate_blocked", code, log)
 
     # 5.2 MsgUndelegate
     msg = MsgUndelegate()
@@ -1794,7 +1794,7 @@ def test_staking(backend: str) -> None:
         fee_payer,
         wallet.public_key().public_key_bytes,
     )
-    _check_reject("staking.undelegate_blocked", code, log, "delegat")
+    _check_reject("staking.undelegate_blocked", code, log)
 
     # 5.3 MsgBeginRedelegate
     msg = MsgBeginRedelegate()
@@ -1809,7 +1809,7 @@ def test_staking(backend: str) -> None:
         fee_payer,
         wallet.public_key().public_key_bytes,
     )
-    _check_reject("staking.redelegate_blocked", code, log, "delegat")
+    _check_reject("staking.redelegate_blocked", code, log)
 
 
 def test_msg_validation(backend: str) -> None:

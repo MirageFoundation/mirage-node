@@ -9,12 +9,7 @@ import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Su
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
 
-// Nonce: (Date.now() * 1_000_000) + rand32. Must be >0, <=2^53-1 (JS safe int). Included in signed canonical bytes.
-function generateEnvelopeNonce() {
-    let nonce = Math.floor(Date.now() * 1_000_000) + ((Math.random() * 0xFFFFFFFF) >>> 0);
-    if (nonce <= 0 || !Number.isSafeInteger(nonce)) nonce = Date.now() * 1000 + ((Math.random() * 999) >>> 0) + 1;
-    return nonce;
-}
+import { generateEnvelopeNonce } from './canonicalEncoding';
 
 let __CosmSecp256k1 = null;
 let __CosmSha256 = null;
@@ -5597,3 +5592,4 @@ class TransactionHandler {
 // Ensure singleton instance
 const instance = new TransactionHandler();
 export default instance;
+export { TransactionHandler };
