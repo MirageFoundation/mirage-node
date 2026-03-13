@@ -203,15 +203,14 @@ const Sidebar = ({ currentPath, state }) => {
     const [showAllPeople, setShowAllPeople] = useState(false);
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
 
-    // Handle clicking on feed nav items - refresh if already on that route
     const handleFeedClick = (targetPath, e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
         const currentPathname = location.pathname;
         const isAlreadyOnRoute = currentPathname === targetPath ||
             (targetPath === '/home' && (currentPathname === '/' || currentPathname === '/home'));
 
         if (isAlreadyOnRoute) {
             e.preventDefault();
-            // Scroll to top and trigger refresh
             window.scrollTo({ top: 0, behavior: 'smooth' });
             window.dispatchEvent(new CustomEvent('mirageRefreshFeed'));
         }

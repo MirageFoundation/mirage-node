@@ -25,7 +25,8 @@ const MobileHeaderRow = styled.div`
     position: relative;
 `;
 
-const MobileBrandText = styled.div`
+const MobileBrandText = styled.a`
+    text-decoration: none;
     font-size: 1.6rem;
     font-weight: 800;
     letter-spacing: 0.05rem;
@@ -252,7 +253,7 @@ const MobileHeader = () => {
     return (
         <MobileHeaderContainer>
             <MobileHeaderRow>
-                <MobileBrandText $hidden={searchExpanded} onClick={() => { window.location.href = '/home'; }}>MIRAGE</MobileBrandText>
+                <MobileBrandText $hidden={searchExpanded} href="/home">MIRAGE</MobileBrandText>
                 <MobileRightSection>
                     {hasPublicKey && (
                         <MobileBalanceDisplay $hidden={searchExpanded} title="Your MIRAGE balance">

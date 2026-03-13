@@ -555,8 +555,9 @@ function MobileBottomNav({ state }) {
         }
     };
 
-    // Handle clicking on feed nav items - always scroll to top, refresh if already on route
     const handleFeedNavClick = (targetPath, e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+
         if (isProfileSheetOpen) {
             setIsProfileSheetOpen(false);
         }
@@ -564,12 +565,10 @@ function MobileBottomNav({ state }) {
         const isAlreadyOnRoute = pathname === targetPath ||
             (targetPath === '/home' && (pathname === '/' || pathname === '/home' || pathname.startsWith('/t/')));
 
-        // Always scroll to top (including header visibility)
         window.scrollTo({ top: 0, behavior: 'instant' });
 
         if (isAlreadyOnRoute) {
             e.preventDefault();
-            // Trigger refresh
             window.dispatchEvent(new CustomEvent('mirageRefreshFeed'));
         }
     };

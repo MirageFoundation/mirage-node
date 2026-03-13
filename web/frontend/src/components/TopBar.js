@@ -437,6 +437,7 @@ function TopBar({ state }) {
     if (isMobile) return null;
 
     const handleNavClick = (targetPath, e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
         const currentPathname = location.pathname;
         const isAlreadyOnRoute = currentPathname === targetPath ||
             (targetPath === '/home' && (currentPathname === '/' || currentPathname === '/home'));
