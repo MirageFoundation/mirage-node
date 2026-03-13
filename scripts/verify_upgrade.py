@@ -515,9 +515,7 @@ def check_nonce_enforcement(upgrade_name: str) -> None:
         )
     elif ver >= "1.20.0":
         ok("v1.20.0+: envelope_nonce is mandatory. Legacy fallback removed.")
-        warn(
-            "Full enforcement can only be verified by submitting a tx without envelope_nonce and confirming rejection."
-        )
+        ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
     else:
         ok(f"Nonce enforcement not applicable for {upgrade_name}")
 
