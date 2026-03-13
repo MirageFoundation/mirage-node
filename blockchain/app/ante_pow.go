@@ -167,12 +167,16 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 
 	// Remove subscription index
 	if core.SubscriptionExpiry > 0 {
-		_ = d.Keeper.RemoveSubscription(ctx, addr, core.SubscriptionExpiry)
+		if err := d.Keeper.RemoveSubscription(ctx, addr, core.SubscriptionExpiry); err != nil {
+			return fmt.Errorf("checkReserveOrDowngrade: remove subscription failed: %w", err)
+		}
 	}
 
 	// Burn any remaining reserve
 	if core.ReserveFunds > 0 {
-		_ = d.Keeper.BurnFromModuleAmount(ctx, core.ReserveFunds)
+		if err := d.Keeper.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
+			return fmt.Errorf("checkReserveOrDowngrade: burn reserve failed: %w", err)
+		}
 	}
 
 	// Downgrade to free tier

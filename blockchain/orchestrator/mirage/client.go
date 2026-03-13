@@ -18,6 +18,7 @@ import (
 	authtxconfig "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"mirage/app"
@@ -60,7 +61,13 @@ func NewClient(ctx context.Context, cfg *config.Config, logger *log.Logger) (*Cl
 
 	clientCtx = clientCtx.WithKeyring(kr).WithFromName(cfg.Mirage.KeyName).WithFromAddress(fromAddr)
 
-	grpcConn, err := grpc.DialContext(ctx, cfg.Mirage.GRPC, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	var transportCreds grpc.DialOption
+	if cfg.Mirage.TLS {
+		transportCreds = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+	} else {
+		transportCreds = grpc.WithTransportCredentials(insecure.NewCredentials())
+	}
+	grpcConn, err := grpc.DialContext(ctx, cfg.Mirage.GRPC, transportCreds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC: %w", err)
 	}

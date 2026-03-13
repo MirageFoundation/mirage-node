@@ -21,9 +21,9 @@ func TestIsPermanentError(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "TransactionTooOld error",
+			name:     "TransactionTooOld is retriable (stale blockhash)",
 			err:      fmt.Errorf("failed: %w", chains.ErrTransactionTooOld),
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "bridge mint already recorded",

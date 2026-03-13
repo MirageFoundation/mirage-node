@@ -288,14 +288,10 @@ def _parse_envelope_nonce(data: dict):
         nonce = (Date.now() * 1_000_000) ^ (rand32)
         Must be >0; for JS keep <=2^53-1. Include in signature.
 
-    LEGACY_NONCE_COMPAT: When envelope_nonce is missing, return 0 so the
-    chain falls back to pre-1.18 canonical verification (no replay protection).
-    Remove this legacy path after all clients send envelope_nonce.
+    v1.20.0: envelope_nonce is mandatory. Requests without it are rejected.
     """
     if "envelope_nonce" not in data:
-        # LEGACY_NONCE_COMPAT: accept missing nonce (pre-1.18 clients)
-        logging.debug("LEGACY_NONCE_COMPAT: request missing envelope_nonce")
-        return 0, None
+        return 0, (jsonify({"error": "envelope_nonce is required (v1.20.0)"}), 400)
     try:
         nonce = int(data.get("envelope_nonce"))
         if nonce <= 0:

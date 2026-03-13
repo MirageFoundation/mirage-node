@@ -974,7 +974,9 @@ def _do_edit(
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_edit_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce)
+    base = _canon_base_edit_raw(
+        pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce
+    )
     if skip_pow:
         proof = 0
     else:
@@ -2894,7 +2896,9 @@ def test_subscriber(backend: str):
             pub_s = w.public_key().public_key_bytes
             ts = _now_ms()
             nonce = _fresh_nonce()
-            base = _canon_base_post_raw(pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0, None, nonce)
+            base = _canon_base_post_raw(
+                pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0, None, nonce
+            )
             proof = compute_pow(base, 1, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(w, signed)
@@ -2925,7 +2929,9 @@ def test_subscriber(backend: str):
         pub_free = free_wallet.public_key().public_key_bytes
         ts2 = _now_ms()
         nonce2 = _fresh_nonce()
-        base2 = _canon_base_post_raw(pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0, None, nonce2)
+        base2 = _canon_base_post_raw(
+            pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0, None, nonce2
+        )
         signed2 = canon_signed_with_pow(base2, 0)
         sig2 = sign_canonical(free_wallet, signed2)
         payload2 = {
@@ -3112,7 +3118,9 @@ def test_edge_cases(backend: str):
     # 9.6 Timestamp too old rejected
     ts_old = _now_ms() - 120_000  # 2 minutes ago
     nonce_old = _fresh_nonce()
-    base_old = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0, None, nonce_old)
+    base_old = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0, None, nonce_old
+    )
     proof_old = compute_pow(base_old, diff, base_bits, pow_factor, lb)
     signed_old = canon_signed_with_pow(base_old, int(proof_old))
     sig_old = sign_canonical(wallet, signed_old)
@@ -3140,7 +3148,9 @@ def test_edge_cases(backend: str):
     # 9.7 Timestamp too far in future rejected
     ts_future = _now_ms() + 120_000  # 2 minutes in future
     nonce_fut = _fresh_nonce()
-    base_fut = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0, None, nonce_fut)
+    base_fut = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0, None, nonce_fut
+    )
     proof_fut = compute_pow(base_fut, diff, base_bits, pow_factor, lb)
     signed_fut = canon_signed_with_pow(base_fut, int(proof_fut))
     sig_fut = sign_canonical(wallet, signed_fut)
@@ -3211,7 +3221,9 @@ def test_edge_cases(backend: str):
     pub_b = wallet_b.public_key().public_key_bytes
     ts_mis = _now_ms()
     nonce_mis = _fresh_nonce()
-    base_mis = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0, None, nonce_mis)
+    base_mis = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0, None, nonce_mis
+    )
     proof_mis = compute_pow(base_mis, diff, base_bits, pow_factor, lb)
     signed_mis = canon_signed_with_pow(base_mis, int(proof_mis))
     sig_mis = sign_canonical(wallet, signed_mis)  # signed by wallet A
@@ -3267,11 +3279,12 @@ def test_edge_cases(backend: str):
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
-    # 9.11b LEGACY_NONCE_COMPAT: missing envelope_nonce accepted (pre-1.18 clients).
-    # Sign with nonce=0 canonical bytes (no tag 7) to match the chain's legacy path.
-    # Remove this legacy test after all clients send envelope_nonce.
+    # 9.11b Missing envelope_nonce must be rejected (v1.20.0+)
+    # Sign with nonce=0 canonical bytes (no tag 7) to match the legacy path.
     ts_legacy = _now_ms()
-    base_legacy = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_legacy, "", "test", "legacy no nonce", "body", "", 0, None, 0)
+    base_legacy = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_legacy, "", "test", "legacy no nonce", "body", "", 0, None, 0
+    )
     proof_legacy = compute_pow(base_legacy, diff, base_bits, pow_factor, lb)
     signed_legacy = canon_signed_with_pow(base_legacy, int(proof_legacy))
     sig_legacy = sign_canonical(wallet, signed_legacy)
@@ -3288,10 +3301,10 @@ def test_edge_cases(backend: str):
         "content": "body",
     }
     code_no_nonce, resp_no_nonce = _post(f"{backend}/api/core/post", payload_no_nonce)
-    if code_no_nonce == 200:
-        _pass("edge.missing_envelope_nonce_legacy_accepted")
+    if code_no_nonce >= 400:
+        _pass("edge.missing_envelope_nonce_rejected")
     else:
-        _fail("edge.missing_envelope_nonce_legacy_accepted", f"code={code_no_nonce} resp={resp_no_nonce}")
+        _fail("edge.missing_envelope_nonce_rejected", f"code={code_no_nonce} resp={resp_no_nonce}")
 
     # 9.11c Zero envelope_nonce explicitly sent is still rejected
     ts_z = _now_ms()
@@ -3318,11 +3331,13 @@ def test_edge_cases(backend: str):
     else:
         _fail("edge.zero_envelope_nonce_rejected", f"code={code_zero} expected 400")
 
-    # 9.11d 1.18+ path: nonce present → replay protection active
+    # 9.11d v1.20+ path: nonce present → replay protection active
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     ts_new = _now_ms()
     nonce_new = _fresh_nonce()
-    base_new = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_new, "", "test", "nonce present", "body", "", 0, None, nonce_new)
+    base_new = _canon_base_post_raw(
+        pub, _lb_bytes(lb), diff, ts_new, "", "test", "nonce present", "body", "", 0, None, nonce_new
+    )
     proof_new = compute_pow(base_new, diff, base_bits, pow_factor, lb)
     signed_new = canon_signed_with_pow(base_new, int(proof_new))
     sig_new = sign_canonical(wallet, signed_new)
@@ -3452,7 +3467,9 @@ def test_edge_cases(backend: str):
             ts = _now_ms()
             nonce = _fresh_nonce()
             topic = f"vtag{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0, None, nonce)
+            base = _canon_base_post_raw(
+                pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0, None, nonce
+            )
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(wallet, signed)
@@ -3621,7 +3638,9 @@ def test_security(backend: str):
         nonce = _fresh_nonce()
         topic_a = f"topic{_rand_str(4)}"
 
-        base_a = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0, None, nonce)
+        base_a = _canon_base_post_raw(
+            pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0, None, nonce
+        )
         proof = compute_pow(base_a, diff, base_bits, pow_factor, lb)
         signed_a = canon_signed_with_pow(base_a, int(proof))
         sig = sign_canonical(free_wallet, signed_a)
@@ -3656,14 +3675,18 @@ def test_security(backend: str):
         nonce1 = _fresh_nonce()
         topic1 = f"topic{_rand_str(4)}"
 
-        base1 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0, None, nonce1)
+        base1 = _canon_base_post_raw(
+            pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0, None, nonce1
+        )
         proof1 = compute_pow(base1, diff, base_bits, pow_factor, lb)
 
         # Build a different message and reuse proof1
         ts2 = _now_ms()
         nonce2 = _fresh_nonce()
         topic2 = f"topic{_rand_str(4)}"
-        base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0, None, nonce2)
+        base2 = _canon_base_post_raw(
+            pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0, None, nonce2
+        )
         signed2 = canon_signed_with_pow(base2, int(proof1))
         sig2 = sign_canonical(free_wallet, signed2)
 
@@ -4205,7 +4228,9 @@ def test_validation(backend: str):
             ts = _now_ms()
             nonce = _fresh_nonce()
             topic = f"topic{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
+            base = _canon_base_post_raw(
+                pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0, None, nonce
+            )
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(free_wallet, signed)
@@ -4806,7 +4831,18 @@ def test_media(backend: str):
             topic = edit_media_topic
             media_list = ["https://example.com/edited.jpg"]
             base = _canon_base_edit_raw(
-                pub, _lb_bytes(lb), 0, ts, "", topic, "Edit media test", "updated body", "", base_post, media_list, nonce
+                pub,
+                _lb_bytes(lb),
+                0,
+                ts,
+                "",
+                topic,
+                "Edit media test",
+                "updated body",
+                "",
+                base_post,
+                media_list,
+                nonce,
             )
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub1, signed)

@@ -13,6 +13,14 @@ const (
 	LevelAdminMin   = 100
 )
 
+// Governance-safe upper bounds for key economics parameters.
+const (
+	MaxMintQuantity    = 10_000_000_000_000 // 10M MIRAGE per interval
+	MaxVoteWeight      = 100.0              // no single tier gets >100x weight
+	MaxRelayMinGasPrice = 1_000_000_000     // 1000 MIRAGE per gas unit
+	MaxRelayMaxGasFee  = 100_000_000_000    // 100k MIRAGE per tx
+)
+
 // ValidSubscriptionLevels are the levels users can self-upgrade to via MsgUpgradeLevel.
 var ValidSubscriptionLevels = map[int]bool{
 	LevelSubscriber: true,
@@ -201,6 +209,9 @@ func (p Params) Validate() error {
 	if p.MintQuantity == 0 {
 		return fmt.Errorf("mint_quantity must be > 0")
 	}
+	if p.MintQuantity > MaxMintQuantity {
+		return fmt.Errorf("mint_quantity %d exceeds max %d", p.MintQuantity, MaxMintQuantity)
+	}
 	if p.MintDynamicSplit < 0 || p.MintDynamicSplit > 1 {
 		return fmt.Errorf("mint_dynamic_split must be in [0,1]")
 	}
@@ -233,6 +244,13 @@ func (p Params) Validate() error {
 	if p.PowDifficultyStep <= 0 || p.PowDifficultyStep > 1 {
 		return fmt.Errorf("pow_difficulty_step must be in (0,1]")
 	}
+	// Relay gas price bounds
+	if p.RelayMinGasPrice > MaxRelayMinGasPrice {
+		return fmt.Errorf("relay_min_gas_price %d exceeds max %d", p.RelayMinGasPrice, MaxRelayMinGasPrice)
+	}
+	if p.RelayMaxGasFee > MaxRelayMaxGasFee {
+		return fmt.Errorf("relay_max_gas_fee %d exceeds max %d", p.RelayMaxGasFee, MaxRelayMaxGasFee)
+	}
 	// MaxEnvelopeAge must be > 0 (replay protection)
 	if p.MaxEnvelopeAge == 0 {
 		return fmt.Errorf("max_envelope_age must be > 0")
@@ -254,6 +272,9 @@ func (p Params) Validate() error {
 		}
 		if tier.VoteWeight < 0 {
 			return fmt.Errorf("tier %d: vote_weight must be >= 0", i)
+		}
+		if tier.VoteWeight > MaxVoteWeight {
+			return fmt.Errorf("tier %d: vote_weight %.2f exceeds max %.2f", i, tier.VoteWeight, MaxVoteWeight)
 		}
 	}
 	// Validate bridge params

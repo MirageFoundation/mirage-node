@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,14 +11,14 @@ import (
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	"github.com/cosmos/cosmos-sdk/x/authz"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"github.com/cosmos/cosmos-sdk/x/authz"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	"github.com/stretchr/testify/require"
 	protov2 "google.golang.org/protobuf/proto"
 
@@ -287,7 +288,6 @@ func TestIsRelayMessage(t *testing.T) {
 
 func TestMixedRelaySDKMessageRejection(t *testing.T) {
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	_ = govAuthority
 
 	sdkMsgs := []struct {
 		name string
@@ -338,6 +338,16 @@ func TestMixedRelaySDKMessageRejection(t *testing.T) {
 		})
 	}
 
+	t.Run("relay+gov_authority_short_circuit", func(t *testing.T) {
+		msgs := []sdk.Msg{
+			&coretypes.MsgPost{},
+			&banktypes.MsgUpdateParams{Authority: govAuthority},
+		}
+		isRelay, hasNon := classifyMsgs(msgs)
+		require.False(t, isRelay)
+		require.False(t, hasNon)
+	})
+
 	// Pure relay tx must be accepted (both flags consistent).
 	t.Run("pure_relay", func(t *testing.T) {
 		msgs := []sdk.Msg{
@@ -365,7 +375,13 @@ func TestMixedRelaySDKMessageRejection(t *testing.T) {
 // classifyMsgs replicates the ante handler's message classification logic
 // for testability.
 func classifyMsgs(msgs []sdk.Msg) (isRelayTx, hasNonRelay bool) {
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	for _, m := range msgs {
+		if am, ok := m.(interface{ GetAuthority() string }); ok {
+			if strings.TrimSpace(am.GetAuthority()) == govAuthority {
+				return false, false
+			}
+		}
 		if isRelayMessage(m) {
 			isRelayTx = true
 		} else {

@@ -109,6 +109,84 @@ func TestGetAwardConfig(t *testing.T) {
 	require.Nil(t, p.GetAwardConfig("not_a_real_award"))
 }
 
+func TestParamsValidateUpperBounds(t *testing.T) {
+	p := DefaultParams()
+
+	// MintQuantity exceeds max
+	p.MintQuantity = MaxMintQuantity + 1
+	require.Error(t, p.Validate())
+	require.Contains(t, p.Validate().Error(), "mint_quantity")
+
+	// Reset and test VoteWeight
+	p = DefaultParams()
+	p.Tiers[1].VoteWeight = MaxVoteWeight + 1
+	require.Error(t, p.Validate())
+	require.Contains(t, p.Validate().Error(), "vote_weight")
+
+	// Reset and test RelayMinGasPrice
+	p = DefaultParams()
+	p.RelayMinGasPrice = MaxRelayMinGasPrice + 1
+	require.Error(t, p.Validate())
+	require.Contains(t, p.Validate().Error(), "relay_min_gas_price")
+
+	// Reset and test RelayMaxGasFee
+	p = DefaultParams()
+	p.RelayMaxGasFee = MaxRelayMaxGasFee + 1
+	require.Error(t, p.Validate())
+	require.Contains(t, p.Validate().Error(), "relay_max_gas_fee")
+
+	// Default params should pass
+	p = DefaultParams()
+	require.NoError(t, p.Validate())
+}
+
+func TestProfileValidateBasicRuneCounts(t *testing.T) {
+	// 512 single-byte ASCII chars should pass
+	asciiStr := ""
+	for i := 0; i < 512; i++ {
+		asciiStr += "a"
+	}
+	p := Profile{Username: "testuser", Biography: asciiStr}
+	require.NoError(t, p.ValidateBasic(3, 30, 50))
+
+	// 512 multi-byte runes should pass (each is 3 bytes in UTF-8)
+	multiByteStr := ""
+	for i := 0; i < 512; i++ {
+		multiByteStr += "\u4e16" // Chinese character, 3 bytes
+	}
+	p = Profile{Username: "testuser", Biography: multiByteStr}
+	require.NoError(t, p.ValidateBasic(3, 30, 50))
+
+	// 513 runes should fail (regardless of byte count)
+	tooLong := multiByteStr + "\u4e16"
+	p = Profile{Username: "testuser", Biography: tooLong}
+	require.Error(t, p.ValidateBasic(3, 30, 50))
+	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "biography too long")
+
+	// Avatar rune count
+	p = Profile{Username: "testuser", Avatar: tooLong}
+	require.Error(t, p.ValidateBasic(3, 30, 50))
+	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "avatar too long")
+
+	// Banner rune count
+	p = Profile{Username: "testuser", Banner: tooLong}
+	require.Error(t, p.ValidateBasic(3, 30, 50))
+	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "banner too long")
+
+	// Flair rune count (limit 20)
+	flairOk := ""
+	for i := 0; i < 20; i++ {
+		flairOk += "\u4e16"
+	}
+	p = Profile{Username: "testuser", Flair: flairOk}
+	require.NoError(t, p.ValidateBasic(3, 30, 50))
+
+	flairTooLong := flairOk + "\u4e16"
+	p = Profile{Username: "testuser", Flair: flairTooLong}
+	require.Error(t, p.ValidateBasic(3, 30, 50))
+	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "flair too long")
+}
+
 func TestC1BugCondition(t *testing.T) {
 	// Reproduce the C-1 bug condition: the old code used
 	//   if core.Level <= 0 || int(core.Level) >= len(params.Tiers)

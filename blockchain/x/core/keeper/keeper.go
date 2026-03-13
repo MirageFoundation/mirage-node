@@ -1074,17 +1074,28 @@ func (k Keeper) ResetAllRelayCredits(ctx sdk.Context) error {
 func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get([]byte("params"))
-	if err == nil && len(bz) > 0 {
-		_ = k.cdc.Unmarshal(bz, &p)
+	if err != nil || len(bz) == 0 {
+		// Store empty (first boot / genesis) — use defaults.
+		ctx.Logger().Debug("core/GetParams: using default params", "reason", "empty_store")
+		return types.DefaultParams()
 	}
-	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
-		p.MaxUsernameSize == 0 || p.MaxTopicSize == 0 || p.MinUsernameSize == 0 || p.MinTopicSize == 0 || len(p.Tiers) == 0 {
-		p = types.DefaultParams()
+	if err := k.cdc.Unmarshal(bz, &p); err != nil {
+		ctx.Logger().Error("core/GetParams: corrupted params in store; using defaults", "err", err)
+		ctx.Logger().Debug("core/GetParams: using default params", "reason", "unmarshal_failed")
+		return types.DefaultParams()
+	}
+	if err := p.Validate(); err != nil {
+		ctx.Logger().Error("core/GetParams: invalid params in store; using defaults", "err", err)
+		ctx.Logger().Debug("core/GetParams: using default params", "reason", "validation_failed")
+		return types.DefaultParams()
 	}
 	return p
 }
 
 func (k Keeper) SetParams(ctx sdk.Context, p types.Params) error {
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("SetParams: invalid params: %w", err)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := k.cdc.Marshal(&p)
 	if err != nil {
@@ -1229,7 +1240,7 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 	}
 	dynDec, errDec := sdkmath.LegacyNewDecFromStr(fmt.Sprintf("%.18f", split))
 	if errDec != nil {
-		dynDec = sdkmath.LegacyNewDecWithPrec(5, 1) // 0.5 fallback
+		return fmt.Errorf("invalid MintDynamicSplit value %.18f: %w", split, errDec)
 	}
 	dynamicPool := dynDec.MulInt(amt).TruncateInt()
 	if dynamicPool.IsNegative() || dynamicPool.GT(amt) {
@@ -1378,6 +1389,7 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		return err
 	}
 
+	failedValopers := make([]string, 0)
 	for _, r := range rewards {
 		total := r.baseline.Add(r.dynamic)
 		if !total.IsPositive() {
@@ -1386,10 +1398,16 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		val_coins := sdk.NewCoins(sdk.NewCoin(k.mintDenom(), total))
 		valAddr, err := sdk.ValAddressFromBech32(r.validator.OperatorAddress)
 		if err != nil {
+			ctx.Logger().Error("mint distribution: invalid validator address",
+				"valoper", r.validator.OperatorAddress, "err", err)
+			failedValopers = append(failedValopers, r.validator.OperatorAddress)
 			continue
 		}
 		accAddr := sdk.AccAddress(valAddr)
 		if err := k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, accAddr, val_coins); err != nil {
+			ctx.Logger().Error("mint distribution: failed to send to validator",
+				"valoper", r.validator.OperatorAddress, "amount", total.String(), "err", err)
+			failedValopers = append(failedValopers, r.validator.OperatorAddress)
 			continue
 		}
 		ctx.Logger().Info("mint distribution",
@@ -1399,9 +1417,14 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 			"total", total.String(),
 		)
 	}
+	if len(failedValopers) > 0 {
+		ctx.Logger().Error("mint distribution: failed for validators", "count", len(failedValopers), "valopers", strings.Join(failedValopers, ","))
+	}
 
 	// Reset relay credits for next interval
-	_ = k.ResetAllRelayCredits(ctx)
+	if err := k.ResetAllRelayCredits(ctx); err != nil {
+		return fmt.Errorf("failed to reset relay credits: %w", err)
+	}
 
 	ctx.Logger().Info("minted tokens (baseline+dynamic) and distributed to validators",
 		"amount", amt.String(),
