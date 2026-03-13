@@ -6,10 +6,9 @@ import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
 import Api from '../lib/api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
+import { generateEnvelopeNonce } from './canonicalEncoding';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
-
-import { generateEnvelopeNonce } from './canonicalEncoding';
 
 let __CosmSecp256k1 = null;
 let __CosmSha256 = null;
