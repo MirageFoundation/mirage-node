@@ -1122,12 +1122,12 @@ class DatabaseManager:
                         post_txhash.lower(),
                         agent_address.lower(),
                         edit_txhash.lower(),
-                        topic,
-                        title,
-                        content,
-                        tag,
-                        media_json,
-                        appendix,
+                        self._strip_nul(topic),
+                        self._strip_nul(title),
+                        self._strip_nul(content),
+                        self._strip_nul(tag),
+                        self._strip_nul(media_json),
+                        self._strip_nul(appendix),
                         int(edited_at),
                     ),
                 )
@@ -1525,7 +1525,7 @@ class DatabaseManager:
                       tx_type=EXCLUDED.tx_type,
                       created_at=EXCLUDED.created_at
                     """,
-                    (txhash, int(height), int(code), str(raw_log or ""), str(tx_type or "unknown"), int(created_at)),
+                    (txhash, int(height), int(code), self._strip_nul(str(raw_log or "")), self._strip_nul(str(tx_type or "unknown")), int(created_at)),
                 )
                 cur.execute("SELECT COUNT(*) FROM tx_receipts")
                 total = int((cur.fetchone() or [0])[0] or 0)
