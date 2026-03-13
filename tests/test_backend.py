@@ -814,18 +814,19 @@ def setup_test_wallets(backend: str) -> bool:
         verified = False
         while time.perf_counter() < deadline:
             try:
-                code, profile = _get(f"{backend}/api/get_profile", {"address": addr})
-                if code == 200 and profile:
-                    actual_level = int(profile.get("level", 0) or 0)
-                    if actual_level >= level:
-                        print(f"  Verified {name} level={actual_level}")
-                        verified = True
-                        break
+                status = get_user_status(backend, addr)
+                actual_level = int(status.get("user_level", 0) or 0)
+                if actual_level >= level:
+                    print(f"  Verified {name} level={actual_level}")
+                    verified = True
+                    break
             except Exception:
                 pass
             time.sleep(1)
         if not verified:
-            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} level not reflected in indexer after {int(INDEX_TIMEOUT_SEC)}s")
+            print(
+                f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} level not reflected in indexer after {int(INDEX_TIMEOUT_SEC)}s"
+            )
             return False
 
     # Set biographies on the dedicated agent wallets

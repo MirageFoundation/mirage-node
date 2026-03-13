@@ -444,7 +444,6 @@ def is_subscriber(addr: str) -> bool:
     try:
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
-            # Prefer case-insensitive match via LOWER()
             cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (addr_lc,))
             row = cur.fetchone()
             level = int(row[0]) if row and row[0] is not None else 0
@@ -1027,7 +1026,9 @@ def core_enable_agent():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_enable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce)
+                base = canon_base_enable_agent(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -1128,7 +1129,9 @@ def core_disable_agent():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_disable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce)
+                base = canon_base_disable_agent(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -1268,7 +1271,9 @@ def core_set_agents():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_set_agents(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agents, nonce=nonce)
+                base = canon_base_set_agents(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agents, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -1613,7 +1618,9 @@ def core_unblock_post():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unblock_post(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
+                base = canon_base_unblock_post(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1705,7 +1712,9 @@ def core_unblock_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unblock_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
+                base = canon_base_unblock_user(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1830,7 +1839,9 @@ def core_block_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_block_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce)
+                base = canon_base_block_topic(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1923,7 +1934,9 @@ def core_unblock_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unblock_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce)
+                base = canon_base_unblock_topic(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2028,7 +2041,9 @@ def core_follow_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_follow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce)
+                base = canon_base_follow_user(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2119,7 +2134,9 @@ def core_unfollow_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unfollow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce)
+                base = canon_base_unfollow_user(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2216,7 +2233,9 @@ def core_follow_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_follow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce)
+                base = canon_base_follow_topic(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2304,7 +2323,9 @@ def core_unfollow_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unfollow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce)
+                base = canon_base_unfollow_topic(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -3556,7 +3577,9 @@ def core_vote():
                 return jsonify({"error": "invalid last_block_hash"}), 400
                 # PoW precheck: mirror chain's validatePoWBytesArgon2 threshold
             try:
-                base = canon_base_vote(pub_dec, last_block_hash, int(difficulty), timestamp, target, int(direction), nonce=nonce)
+                base = canon_base_vote(
+                    pub_dec, last_block_hash, int(difficulty), timestamp, target, int(direction), nonce=nonce
+                )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
