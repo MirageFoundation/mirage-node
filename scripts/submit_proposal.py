@@ -950,8 +950,12 @@ def main():
         log(f"TX hash: {txhash}")
         info(f"TX hash: {txhash}")
 
-        # Retry tx query - it may take a few seconds to be included in a block
+        # Retry tx query - it may take a few seconds to be included in a block.
+        # NOTE: If CometBFT tx indexing is disabled (indexer="null"), `q tx`
+        # will always fail. In that case we skip verification and fall back
+        # to finding the proposal by title after waiting for block inclusion.
         tx_verified = False
+        tx_index_disabled = False
         max_attempts = 15
         for attempt in range(1, max_attempts + 1):
             print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
@@ -989,8 +993,14 @@ def main():
                     tx_verified = True
                     break
                 else:
-                    # Check if it's just "not found" (still pending)
-                    if "not found" in result.stderr.lower():
+                    combined_err = (result.stderr + result.stdout).lower()
+                    if "indexing is disabled" in combined_err:
+                        print()
+                        log("TX indexing is disabled (indexer=null) — cannot verify via q tx")
+                        info("ℹ️  TX indexing disabled — waiting for block inclusion instead")
+                        tx_index_disabled = True
+                        break
+                    elif "not found" in combined_err:
                         log_debug(f"TX not found yet (attempt {attempt}), retrying...")
                         continue
                     else:
@@ -1001,6 +1011,13 @@ def main():
                 print()  # newline after progress
                 log(f"TX verification error: {e}")
                 break
+
+        if tx_index_disabled:
+            # Wait a few blocks for the TX to be committed, then proceed
+            # to proposal discovery by title
+            info("   Waiting for TX to be included in a block...")
+            time.sleep(5)
+            tx_verified = True  # assume success; proposal lookup will confirm
 
         if not tx_verified:
             print()  # newline after progress
