@@ -1848,7 +1848,9 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 // ============================================
 
 // GetBridgeAttestation retrieves a bridge attestation by source_chain and burn_id.
-// Returns an error if multiple attestations exist for the same burn.
+// If multiple attestations exist (conflicting params from a malicious validator),
+// returns the first one found to prevent query DoS. Consensus logic uses
+// GetBridgeAttestationWithParams which is scoped to exact (recipient, amount).
 func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string) (*types.BridgeAttestation, bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
 	prefix := []byte(fmt.Sprintf("%s%s/%s/", types.BridgeAttestationsPrefix, sourceChain, burnID))
