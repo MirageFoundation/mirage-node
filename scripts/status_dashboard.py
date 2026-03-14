@@ -2061,21 +2061,47 @@ def _get_directory_size(path: str) -> Optional[int]:
 
 
 def _get_mirage_dir_sizes() -> tuple[Optional[int], dict[str, int]]:
-    """Return (total_size, {subdir_name: size}) for ~/.mirage."""
+    """Return (total_size, {subdir_name: size}) for ~/.mirage.
+
+    Scans every immediate subdirectory so nothing is missed.
+    """
     mirage_home = os.path.expanduser("~/.mirage")
     if not os.path.isdir(mirage_home):
         return None, {}
 
     total = _get_directory_size(mirage_home)
     breakdown: dict[str, int] = {}
-    for name in ("postgres", "node", "logs", "backups", "orchestrator"):
-        subdir = os.path.join(mirage_home, name)
-        if os.path.isdir(subdir):
-            sz = _get_directory_size(subdir)
-            if sz is not None and sz > 0:
-                breakdown[name] = sz
+    try:
+        with os.scandir(mirage_home) as it:
+            for entry in it:
+                if entry.is_dir(follow_symlinks=False):
+                    sz = _get_directory_size(entry.path)
+                    if sz is not None and sz > 0:
+                        breakdown[entry.name] = sz
+    except (PermissionError, OSError):
+        pass
 
     return total, breakdown
+
+
+def check_disk_usage() -> ServiceStatus:
+    """Report ~/.mirage data footprint with per-subdirectory breakdown."""
+    mirage_home = os.path.expanduser("~/.mirage")
+    if not os.path.isdir(mirage_home):
+        return ServiceStatus(
+            name="Disk Usage", status=Status.UNKNOWN, message="No ~/.mirage", details={}
+        )
+
+    total, breakdown = _get_mirage_dir_sizes()
+    if total is None:
+        return ServiceStatus(
+            name="Disk Usage", status=Status.WARN, message="Scan failed", details={}
+        )
+
+    details = {"total": total, "breakdown": breakdown}
+    return ServiceStatus(
+        name="Disk Usage", status=Status.OK, message=_format_bytes(total), details=details
+    )
 
 
 def check_system() -> ServiceStatus:
@@ -2112,13 +2138,6 @@ def check_system() -> ServiceStatus:
                 issues.append(("error", "mirage_disk_critical"))
             elif free_gb < SYSTEM_STORAGE_WARN_GB:
                 issues.append(("warn", "mirage_disk_low"))
-
-    # ~/.mirage actual directory size + breakdown
-    mirage_total, mirage_breakdown = _get_mirage_dir_sizes()
-    if mirage_total is not None:
-        details["mirage_dir_size"] = mirage_total
-        if mirage_breakdown:
-            details["mirage_dir_breakdown"] = mirage_breakdown
 
     # Memory
     mem = _get_memory_info()
@@ -2345,6 +2364,13 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 err = str(err)[:12]
                 lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}")
 
+    elif status.name == "Disk Usage":
+        breakdown = details.get("breakdown", {})
+        if breakdown:
+            sorted_dirs = sorted(breakdown.items(), key=lambda x: -x[1])
+            for name, sz in sorted_dirs[:5]:
+                lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {_format_bytes(sz)}")
+
     elif status.name == "Orchestrator":
         if details.get("network"):
             network = details["network"]
@@ -2399,16 +2425,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(
                 f"{bullet}{Colors.DIM}Data vol:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
             )
-
-        # ~/.mirage directory size + per-subdirectory breakdown
-        if "mirage_dir_size" in details:
-            total_size = details["mirage_dir_size"]
-            lines.append(f"{bullet}{Colors.DIM}~/.mirage:{Colors.RESET} {_format_bytes(total_size)}")
-            breakdown = details.get("mirage_dir_breakdown", {})
-            if breakdown:
-                sorted_dirs = sorted(breakdown.items(), key=lambda x: -x[1])
-                parts = [f"{n} {_format_bytes(s)}" for n, s in sorted_dirs[:3]]
-                lines.append(f"  {Colors.DIM}{', '.join(parts)}{Colors.RESET}")
 
         # Memory usage
         if "mem_used_pct" in details:
@@ -2466,6 +2482,7 @@ def render_dashboard(refresh_secs: int):
         check_indexer(),
         check_endpoints(),
         check_orchestrator(),
+        check_disk_usage(),
         check_system(),
     ]
 
@@ -2474,7 +2491,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "PostgreSQL", "Backend", "Indexer", "Endpoints", "System")
+        or s.name in ("CometBFT", "PostgreSQL", "Backend", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
     # Render header
