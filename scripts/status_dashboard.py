@@ -2088,20 +2088,14 @@ def check_disk_usage() -> ServiceStatus:
     """Report ~/.mirage data footprint with per-subdirectory breakdown."""
     mirage_home = os.path.expanduser("~/.mirage")
     if not os.path.isdir(mirage_home):
-        return ServiceStatus(
-            name="Disk Usage", status=Status.UNKNOWN, message="No ~/.mirage", details={}
-        )
+        return ServiceStatus(name="Disk Usage", status=Status.UNKNOWN, message="No ~/.mirage", details={})
 
     total, breakdown = _get_mirage_dir_sizes()
     if total is None:
-        return ServiceStatus(
-            name="Disk Usage", status=Status.WARN, message="Scan failed", details={}
-        )
+        return ServiceStatus(name="Disk Usage", status=Status.WARN, message="Scan failed", details={})
 
     details = {"total": total, "breakdown": breakdown}
-    return ServiceStatus(
-        name="Disk Usage", status=Status.OK, message=_format_bytes(total), details=details
-    )
+    return ServiceStatus(name="Disk Usage", status=Status.OK, message=f"Total: {_format_bytes(total)}", details=details)
 
 
 def check_system() -> ServiceStatus:
