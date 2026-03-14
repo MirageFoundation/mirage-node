@@ -63,6 +63,9 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 - Full security audit for every module.
 
 
+# add something for cloudflare:
+- so that videos and images with zero views get deleted
+
 # CLEANUP!!!
 - now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
 

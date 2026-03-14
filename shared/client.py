@@ -133,6 +133,15 @@ def _log(msg: str) -> None:
         pass
 
 
+def _generate_envelope_nonce() -> int:
+    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    if nonce <= 0:
+        raise RuntimeError("envelope_nonce must be > 0")
+    if nonce > 0xFFFFFFFFFFFFFFFF:
+        raise RuntimeError("envelope_nonce exceeds uint64 range")
+    return nonce
+
+
 def _retry_delay_seconds(attempt: int, retry_after_header: str | None = None) -> float:
     if retry_after_header:
         try:
@@ -527,7 +536,7 @@ def set_username(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
-    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    nonce = _generate_envelope_nonce()
 
     if skip_pow:
         # Subscriber mode: no PoW, difficulty=0, pow=0
@@ -608,7 +617,8 @@ def post(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
-    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    nonce = _generate_envelope_nonce()
+    _log(f"[post] envelope_nonce={nonce} skip_pow={skip_pow} media_count={len(media or [])}")
 
     if skip_pow:
         # Subscriber mode: no PoW
@@ -717,7 +727,7 @@ def vote(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
-    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    nonce = _generate_envelope_nonce()
 
     if skip_pow:
         # Subscriber mode: no PoW

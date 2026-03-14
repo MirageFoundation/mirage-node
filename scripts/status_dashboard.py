@@ -2333,17 +2333,10 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             extra = f" (keep {keep:,})" if keep else ""
             lines.append(f"{bullet}{Colors.DIM}Pruning:{Colors.RESET} {pruning}{extra}")
         snap_count = details.get("snapshot_count", 0)
-        snap_interval = details.get("snapshot_interval")
-        snap_size = details.get("snapshot_total_size", 0)
-        if snap_interval:
-            size_str = f", {_format_bytes(snap_size)}" if snap_size > 0 else ""
-            lines.append(
-                f"{bullet}{Colors.DIM}Snapshots:{Colors.RESET} {snap_count} (every {snap_interval:,}){size_str}"
-            )
         snap_heights = details.get("snapshot_heights", [])
         if snap_heights:
             latest = snap_heights[0]
-            lines.append(f"{bullet}{Colors.DIM}Latest snap:{Colors.RESET} #{latest:,}")
+            lines.append(f"{bullet}{Colors.DIM}Snapshot:{Colors.RESET} #{latest:,} ({snap_count} total)")
 
     elif status.name == "Validator":
         if details.get("moniker"):
@@ -2536,8 +2529,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name
-        in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Endpoints", "Disk Usage", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
     # Render header
