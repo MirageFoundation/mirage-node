@@ -736,6 +736,29 @@ def check_retention() -> ServiceStatus:
     for candidate in (min_retain_blocks, evidence_max_age_blocks, snapshot_retention):
         effective = min_non_zero(effective, candidate)
 
+    # Count actual snapshots on disk
+    snapshot_count = 0
+    snapshot_total_size = 0
+    snapshot_heights: list[int] = []
+    snapshots_dir = os.path.join(node_home, "data", "snapshots")
+    try:
+        if os.path.isdir(snapshots_dir):
+            with os.scandir(snapshots_dir) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        try:
+                            h = int(entry.name)
+                            snapshot_heights.append(h)
+                            sz = _get_directory_size(entry.path)
+                            if sz is not None:
+                                snapshot_total_size += sz
+                        except ValueError:
+                            pass
+            snapshot_count = len(snapshot_heights)
+            snapshot_heights.sort(reverse=True)
+    except (PermissionError, OSError) as e:
+        debug_log(f"retention: snapshot scan failed: {e}")
+
     details.update(
         {
             "retained_blocks": retained,
@@ -743,6 +766,11 @@ def check_retention() -> ServiceStatus:
             "min_retain_blocks": min_retain_blocks,
             "evidence_max_age_blocks": evidence_max_age_blocks,
             "snapshot_retention_blocks": snapshot_retention,
+            "snapshot_interval": snapshot_interval,
+            "snapshot_keep_recent": snapshot_keep_recent,
+            "snapshot_count": snapshot_count,
+            "snapshot_total_size": snapshot_total_size,
+            "snapshot_heights": snapshot_heights[:5],
             "pruning_strategy": pruning_strategy,
             "pruning_keep_recent": pruning_keep_recent,
             "pruning_interval": pruning_interval,
@@ -2295,6 +2323,28 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                     f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_GREEN}{age_human}{Colors.RESET}"
                 )
 
+    elif status.name == "Retention":
+        retained = details.get("retained_blocks")
+        if retained is not None:
+            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
+        pruning = details.get("pruning_strategy")
+        keep = details.get("pruning_keep_recent")
+        if pruning:
+            extra = f" (keep {keep:,})" if keep else ""
+            lines.append(f"{bullet}{Colors.DIM}Pruning:{Colors.RESET} {pruning}{extra}")
+        snap_count = details.get("snapshot_count", 0)
+        snap_interval = details.get("snapshot_interval")
+        snap_size = details.get("snapshot_total_size", 0)
+        if snap_interval:
+            size_str = f", {_format_bytes(snap_size)}" if snap_size > 0 else ""
+            lines.append(
+                f"{bullet}{Colors.DIM}Snapshots:{Colors.RESET} {snap_count} (every {snap_interval:,}){size_str}"
+            )
+        snap_heights = details.get("snapshot_heights", [])
+        if snap_heights:
+            latest = snap_heights[0]
+            lines.append(f"{bullet}{Colors.DIM}Latest snap:{Colors.RESET} #{latest:,}")
+
     elif status.name == "Validator":
         if details.get("moniker"):
             moniker = details["moniker"]
@@ -2470,6 +2520,7 @@ def render_dashboard(refresh_secs: int):
     # Collect all statuses -- ops-focused set only
     statuses = [
         check_node(),
+        check_retention(),
         check_validator(),
         check_postgres(),
         check_backend(),
@@ -2485,7 +2536,8 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "PostgreSQL", "Backend", "Indexer", "Endpoints", "Disk Usage", "System")
+        or s.name
+        in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
     # Render header
