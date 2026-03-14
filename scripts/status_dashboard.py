@@ -2421,6 +2421,16 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lag_color = Colors.BRIGHT_GREEN if lag <= 10 else Colors.BRIGHT_YELLOW
             lines.append(f"{bullet}{Colors.DIM}Lag:{Colors.RESET} {lag_color}{lag}{Colors.RESET} blocks")
 
+    elif status.name == "Rewards":
+        if details.get("payouts_enabled"):
+            lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} {Colors.BRIGHT_GREEN}ON{Colors.RESET}")
+            pool_balance = details.get("pool_balance")
+            if pool_balance is not None:
+                balance_mirage = pool_balance / 1_000_000
+                lines.append(f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {balance_mirage:,.0f} MIRAGE")
+        else:
+            lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} OFF")
+
     elif status.name == "Endpoints":
         endpoints = details.get("endpoints", {})
         for name, info in endpoints.items():
@@ -2548,6 +2558,7 @@ def render_dashboard(refresh_secs: int):
         check_validator(),
         check_postgres(),
         check_backend(),
+        check_rewards(),
         check_indexer(),
         check_endpoints(),
         check_orchestrator(),
@@ -2560,7 +2571,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Endpoints", "Disk Usage", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
     # Render header
