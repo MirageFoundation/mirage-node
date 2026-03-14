@@ -2340,7 +2340,12 @@ def format_card_content(status: ServiceStatus) -> list[str]:
 
     elif status.name == "Retention":
         retained = details.get("retained_blocks")
-        if retained is not None:
+        expected = details.get("expected_blocks")
+        if retained is not None and expected is not None:
+            lines.append(
+                f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} / {expected:,} blocks"
+            )
+        elif retained is not None:
             lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
         pruning = details.get("pruning_strategy")
         keep = details.get("pruning_keep_recent")

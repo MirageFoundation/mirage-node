@@ -111,6 +111,10 @@ from shared.canon import (
     canon_base_set_username as _canon_base_set_username,
     canon_base_post as _canon_base_post,
     canon_base_vote as _canon_base_vote,
+    canon_base_annotate as _canon_base_annotate,
+    canon_base_block_post as _canon_base_block_post,
+    canon_base_unblock_post as _canon_base_unblock_post,
+    canon_base_delete as _canon_base_delete,
     canon_signed_with_pow,
     uvarint,
 )
@@ -798,3 +802,122 @@ def comment(
         tag="",
         skip_pow=skip_pow,
     )
+
+
+# ---------------------------------------------------------------------------
+# Agent / moderation operations (all agent-tier, no PoW)
+# ---------------------------------------------------------------------------
+
+def _agent_sign_and_submit(
+    backend: str,
+    wallet: LocalWallet,
+    endpoint: str,
+    canon_fn,
+    canon_args: tuple,
+    extra_payload: dict,
+) -> dict:
+    """Shared helper for agent-tier operations that never need PoW."""
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = st["last_block_hash"]
+    pub = wallet.public_key().public_key_bytes
+    ts_ms = int(time.time() * 1000)
+    nonce = _generate_envelope_nonce()
+
+    base = canon_fn(pub, bytes.fromhex(lb), 0, ts_ms, *canon_args, nonce=nonce)
+    signed = canon_signed_with_pow(base, 0)
+    sig = sign_canonical(wallet, signed)
+
+    payload = {
+        "pubkey": base64.b64encode(pub).decode(),
+        "signature": base64.b64encode(sig).decode(),
+        "last_block_hash": lb,
+        "timestamp": ts_ms,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": 0,
+        "pow": 0,
+        **extra_payload,
+    }
+    _log(f"[{endpoint.rsplit('/', 1)[-1]}] envelope_nonce={nonce}")
+    r = _request_with_retries("POST", f"{backend}{endpoint}", json=payload, timeout=20)
+    try:
+        return r.json()
+    except Exception:
+        return {"status": r.status_code, "text": r.text[:200]}
+
+
+def block_post(backend: str, wallet: LocalWallet, target: str) -> dict:
+    return _agent_sign_and_submit(
+        backend, wallet, "/api/core/block_post",
+        _canon_base_block_post, (target,),
+        {"target": target},
+    )
+
+
+def unblock_post(backend: str, wallet: LocalWallet, target: str) -> dict:
+    return _agent_sign_and_submit(
+        backend, wallet, "/api/core/unblock_post",
+        _canon_base_unblock_post, (target,),
+        {"target": target},
+    )
+
+
+def delete_post(backend: str, wallet: LocalWallet, target: str) -> dict:
+    return _agent_sign_and_submit(
+        backend, wallet, "/api/core/delete_post",
+        _canon_base_delete, (target,),
+        {"target": target},
+    )
+
+
+def annotate(
+    backend: str,
+    wallet: LocalWallet,
+    override: str,
+    topic: str = ".",
+    title: str = ".",
+    content: str = ".",
+    tag: str = ".",
+    media: list[str] | None = None,
+    appendix: str = ".",
+) -> dict:
+    """Annotate (agent overlay) a post. Sentinel '.' means no change."""
+    if media is None:
+        media = ["."]
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = st["last_block_hash"]
+    pub = wallet.public_key().public_key_bytes
+    ts_ms = int(time.time() * 1000)
+    nonce = _generate_envelope_nonce()
+
+    base = _canon_base_annotate(
+        pub, bytes.fromhex(lb), 0, ts_ms,
+        topic, title, content, tag, override,
+        media=media, appendix=appendix, nonce=nonce,
+    )
+    signed = canon_signed_with_pow(base, 0)
+    sig = sign_canonical(wallet, signed)
+
+    payload = {
+        "pubkey": base64.b64encode(pub).decode(),
+        "signature": base64.b64encode(sig).decode(),
+        "last_block_hash": lb,
+        "timestamp": ts_ms,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": 0,
+        "pow": 0,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "override": override,
+        "media": media,
+        "appendix": appendix,
+    }
+    _log(f"[annotate] envelope_nonce={nonce} override={override[:16]}...")
+    r = _request_with_retries("POST", f"{backend}/api/core/annotate", json=payload, timeout=20)
+    try:
+        return r.json()
+    except Exception:
+        return {"status": r.status_code, "text": r.text[:200]}
