@@ -805,27 +805,60 @@ def comment(
 
 
 # ---------------------------------------------------------------------------
-# Agent / moderation operations (all agent-tier, no PoW)
+# Moderation operations (supports PoW when required)
 # ---------------------------------------------------------------------------
 
-def _agent_sign_and_submit(
+
+def _require_json_response(resp: requests.Response, endpoint: str) -> dict:
+    content_type = resp.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        raise RuntimeError(f"{endpoint} response not JSON (HTTP {resp.status_code}): {resp.text[:200]}")
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise RuntimeError(f"{endpoint} response invalid JSON (HTTP {resp.status_code}): {resp.text[:200]}") from exc
+
+
+def _prepare_envelope(backend: str, wallet: LocalWallet, skip_pow: Optional[bool]) -> tuple:
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = st.get("last_block_hash")
+    if not lb:
+        raise RuntimeError(f"get_status response missing last_block_hash for {addr}")
+    diff = int(st["pow_difficulty"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
+
+    if skip_pow is None:
+        skip_pow = is_subscriber(backend, addr)
+
+    pub = wallet.public_key().public_key_bytes
+    ts_ms = int(time.time() * 1000)
+    nonce = _generate_envelope_nonce()
+    return pub, lb, diff, base_bits, pow_factor, ts_ms, nonce, skip_pow
+
+
+def _submit_envelope(
     backend: str,
     wallet: LocalWallet,
     endpoint: str,
     canon_fn,
     canon_args: tuple,
     extra_payload: dict,
+    skip_pow: Optional[bool],
+    canon_kwargs: dict | None = None,
 ) -> dict:
-    """Shared helper for agent-tier operations that never need PoW."""
-    addr = str(wallet.address())
-    st = get_status(backend, address=addr)
-    lb = st["last_block_hash"]
-    pub = wallet.public_key().public_key_bytes
-    ts_ms = int(time.time() * 1000)
-    nonce = _generate_envelope_nonce()
+    pub, lb, diff, base_bits, pow_factor, ts_ms, nonce, skip_pow = _prepare_envelope(backend, wallet, skip_pow)
+    declared = 0 if skip_pow else diff
+    kwargs = canon_kwargs or {}
+    base = canon_fn(pub, bytes.fromhex(lb), declared, ts_ms, *canon_args, nonce=nonce, **kwargs)
 
-    base = canon_fn(pub, bytes.fromhex(lb), 0, ts_ms, *canon_args, nonce=nonce)
-    signed = canon_signed_with_pow(base, 0)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+
+    signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
 
     payload = {
@@ -834,39 +867,48 @@ def _agent_sign_and_submit(
         "last_block_hash": lb,
         "timestamp": ts_ms,
         "envelope_nonce": str(nonce),
-        "pow_difficulty": 0,
-        "pow": 0,
+        "pow_difficulty": declared,
+        "pow": int(proof),
         **extra_payload,
     }
-    _log(f"[{endpoint.rsplit('/', 1)[-1]}] envelope_nonce={nonce}")
+    _log(f"[{endpoint.rsplit('/', 1)[-1]}] envelope_nonce={nonce} skip_pow={skip_pow}")
     r = _request_with_retries("POST", f"{backend}{endpoint}", json=payload, timeout=20)
-    try:
-        return r.json()
-    except Exception:
-        return {"status": r.status_code, "text": r.text[:200]}
+    return _require_json_response(r, endpoint)
 
 
-def block_post(backend: str, wallet: LocalWallet, target: str) -> dict:
-    return _agent_sign_and_submit(
-        backend, wallet, "/api/core/block_post",
-        _canon_base_block_post, (target,),
+def block_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Optional[bool] = None) -> dict:
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/block_post",
+        _canon_base_block_post,
+        (target,),
         {"target": target},
+        skip_pow,
     )
 
 
-def unblock_post(backend: str, wallet: LocalWallet, target: str) -> dict:
-    return _agent_sign_and_submit(
-        backend, wallet, "/api/core/unblock_post",
-        _canon_base_unblock_post, (target,),
+def unblock_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Optional[bool] = None) -> dict:
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/unblock_post",
+        _canon_base_unblock_post,
+        (target,),
         {"target": target},
+        skip_pow,
     )
 
 
-def delete_post(backend: str, wallet: LocalWallet, target: str) -> dict:
-    return _agent_sign_and_submit(
-        backend, wallet, "/api/core/delete_post",
-        _canon_base_delete, (target,),
+def delete_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Optional[bool] = None) -> dict:
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/delete_post",
+        _canon_base_delete,
+        (target,),
         {"target": target},
+        skip_pow,
     )
 
 
@@ -880,44 +922,26 @@ def annotate(
     tag: str = ".",
     media: list[str] | None = None,
     appendix: str = ".",
+    skip_pow: Optional[bool] = None,
 ) -> dict:
-    """Annotate (agent overlay) a post. Sentinel '.' means no change."""
+    """Annotate (overlay) a post. Sentinel '.' means no change."""
     if media is None:
         media = ["."]
-    addr = str(wallet.address())
-    st = get_status(backend, address=addr)
-    lb = st["last_block_hash"]
-    pub = wallet.public_key().public_key_bytes
-    ts_ms = int(time.time() * 1000)
-    nonce = _generate_envelope_nonce()
-
-    base = _canon_base_annotate(
-        pub, bytes.fromhex(lb), 0, ts_ms,
-        topic, title, content, tag, override,
-        media=media, appendix=appendix, nonce=nonce,
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/annotate",
+        _canon_base_annotate,
+        (topic, title, content, tag, override),
+        {
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "tag": tag,
+            "override": override,
+            "media": media,
+            "appendix": appendix,
+        },
+        skip_pow,
+        canon_kwargs={"media": media, "appendix": appendix},
     )
-    signed = canon_signed_with_pow(base, 0)
-    sig = sign_canonical(wallet, signed)
-
-    payload = {
-        "pubkey": base64.b64encode(pub).decode(),
-        "signature": base64.b64encode(sig).decode(),
-        "last_block_hash": lb,
-        "timestamp": ts_ms,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": 0,
-        "pow": 0,
-        "topic": topic,
-        "title": title,
-        "content": content,
-        "tag": tag,
-        "override": override,
-        "media": media,
-        "appendix": appendix,
-    }
-    _log(f"[annotate] envelope_nonce={nonce} override={override[:16]}...")
-    r = _request_with_retries("POST", f"{backend}/api/core/annotate", json=payload, timeout=20)
-    try:
-        return r.json()
-    except Exception:
-        return {"status": r.status_code, "text": r.text[:200]}
