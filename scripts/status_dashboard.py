@@ -1005,12 +1005,21 @@ def check_validator() -> ServiceStatus:
         except Exception:
             pass
 
+        # Payer balance — if this hits 0 every tx fails
+        payer_addr = _get_validator_payer_address()
+        balance_mirage = None
+        if payer_addr:
+            raw_balance = _query_balance_rest(payer_addr)
+            if raw_balance is not None:
+                balance_mirage = raw_balance / 1_000_000
+
         base_details = {
             "configured": True,
             "moniker": moniker,
             "tokens": tokens,
             "power_pct": power_pct,
             "voting_power": voting_power,
+            "balance_mirage": balance_mirage,
         }
 
         if jailed:
@@ -1040,11 +1049,17 @@ def check_validator() -> ServiceStatus:
             )
 
         if in_set:
+            active_details = {**base_details, "active": True, "voting_power": voting_power}
+            if balance_mirage is not None and balance_mirage < SERVER_BALANCE_ERROR:
+                return ServiceStatus(
+                    name="Validator", status=Status.ERROR, message="Balance critical", details=active_details
+                )
+            if balance_mirage is not None and balance_mirage < SERVER_BALANCE_WARN:
+                return ServiceStatus(
+                    name="Validator", status=Status.WARN, message="Balance low", details=active_details
+                )
             return ServiceStatus(
-                name="Validator",
-                status=Status.OK,
-                message="Active",
-                details={**base_details, "active": True, "voting_power": voting_power},
+                name="Validator", status=Status.OK, message="Active", details=active_details
             )
         else:
             return ServiceStatus(
@@ -2356,6 +2371,17 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if details.get("power_pct") is not None:
             pct = details["power_pct"]
             lines.append(f"{bullet}{Colors.DIM}Power:{Colors.RESET} {pct:.2f}%")
+        balance_mirage = details.get("balance_mirage")
+        if balance_mirage is not None:
+            if balance_mirage < SERVER_BALANCE_ERROR:
+                bal_color = Colors.BRIGHT_RED
+            elif balance_mirage < SERVER_BALANCE_WARN:
+                bal_color = Colors.BRIGHT_YELLOW
+            else:
+                bal_color = Colors.BRIGHT_GREEN
+            lines.append(
+                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}"
+            )
         if details.get("tombstoned"):
             lines.append(f"{bullet}{Colors.BRIGHT_RED}TOMBSTONED (permanent){Colors.RESET}")
         elif details.get("jailed"):
