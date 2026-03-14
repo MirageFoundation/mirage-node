@@ -111,6 +111,10 @@ from shared.canon import (
     canon_base_set_username as _canon_base_set_username,
     canon_base_post as _canon_base_post,
     canon_base_vote as _canon_base_vote,
+    canon_base_annotate as _canon_base_annotate,
+    canon_base_block_post as _canon_base_block_post,
+    canon_base_unblock_post as _canon_base_unblock_post,
+    canon_base_delete as _canon_base_delete,
     canon_signed_with_pow,
     uvarint,
 )
@@ -131,6 +135,15 @@ def _log(msg: str) -> None:
         print(msg, flush=True)
     except Exception:
         pass
+
+
+def _generate_envelope_nonce() -> int:
+    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    if nonce <= 0:
+        raise RuntimeError("envelope_nonce must be > 0")
+    if nonce > 0xFFFFFFFFFFFFFFFF:
+        raise RuntimeError("envelope_nonce exceeds uint64 range")
+    return nonce
 
 
 def _retry_delay_seconds(attempt: int, retry_after_header: str | None = None) -> float:
@@ -527,7 +540,7 @@ def set_username(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
-    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    nonce = _generate_envelope_nonce()
 
     if skip_pow:
         # Subscriber mode: no PoW, difficulty=0, pow=0
@@ -608,7 +621,8 @@ def post(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
-    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    nonce = _generate_envelope_nonce()
+    _log(f"[post] envelope_nonce={nonce} skip_pow={skip_pow} media_count={len(media or [])}")
 
     if skip_pow:
         # Subscriber mode: no PoW
@@ -717,7 +731,7 @@ def vote(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
-    nonce = int(time.time_ns()) ^ random.getrandbits(32)
+    nonce = _generate_envelope_nonce()
 
     if skip_pow:
         # Subscriber mode: no PoW
@@ -787,4 +801,147 @@ def comment(
         target=parent,
         tag="",
         skip_pow=skip_pow,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Moderation operations (supports PoW when required)
+# ---------------------------------------------------------------------------
+
+
+def _require_json_response(resp: requests.Response, endpoint: str) -> dict:
+    content_type = resp.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        raise RuntimeError(f"{endpoint} response not JSON (HTTP {resp.status_code}): {resp.text[:200]}")
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise RuntimeError(f"{endpoint} response invalid JSON (HTTP {resp.status_code}): {resp.text[:200]}") from exc
+
+
+def _prepare_envelope(backend: str, wallet: LocalWallet, skip_pow: Optional[bool]) -> tuple:
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = st.get("last_block_hash")
+    if not lb:
+        raise RuntimeError(f"get_status response missing last_block_hash for {addr}")
+    diff = int(st["pow_difficulty"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
+
+    if skip_pow is None:
+        skip_pow = is_subscriber(backend, addr)
+
+    pub = wallet.public_key().public_key_bytes
+    ts_ms = int(time.time() * 1000)
+    nonce = _generate_envelope_nonce()
+    return pub, lb, diff, base_bits, pow_factor, ts_ms, nonce, skip_pow
+
+
+def _submit_envelope(
+    backend: str,
+    wallet: LocalWallet,
+    endpoint: str,
+    canon_fn,
+    canon_args: tuple,
+    extra_payload: dict,
+    skip_pow: Optional[bool],
+    canon_kwargs: dict | None = None,
+) -> dict:
+    pub, lb, diff, base_bits, pow_factor, ts_ms, nonce, skip_pow = _prepare_envelope(backend, wallet, skip_pow)
+    declared = 0 if skip_pow else diff
+    kwargs = canon_kwargs or {}
+    base = canon_fn(pub, bytes.fromhex(lb), declared, ts_ms, *canon_args, nonce=nonce, **kwargs)
+
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+
+    payload = {
+        "pubkey": base64.b64encode(pub).decode(),
+        "signature": base64.b64encode(sig).decode(),
+        "last_block_hash": lb,
+        "timestamp": ts_ms,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": declared,
+        "pow": int(proof),
+        **extra_payload,
+    }
+    _log(f"[{endpoint.rsplit('/', 1)[-1]}] envelope_nonce={nonce} skip_pow={skip_pow}")
+    r = _request_with_retries("POST", f"{backend}{endpoint}", json=payload, timeout=20)
+    return _require_json_response(r, endpoint)
+
+
+def block_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Optional[bool] = None) -> dict:
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/block_post",
+        _canon_base_block_post,
+        (target,),
+        {"target": target},
+        skip_pow,
+    )
+
+
+def unblock_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Optional[bool] = None) -> dict:
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/unblock_post",
+        _canon_base_unblock_post,
+        (target,),
+        {"target": target},
+        skip_pow,
+    )
+
+
+def delete_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Optional[bool] = None) -> dict:
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/delete_post",
+        _canon_base_delete,
+        (target,),
+        {"target": target},
+        skip_pow,
+    )
+
+
+def annotate(
+    backend: str,
+    wallet: LocalWallet,
+    override: str,
+    topic: str = ".",
+    title: str = ".",
+    content: str = ".",
+    tag: str = ".",
+    media: list[str] | None = None,
+    appendix: str = ".",
+    skip_pow: Optional[bool] = None,
+) -> dict:
+    """Annotate (overlay) a post. Sentinel '.' means no change."""
+    if media is None:
+        media = ["."]
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/annotate",
+        _canon_base_annotate,
+        (topic, title, content, tag, override),
+        {
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "tag": tag,
+            "override": override,
+            "media": media,
+            "appendix": appendix,
+        },
+        skip_pow,
+        canon_kwargs={"media": media, "appendix": appendix},
     )

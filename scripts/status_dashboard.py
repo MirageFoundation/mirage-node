@@ -2,8 +2,8 @@
 """
 Mirage Unified Status Dashboard
 
-A unified health check dashboard combining all service statuses in a
-visually appealing card/tile layout.
+An ops-focused health check dashboard showing the highest-signal service
+statuses in a card/tile layout.
 
 Services monitored:
   - CometBFT (blockchain node)
@@ -11,7 +11,8 @@ Services monitored:
   - PostgreSQL database
   - Backend API
   - Indexer
-  - Caddy (web server)
+  - Endpoints (Caddy + public chain RPC/REST/gRPC)
+  - System (disk, ~/.mirage usage, memory, CPU)
   - Bridge Orchestrator (if configured)
 """
 
@@ -735,6 +736,29 @@ def check_retention() -> ServiceStatus:
     for candidate in (min_retain_blocks, evidence_max_age_blocks, snapshot_retention):
         effective = min_non_zero(effective, candidate)
 
+    # Count actual snapshots on disk
+    snapshot_count = 0
+    snapshot_total_size = 0
+    snapshot_heights: list[int] = []
+    snapshots_dir = os.path.join(node_home, "data", "snapshots")
+    try:
+        if os.path.isdir(snapshots_dir):
+            with os.scandir(snapshots_dir) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        try:
+                            h = int(entry.name)
+                            snapshot_heights.append(h)
+                            sz = _get_directory_size(entry.path)
+                            if sz is not None:
+                                snapshot_total_size += sz
+                        except ValueError:
+                            pass
+            snapshot_count = len(snapshot_heights)
+            snapshot_heights.sort(reverse=True)
+    except (PermissionError, OSError) as e:
+        debug_log(f"retention: snapshot scan failed: {e}")
+
     details.update(
         {
             "retained_blocks": retained,
@@ -742,6 +766,11 @@ def check_retention() -> ServiceStatus:
             "min_retain_blocks": min_retain_blocks,
             "evidence_max_age_blocks": evidence_max_age_blocks,
             "snapshot_retention_blocks": snapshot_retention,
+            "snapshot_interval": snapshot_interval,
+            "snapshot_keep_recent": snapshot_keep_recent,
+            "snapshot_count": snapshot_count,
+            "snapshot_total_size": snapshot_total_size,
+            "snapshot_heights": snapshot_heights[:5],
             "pruning_strategy": pruning_strategy,
             "pruning_keep_recent": pruning_keep_recent,
             "pruning_interval": pruning_interval,
@@ -976,12 +1005,21 @@ def check_validator() -> ServiceStatus:
         except Exception:
             pass
 
+        # Payer balance — if this hits 0 every tx fails
+        payer_addr = _get_validator_payer_address()
+        balance_mirage = None
+        if payer_addr:
+            raw_balance = _query_balance_rest(payer_addr)
+            if raw_balance is not None:
+                balance_mirage = raw_balance / 1_000_000
+
         base_details = {
             "configured": True,
             "moniker": moniker,
             "tokens": tokens,
             "power_pct": power_pct,
             "voting_power": voting_power,
+            "balance_mirage": balance_mirage,
         }
 
         if jailed:
@@ -1011,11 +1049,17 @@ def check_validator() -> ServiceStatus:
             )
 
         if in_set:
+            active_details = {**base_details, "active": True, "voting_power": voting_power}
+            if balance_mirage is not None and balance_mirage < SERVER_BALANCE_ERROR:
+                return ServiceStatus(
+                    name="Validator", status=Status.ERROR, message="Balance critical", details=active_details
+                )
+            if balance_mirage is not None and balance_mirage < SERVER_BALANCE_WARN:
+                return ServiceStatus(
+                    name="Validator", status=Status.WARN, message="Balance low", details=active_details
+                )
             return ServiceStatus(
-                name="Validator",
-                status=Status.OK,
-                message="Active",
-                details={**base_details, "active": True, "voting_power": voting_power},
+                name="Validator", status=Status.OK, message="Active", details=active_details
             )
         else:
             return ServiceStatus(
@@ -1433,130 +1477,17 @@ def check_node_internals() -> ServiceStatus:
     return ServiceStatus(name="Node", status=status, message=message, details=details)
 
 
-def check_caddy() -> ServiceStatus:
-    """Check Caddy web server status by actually making requests."""
-    # Try to get domain from env first, then from Caddyfile
-    domain = os.environ.get("DOMAIN", "")
-
-    # If not in env, read from Caddyfile (more reliable)
-    if not domain:
-        try:
-            with open("/etc/caddy/Caddyfile") as f:
-                content = f.read()
-                # Look for domain (not :80 or www.)
-                for line in content.splitlines():
-                    line = line.strip()
-                    # Skip :80, www., comments, empty lines
-                    if line.startswith(":") or line.startswith("www.") or line.startswith("#") or not line:
-                        continue
-                    # Match domain-like pattern at start of line (before {)
-                    match = re.match(r"^([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", line)
-                    if match:
-                        domain = match.group(1)
-                        break
-        except Exception:
-            pass
-
-    # Strip protocol from domain if present
-    clean_domain = domain
-    if clean_domain.startswith("https://"):
-        clean_domain = clean_domain[8:]
-    elif clean_domain.startswith("http://"):
-        clean_domain = clean_domain[7:]
-
-    # Check if process is running
+def check_endpoints() -> ServiceStatus:
+    """Check Caddy + public chain endpoints (RPC/REST/gRPC)."""
+    # --- Caddy process ---
+    caddy_running = False
     try:
         result = subprocess.run(["pgrep", "-x", "caddy"], capture_output=True, text=True)
-        process_running = result.returncode == 0
+        caddy_running = result.returncode == 0
     except Exception:
-        process_running = False
+        pass
 
-    if not process_running:
-        return ServiceStatus(name="Caddy", status=Status.ERROR, message="Not running", details={"running": False})
-
-    # Actually test HTTP connectivity
-    http_ok = False
-    https_ok = False
-    http_status = None
-    https_status = None
-    response_ms = None
-
-    # Test HTTP on localhost - TCP connect only (backend check already tests the endpoint)
-    ms = tcp_connect_ms("127.0.0.1", 80, timeout_secs=2)
-    if ms is not None:
-        response_ms = ms
-        http_status = ms  # Show latency as the status
-        http_ok = True
-    else:
-        http_status = "refused"
-
-    # If DOMAIN is set, test HTTPS
-    if clean_domain:
-        try:
-            resp = requests.get(f"https://{clean_domain}/api/get_parameters", timeout=5, verify=True)
-            https_status = resp.status_code
-            https_ok = resp.status_code < 500
-        except requests.exceptions.SSLError as e:
-            https_status = "SSL error"
-        except requests.exceptions.ConnectionError:
-            https_status = "refused"
-        except Exception as e:
-            https_status = str(e)[:15]
-
-    details = {
-        "running": True,
-        "domain": clean_domain if clean_domain else None,
-        "http": http_status,
-        "https": https_status if clean_domain else None,
-        "response_ms": response_ms,
-    }
-
-    # Determine status
-    if clean_domain:
-        # If domain is set, HTTPS must work
-        if https_ok:
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.OK,
-                message="HTTPS OK",
-                details=details,
-            )
-        elif http_ok:
-            # HTTP works but HTTPS doesn't - this is bad
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.ERROR,
-                message="HTTPS failed",
-                details=details,
-            )
-        else:
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.ERROR,
-                message="Not responding",
-                details=details,
-            )
-    else:
-        # No domain - just HTTP
-        if http_ok:
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.OK,
-                message="HTTP OK",
-                details=details,
-            )
-        else:
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.ERROR,
-                message="Not responding",
-                details=details,
-            )
-
-
-def check_endpoints() -> ServiceStatus:
-    """Check public chain endpoints (RPC/REST paths through Caddy)."""
-    # Get domain from env or Caddyfile
+    # --- Domain discovery ---
     domain = os.environ.get("DOMAIN", "")
     is_local = False
     if not domain:
@@ -1567,7 +1498,6 @@ def check_endpoints() -> ServiceStatus:
                     line = line.strip()
                     if line.startswith("#") or not line:
                         continue
-                    # Local mode: Caddyfile starts with :80 (no domain)
                     if line.startswith(":80") or line.startswith(":443"):
                         is_local = True
                         break
@@ -1580,14 +1510,12 @@ def check_endpoints() -> ServiceStatus:
         except Exception:
             pass
 
-    # Clean domain
     if domain:
         if domain.startswith("https://"):
             domain = domain[8:]
         elif domain.startswith("http://"):
             domain = domain[7:]
 
-    # If local mode (no domain, just :80), use localhost
     use_https = bool(domain) and not is_local
     host = domain
     if not host:
@@ -1601,15 +1529,22 @@ def check_endpoints() -> ServiceStatus:
             except Exception:
                 pass
 
+    if not caddy_running:
+        return ServiceStatus(
+            name="Endpoints",
+            status=Status.ERROR,
+            message="Caddy not running",
+            details={"caddy": False, "configured": bool(host)},
+        )
+
     if not host:
         return ServiceStatus(
             name="Endpoints",
             status=Status.ERROR,
             message="No domain or IP",
-            details={"configured": False},
+            details={"caddy": True, "configured": False},
         )
 
-    # Build base URL
     base_url = f"https://{host}" if use_https else f"http://{host}"
 
     results = {}
@@ -1632,7 +1567,7 @@ def check_endpoints() -> ServiceStatus:
                         block_height = int(height)
                     results[name] = {"ok": True, "ms": ms, "height": int(height), "catching_up": catching_up}
                 else:
-                    results[name] = {"ok": False, "error": f"bad response"}
+                    results[name] = {"ok": False, "error": "bad response"}
                     all_ok = False
             else:
                 results[name] = {"ok": False, "status": resp.status_code}
@@ -1645,12 +1580,10 @@ def check_endpoints() -> ServiceStatus:
         nonlocal all_ok
         try:
             start = time.time()
-            # Query bank module params to verify REST is functional
             resp = requests.get(f"{base_url}{path}/cosmos/bank/v1beta1/params", timeout=5, verify=use_https)
             ms = int((time.time() - start) * 1000)
             if resp.status_code == 200:
                 data = resp.json()
-                # Check we got valid bank params
                 params = data.get("params", {})
                 if "default_send_enabled" in params or "send_enabled" in params:
                     results[name] = {"ok": True, "ms": ms, "module": "bank"}
@@ -1678,12 +1611,33 @@ def check_endpoints() -> ServiceStatus:
             results["grpc"] = {"ok": False, "error": str(e)[:20]}
             all_ok = False
 
-    # Check endpoints
+    # --- HTTPS probe (replaces standalone Caddy card) ---
+    if use_https:
+        try:
+            start = time.time()
+            https_resp = requests.get(f"https://{host}/api/get_parameters", timeout=5, verify=True)
+            https_ms = int((time.time() - start) * 1000)
+            if https_resp.status_code < 500:
+                results["https"] = {"ok": True, "ms": https_ms, "status": https_resp.status_code}
+            else:
+                results["https"] = {"ok": False, "status": https_resp.status_code}
+                all_ok = False
+        except requests.exceptions.SSLError:
+            results["https"] = {"ok": False, "error": "SSL error"}
+            all_ok = False
+        except requests.exceptions.ConnectionError:
+            results["https"] = {"ok": False, "error": "refused"}
+            all_ok = False
+        except Exception as e:
+            results["https"] = {"ok": False, "error": str(e)[:15]}
+            all_ok = False
+
     check_rpc("/chain/rpc", "chain/rpc")
     check_rest("/chain/rest", "chain/rest")
     check_grpc_endpoint()
 
     details = {
+        "caddy": True,
         "configured": True,
         "host": host,
         "https": use_https,
@@ -2122,12 +2076,77 @@ def _get_pending_updates() -> Optional[dict]:
         return None
 
 
+def _get_directory_size(path: str) -> Optional[int]:
+    """Recursively compute total size (bytes) of a directory using os.scandir()."""
+    try:
+        total = 0
+
+        def _walk(p: str) -> None:
+            nonlocal total
+            try:
+                with os.scandir(p) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_file(follow_symlinks=False):
+                                total += entry.stat(follow_symlinks=False).st_size
+                            elif entry.is_dir(follow_symlinks=False):
+                                _walk(entry.path)
+                        except (PermissionError, OSError):
+                            pass
+            except (PermissionError, OSError):
+                pass
+
+        _walk(path)
+        return total
+    except Exception as e:
+        debug_log(f"system: _get_directory_size({path}) failed: {e}")
+        return None
+
+
+def _get_mirage_dir_sizes() -> tuple[Optional[int], dict[str, int]]:
+    """Return (total_size, {subdir_name: size}) for ~/.mirage.
+
+    Scans every immediate subdirectory so nothing is missed.
+    """
+    mirage_home = os.path.expanduser("~/.mirage")
+    if not os.path.isdir(mirage_home):
+        return None, {}
+
+    total = _get_directory_size(mirage_home)
+    breakdown: dict[str, int] = {}
+    try:
+        with os.scandir(mirage_home) as it:
+            for entry in it:
+                if entry.is_dir(follow_symlinks=False):
+                    sz = _get_directory_size(entry.path)
+                    if sz is not None and sz > 0:
+                        breakdown[entry.name] = sz
+    except (PermissionError, OSError):
+        pass
+
+    return total, breakdown
+
+
+def check_disk_usage() -> ServiceStatus:
+    """Report ~/.mirage data footprint with per-subdirectory breakdown."""
+    mirage_home = os.path.expanduser("~/.mirage")
+    if not os.path.isdir(mirage_home):
+        return ServiceStatus(name="Disk Usage", status=Status.UNKNOWN, message="No ~/.mirage", details={})
+
+    total, breakdown = _get_mirage_dir_sizes()
+    if total is None:
+        return ServiceStatus(name="Disk Usage", status=Status.WARN, message="Scan failed", details={})
+
+    details = {"total": total, "breakdown": breakdown}
+    return ServiceStatus(name="Disk Usage", status=Status.OK, message=f"Total: {_format_bytes(total)}", details=details)
+
+
 def check_system() -> ServiceStatus:
-    """Check system health: disk space, memory, CPU load, uptime."""
+    """Check system health: disk space, memory, CPU load, ~/.mirage size."""
     details = {}
     issues = []
 
-    # Get disk usage for root filesystem
+    # Disk usage for root filesystem
     disk = _get_disk_usage("/")
     if disk:
         free_gb = disk["free"] / (1024**3)
@@ -2141,12 +2160,12 @@ def check_system() -> ServiceStatus:
         elif free_gb < SYSTEM_STORAGE_WARN_GB:
             issues.append(("warn", "disk_low"))
 
-    # Get disk usage for ~/.mirage if it exists on a different mount
+    # Separate mount check for ~/.mirage
     mirage_home = os.path.expanduser("~/.mirage")
     if os.path.exists(mirage_home):
         mirage_disk = _get_disk_usage(mirage_home)
-        if mirage_disk and mirage_disk.get("total") != disk.get("total"):
-            # Different filesystem
+        root_total = disk.get("total") if disk else None
+        if mirage_disk and mirage_disk.get("total") != root_total:
             free_gb = mirage_disk["free"] / (1024**3)
             details["mirage_disk_free"] = mirage_disk["free"]
             details["mirage_disk_used_pct"] = mirage_disk["used_pct"]
@@ -2157,7 +2176,7 @@ def check_system() -> ServiceStatus:
             elif free_gb < SYSTEM_STORAGE_WARN_GB:
                 issues.append(("warn", "mirage_disk_low"))
 
-    # Get memory info
+    # Memory
     mem = _get_memory_info()
     if mem:
         details["mem_total"] = mem["total"]
@@ -2169,7 +2188,7 @@ def check_system() -> ServiceStatus:
         elif mem["used_pct"] >= SYSTEM_MEMORY_WARN_PCT:
             issues.append(("warn", "memory_high"))
 
-    # Get CPU load
+    # CPU load
     load = _get_load_average()
     cpu_count = _get_cpu_count()
     if load:
@@ -2178,7 +2197,6 @@ def check_system() -> ServiceStatus:
         details["load_15m"] = load[2]
         details["cpu_count"] = cpu_count
 
-        # Check load per core
         load_per_core = load[0] / cpu_count
         details["load_per_core"] = load_per_core
 
@@ -2187,33 +2205,22 @@ def check_system() -> ServiceStatus:
         elif load_per_core >= SYSTEM_LOAD_WARN_PER_CORE:
             issues.append(("warn", "load_high"))
 
-    # Get uptime
-    uptime = _get_uptime()
-    if uptime:
-        details["uptime_secs"] = uptime
-        details["uptime_human"] = _format_uptime(uptime)
-
-    # Check for pending system updates
+    # Security updates only
     updates = _get_pending_updates()
     if updates:
         details["updates_total"] = updates["total"]
         details["updates_security"] = updates["security"]
         details["updates_names"] = updates["names"]
 
-        # Security updates are critical
         if updates["security"] > 0:
             issues.append(("error", "security_updates"))
-        elif updates["total"] > 20:
-            # Many pending updates is a warning
-            issues.append(("warn", "many_updates"))
 
-    # Determine overall status and message
+    # Determine overall status
     has_error = any(level == "error" for level, _ in issues)
     has_warn = any(level == "warn" for level, _ in issues)
 
     if has_error:
         status = Status.ERROR
-        # Prioritize message by severity
         error_types = [t for l, t in issues if l == "error"]
         if "security_updates" in error_types:
             message = "Security updates!"
@@ -2295,14 +2302,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     lines = []
     details = status.details
 
-    # Status message
     color = STATUS_COLORS[status.status]
     lines.append(f"{color}{status.message}{Colors.RESET}")
 
-    # Bullet prefix for detail lines
     bullet = f"{Colors.DIM}-{Colors.RESET} "
 
-    # Service-specific details (4 bullets each)
     if status.name == "CometBFT":
         if details.get("height"):
             try:
@@ -2310,9 +2314,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {h:,}")
             except (ValueError, TypeError):
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']}")
-        if details.get("validators_total"):
-            val_total = details["validators_total"]
-            lines.append(f"{bullet}{Colors.DIM}Validators:{Colors.RESET} {val_total}")
         if "peers" in details:
             peers = details["peers"]
             peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_RED
@@ -2336,39 +2337,30 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 lines.append(
                     f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_GREEN}{age_human}{Colors.RESET}"
                 )
-        if details.get("rpc_health_ok") is not None:
-            ok = details["rpc_health_ok"]
-            ms = details.get("rpc_health_ms")
-            if ok:
-                extra = f" ({ms}ms)" if isinstance(ms, int) else ""
-                lines.append(
-                    f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{extra}{Colors.RESET}"
-                )
-            else:
-                lines.append(f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_RED}BAD{Colors.RESET}")
 
     elif status.name == "Retention":
         retained = details.get("retained_blocks")
         expected = details.get("expected_blocks")
-        min_retain = details.get("min_retain_blocks")
-        evidence = details.get("evidence_max_age_blocks")
-        snapshot = details.get("snapshot_retention_blocks")
-
-        if retained is not None:
+        if retained is not None and expected is not None:
+            lines.append(
+                f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} / {expected:,} blocks"
+            )
+        elif retained is not None:
             lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
-        if expected is not None:
-            lines.append(f"{bullet}{Colors.DIM}Expected:{Colors.RESET} {expected:,} blocks")
-        if evidence is not None or snapshot is not None:
-            ev = f"{evidence:,}" if isinstance(evidence, int) else "?"
-            sn = f"{snapshot:,}" if isinstance(snapshot, int) else "?"
-            lines.append(f"{bullet}{Colors.DIM}Evidence/Snap:{Colors.RESET} {ev} / {sn}")
-        if min_retain is not None:
-            lines.append(f"{bullet}{Colors.DIM}Min-retain:{Colors.RESET} {min_retain:,}")
+        pruning = details.get("pruning_strategy")
+        keep = details.get("pruning_keep_recent")
+        if pruning:
+            extra = f" (keep {keep:,})" if keep else ""
+            lines.append(f"{bullet}{Colors.DIM}Pruning:{Colors.RESET} {pruning}{extra}")
+        snap_count = details.get("snapshot_count", 0)
+        snap_heights = details.get("snapshot_heights", [])
+        if snap_heights:
+            latest = snap_heights[0]
+            lines.append(f"{bullet}{Colors.DIM}Snapshot:{Colors.RESET} #{latest:,} ({snap_count} total)")
 
     elif status.name == "Validator":
         if details.get("moniker"):
             moniker = details["moniker"]
-            # Strip https:// prefix for cleaner display
             if moniker.startswith("https://"):
                 moniker = moniker[8:]
             elif moniker.startswith("http://"):
@@ -2384,13 +2376,20 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if details.get("power_pct") is not None:
             pct = details["power_pct"]
             lines.append(f"{bullet}{Colors.DIM}Power:{Colors.RESET} {pct:.2f}%")
-        if details.get("voting_power"):
-            vp = details["voting_power"]
-            lines.append(f"{bullet}{Colors.DIM}Voting power:{Colors.RESET} {vp:,}")
+        balance_mirage = details.get("balance_mirage")
+        if balance_mirage is not None:
+            if balance_mirage < SERVER_BALANCE_ERROR:
+                bal_color = Colors.BRIGHT_RED
+            elif balance_mirage < SERVER_BALANCE_WARN:
+                bal_color = Colors.BRIGHT_YELLOW
+            else:
+                bal_color = Colors.BRIGHT_GREEN
+            lines.append(
+                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}"
+            )
         if details.get("tombstoned"):
             lines.append(f"{bullet}{Colors.BRIGHT_RED}TOMBSTONED (permanent){Colors.RESET}")
         elif details.get("jailed"):
-            # Show jail duration if available
             jailed_secs = details.get("jailed_since_secs")
             if jailed_secs is not None:
                 jail_duration = format_age_secs(jailed_secs).replace(" ago", "")
@@ -2399,18 +2398,12 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 lines.append(f"{bullet}{Colors.BRIGHT_RED}JAILED!{Colors.RESET}")
 
     elif status.name == "PostgreSQL":
-        if details.get("tables") is not None:
-            lines.append(f"{bullet}{Colors.DIM}Tables:{Colors.RESET} {details['tables']}")
         if details.get("size"):
             lines.append(f"{bullet}{Colors.DIM}Size:{Colors.RESET} {details['size']}")
         if details.get("connections") is not None:
             lines.append(f"{bullet}{Colors.DIM}Connections:{Colors.RESET} {details['connections']}")
-        if details.get("version"):
-            lines.append(f"{bullet}{Colors.DIM}Version:{Colors.RESET} {details['version']}")
 
     elif status.name == "Backend":
-        if details.get("workers"):
-            lines.append(f"{bullet}{Colors.DIM}Workers:{Colors.RESET} {details['workers']}")
         if details.get("response_ms") is not None:
             ms = details["response_ms"]
             ms_color = Colors.BRIGHT_GREEN if ms < 100 else Colors.BRIGHT_YELLOW if ms < 500 else Colors.BRIGHT_RED
@@ -2427,110 +2420,16 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lag = details["lag"]
             lag_color = Colors.BRIGHT_GREEN if lag <= 10 else Colors.BRIGHT_YELLOW
             lines.append(f"{bullet}{Colors.DIM}Lag:{Colors.RESET} {lag_color}{lag}{Colors.RESET} blocks")
-        if details.get("rate"):
-            lines.append(f"{bullet}{Colors.DIM}Rate:{Colors.RESET} {details['rate']}")
 
     elif status.name == "Rewards":
-        backend_quests = details.get("backend_quests_enabled")
-        indexer_quests = details.get("indexer_quests_enabled")
-        payouts_enabled = details.get("payouts_enabled")
-        both_enabled = details.get("both_enabled")
-
-        if backend_quests is not None:
-            b_color = Colors.BRIGHT_GREEN if backend_quests else Colors.BRIGHT_YELLOW
-            b_text = "ON" if backend_quests else "OFF"
-            lines.append(f"{bullet}{Colors.DIM}Backend quests:{Colors.RESET} {b_color}{b_text}{Colors.RESET}")
-        if indexer_quests is not None:
-            i_color = Colors.BRIGHT_GREEN if indexer_quests else Colors.BRIGHT_RED
-            i_text = "ON" if indexer_quests else "OFF"
-            lines.append(f"{bullet}{Colors.DIM}Indexing quests:{Colors.RESET} {i_color}{i_text}{Colors.RESET}")
-        if payouts_enabled is not None:
-            # Payouts OFF is fine if quests are also OFF; otherwise it's an error
-            if payouts_enabled:
-                p_color = Colors.BRIGHT_GREEN
-            elif backend_quests:
-                p_color = Colors.BRIGHT_RED  # Quests ON but payouts OFF = problem
-            else:
-                p_color = Colors.BRIGHT_YELLOW  # Both off = acceptable
-            p_text = "ON" if payouts_enabled else "OFF"
-            lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} {p_color}{p_text}{Colors.RESET}")
-        # Reward pool balance
-        pool_balance = details.get("pool_balance")
-        if pool_balance is not None:
-            pool_mirage = pool_balance / 1_000_000
-            if pool_mirage >= 1_000_000:
-                pool_color = Colors.BRIGHT_GREEN
-            elif pool_mirage >= 100_000:
-                pool_color = Colors.BRIGHT_YELLOW
-            else:
-                pool_color = Colors.BRIGHT_RED
-            lines.append(f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {pool_color}{pool_mirage:,.0f} MIRAGE{Colors.RESET}")
-
-    elif status.name == "Node":
-        # Validator payer balance
-        balance_mirage = details.get("balance_mirage")
-        if balance_mirage is not None:
-            if balance_mirage < SERVER_BALANCE_ERROR:
-                bal_color = Colors.BRIGHT_RED
-            elif balance_mirage < SERVER_BALANCE_WARN:
-                bal_color = Colors.BRIGHT_YELLOW
-            else:
-                bal_color = Colors.BRIGHT_GREEN
-            lines.append(
-                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}"
-            )
-        elif details.get("payer_address"):
-            lines.append(f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {Colors.BRIGHT_YELLOW}unknown{Colors.RESET}")
-        # PoW difficulty
-        pow_diff = details.get("pow_difficulty")
-        if pow_diff is not None:
-            diff_color = Colors.BRIGHT_GREEN if pow_diff == 0 else Colors.BRIGHT_CYAN
-            lines.append(f"{bullet}{Colors.DIM}PoW difficulty:{Colors.RESET} {diff_color}{pow_diff}{Colors.RESET}")
-        pow_msg = details.get("pow_msg_count")
-        if pow_msg is not None:
-            lines.append(f"{bullet}{Colors.DIM}PoW msg count:{Colors.RESET} {pow_msg}")
-        calm = details.get("pow_calm_sequence")
-        if calm is not None:
-            lines.append(f"{bullet}{Colors.DIM}Calm sequence:{Colors.RESET} {calm}")
-
-    elif status.name == "Caddy":
-        if details.get("domain"):
-            lines.append(f"{bullet}{Colors.DIM}Domain:{Colors.RESET} {truncate(details['domain'], 18)}")
-        # Show HTTP status (now shows TCP connect latency, not HTTP status code)
-        http_val = details.get("http")
-        https_ok = isinstance(details.get("https"), int) and details.get("https") < 400
-        if http_val is not None:
-            if isinstance(http_val, int):
-                # It's TCP connect latency in ms
-                ms_color = (
-                    Colors.BRIGHT_GREEN
-                    if http_val < 50
-                    else Colors.BRIGHT_YELLOW if http_val < 200 else Colors.BRIGHT_RED
-                )
-                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {ms_color}{http_val}ms{Colors.RESET}")
-            elif http_val == "refused" and https_ok:
-                # HTTP refused is expected when HTTPS is working
-                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_GREEN}redirected{Colors.RESET}")
-            else:
-                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_RED}{http_val}{Colors.RESET}")
-        # Show HTTPS status if domain is set
-        https_val = details.get("https")
-        if https_val is not None:
-            if isinstance(https_val, int) and https_val < 400:
-                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val}{Colors.RESET}")
-            elif isinstance(https_val, int):
-                lines.append(
-                    f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_YELLOW}{https_val}{Colors.RESET}"
-                )
-            else:
-                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_RED}{https_val}{Colors.RESET}")
-        elif not details.get("domain"):
-            lines.append(f"{bullet}{Colors.DIM}Mode:{Colors.RESET} HTTP only")
-        # Response time
-        if details.get("response_ms") is not None:
-            ms = details["response_ms"]
-            ms_color = Colors.BRIGHT_GREEN if ms < 100 else Colors.BRIGHT_YELLOW if ms < 500 else Colors.BRIGHT_RED
-            lines.append(f"{bullet}{Colors.DIM}Response:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
+        if details.get("payouts_enabled"):
+            lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} {Colors.BRIGHT_GREEN}ON{Colors.RESET}")
+            pool_balance = details.get("pool_balance")
+            if pool_balance is not None:
+                balance_mirage = pool_balance / 1_000_000
+                lines.append(f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {balance_mirage:,.0f} MIRAGE")
+        else:
+            lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} OFF")
 
     elif status.name == "Endpoints":
         endpoints = details.get("endpoints", {})
@@ -2543,6 +2442,13 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 err = str(err)[:12]
                 lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}")
 
+    elif status.name == "Disk Usage":
+        breakdown = details.get("breakdown", {})
+        if breakdown:
+            sorted_dirs = sorted(breakdown.items(), key=lambda x: -x[1])
+            for name, sz in sorted_dirs[:5]:
+                lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {_format_bytes(sz)}")
+
     elif status.name == "Orchestrator":
         if details.get("network"):
             network = details["network"]
@@ -2552,7 +2458,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET}")
         elif details.get("enabled"):
             lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_RED}Missing{Colors.RESET}")
-        # Show SOL balance with color based on thresholds
         if "sol_balance" in details:
             bal = details["sol_balance"]
             if bal < ORCHESTRATOR_SOL_ERROR:
@@ -2567,10 +2472,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}SOL:{Colors.RESET} {bal_color}{bal:.4f}{bal_suffix}{Colors.RESET}")
 
     elif status.name == "System":
-        # Disk space (primary concern)
+        # Disk free space
         if "disk_free_gb" in details:
             free_gb = details["disk_free_gb"]
-            used_pct = details.get("disk_used_pct", 0)
             if free_gb < SYSTEM_STORAGE_ERROR_GB:
                 disk_color = Colors.BRIGHT_RED
                 disk_suffix = " CRITICAL!"
@@ -2597,7 +2501,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 disk_color = Colors.BRIGHT_GREEN
                 disk_suffix = ""
             lines.append(
-                f"{bullet}{Colors.DIM}Data:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Data vol:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
             )
 
         # Memory usage
@@ -2615,7 +2519,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 f"{bullet}{Colors.DIM}Memory:{Colors.RESET} {mem_color}{used_pct:.0f}% used{Colors.RESET} ({avail_str} free)"
             )
 
-        # CPU load (show as percentage of total capacity)
+        # CPU load
         if "load_1m" in details:
             load_1m = details["load_1m"]
             cpu_count = details.get("cpu_count", 1)
@@ -2630,25 +2534,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 f"{bullet}{Colors.DIM}CPU:{Colors.RESET} {load_color}{load_pct:.0f}%{Colors.RESET} ({cpu_count} cores)"
             )
 
-        # Uptime
-        if details.get("uptime_human"):
-            lines.append(f"{bullet}{Colors.DIM}Uptime:{Colors.RESET} {details['uptime_human']}")
-
-        # Pending updates
-        if "updates_total" in details:
-            total = details["updates_total"]
-            security = details.get("updates_security", 0)
-            if security > 0:
-                lines.append(f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)")
-            elif total > 0:
-                update_color = Colors.BRIGHT_YELLOW if total > 20 else Colors.BRIGHT_GREEN
-                lines.append(
-                    f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {update_color}{total} available{Colors.RESET}"
-                )
-            else:
-                lines.append(
-                    f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {Colors.BRIGHT_GREEN}up to date{Colors.RESET}"
-                )
+        # Security updates only (skip non-security)
+        security = details.get("updates_security", 0)
+        if security > 0:
+            total = details.get("updates_total", security)
+            lines.append(f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)")
 
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:
@@ -2661,7 +2551,7 @@ def render_dashboard(refresh_secs: int):
     """Render the full dashboard."""
     term_width, term_height = get_terminal_size()
 
-    # Collect all statuses
+    # Collect all statuses -- ops-focused set only
     statuses = [
         check_node(),
         check_retention(),
@@ -2669,29 +2559,26 @@ def render_dashboard(refresh_secs: int):
         check_postgres(),
         check_backend(),
         check_rewards(),
-        check_node_internals(),
         check_indexer(),
-        check_caddy(),
         check_endpoints(),
         check_orchestrator(),
+        check_disk_usage(),
         check_system(),
     ]
 
-    # Filter out unconfigured services for cleaner display
-    # But keep them if they have errors
+    # Hide unconfigured optional services (Validator, Orchestrator)
     display_statuses = [
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name
-        in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "Node", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
     # Render header
     output = render_header(term_width)
 
-    # Render summary
-    output.extend(render_summary(statuses, term_width))
+    # Render summary (only count displayed services)
+    output.extend(render_summary(display_statuses, term_width))
 
     # Calculate card layout
     card_width = 38
@@ -2755,14 +2642,12 @@ def run_health_check_json(required_services: list[str]) -> dict:
             - services: dict mapping service name to status info
             - errors: list of error messages for unhealthy required services
     """
-    # Run all checks
     all_statuses = [
         check_node(),
         check_validator(),
         check_postgres(),
         check_backend(),
         check_indexer(),
-        check_caddy(),
         check_endpoints(),
     ]
 
@@ -2811,7 +2696,7 @@ def main():
     parser.add_argument(
         "--require",
         type=str,
-        default="CometBFT,Validator,PostgreSQL,Backend,Indexer,Caddy,Endpoints",
+        default="CometBFT,Validator,PostgreSQL,Backend,Indexer,Endpoints",
         help="Comma-separated list of required services for --json health check",
     )
     parser.add_argument(

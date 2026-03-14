@@ -956,8 +956,10 @@ export default function NetworkView({ state }) {
                                                             <AccountName
                                                                 href={`/u/${account.username || account.address}`}
                                                                 onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    navigate(`/u/${account.username || account.address}`);
+                                                                    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        navigate(`/u/${account.username || account.address}`);
+                                                                    }
                                                                 }}
                                                             >
                                                                 {account.username || account.address.slice(0, 12) + '...'}

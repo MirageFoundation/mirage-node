@@ -139,7 +139,10 @@ const PostsList = styled.div`
     gap: 0.5rem;
 `;
 
-const PostItem = styled.div`
+const PostItem = styled.a`
+    display: block;
+    text-decoration: none;
+    color: inherit;
     border: 1px solid ${({ theme, isActive }) => isActive ? '#667eea' : (theme?.colors?.border || '#444')};
     background-color: ${({ theme, isActive }) => isActive ? 'rgba(102, 126, 234, 0.1)' : (theme?.colors?.panel || '#23272C')};
     border-radius: 8px;
@@ -782,22 +785,21 @@ export default function ProfileView({ state }) {
         }
     };
 
-    const handleRecentPostClick = async (post) => {
+    const getPostUrl = (post) => {
+        if (!post || !post.post_id) return '#';
+        const isComment = post.target && post.target.trim() !== '';
+        return isComment ? `/p/${post.post_id}?depth=1` : `/p/${post.post_id}`;
+    };
+
+    const handleRecentPostClick = async (post, e) => {
         if (!post || !post.post_id) return;
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        e.preventDefault();
         setActiveRecentPost(post.post_id);
         try {
             Storage.setPendingPostHighlight(post.post_id);
         } catch (_) { }
-
-        // New clean URL format - works for both posts and comments
-        // For comments, the view will auto-detect and show context options
-        const isComment = post.target && post.target.trim() !== '';
-        if (isComment) {
-            // Show comment with parent context
-            navigate(`/p/${post.post_id}?depth=1`);
-        } else {
-            navigate(`/p/${post.post_id}`);
-        }
+        navigate(getPostUrl(post));
     };
 
 
@@ -1108,8 +1110,9 @@ export default function ProfileView({ state }) {
                                             {recentPosts.map((post) => (
                                                 <PostItem
                                                     key={post.post_id}
+                                                    href={getPostUrl(post)}
                                                     isActive={activeRecentPost === post.post_id}
-                                                    onClick={() => handleRecentPostClick(post)}
+                                                    onClick={(e) => handleRecentPostClick(post, e)}
                                                 >
                                                     <PostPreview>{renderPostPreview(post)}</PostPreview>
                                                     <PostMeta>{buildMetaLine(post)}</PostMeta>
@@ -1159,7 +1162,7 @@ export default function ProfileView({ state }) {
                                                         }
                                                         return (
                                                             <div key={t.topic} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                                                                <Mono onClick={() => navigate(`/t/${encodeURIComponent(t.topic)}`)} style={{ cursor: 'pointer' }}>#{t.topic}</Mono>
+                                                                <a href={`/t/${encodeURIComponent(t.topic)}`} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/t/${encodeURIComponent(t.topic)}`); } }} style={{ textDecoration: 'none', color: 'inherit' }}><Mono style={{ cursor: 'pointer' }}>#{t.topic}</Mono></a>
                                                                 <Mono style={{ color: colorForWeight(t.weight) }}>
                                                                     {formatPrefWeight(t.weight)}
                                                                 </Mono>
@@ -1212,16 +1215,17 @@ export default function ProfileView({ state }) {
                                                         }
                                                         const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
                                                         return (
-                                                            <div
+                                                            <a
                                                                 key={u.user}
-                                                                style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
-                                                                onClick={() => navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`)}
+                                                                href={`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`}
+                                                                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`); } }}
+                                                                style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
                                                             >
                                                                 <Mono>{uname && uname !== u.user ? uname : shortenAddress(u.user)}</Mono>
                                                                 <Mono style={{ color: colorForWeight(u.weight) }}>
                                                                     {formatPrefWeight(u.weight)}
                                                                 </Mono>
-                                                            </div>
+                                                            </a>
                                                         );
                                                     });
                                                 })()}
@@ -1249,16 +1253,17 @@ export default function ProfileView({ state }) {
                                         {!similarUsersError && similarUsers.length > 0 && (
                                             <div>
                                                 {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map((u) => (
-                                                    <div
+                                                    <a
                                                         key={u.address}
-                                                        style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
-                                                        onClick={() => navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`)}
+                                                        href={`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`}
+                                                        onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`); } }}
+                                                        style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
                                                     >
                                                         <Mono>{u.username || shortenAddress(u.address)}</Mono>
                                                         <Mono style={{ color: u.similarity >= 0 ? '#22c55e' : '#ef4444' }}>
                                                             {u.similarity >= 0 ? '+' : ''}{Math.round(u.similarity * 100)}% ({u.shared_dimensions} shared)
                                                         </Mono>
-                                                    </div>
+                                                    </a>
                                                 ))}
                                                 {!showAllSimilarUsers && similarUsers.length > 5 && (
                                                     <div style={{ textAlign: 'center', padding: '4px 0' }}>

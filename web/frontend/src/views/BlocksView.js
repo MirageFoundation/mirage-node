@@ -47,7 +47,10 @@ const PostsList = styled.div`
     gap: 0.5rem;
 `;
 
-const PostItem = styled.div`
+const PostItem = styled.a`
+    display: block;
+    text-decoration: none;
+    color: inherit;
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
     border-radius: 8px;
@@ -263,7 +266,7 @@ export default function BlocksView({ state }) {
                                             const isPending = isTopicPending(topic);
                                             const status = formatTopicStatus(topic);
                                             return (
-                                                <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
+                                                <PostItem key={topic} href={`/t/${encodeURIComponent(topic)}`} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/t/${encodeURIComponent(topic)}`); } }}>
                                                     <BlockItemRow>
                                                         <BlockItemContent>
                                                             <PostPreview>#{topic}</PostPreview>
@@ -299,7 +302,7 @@ export default function BlocksView({ state }) {
                                             const isPending = isUserPending(userAddr);
                                             const status = formatUserStatus(userAddr);
                                             return (
-                                                <PostItem key={userAddr} onClick={() => navigate(`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`)}>
+                                                <PostItem key={userAddr} href={`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`); } }}>
                                                     <BlockItemRow>
                                                         <BlockItemContent>
                                                             <PostPreview>
@@ -340,7 +343,7 @@ export default function BlocksView({ state }) {
                                             const isPending = isPostPending(postId);
                                             const status = formatPostStatus(postId);
                                             return (
-                                                <PostItem key={postId} onClick={() => navigate(`/p/${encodeURIComponent(postId)}`)}>
+                                                <PostItem key={postId} href={`/p/${encodeURIComponent(postId)}`} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/p/${encodeURIComponent(postId)}`); } }}>
                                                     <BlockItemRow>
                                                         <BlockItemContent>
                                                             <PostPreview>{shortenAddress(postId)}</PostPreview>

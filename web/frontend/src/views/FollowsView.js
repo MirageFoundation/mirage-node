@@ -49,7 +49,10 @@ const PostsList = styled.div`
     gap: 0.5rem;
 `;
 
-const PostItem = styled.div`
+const PostItem = styled.a`
+    display: block;
+    text-decoration: none;
+    color: inherit;
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
     border-radius: 8px;
@@ -245,7 +248,7 @@ export default function FollowsView({ state }) {
                                             const isPending = isFollowTopicPending(topic);
                                             const status = formatFollowTopicStatus(topic);
                                             return (
-                                                <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
+                                                <PostItem key={topic} href={`/t/${encodeURIComponent(topic)}`} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/t/${encodeURIComponent(topic)}`); } }}>
                                                     <BlockItemRow>
                                                         <BlockItemContent>
                                                             <PostPreview>#{topic}</PostPreview>
@@ -285,7 +288,8 @@ export default function FollowsView({ state }) {
                                             return (
                                                 <PostItem
                                                     key={userAddr}
-                                                    onClick={() => navigate(`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`)}
+                                                    href={`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`}
+                                                    onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`); } }}
                                                 >
                                                     <BlockItemRow>
                                                         <BlockItemContent>

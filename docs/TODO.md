@@ -63,8 +63,19 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 - Full security audit for every module.
 
 
+# add something for cloudflare:
+- so that videos and images with zero views get deleted
+
 # CLEANUP!!!
 - now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
 
 # Other Ideas:
 - Allow only 3 new profiles (set_username) per minute
+
+
+# New agent ideas:
+- Real User agent: keeps tabs on every user and assigns them a trust score
+
+
+# Video Series ideas:
+- explaining the /network tab, e.g. show how difficulty spikes, how spam is handled and so on

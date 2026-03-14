@@ -220,14 +220,15 @@ function LoginView({ state, setCredentials }) {
 
                             <div style={{ marginTop: '0.25rem', fontSize: '0.6rem', color: '#999' }}>
                                 Don't have an account?{' '}
-                                <span
-                                    style={{ color: '#4a9eff', cursor: 'pointer', fontSize: '0.6rem' }}
+                                <a
+                                    href="/create_account"
+                                    style={{ color: '#4a9eff', cursor: 'pointer', fontSize: '0.6rem', textDecoration: 'none' }}
                                     onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
                                     onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
-                                    onClick={() => navigate('/create_account')}
+                                    onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate('/create_account'); } }}
                                 >
                                     Create one here
-                                </span>.
+                                </a>.
                             </div>
                         </Centered>
                     </AuthPageShell>

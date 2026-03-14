@@ -605,7 +605,7 @@ def _get_new_inbox_count(cur, address: str) -> int:
         reply_count = 0
 
     try:
-        # Count new @mentions
+        # Count new @mentions (exclude mentions that are already direct replies to viewer's posts)
         cur.execute(
             """
             SELECT COUNT(*) FROM mentions m
@@ -613,8 +613,13 @@ def _get_new_inbox_count(cur, address: str) -> int:
             WHERE LOWER(m.mentioned_address) = %s
               AND LOWER(m.mentioner_address) != %s
               AND m.created_at > %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM posts tp
+                  WHERE tp.txhash = p.target
+                    AND LOWER(tp.owner) = %s
+              )
             """,
-            (viewer, viewer, last_seen),
+            (viewer, viewer, last_seen, viewer),
         )
         mrow = cur.fetchone()
         mention_count = int(mrow[0]) if mrow and mrow[0] else 0
@@ -5935,6 +5940,11 @@ def get_inbox():
                 LEFT JOIN profiles mpr ON mpr.owner = m.mentioner_address
                 WHERE LOWER(m.mentioned_address) = %s
                   AND LOWER(m.mentioner_address) != %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM posts tp
+                      WHERE tp.txhash = mp.target
+                        AND LOWER(tp.owner) = %s
+                  )
 
                 UNION ALL
 
@@ -5965,7 +5975,17 @@ def get_inbox():
             LIMIT %s OFFSET %s
         """
 
-        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
+        params = [
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            limit,
+            offset,
+        ]
 
         t_query = time.time()
         cur.execute(query, params)
@@ -5984,13 +6004,21 @@ def get_inbox():
                 SELECT COUNT(*) FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
                 WHERE LOWER(m.mentioned_address) = %s AND LOWER(m.mentioner_address) != %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM posts tp
+                      WHERE tp.txhash = mp.target
+                        AND LOWER(tp.owner) = %s
+                  )
             ) + (
                 SELECT COUNT(*) FROM awards a
                 INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
                 WHERE LOWER(p.owner) = %s AND LOWER(a.owner) != %s
             )
         """
-        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower])
+        cur.execute(
+            count_query,
+            [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower],
+        )
         total_row = cur.fetchone()
         total = int(total_row[0]) if total_row and total_row[0] else 0
 
@@ -6138,8 +6166,27 @@ def get_upload_url():
             response = requests.post(url, headers=headers, json=payload, timeout=10)
 
             if response.status_code != 200:
-                log_event(rid, "get_upload_url.err", error=f"cloudflare_stream_api_error_{response.status_code}")
-                return jsonify({"error": "Upload service error"}), 500
+                try:
+                    cf_body = response.text[:500]
+                except Exception:
+                    cf_body = "<unreadable>"
+                log_event(
+                    rid,
+                    "get_upload_url.err",
+                    error=f"cloudflare_stream_api_error_{response.status_code}",
+                    cf_response=cf_body,
+                )
+                user_msg = "Upload service error"
+                try:
+                    cf_errors = response.json().get("errors", [])
+                    for e in cf_errors:
+                        code = e.get("code", 0)
+                        if code == 10005 or "limit" in str(e.get("message", "")).lower():
+                            user_msg = "Video uploads are temporarily unavailable (storage limit reached)"
+                            break
+                except Exception:
+                    pass
+                return jsonify({"error": user_msg}), 500
 
             result = response.json()
             # Stream responses typically contain result.uploadURL and sometimes result.uid
