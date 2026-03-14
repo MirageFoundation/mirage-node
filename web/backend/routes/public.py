@@ -5975,7 +5975,17 @@ def get_inbox():
             LIMIT %s OFFSET %s
         """
 
-        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
+        params = [
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            viewer_lower,
+            limit,
+            offset,
+        ]
 
         t_query = time.time()
         cur.execute(query, params)
@@ -6005,7 +6015,10 @@ def get_inbox():
                 WHERE LOWER(p.owner) = %s AND LOWER(a.owner) != %s
             )
         """
-        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower])
+        cur.execute(
+            count_query,
+            [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower],
+        )
         total_row = cur.fetchone()
         total = int(total_row[0]) if total_row and total_row[0] else 0
 
@@ -6153,8 +6166,27 @@ def get_upload_url():
             response = requests.post(url, headers=headers, json=payload, timeout=10)
 
             if response.status_code != 200:
-                log_event(rid, "get_upload_url.err", error=f"cloudflare_stream_api_error_{response.status_code}")
-                return jsonify({"error": "Upload service error"}), 500
+                try:
+                    cf_body = response.text[:500]
+                except Exception:
+                    cf_body = "<unreadable>"
+                log_event(
+                    rid,
+                    "get_upload_url.err",
+                    error=f"cloudflare_stream_api_error_{response.status_code}",
+                    cf_response=cf_body,
+                )
+                user_msg = "Upload service error"
+                try:
+                    cf_errors = response.json().get("errors", [])
+                    for e in cf_errors:
+                        code = e.get("code", 0)
+                        if code == 10005 or "limit" in str(e.get("message", "")).lower():
+                            user_msg = "Video uploads are temporarily unavailable (storage limit reached)"
+                            break
+                except Exception:
+                    pass
+                return jsonify({"error": user_msg}), 500
 
             result = response.json()
             # Stream responses typically contain result.uploadURL and sometimes result.uid

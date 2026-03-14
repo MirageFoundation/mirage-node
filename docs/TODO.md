@@ -68,3 +68,11 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 
 # Other Ideas:
 - Allow only 3 new profiles (set_username) per minute
+
+
+# New agent ideas:
+- Real User agent: keeps tabs on every user and assigns them a trust score
+
+
+# Video Series ideas:
+- explaining the /network tab, e.g. show how difficulty spikes, how spam is handled and so on
