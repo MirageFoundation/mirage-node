@@ -266,10 +266,20 @@ func New(
 			}
 			stdAnte, _ := authante.NewAnteHandler(stdOpts)
 
-			// Define no-op terminator for the end of the chain
-			terminator := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
-				return ctx, nil
-			}
+			// Relay ante chain (must start with SetUpContextDecorator)
+			relayAnte := sdk.ChainAnteDecorators(
+				setup,
+				validateBasic,
+				timeout,
+				gasSize,
+				logDec,
+				powDec,
+				ensure,
+				metaFees,
+				accDec,
+				disableDel,
+				meta,
+			)
 
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 				// Classify each message as relay or non-relay.
@@ -316,73 +326,7 @@ func New(
 				ctx.Logger().Debug("Relay ante: using relay ante", "msg_types", msgTypes)
 
 				// Relay flow for core messages
-				// 1. Setup Context (Must be first)
-				ctx1, err := setup.AnteHandle(ctx, tx, simulate, terminator)
-				if err != nil {
-					return ctx1, err
-				}
-
-				// 1.5. ValidateBasic — structural tx validation (proto validity,
-				// len(signatures)==len(signers)). Defense-in-depth against mixed-message
-				// attacks: a piggybacked bank.MsgSend would add a second signer that
-				// doesn't have a matching signature entry.
-				ctx1b, err := validateBasic.AnteHandle(ctx1, tx, simulate, terminator)
-				if err != nil {
-					return ctx1b, err
-				}
-
-				// 2. Timeout (Cheap check)
-				ctx2, err := timeout.AnteHandle(ctx1b, tx, simulate, terminator)
-				if err != nil {
-					return ctx2, err
-				}
-
-				// 3. Gas/Size Limit (Cheap check - prevents large txs)
-				ctx3, err := gasSize.AnteHandle(ctx2, tx, simulate, terminator)
-				if err != nil {
-					return ctx3, err
-				}
-
-				// 4. Log
-				ctx4, err := logDec.AnteHandle(ctx3, tx, simulate, terminator)
-				if err != nil {
-					return ctx4, err
-				}
-
-				// 5. PoW Check (CPU intensive, but protects DB)
-				// Note: PoW runs BEFORE EnsureAccounts to prevent spam account creation
-				ctx5, err := powDec.AnteHandle(ctx4, tx, simulate, terminator)
-				if err != nil {
-					return ctx5, err
-				}
-
-				// 6. Ensure Accounts (DB intensive)
-				// Only runs if PoW passed
-				ctx6, err := ensure.AnteHandle(ctx5, tx, simulate, terminator)
-				if err != nil {
-					return ctx6, err
-				}
-
-				// 7. Check Fees (Needs accounts? No, usually handled by checking bank balance of payer)
-				ctx7, err := metaFees.AnteHandle(ctx6, tx, simulate, terminator)
-				if err != nil {
-					return ctx7, err
-				}
-
-				// 8. Relay Accounting
-				ctx8, err := accDec.AnteHandle(ctx7, tx, simulate, terminator)
-				if err != nil {
-					return ctx8, err
-				}
-
-				// 9. Disable Delegator Staking
-				ctx9, err := disableDel.AnteHandle(ctx8, tx, simulate, terminator)
-				if err != nil {
-					return ctx9, err
-				}
-
-				// 10. Verify Signatures (Relay)
-				return meta.AnteHandle(ctx9, tx, simulate, terminator)
+				return relayAnte(ctx, tx, simulate)
 			})
 
 			// Always propose all txs and accept proposals to avoid filtering in proposal phases
