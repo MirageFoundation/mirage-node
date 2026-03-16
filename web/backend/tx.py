@@ -28,7 +28,10 @@ _TX_SIZE_COST_PER_BYTE: Optional[int] = None
 
 
 def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
-    base_required = 0
+    # Ante handler KV reads: auth params, PoW/difficulty, account lookup,
+    # balance check, etc.  Each ReadFlat = 1000 + 3*value_bytes.
+    # Budget ~8 reads + HasCost checks = ~10000 gas.
+    ante_gas = 10_000
     tx_size_ppb = _get_tx_size_cost_per_byte()
     min_gas_price = min_gas_price_umirage()
 
@@ -46,11 +49,11 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
         tx_raw = TxRaw(body_bytes=body_bytes, auth_info_bytes=auth.SerializeToString(), signatures=[b"\x00"])
         return len(tx_raw.SerializeToString())
 
-    gas_guess = max(base_required, 1)
-    for _ in range(2):
+    gas_guess = max(ante_gas, 1)
+    for _ in range(3):
         size_gas = tx_size_ppb * _txraw_len(int(gas_guess))
-        store_gas = 1000 + 2000 + (30 * max(0, int(content_len)))
-        new_gas = base_required + size_gas + store_gas + 1024
+        msg_gas = 1000 + 2000 + (30 * max(0, int(content_len)))
+        new_gas = ante_gas + size_gas + msg_gas + 2048
         if new_gas % 64 != 0:
             new_gas = ((new_gas + 63) // 64) * 64
         if abs(new_gas - gas_guess) <= 1:
