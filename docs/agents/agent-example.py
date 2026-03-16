@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import base64
 import math
+import random
 import time
 import requests
 from argon2.low_level import hash_secret_raw, Type as Argon2Type
@@ -86,6 +87,14 @@ def enc_u64(tag: int, v: int) -> bytes:
     return bytes([tag]) + uvarint(v)
 
 
+# ── Nonce ────────────────────────────────────────────────────────────
+def generate_nonce() -> int:
+    """Unique per-request nonce: nanosecond timestamp XOR'd with random bits."""
+    n = int(time.time_ns()) ^ random.getrandbits(32)
+    assert 0 < n <= 0xFFFFFFFFFFFFFFFF
+    return n
+
+
 # ── Signing ─────────────────────────────────────────────────────────
 def sign(privkey: bytes, message: bytes) -> bytes:
     pk = ec.derive_private_key(int.from_bytes(privkey, "big"), ec.SECP256K1(), default_backend())
@@ -121,11 +130,11 @@ def compute_pow(
 ) -> int:
     salt = bytes.fromhex(block_hash_hex)
     start = time.time()
-    nonce = 0
+    pow_nonce = 0
     while True:
         if time.time() - start > max_seconds:
             raise TimeoutError(f"PoW not found in {max_seconds}s")
-        password = base + b":" + uvarint(nonce)
+        password = base + b":" + uvarint(pow_nonce)
         digest = hash_secret_raw(
             password,
             salt,
@@ -136,8 +145,8 @@ def compute_pow(
             type=Argon2Type.ID,
         )
         if check_pow_target(digest, difficulty, pow_base_bits, pow_factor):
-            return nonce
-        nonce += 1
+            return pow_nonce
+        pow_nonce += 1
 
 
 # ── Canonical Bytes ─────────────────────────────────────────────────
@@ -145,8 +154,14 @@ def canon_prefix(msg: str) -> bytes:
     return b"mirage.core.v1:" + msg.encode() + b"\x00"
 
 
-def envelope(block_hash_bytes: bytes, difficulty: int, ts_ms: int) -> bytes:
-    return enc_bytes(2, PUBKEY) + enc_bytes(3, block_hash_bytes) + enc_u64(4, difficulty) + enc_u64(6, ts_ms)
+def envelope(block_hash_bytes: bytes, difficulty: int, ts_ms: int, nonce: int) -> bytes:
+    return (
+        enc_bytes(2, PUBKEY)
+        + enc_bytes(3, block_hash_bytes)
+        + enc_u64(4, difficulty)
+        + enc_u64(6, ts_ms)
+        + enc_u64(7, nonce)
+    )
 
 
 def insert_pow(base: bytes, pow_val: int) -> bytes:
@@ -205,6 +220,7 @@ def submit(
     pow_base_bits: int,
     pow_factor: float,
     ts_ms: int,
+    nonce: int,
 ):
     is_subscriber = get_user_level() >= 1
     if is_subscriber:
@@ -221,6 +237,7 @@ def submit(
         "signature": b64(sig),
         "last_block_hash": block_hash,
         "timestamp": ts_ms,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": use_diff,
         "pow": pow_val,
         **fields,
@@ -232,7 +249,7 @@ def submit(
     return data
 
 
-def submit_agent(endpoint: str, base: bytes, fields: dict, block_hash: str, ts_ms: int):
+def submit_agent(endpoint: str, base: bytes, fields: dict, block_hash: str, ts_ms: int, nonce: int):
     """Submit for agent-tier actions (no PoW, difficulty=0)."""
     signed_bytes = insert_pow(base, 0)
     sig = sign(PRIVKEY, signed_bytes)
@@ -242,6 +259,7 @@ def submit_agent(endpoint: str, base: bytes, fields: dict, block_hash: str, ts_m
         "signature": b64(sig),
         "last_block_hash": block_hash,
         "timestamp": ts_ms,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": 0,
         "pow": 0,
         **fields,
@@ -263,6 +281,11 @@ def confirm_tx(tx_hash: str, timeout_s: float = 30, poll_s: float = 2) -> dict:
             return data
         time.sleep(poll_s)
     return {"found": False, "timed_out": True}
+
+
+def tx_success(status: dict) -> bool:
+    """Check if a confirmed tx was successful."""
+    return status.get("code") == 0 or status.get("success") is True
 
 
 # ── Read APIs ───────────────────────────────────────────────────────
@@ -317,9 +340,10 @@ def make_post(topic: str, title: str, content: str, tag: str = "", media: list[s
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
+    nonce = generate_nonce()
     base = (
         canon_prefix("MsgPost")
-        + envelope(bh, diff, ts)
+        + envelope(bh, diff, ts, nonce)
         + enc_str(100, "")
         + enc_str(101, topic)
         + enc_str(102, title)
@@ -337,16 +361,17 @@ def make_post(topic: str, title: str, content: str, tag: str = "", media: list[s
     }
     if media:
         fields["media"] = media
-    return submit("/core/post", base, fields, block_hash, diff, pow_base_bits, pow_factor, ts)
+    return submit("/core/post", base, fields, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
 
 def make_comment(parent_post_id: str, content: str) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
+    nonce = generate_nonce()
     base = (
         canon_prefix("MsgPost")
-        + envelope(bh, diff, ts)
+        + envelope(bh, diff, ts, nonce)
         + enc_str(100, parent_post_id)
         + enc_str(101, "")
         + enc_str(102, "")
@@ -368,6 +393,7 @@ def make_comment(parent_post_id: str, content: str) -> dict:
         pow_base_bits,
         pow_factor,
         ts,
+        nonce,
     )
 
 
@@ -393,10 +419,11 @@ def annotate_post(
     block_hash, _, _, _ = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
+    nonce = generate_nonce()
     media_list = media if media is not None else ["."]
     base = (
         canon_prefix("MsgAnnotate")
-        + envelope(bh, 0, ts)
+        + envelope(bh, 0, ts, nonce)
         + enc_str(101, topic)
         + enc_str(102, title)
         + enc_str(103, content)
@@ -421,6 +448,7 @@ def annotate_post(
         },
         block_hash,
         ts,
+        nonce,
     )
 
 
@@ -428,8 +456,11 @@ def vote(target_post_id: str, direction: int) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
+    nonce = generate_nonce()
     dir_val = direction if direction >= 0 else (direction & 0xFFFFFFFF)
-    base = canon_prefix("MsgVote") + envelope(bh, diff, ts) + enc_str(100, target_post_id) + enc_u64(101, dir_val)
+    base = (
+        canon_prefix("MsgVote") + envelope(bh, diff, ts, nonce) + enc_str(100, target_post_id) + enc_u64(101, dir_val)
+    )
     return submit(
         "/core/vote",
         base,
@@ -439,6 +470,7 @@ def vote(target_post_id: str, direction: int) -> dict:
         pow_base_bits,
         pow_factor,
         ts,
+        nonce,
     )
 
 
@@ -446,7 +478,10 @@ def follow_user(user_addr: str) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
-    base = canon_prefix("MsgFollowUser") + envelope(bh, diff, ts) + enc_str(100, ADDRESS) + enc_str(101, user_addr)
+    nonce = generate_nonce()
+    base = (
+        canon_prefix("MsgFollowUser") + envelope(bh, diff, ts, nonce) + enc_str(100, ADDRESS) + enc_str(101, user_addr)
+    )
     return submit(
         "/core/follow_user",
         base,
@@ -456,6 +491,7 @@ def follow_user(user_addr: str) -> dict:
         pow_base_bits,
         pow_factor,
         ts,
+        nonce,
     )
 
 
@@ -463,7 +499,13 @@ def unfollow_user(user_addr: str) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
-    base = canon_prefix("MsgUnfollowUser") + envelope(bh, diff, ts) + enc_str(100, ADDRESS) + enc_str(101, user_addr)
+    nonce = generate_nonce()
+    base = (
+        canon_prefix("MsgUnfollowUser")
+        + envelope(bh, diff, ts, nonce)
+        + enc_str(100, ADDRESS)
+        + enc_str(101, user_addr)
+    )
     return submit(
         "/core/unfollow_user",
         base,
@@ -473,6 +515,7 @@ def unfollow_user(user_addr: str) -> dict:
         pow_base_bits,
         pow_factor,
         ts,
+        nonce,
     )
 
 
@@ -480,7 +523,8 @@ def follow_topic(topic: str) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
-    base = canon_prefix("MsgFollowTopic") + envelope(bh, diff, ts) + enc_str(100, ADDRESS) + enc_str(101, topic)
+    nonce = generate_nonce()
+    base = canon_prefix("MsgFollowTopic") + envelope(bh, diff, ts, nonce) + enc_str(100, ADDRESS) + enc_str(101, topic)
     return submit(
         "/core/follow_topic",
         base,
@@ -490,6 +534,7 @@ def follow_topic(topic: str) -> dict:
         pow_base_bits,
         pow_factor,
         ts,
+        nonce,
     )
 
 
@@ -570,8 +615,8 @@ def handle_mention(item: dict) -> None:
         tx_hash = result.get("tx_hash")
         if tx_hash:
             status = confirm_tx(tx_hash)
-            if status.get("found") and status.get("code") == 0:
-                log(f"  annotation confirmed at height {status.get('height')}")
+            if status.get("found") and tx_success(status):
+                log(f"  annotation confirmed (tx_type={status.get('tx_type')})")
             else:
                 log(f"  annotation status: {status}")
     else:
@@ -677,8 +722,8 @@ if __name__ == "__main__":
             tx_hash = result.get("tx_hash")
             if tx_hash:
                 status = confirm_tx(tx_hash)
-                if status.get("found") and status.get("code") == 0:
-                    log(f"    confirmed at height {status.get('height')}")
+                if status.get("found") and tx_success(status):
+                    log(f"    confirmed (tx_type={status.get('tx_type')})")
                 else:
                     log(f"    status: {status}")
             time.sleep(2)

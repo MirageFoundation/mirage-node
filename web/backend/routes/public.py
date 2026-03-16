@@ -2467,6 +2467,7 @@ def get_tx_status():
         out = {
             "found": True,
             "tx_hash": tx_hash,
+            "code": 0,
             "success": True,
             "indexed": True,
             "tx_type": tx_type,
