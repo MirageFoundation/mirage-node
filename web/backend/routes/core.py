@@ -57,7 +57,7 @@ from shared.datatypes import (
 
 from logging_utils import log_event, next_request_id, logger
 from node import derive_address_from_pubkey, min_gas_price_umirage, require_runtime
-from params import expect_params, load_params
+from params import expect_params
 from db import connect_db
 from pow import (
     argon2_digest,
@@ -2383,11 +2383,6 @@ def core_delete_post():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        # Ensure params cache is initialized (avoids 'params cache uninitialized' until profile is visited)
-        try:
-            load_params(force=False)
-        except Exception:
-            pass
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -2528,11 +2523,6 @@ def core_delete_user():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        # Ensure params cache is initialized (avoids 'params cache uninitialized' until profile is visited)
-        try:
-            load_params(force=False)
-        except Exception:
-            pass
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -3703,11 +3693,6 @@ def core_send_tokens():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        # Ensure params cache is initialized for fee checks
-        try:
-            load_params(force=False)
-        except Exception:
-            pass
         data = request.get_json(force=True) or {}
         log_event(rid, "send_tokens.data", data=data)
 
@@ -3920,10 +3905,7 @@ def core_upgrade_level():
         # PoW is NOT allowed for upgrade_level - must pay with tokens. No upfront fee field required.
 
         # Backend precheck: ensure user has enough balance for the target tier's period fee
-        try:
-            p = load_params(force=False)
-        except Exception:
-            p = {}
+        p = expect_params()
         period_fee = 0
         try:
             tiers = p.get("tiers") or []

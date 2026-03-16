@@ -31,6 +31,7 @@ from shared.datatypes import (
     MsgSetLevel,
     MsgUpgradeLevel,
     MsgSetAutoRenewal,
+    MsgUpdateParams,
     MsgBridgeBurn,
     MsgBridgeAttestBurned,
     MsgBridgeAttestMinted,
@@ -103,6 +104,7 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgSetLevel": MsgSetLevel,
     "/mirage.core.v1.MsgUpgradeLevel": MsgUpgradeLevel,
     "/mirage.core.v1.MsgSetAutoRenewal": MsgSetAutoRenewal,
+    "/mirage.core.v1.MsgUpdateParams": MsgUpdateParams,
     "/mirage.core.v1.MsgBridgeBurn": MsgBridgeBurn,
     "/mirage.core.v1.MsgBridgeAttestBurned": MsgBridgeAttestBurned,
     "/mirage.core.v1.MsgBridgeAttestMinted": MsgBridgeAttestMinted,
@@ -170,6 +172,8 @@ class MessageProcessor:
             self._handle_upgrade_level(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetAutoRenewal":
             self._handle_set_auto_renewal(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgUpdateParams":
+            self._handle_update_params(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgAward":
             self._handle_award(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgSendTokens":
@@ -1836,6 +1840,21 @@ class MessageProcessor:
                 )
         except Exception as e:
             logger.error("Error handling set_auto_renewal: %s", e, exc_info=True)
+
+    def _handle_update_params(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgUpdateParams (governance parameter changes)."""
+        try:
+            parsed = MsgUpdateParams()
+            parsed.ParseFromString(value)
+            from indexer.params import load_params as load_chain_params, get_raw_params
+
+            load_chain_params(self.chain.grpc_target, force=True)
+            raw = get_raw_params()
+            if raw:
+                self.db.set_chain_stat("chain_params", raw, int(ts))
+                logger.info("Params updated via MsgUpdateParams: chain_params stored")
+        except Exception as e:
+            logger.error("Error handling update_params: %s", e, exc_info=True)
 
     def update_profile_level(self, addr: str, level: int, ts: int):
         """Update profile level from subscription events (EndBlock)."""

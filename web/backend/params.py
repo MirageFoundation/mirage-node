@@ -16,8 +16,6 @@ from db import connect_db
 log = logging.getLogger(__name__)
 
 _PARAMS_CACHE: Optional[Dict[str, Any]] = None
-_PARAMS_CACHE_TIME: float = 0.0
-_PARAMS_CACHE_TTL: float = 300.0
 _LOCK = threading.Lock()
 
 _REQUIRED_INT_PARAMS = [
@@ -115,11 +113,9 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
     Raises:
         RuntimeError: If params not available after max_retries
     """
-    global _PARAMS_CACHE, _PARAMS_CACHE_TIME
+    global _PARAMS_CACHE
     with _LOCK:
-        now = time.time()
-        cache_valid = _PARAMS_CACHE is not None and (now - _PARAMS_CACHE_TIME) < _PARAMS_CACHE_TTL
-        if cache_valid and not force:
+        if _PARAMS_CACHE is not None and not force:
             return _PARAMS_CACHE
 
         last_error = None
@@ -131,7 +127,6 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
                     raise RuntimeError("chain_params not yet available in indexer DB")
                 cache = _build_cache_from_params(params_dict)
                 _PARAMS_CACHE = cache
-                _PARAMS_CACHE_TIME = time.time()
                 log.info(f"Loaded chain params from indexer DB: {cache}")
                 return _PARAMS_CACHE
             except Exception as e:

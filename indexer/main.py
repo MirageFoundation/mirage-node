@@ -556,16 +556,6 @@ class Indexer:
                                     self.db.set_chain_stat("total_supply", supply, int(time.time()))
                             except Exception as supply_err:
                                 logger.warning("Failed to record supply at height %s: %s", height, supply_err)
-                            # Refresh chain params periodically
-                            try:
-                                load_chain_params(self.chain.grpc_target, force=True)
-                                from indexer.params import get_raw_params
-
-                                raw = get_raw_params()
-                                if raw:
-                                    self.db.set_chain_stat("chain_params", raw, int(time.time()))
-                            except Exception:
-                                pass
         except Exception as e:
             logger.error("Error processing message: %s", e, exc_info=True)
 

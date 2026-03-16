@@ -337,6 +337,9 @@ def reload_params():
         rt = require_runtime()
         load_params(force=True)
         params = expect_params()
+        global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
+        _CHAIN_CONFIG_CACHE = None
+        _CHAIN_CONFIG_CACHE_TIME = 0.0
         log_event(rid, "reload_params.success", params_keys=list(params.keys()))
         return jsonify({"status": "ok", "params": params})
     except Exception as e:
@@ -3278,11 +3281,7 @@ def get_chain_config():
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
-        try:
-            p = load_params(force=False)
-        except Exception as e:
-            log_event(rid, "get_chain_config.params_err", error=str(e))
-            return safe_error(e, context="get_chain_config.params")
+        p = expect_params()
 
         resp: Dict[str, Any] = {
             "max_username_size": p["max_username_size"],
