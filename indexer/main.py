@@ -6,7 +6,6 @@ IMPORTANT: API USAGE POLICY
 - Use gRPC (port 9090) for all chain queries (governance, bank, etc.)
 - Use RPC/HTTP (port 26657) only for Tendermint-specific queries (status, block_results, websocket)
 - NEVER use REST API (port 1317) - it is not enabled and not used by the backend
-- This matches the backend's API usage pattern for consistency
 """
 import base64
 import hashlib
@@ -201,6 +200,7 @@ class Indexer:
             block = result.get("block")
             if not block:
                 raise RuntimeError(f"Missing 'block' in result at height {height}")
+            block_hash = (result.get("block_id") or {}).get("hash", "") or ""
             header = block.get("header")
             if not header:
                 raise RuntimeError(f"Missing 'header' in block at height {height}")
@@ -316,6 +316,12 @@ class Indexer:
 
             self._process_governance_events(result_obj, ts, height)
             self._process_subscription_events(result_obj, ts, height)
+
+            # Per-block state updates: balances, recent blocks, indexer state
+            try:
+                self._update_per_block_state(height, header, result_obj, ts, block_hash)
+            except Exception as state_err:
+                logger.warning("Per-block state update failed at height %s: %s", height, state_err)
         except Exception as e:
             raise RuntimeError(f"Error processing block {height}: {e}") from e
 
@@ -526,7 +532,13 @@ class Indexer:
                         # Record difficulty and msg_count in live mode (accurate data)
                         try:
                             info = self.chain.get_difficulty_info()
-                            self.db.upsert_difficulty(height, info["difficulty"], info["msg_count"], int(time.time()))
+                            self.db.upsert_difficulty(
+                                height,
+                                int(info.get("current_difficulty", 0)),
+                                int(info.get("pow_message_count", 0)),
+                                int(time.time()),
+                            )
+                            self.db.set_chain_stat("difficulty_info", info, int(time.time()))
                         except Exception as diff_err:
                             logger.warning("Failed to record difficulty at height %s: %s", height, diff_err)
                         # Record supply (and node balance) every 200 blocks (aligns with mint interval)
@@ -541,8 +553,16 @@ class Indexer:
                                         pass
                                 if supply > 0:
                                     self.db.upsert_supply(height, supply, int(time.time()), node_balance=node_bal)
+                                    self.db.set_chain_stat("total_supply", supply, int(time.time()))
                             except Exception as supply_err:
                                 logger.warning("Failed to record supply at height %s: %s", height, supply_err)
+                            # Refresh chain params periodically
+                            try:
+                                params_dict = load_chain_params(self.chain.grpc_target, force=True)
+                                if params_dict:
+                                    self.db.set_chain_stat("chain_params", params_dict, int(time.time()))
+                            except Exception:
+                                pass
         except Exception as e:
             logger.error("Error processing message: %s", e, exc_info=True)
 
@@ -612,13 +632,268 @@ class Indexer:
         except Exception as e:
             logger.warning("KV Sync skipped (profiles): %s", e)
 
+        # Startup resync: refresh mutable chain state (balances, supply, validators, params)
+        try:
+            self._startup_resync()
+        except Exception as e:
+            logger.warning("Startup resync failed: %s", e, exc_info=True)
+
         self.running = True
         current_height = self._catch_up()
+
+        # Start tx queue poller in background thread
+        import threading
+
+        self._tx_queue_thread = threading.Thread(target=self._tx_queue_poller, daemon=True)
+        self._tx_queue_thread.start()
+
         logger.info("Transitioning to live mode (WebSocket)")
         try:
             self.start_websocket()
         except KeyboardInterrupt:
             pass
+
+    def _startup_resync(self):
+        """Refresh mutable chain state on startup — block replay may be incomplete."""
+        now = int(time.time())
+        logger.info("Startup resync: refreshing chain stats, params, balances...")
+
+        # 1. Chain params (already loaded at startup; store in DB for backend)
+        try:
+            from indexer.params import expect_params as _ep
+
+            params_dict = _ep()
+            if params_dict:
+                self.db.set_chain_stat("chain_params", params_dict, now)
+                logger.info("Startup resync: chain_params stored")
+        except Exception as e:
+            logger.warning("Startup resync: chain_params failed: %s", e)
+
+        # 2. Total supply
+        try:
+            supply = self.chain.get_total_supply()
+            if supply > 0:
+                self.db.set_chain_stat("total_supply", supply, now)
+                logger.info("Startup resync: total_supply=%d", supply)
+        except Exception as e:
+            logger.warning("Startup resync: total_supply failed: %s", e)
+
+        # 2b. Auth params (tx_size_cost_per_byte)
+        try:
+            tx_size_ppb = int(self.chain.get_tx_size_cost_per_byte() or 0)
+            if tx_size_ppb > 0:
+                self.db.set_chain_stat("tx_size_cost_per_byte", tx_size_ppb, now)
+        except Exception as e:
+            logger.warning("Startup resync: tx_size_cost_per_byte failed: %s", e)
+
+        # 3. Validator info (moniker, staked balance)
+        try:
+            self._sync_validator_info(now)
+        except Exception as e:
+            logger.warning("Startup resync: validator_info failed: %s", e)
+
+        # 4. Difficulty snapshot
+        try:
+            diff_info = self.chain.get_difficulty_info()
+            if diff_info:
+                self.db.set_chain_stat("difficulty_info", diff_info, now)
+        except Exception as e:
+            logger.warning("Startup resync: difficulty_info failed: %s", e)
+
+        # 5. Balance snapshot for all profiles + system wallets
+        try:
+            self._snapshot_all_balances(now)
+        except Exception as e:
+            logger.warning("Startup resync: balance snapshot failed: %s", e)
+
+        # 6. Recent blocks (last 100)
+        try:
+            self._sync_recent_blocks()
+        except Exception as e:
+            logger.warning("Startup resync: recent blocks failed: %s", e)
+
+        # 7. Indexer state
+        status = self.chain.get_status()
+        chain_height = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
+        self.db.set_indexer_state("chain_head_height", str(chain_height), now)
+        logger.info("Startup resync complete")
+
+    def _sync_validator_info(self, now: int):
+        """Query validator info from chain and store in chain_stats."""
+        try:
+            from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
+            from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
+            import grpc as _grpc
+
+            with _grpc.insecure_channel(self.chain.grpc_target) as channel:
+                stub = staking_query_pb2_grpc.QueryStub(channel)
+                resp = stub.Validators(staking_query_pb2.QueryValidatorsRequest(), timeout=10)
+                validators = []
+                for v in resp.validators or []:
+                    moniker = v.description.moniker if v.description else ""
+                    tokens = str(v.tokens) if v.tokens else "0"
+                    status = int(v.status)
+                    oper_addr = v.operator_address or ""
+                    validators.append(
+                        {
+                            "moniker": moniker,
+                            "tokens": tokens,
+                            "status": status,
+                            "operator_address": oper_addr,
+                        }
+                    )
+                self.db.set_chain_stat("validators", validators, now)
+                logger.info("Startup resync: %d validators stored", len(validators))
+
+                # Store total staked across all validators
+                total_staked = sum(int(v.get("tokens") or 0) for v in validators)
+                self.db.set_chain_stat("total_staked", total_staked, now)
+        except Exception as e:
+            logger.warning("_sync_validator_info failed: %s", e)
+
+    def _snapshot_all_balances(self, now: int):
+        """Snapshot balances for all profile owners + system wallets."""
+        import os
+
+        owners = []
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT owner FROM profiles")
+                owners = [r[0] for r in cur.fetchall()]
+
+        # Add system wallets from env or hardcoded
+        system_wallets = [w.strip() for w in os.environ.get("INDEXER_SYSTEM_WALLETS", "").split(",") if w.strip()]
+        all_addrs = list(set(owners + system_wallets))
+        logger.info("Balance snapshot: querying %d addresses...", len(all_addrs))
+
+        batch = []
+        errors = 0
+        for addr in all_addrs:
+            try:
+                bal = self.chain.get_balance(addr)
+                batch.append((addr, bal))
+            except Exception:
+                errors += 1
+                batch.append((addr, 0))
+
+        self.db.upsert_balances_batch(batch, now)
+        logger.info("Balance snapshot: upserted %d balances (%d errors)", len(batch), errors)
+
+    def _tx_queue_poller(self):
+        """Poll pending_txs table and broadcast via gRPC. Runs in a background thread."""
+        import grpc as _grpc
+        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import BroadcastTxRequest, BroadcastMode
+        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
+
+        logger.info("TX queue poller started")
+        while self.running:
+            try:
+                pending = self.db.get_pending_txs(limit=50)
+                if not pending:
+                    time.sleep(0.5)
+                    continue
+
+                with _grpc.insecure_channel(self.chain.grpc_target) as channel:
+                    stub = ServiceStub(channel)
+                    for tx in pending:
+                        tx_id = tx["id"]
+                        tx_bytes = tx["tx_bytes"]
+                        tx_hash = tx["tx_hash"]
+                        try:
+                            req = BroadcastTxRequest(tx_bytes=tx_bytes, mode=BroadcastMode.BROADCAST_MODE_ASYNC)
+                            stub.BroadcastTx(req, timeout=10)
+                            self.db.update_pending_tx_status(tx_id, "broadcasted")
+                            logger.debug("TX queue: broadcasted %s", tx_hash)
+                        except Exception as e:
+                            self.db.update_pending_tx_status(tx_id, "failed", error_log=str(e))
+                            logger.warning("TX queue: failed to broadcast %s: %s", tx_hash, e)
+            except Exception as e:
+                logger.error("TX queue poller error: %s", e, exc_info=True)
+                time.sleep(2)
+
+    def _sync_recent_blocks(self):
+        """Fetch recent blocks from RPC and store hashes."""
+        try:
+            status = self.chain.get_status()
+            latest = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
+            if latest <= 0:
+                return
+            start = max(1, latest - 99)
+            for h in range(start, latest + 1):
+                try:
+                    blk = self.chain.get_block(h)
+                    result = blk.get("result", {})
+                    block = result.get("block", {})
+                    header = block.get("header", {})
+                    block_hash = result.get("block_id", {}).get("hash", "")
+                    block_time = self.chain.parse_header_time(str(header.get("time", "")))
+                    self.db.upsert_recent_block(h, block_hash, block_time)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("_sync_recent_blocks failed: %s", e)
+
+    def _update_per_block_state(self, height: int, header: dict, result_obj: dict, ts: int, block_hash: str):
+        """Per-block updates: recent blocks, balances for touched addresses, indexer state."""
+        now = int(time.time())
+
+        # Store block hash (block_id.hash)
+        try:
+            self.db.upsert_recent_block(height, block_hash, ts)
+            if height % 1000 == 0:
+                self.db.prune_old_blocks(1000)
+        except Exception:
+            pass
+
+        # Collect addresses touched by bank events
+        touched = set()
+        txs_results = result_obj.get("txs_results") or []
+        for tx_result in txs_results:
+            for ev in tx_result.get("events") or []:
+                ev_type = ev.get("type", "")
+                if ev_type in ("transfer", "coin_spent", "coin_received"):
+                    for attr in ev.get("attributes") or []:
+                        key = attr.get("key", "")
+                        val = attr.get("value", "")
+                        # Base64 decode if needed
+                        try:
+                            key = base64.b64decode(key).decode("utf-8")
+                        except Exception:
+                            pass
+                        try:
+                            val = base64.b64decode(val).decode("utf-8")
+                        except Exception:
+                            pass
+                        if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
+                            touched.add(val.lower())
+
+        # Refresh balances for touched addresses (bounded)
+        MAX_BALANCE_REFRESH_PER_BLOCK = 200
+        if touched:
+            addrs = list(touched)[:MAX_BALANCE_REFRESH_PER_BLOCK]
+            batch = []
+            for addr in addrs:
+                try:
+                    bal = self.chain.get_balance(addr)
+                    batch.append((addr, bal))
+                except Exception:
+                    pass
+            if batch:
+                self.db.upsert_balances_batch(batch, now)
+
+        # Update indexer state
+        self.db.set_indexer_state("last_processed_height", str(height), now)
+        self.db.set_indexer_state("last_processed_time", str(now), now)
+
+        # Periodically update chain head height
+        if height % 10 == 0:
+            try:
+                status = self.chain.get_status()
+                chain_height = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
+                if chain_height > 0:
+                    self.db.set_indexer_state("chain_head_height", str(chain_height), now)
+            except Exception:
+                pass
 
     def _sync_profiles_from_chain(self):
         """
@@ -642,6 +917,7 @@ class Indexer:
             avatar = str(p.get("avatar", "") or "")
             banner = str(p.get("banner", "") or "")
             flair = str(p.get("flair", "") or "")
+            reserve_funds = int(p.get("reserve_funds", 0) or 0)
             self.db.upsert_profile_full(
                 owner,
                 username,
@@ -654,6 +930,7 @@ class Indexer:
                 banner,
                 flair,
                 now,
+                reserve_funds=reserve_funds,
             )
             num += 1
         logger.info("KV Sync: Upserted %d profiles from chain KV", num)

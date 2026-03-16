@@ -1714,6 +1714,7 @@ class MessageProcessor:
                 avatar = profile_data.get("avatar", "") or ""
                 banner = profile_data.get("banner", "") or ""
                 flair = profile_data.get("flair", "") or ""
+                reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
 
                 self.db.upsert_profile_full(
                     owner,
@@ -1727,6 +1728,7 @@ class MessageProcessor:
                     banner,
                     flair,
                     ts,
+                    reserve_funds=reserve_funds,
                 )
                 self.log_yaml(
                     "User upgraded level",
@@ -1784,6 +1786,7 @@ class MessageProcessor:
                 avatar = profile_data.get("avatar", "") or ""
                 banner = profile_data.get("banner", "") or ""
                 flair = profile_data.get("flair", "") or ""
+                reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
 
                 self.db.upsert_profile_full(
                     owner,
@@ -1797,6 +1800,7 @@ class MessageProcessor:
                     banner,
                     flair,
                     ts,
+                    reserve_funds=reserve_funds,
                 )
                 self.log_yaml(
                     "User set auto_renewal",

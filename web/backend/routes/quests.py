@@ -26,7 +26,18 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, jsonify, request
 
-from bank import get_balance as _get_balance
+
+def _get_balance(address) -> int:
+    """Read balance from indexer DB."""
+    if not address:
+        return 0
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance FROM balances WHERE address = LOWER(%s)", (str(address),))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
 from db import connect_db
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
@@ -39,10 +50,7 @@ from settings import QUESTS_ENABLED, require_bool_env
 def _inject_balance(resp: dict, addr: str) -> dict:
     """Add balance to response dict if address is provided."""
     if addr and addr.lower() != "guest":
-        try:
-            resp["balance"] = int(_get_balance(addr))
-        except Exception:
-            pass
+        resp["balance"] = int(_get_balance(addr))
     return resp
 
 
