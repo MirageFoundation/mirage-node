@@ -28,10 +28,10 @@ _TX_SIZE_COST_PER_BYTE: Optional[int] = None
 
 
 def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
-    # Ante handler KV reads: auth params, PoW/difficulty, account lookup,
-    # balance check, etc.  Each ReadFlat = 1000 + 3*value_bytes.
-    # Budget ~8 reads + HasCost checks = ~10000 gas.
-    ante_gas = 10_000
+    # Ante handler KV reads: auth params, PoW/difficulty, nonce check/write,
+    # account lookup, balance check, profile reads, etc.
+    # Each ReadFlat=1000, WriteFLat=2000, Has=1000, plus per-byte costs.
+    ante_gas = 15_000
     tx_size_ppb = _get_tx_size_cost_per_byte()
     min_gas_price = min_gas_price_umirage()
 
