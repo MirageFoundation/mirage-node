@@ -31,6 +31,7 @@ if os.path.exists(cfg_env):
 from logging_utils import configure_logging, logger  # noqa: E402
 from node import initialize_runtime  # noqa: E402
 from params import load_params  # noqa: E402
+from tx import load_tx_size_cost_per_byte  # noqa: E402
 from routes.public import public_bp  # noqa: E402
 from routes.core import core_bp  # noqa: E402
 from routes.bridge import bridge_bp  # noqa: E402
@@ -115,6 +116,10 @@ def create_app(init_runtime: bool = True) -> Flask:
         logger().info("Loading chain params from indexer DB (waiting for indexer if needed)...")
         load_params()
         logger().info("Chain params loaded successfully from indexer DB")
+        # Load tx size cost once at startup
+        logger().info("Loading tx_size_cost_per_byte from indexer DB...")
+        load_tx_size_cost_per_byte()
+        logger().info("tx_size_cost_per_byte loaded successfully")
 
     return app
 

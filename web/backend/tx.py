@@ -9,7 +9,7 @@ Functions:
 - broadcast_tx(tx_bytes): Insert into pending_txs DB queue; returns (tx_hash, code, height, raw_log).
 """
 
-from typing import Tuple
+from typing import Tuple, Optional
 import hashlib as _hashlib
 import math as _math
 import time as _time
@@ -21,6 +21,8 @@ from cosmpy.protos.cosmos.base.v1beta1.coin_pb2 import Coin
 
 from node import min_gas_price_umirage, require_runtime
 from db import connect_db
+
+_TX_SIZE_COST_PER_BYTE: Optional[int] = None
 
 
 def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
@@ -57,6 +59,8 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
 
 
 def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
+    if int(gas_limit) <= 0:
+        raise RuntimeError("gas_limit must be > 0")
     min_gas_price = min_gas_price_umirage()
     fee_amt = int(_math.ceil(int(gas_limit) * min_gas_price))
     fee = Fee(gas_limit=int(gas_limit))
@@ -101,14 +105,25 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 
 
 def _get_tx_size_cost_per_byte() -> int:
-    """Read tx_size_cost_per_byte from chain_stats DB or use default."""
+    """Return cached tx_size_cost_per_byte loaded at startup."""
+    if _TX_SIZE_COST_PER_BYTE is None:
+        raise RuntimeError("tx_size_cost_per_byte not loaded - call load_tx_size_cost_per_byte at startup")
+    return _TX_SIZE_COST_PER_BYTE
+
+
+def load_tx_size_cost_per_byte() -> int:
+    """Load tx_size_cost_per_byte once at startup from chain_stats."""
+    global _TX_SIZE_COST_PER_BYTE
+    if _TX_SIZE_COST_PER_BYTE is not None:
+        return _TX_SIZE_COST_PER_BYTE
     with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
         cur = conn.cursor()
         cur.execute("SELECT value FROM chain_stats WHERE key = 'tx_size_cost_per_byte'")
         row = cur.fetchone()
         if row and row[0] is not None:
-            v = int(row[0]) if isinstance(row[0], (int, float)) else 0
+            v = int(row[0])
             if v > 0:
+                _TX_SIZE_COST_PER_BYTE = v
                 return v
     raise RuntimeError("tx_size_cost_per_byte missing in indexer DB")
 
@@ -124,4 +139,5 @@ __all__ = [
     "build_tx_bytes",
     "simulate_gas",
     "broadcast_tx",
+    "load_tx_size_cost_per_byte",
 ]

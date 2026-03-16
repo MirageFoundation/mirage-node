@@ -597,7 +597,12 @@ def setup_test_wallets(backend: str) -> bool:
 
     Returns True on success, False on failure.
     """
-    from tests.backend_helpers import _do_set_username_raw, _wait_username, _do_set_biography
+    from tests.backend_helpers import (
+        _do_set_username_raw,
+        _wait_username,
+        _wait_tx_deliver,
+        _do_set_biography,
+    )
 
     print(f"\n{_COLOR_BOLD}[setup] Generating wallets & funding{_COLOR_RESET}")
 
@@ -612,18 +617,35 @@ def setup_test_wallets(backend: str) -> bool:
         print(f"  Wallet {name:4s}: {w.address()}")
 
     # Set usernames for all wallets (required before any other core transaction)
+    username_tx_hashes: list[tuple[str, str]] = []
     for name, w in WALLETS.items():
         uname = f"test{name}{_rand_str(4)}"
         resp = _do_set_username_raw(backend, w, uname, skip_pow=False)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         if txh:
+            username_tx_hashes.append((name, txh))
             print(f"  Username {name:4s}: {uname} (tx: {txh[:16]}...)")
         else:
             err = resp.get("error", resp) if resp else "no response"
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: {err}")
             return False
 
-    # Wait until usernames are visible on-chain to avoid downstream failures
+    # Wait for each set_username tx to be delivered in a block before polling indexer
+    for name, txh in username_tx_hashes:
+        result = _wait_tx_deliver(txh)
+        if result is None:
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: tx not delivered in block")
+            return False
+        code, _ = result
+        if code != 0:
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: tx failed in block (code={code})")
+            return False
+
+    # Brief delay so indexer can process the blocks before we poll get_profile
+    _debug("waiting for indexer to process set_username blocks...")
+    time.sleep(10)
+
+    # Wait until usernames are visible in indexer (get_profile)
     for name, w in WALLETS.items():
         addr = str(w.address())
         resolved = _wait_username(backend, addr)

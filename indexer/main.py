@@ -788,6 +788,7 @@ class Indexer:
         import grpc as _grpc
         from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import BroadcastTxRequest, BroadcastMode
         from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
+        from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxRaw, AuthInfo
 
         logger.info("TX queue poller started")
         while self.running:
@@ -803,6 +804,21 @@ class Indexer:
                         tx_id = tx["id"]
                         tx_bytes = tx["tx_bytes"]
                         tx_hash = tx["tx_hash"]
+                        # Hard fail on invalid gas to avoid spamming the chain
+                        try:
+                            tx_raw = TxRaw()
+                            tx_raw.ParseFromString(tx_bytes)
+                            auth = AuthInfo()
+                            auth.ParseFromString(tx_raw.auth_info_bytes)
+                            gas_limit = int(getattr(auth.fee, "gas_limit", 0) or 0)
+                        except Exception as parse_err:
+                            gas_limit = 0
+                            logger.warning("TX queue: failed to parse tx %s: %s", tx_hash, parse_err)
+                        if gas_limit <= 0:
+                            err = "invalid gas_limit: 0"
+                            self.db.update_pending_tx_status(tx_id, "failed", error_log=err)
+                            logger.warning("TX queue: rejected %s: %s", tx_hash, err)
+                            continue
                         try:
                             # Use SYNC so we get CheckTx result immediately; ASYNC can
                             # hide ante/mempool rejections and make queued txs appear
