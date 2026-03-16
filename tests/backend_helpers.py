@@ -1,0 +1,1107 @@
+"""Backend-specific transaction helpers and wait/poll utilities."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import time
+from typing import Optional, Tuple
+
+import requests
+
+from tests.common import (
+    _b64,
+    _debug,
+    _lb_bytes,
+    _now_ms,
+    _fresh_nonce,
+    _rand_str,
+    _get,
+    _post,
+    _fetch_params,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_delete_raw,
+    _canon_base_delete_user_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_follow_user_raw,
+    _canon_base_unfollow_user_raw,
+    _canon_base_follow_topic_raw,
+    _canon_base_unfollow_topic_raw,
+    _canon_base_enable_agent_raw,
+    _canon_base_disable_agent_raw,
+    _canon_base_set_agents_raw,
+    _canon_base_block_post_raw,
+    _canon_base_unblock_post_raw,
+    _canon_base_block_user_raw,
+    _canon_base_unblock_user_raw,
+    _canon_base_block_topic_raw,
+    _canon_base_unblock_topic_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_upgrade_level_raw,
+    _canon_base_report_raw,
+    _canon_base_set_auto_renewal_raw,
+    _canon_base_award_raw,
+    _canon_base_annotate_raw,
+    canon_signed_with_pow,
+    sign_canonical,
+    compute_pow,
+    get_status,
+    get_username_from_address,
+    INDEX_TIMEOUT_SEC,
+)
+from cosmpy.aerial.wallet import LocalWallet
+
+
+def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int, skip_pow: bool = False) -> dict:
+    """Send tokens from wallet to target address via the backend API."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_send_tokens_raw(pub, _lb_bytes(lb), d, ts, addr, target, amount, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "amount": amount,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/send_tokens", payload)
+    return resp
+
+
+def _do_award(
+    backend: str,
+    wallet: LocalWallet,
+    target: str,
+    award_type: str,
+    pow_difficulty: int = 0,
+    pow: int = 0,
+    last_block_hash: str | None = None,
+    timestamp: int | None = None,
+    sig_override: bytes | None = None,
+    pub_override: bytes | None = None,
+) -> tuple[int, dict]:
+    """Send an award via the backend API (burn-only)."""
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = last_block_hash or str(st.get("last_block_hash", ""))
+    pub = pub_override or wallet.public_key().public_key_bytes
+    ts = int(timestamp or _now_ms())
+    nonce = _fresh_nonce()
+    base = _canon_base_award_raw(pub, _lb_bytes(lb), int(pow_difficulty), ts, target, award_type, nonce)
+    signed = canon_signed_with_pow(base, int(pow))
+    sig = sig_override or sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": int(pow_difficulty),
+        "pow": int(pow),
+        "target": target,
+        "award_type": award_type,
+    }
+    code, resp = _post(f"{backend}/api/core/award", payload)
+    return code, resp
+
+
+def _do_post(
+    backend: str, wallet, topic: str, title: str, content: str, target: str = "", tag: str = "", skip_pow: bool = False
+) -> str | None:
+    """Create a post/comment and return the tx_hash or None."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/post", payload)
+    resp = resp or {}
+    if resp.get("error"):
+        _debug(f"post.submit error={resp.get('error')}")
+        return None
+    tx_code = int(resp.get("code", 0) or 0)
+    if tx_code != 0:
+        _debug(f"post.submit failed code={tx_code} log={str(resp.get('raw_log', ''))[:200]}")
+        return None
+    txh = str(resp.get("tx_hash", "") or "").lower()
+    return txh if txh else None
+
+
+def _do_post_with_nonce(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    nonce: int,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/post", payload)
+    return resp or {}
+
+
+def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool = False) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_vote_raw(pub, _lb_bytes(lb), d, ts, target, int(direction), nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "direction": direction,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/vote", payload)
+    return resp
+
+
+def _do_vote_with_nonce(
+    backend: str,
+    wallet,
+    target: str,
+    direction: int,
+    nonce: int,
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_vote_raw(pub, _lb_bytes(lb), d, ts, target, int(direction), nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "direction": direction,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/vote", payload)
+    return resp or {}
+
+
+def _do_edit(
+    backend: str,
+    wallet,
+    override_hash: str,
+    topic: str,
+    title: str,
+    content: str,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    """Edit a post or comment.
+
+    Args:
+        override_hash: The tx hash of the post/comment being edited.
+        topic:         Topic (required for root posts, empty for comments).
+        title:         New title (root posts only).
+        content:       New content.
+        target:        Parent post hash (for comments) or "" for root posts.
+        tag:           Content tag.
+        skip_pow:      True for subscribers.
+    """
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_edit_raw(
+        pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce
+    )
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "override": override_hash,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/edit", payload)
+    return resp
+
+
+def _do_annotate(
+    backend: str,
+    wallet,
+    override_hash: str,
+    topic: str = ".",
+    title: str = ".",
+    content: str = ".",
+    tag: str = ".",
+    media: list[str] | None = None,
+    appendix: str = ".",
+    pow_difficulty: int = 0,
+    pow_val: int = 0,
+) -> dict:
+    """Agent-only: annotate a post with overlay edits. '.' means no change."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    media_list = media if media is not None else ["."]
+
+    base = _canon_base_annotate_raw(
+        pub,
+        _lb_bytes(lb),
+        int(pow_difficulty),
+        ts,
+        topic,
+        title,
+        content,
+        tag,
+        override_hash,
+        media=media_list,
+        appendix=appendix,
+        nonce=nonce,
+    )
+    signed = canon_signed_with_pow(base, int(pow_val))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": int(pow_difficulty),
+        "pow": int(pow_val),
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "override": override_hash,
+        "media": media_list,
+        "appendix": appendix,
+    }
+    code, resp = _post(f"{backend}/api/core/annotate", payload)
+    resp = resp or {}
+    if code >= 400 or resp.get("error"):
+        details = resp.get("details")
+        _debug(f"annotate error code={code} error={resp.get('error')} details={details}")
+        out = {"error": resp.get("error", f"HTTP {code}")}
+        if details:
+            out["details"] = details
+        return out
+    return resp
+
+
+def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_delete_raw(pub, _lb_bytes(lb), d, ts, target, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/delete_post", payload)
+    return resp
+
+
+def _do_delete_user(backend: str, wallet, target_addr: str, skip_pow: bool = False) -> Tuple[int, dict]:
+    """Delete a user account. Returns (status_code, response_dict)."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_delete_user_raw(pub, _lb_bytes(lb), d, ts, target_addr, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    return _post(f"{backend}/api/core/delete_user", payload)
+
+
+def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, skip_pow: bool = False) -> dict:
+    """Follow or unfollow a user."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_follow_user_raw if follow else _canon_base_unfollow_user_raw
+    endpoint = "follow_user" if follow else "unfollow_user"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, user_addr, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": addr,
+        "user": user_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip_pow: bool = False) -> dict:
+    """Follow or unfollow a topic."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_follow_topic_raw if follow else _canon_base_unfollow_topic_raw
+    endpoint = "follow_topic" if follow else "unfollow_topic"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, topic, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": addr,
+        "topic": topic,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = True, skip_pow: bool = False) -> dict:
+    """Block or unblock a post/user. block_type is 'post' or 'user'."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    if block_type == "post":
+        canon_fn = _canon_base_block_post_raw if block else _canon_base_unblock_post_raw
+        endpoint = "block_post" if block else "unblock_post"
+    else:
+        canon_fn = _canon_base_block_user_raw if block else _canon_base_unblock_user_raw
+        endpoint = "block_user" if block else "unblock_user"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, target, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_pow: bool = False) -> dict:
+    """Block or unblock a topic."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_block_topic_raw if block else _canon_base_unblock_topic_raw
+    endpoint = "block_topic" if block else "unblock_topic"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, "", topic, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "topic": topic,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    print(f"    [debug] {endpoint} topic={topic} difficulty={d}")
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = False) -> dict:
+    """Set username via the backend API (raw payload construction)."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_set_username_raw(pub, _lb_bytes(lb), d, ts, addr, username, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": addr,
+        "username": username,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/set_username", payload)
+    return resp
+
+
+def _do_set_biography(backend: str, wallet, biography: str, skip_pow: bool = False) -> dict:
+    """Set biography via the backend API."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), d, ts, addr, biography, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": addr,
+        "biography": biography,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/set_biography", payload)
+    return resp
+
+
+def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = False) -> dict:
+    """Report a post via the backend API."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_report_raw(pub, _lb_bytes(lb), d, ts, target, reason, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "reason": reason,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/report", payload)
+    return resp
+
+
+def _do_enable_agent(backend: str, wallet, agent_addr: str, enable: bool = True, skip_pow: bool = False) -> dict:
+    """Enable or disable an agent."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_enable_agent_raw if enable else _canon_base_disable_agent_raw
+    endpoint = "enable_agent" if enable else "disable_agent"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, agent_addr, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": addr,
+        "agent": agent_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_set_agents(backend: str, wallet, agents: list[str], skip_pow: bool = False) -> dict:
+    """Atomically set the user's enabled agents list."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_set_agents_raw(pub, _lb_bytes(lb), d, ts, addr, agents, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "agents": agents,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/set_agents", payload)
+    return resp
+
+
+def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
+    """Toggle auto-renewal for a subscriber."""
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = str(st.get("last_block_hash", ""))
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+
+    base = _canon_base_set_auto_renewal_raw(pub, _lb_bytes(lb), 0, ts, auto_renew, nonce)
+    signed = canon_signed_with_pow(base, 0)
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "auto_renew": auto_renew,
+    }
+    code, resp = _post(f"{backend}/api/core/set_auto_renewal", payload)
+    return resp
+
+
+def _do_post_with_media(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    media: list,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> str | None:
+    """Create a post with media attachments; returns tx_hash or None."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, media, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "media": media,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/post", payload)
+    txh = str((resp or {}).get("tx_hash", "") or "").lower()
+    return txh if txh else None
+
+
+def _wait_list_count(
+    backend: str,
+    address: str,
+    list_key: str,
+    expected: int,
+    timeout: float = 30.0,
+) -> int:
+    """Poll until a profile/followed list reaches expected count (or timeout).
+
+    list_key: "followed_users", "followed_topics", "enabled_agents"
+    Returns the actual count observed.
+    """
+    endpoint = "get_user_followed" if list_key.startswith("followed_") else "get_profile"
+    deadline = time.perf_counter() + timeout
+    actual = 0
+    while time.perf_counter() < deadline:
+        try:
+            code, data = _get(f"{backend}/api/{endpoint}", {"address": address})
+            if code == 200 and data:
+                actual = len(data.get(list_key) or [])
+                if actual >= expected:
+                    return actual
+        except Exception:
+            pass
+        time.sleep(1.0)
+    return actual
+
+
+def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        try:
+            code, data = _get(f"{backend}/api/get_user_posts", {"owner": owner, "limit": 100, "page": 1})
+            if code == 200:
+                posts = (data or {}).get("posts") or []
+                if any(str(p.get("post_id", "")).lower() == h for p in posts):
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _wait_tx_status(
+    backend: str,
+    tx_hash: str,
+    expect_type: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and data:
+            if not data.get("found"):
+                time.sleep(0.5)
+                continue
+            if expect_type and data.get("tx_type") != expect_type:
+                time.sleep(0.5)
+                continue
+            if data.get("indexed") and data.get("details"):
+                return data
+        time.sleep(0.5)
+    return None
+
+
+def _wait_tx_status_failure(
+    backend: str,
+    tx_hash: str,
+    expect_type: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and data:
+            if not data.get("found"):
+                time.sleep(0.5)
+                continue
+            if data.get("success") is True:
+                time.sleep(0.5)
+                continue
+            if expect_type and data.get("tx_type") != expect_type:
+                time.sleep(0.5)
+                continue
+            return data
+        time.sleep(0.5)
+    return None
+
+
+def _wait_tx_deliver(tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> tuple[int, str] | None:
+    """Scan blocks for tx_hash and return (code, log) from DeliverTx."""
+    if not tx_hash:
+        return None
+    h = tx_hash.strip().lower().removeprefix("0x")
+    deadline = time.perf_counter() + timeout
+    try:
+        last_height = max(1, _rpc_latest_height() - 1)
+    except Exception:
+        last_height = 1
+    while time.perf_counter() < deadline:
+        cur = _rpc_latest_height()
+        for height in range(last_height + 1, cur + 1):
+            block = requests.get(f"http://127.0.0.1:26657/block?height={height}", timeout=3).json()
+            txs = block.get("result", {}).get("block", {}).get("data", {}).get("txs") or []
+            tx_index = None
+            for idx, tx_b64 in enumerate(txs):
+                raw = base64.b64decode(tx_b64)
+                if hashlib.sha256(raw).hexdigest().lower() == h:
+                    tx_index = idx
+                    break
+            if tx_index is not None:
+                while time.perf_counter() < deadline:
+                    br = requests.get(f"http://127.0.0.1:26657/block_results?height={height}", timeout=3).json()
+                    deliver = br.get("result", {}).get("txs_results") or []
+                    if tx_index < len(deliver):
+                        tx_result = deliver[tx_index]
+                        code = int(tx_result.get("code", 0) or 0)
+                        log = str(tx_result.get("log", "") or "")
+                        return code, log
+                    time.sleep(0.5)
+                return None
+        last_height = cur
+        time.sleep(0.5)
+    return None
+
+
+def _wait_username(backend: str, address: str, timeout: float = INDEX_TIMEOUT_SEC) -> str | None:
+    """Wait until a username is visible on-chain (via get_profile)."""
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        try:
+            uname = get_username_from_address(backend, address)
+            if uname:
+                return uname
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return None
+
+
+def _wait_blocked_topic_state(
+    backend: str,
+    address: str,
+    topic: str,
+    expect_present: bool = True,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    topic_lower = (topic or "").strip().lower()
+    while time.perf_counter() < deadline:
+        # Check indexed DB first (fast, eventually consistent)
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
+        if code == 200:
+            blocked = (data or {}).get("blocked_topics") or []
+            present = any(str(t or "").strip().lower() == topic_lower for t in blocked)
+            if present == expect_present:
+                return True
+        # Fall back to chain profile (authoritative, always current)
+        code2, profile = _get(f"{backend}/api/get_profile", {"address": address})
+        if code2 == 200:
+            chain_blocked = (profile or {}).get("blocked_topics") or []
+            present2 = any(str(t or "").strip().lower() == topic_lower for t in chain_blocked)
+            if present2 == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
+    return _wait_blocked_topic_state(backend, address, topic, True, timeout)
+
+
+def _wait_followed_topic(
+    backend: str,
+    address: str,
+    topic: str,
+    expect_present: bool = True,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    topic_lower = (topic or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
+        if code == 200:
+            topics = (data or {}).get("followed_topics") or []
+            present = any(str(t or "").strip().lower() == topic_lower for t in topics)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_followed_user(
+    backend: str,
+    address: str,
+    user: str,
+    expect_present: bool = True,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    user_lower = (user or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
+        if code == 200:
+            users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+            present = any(user_lower in json.dumps(u).lower() for u in users)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_blocked_user(
+    backend: str,
+    address: str,
+    user: str,
+    expect_present: bool = True,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    user_lower = (user or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
+        if code == 200:
+            blocked = (data or {}).get("blocked_users") or []
+            present = any(str(u or "").strip().lower() == user_lower for u in blocked)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_comment_indexed(backend: str, parent: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        try:
+            code, data = _get(f"{backend}/api/get_comments", {"post_id": parent, "limit": 100})
+            if code == 200:
+                children = (data or {}).get("children") or []
+                if any(str(c.get("post_id", "")).lower() == h for c in children):
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _rpc_latest_height() -> int:
+    r = requests.get("http://127.0.0.1:26657/status", timeout=2)
+    if not r.ok:
+        raise RuntimeError(f"rpc status failed: http={r.status_code}")
+    data = r.json()
+    return int(data["result"]["sync_info"]["latest_block_height"])
+
+
+def _wait_next_block(timeout: float = 8.0) -> int:
+    start = _rpc_latest_height()
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        cur = _rpc_latest_height()
+        if cur > start:
+            return cur
+        time.sleep(0.2)
+    raise RuntimeError(f"timeout waiting for next block (start={start})")
