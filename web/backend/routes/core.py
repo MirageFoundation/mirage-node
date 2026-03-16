@@ -2909,14 +2909,18 @@ def core_edit():
             row = cur.fetchone()
             conn.close()
             if not row or not row[0]:
-                return jsonify({"error": "override not found"}), 404
-            owner_of_override = (row[0] or "").lower()
-            if owner_of_override != user_addr.lower():
-                return jsonify({"error": "forbidden"}), 403
-            stored_target = (row[1] or "").lower()
-            if target.lower() != stored_target:
-                log_event(rid, "edit.target_mismatch", supplied=target, stored=stored_target, override=override)
-                return jsonify({"error": "target mismatch: cannot change post parent"}), 400
+                # Indexer may lag briefly behind the chain; don't hard-block relay
+                # on local precheck misses. Chain/indexer validation will enforce
+                # real existence/ownership rules.
+                log_event(rid, "edit.override_precheck_miss", override=override, user_addr=user_addr)
+            else:
+                owner_of_override = (row[0] or "").lower()
+                if owner_of_override != user_addr.lower():
+                    return jsonify({"error": "forbidden"}), 403
+                stored_target = (row[1] or "").lower()
+                if target.lower() != stored_target:
+                    log_event(rid, "edit.target_mismatch", supplied=target, stored=stored_target, override=override)
+                    return jsonify({"error": "target mismatch: cannot change post parent"}), 400
         except Exception:
             # If DB check fails, let chain proceed; indexer will enforce
             pass
@@ -3132,7 +3136,8 @@ def core_annotate():
             cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (override,))
             row = cur.fetchone()
             if not row or not row[0]:
-                return jsonify({"error": "override not found"}), 404
+                # Same as edit route: avoid false negatives during indexer lag.
+                log_event(rid, "annotate.override_precheck_miss", override=override, user_addr=user_addr)
 
         validator_addr = require_runtime().validator_payer_addr
 
