@@ -558,9 +558,12 @@ class Indexer:
                                 logger.warning("Failed to record supply at height %s: %s", height, supply_err)
                             # Refresh chain params periodically
                             try:
-                                params_dict = load_chain_params(self.chain.grpc_target, force=True)
-                                if params_dict:
-                                    self.db.set_chain_stat("chain_params", params_dict, int(time.time()))
+                                load_chain_params(self.chain.grpc_target, force=True)
+                                from indexer.params import get_raw_params
+
+                                raw = get_raw_params()
+                                if raw:
+                                    self.db.set_chain_stat("chain_params", raw, int(time.time()))
                             except Exception:
                                 pass
         except Exception as e:
@@ -658,11 +661,11 @@ class Indexer:
         now = int(time.time())
         logger.info("Startup resync: refreshing chain stats, params, balances...")
 
-        # 1. Chain params (already loaded at startup; store in DB for backend)
+        # 1. Chain params (store RAW gRPC dict so backend gets all fields)
         try:
-            from indexer.params import expect_params as _ep
+            from indexer.params import get_raw_params
 
-            params_dict = _ep()
+            params_dict = get_raw_params()
             if params_dict:
                 self.db.set_chain_stat("chain_params", params_dict, now)
                 logger.info("Startup resync: chain_params stored")

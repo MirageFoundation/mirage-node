@@ -123,7 +123,7 @@ def load_params(
     Raises:
         RuntimeError: If chain is not available after max_retries
     """
-    global _PARAMS_CACHE
+    global _PARAMS_CACHE, _RAW_PARAMS
     with _LOCK:
         if _PARAMS_CACHE is not None and not force:
             return _PARAMS_CACHE
@@ -135,6 +135,7 @@ def load_params(
                 params_dict = _query_core_params(grpc_target)
                 cache = _build_cache_from_params(params_dict)
                 _PARAMS_CACHE = cache
+                _RAW_PARAMS = params_dict
                 log.info("Loaded chain params for indexer: %s", cache)
                 return _PARAMS_CACHE
             except Exception as e:
@@ -146,11 +147,22 @@ def load_params(
         raise RuntimeError(f"Failed to load chain params after {max_retries} attempts: {last_error}")
 
 
+_RAW_PARAMS: dict[str, Any] | None = None
+
+
 def expect_params() -> dict[str, Any]:
     """Get cached params. Raises if not loaded yet."""
     if _PARAMS_CACHE is None:
         raise RuntimeError("indexer params cache uninitialized - call load_params first")
     return _PARAMS_CACHE
+
+
+def get_raw_params() -> dict[str, Any]:
+    """Get the raw (unprocessed) params dict from gRPC. Used for storing into chain_stats
+    so the backend can read ALL chain params, not just the indexer's processed subset."""
+    if _RAW_PARAMS is None:
+        raise RuntimeError("raw params not loaded - call load_params first")
+    return _RAW_PARAMS
 
 
 def get_max_topic_size() -> int:
@@ -209,6 +221,7 @@ def get_award_configs() -> list:
 __all__ = [
     "load_params",
     "expect_params",
+    "get_raw_params",
     "get_max_topic_size",
     "get_min_topic_size",
     "get_max_username_size",
