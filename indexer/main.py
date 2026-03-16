@@ -633,12 +633,6 @@ class Indexer:
 
         self.running = True
 
-        # Start tx queue poller BEFORE catch-up so writes are never blocked
-        import threading
-
-        self._tx_queue_thread = threading.Thread(target=self._tx_queue_poller, daemon=True)
-        self._tx_queue_thread.start()
-
         current_height = self._catch_up()
 
         logger.info("Transitioning to live mode (WebSocket)")
@@ -772,65 +766,6 @@ class Indexer:
 
         self.db.upsert_balances_batch(batch, now)
         logger.info("Balance snapshot: upserted %d balances (%d errors)", len(batch), errors)
-
-    def _tx_queue_poller(self):
-        """Poll pending_txs table and broadcast via gRPC. Runs in a background thread."""
-        import grpc as _grpc
-        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import BroadcastTxRequest, BroadcastMode
-        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
-        from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxRaw, AuthInfo
-
-        logger.info("TX queue poller started")
-        while self.running:
-            try:
-                pending = self.db.get_pending_txs(limit=50)
-                if not pending:
-                    time.sleep(0.5)
-                    continue
-
-                with _grpc.insecure_channel(self.chain.grpc_target) as channel:
-                    stub = ServiceStub(channel)
-                    for tx in pending:
-                        tx_id = tx["id"]
-                        tx_bytes = tx["tx_bytes"]
-                        tx_hash = tx["tx_hash"]
-                        # Hard fail on invalid gas to avoid spamming the chain
-                        try:
-                            tx_raw = TxRaw()
-                            tx_raw.ParseFromString(tx_bytes)
-                            auth = AuthInfo()
-                            auth.ParseFromString(tx_raw.auth_info_bytes)
-                            gas_limit = int(getattr(auth.fee, "gas_limit", 0) or 0)
-                        except Exception as parse_err:
-                            gas_limit = 0
-                            logger.warning("TX queue: failed to parse tx %s: %s", tx_hash, parse_err)
-                        if gas_limit <= 0:
-                            err = "invalid gas_limit: 0"
-                            self.db.update_pending_tx_status(tx_id, "failed", error_log=err)
-                            logger.warning("TX queue: rejected %s: %s", tx_hash, err)
-                            continue
-                        try:
-                            # Use SYNC so we get CheckTx result immediately; ASYNC can
-                            # hide ante/mempool rejections and make queued txs appear
-                            # "broadcasted" when they were actually rejected.
-                            req = BroadcastTxRequest(tx_bytes=tx_bytes, mode=BroadcastMode.BROADCAST_MODE_SYNC)
-                            resp = stub.BroadcastTx(req, timeout=10)
-                            tx_resp = getattr(resp, "tx_response", None)
-                            code = int(getattr(tx_resp, "code", 0) or 0)
-                            raw_log = str(getattr(tx_resp, "raw_log", "") or "")
-                            if code == 0:
-                                self.db.update_pending_tx_status(tx_id, "broadcasted")
-                                logger.debug("TX queue: broadcasted %s", tx_hash)
-                            else:
-                                err = f"check_tx code={code}: {raw_log}"
-                                self.db.update_pending_tx_status(tx_id, "failed", error_log=err)
-                                logger.warning("TX queue: rejected %s: %s", tx_hash, err)
-                        except Exception as e:
-                            self.db.update_pending_tx_status(tx_id, "failed", error_log=str(e))
-                            logger.warning("TX queue: failed to broadcast %s: %s", tx_hash, e)
-            except Exception as e:
-                logger.error("TX queue poller error: %s", e, exc_info=True)
-                time.sleep(2)
 
     def _sync_recent_blocks(self):
         """Fetch recent blocks from RPC and store hashes."""

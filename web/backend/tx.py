@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-"""Transaction helpers: gas estimation, building, and DB-queued broadcasting.
+"""Transaction helpers: gas estimation, building, and direct broadcasting.
 
 Functions:
 - estimate_total_gas_limit(body_bytes, content_len): Heuristic gas estimator.
 - build_tx_bytes(body_bytes, gas_limit): Construct TxRaw bytes with payer.
-- simulate_gas(tx_bytes): Returns 0 (simulation handled by indexer if needed).
-- broadcast_tx(tx_bytes): Insert into pending_txs DB queue; returns (tx_hash, code, height, raw_log).
+- simulate_gas(tx_bytes): Returns 0 (simulation handled heuristically).
+- broadcast_tx(tx_bytes): Broadcast via CometBFT RPC; returns (tx_hash, code, height, raw_log).
 """
 
 from typing import Tuple, Optional
 import hashlib as _hashlib
+import logging as _logging
 import math as _math
-import time as _time
+import requests as _requests
 
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
@@ -22,6 +23,7 @@ from cosmpy.protos.cosmos.base.v1beta1.coin_pb2 import Coin
 from node import min_gas_price_umirage, require_runtime
 from db import connect_db
 
+_log = _logging.getLogger("tx")
 _TX_SIZE_COST_PER_BYTE: Optional[int] = None
 
 
@@ -73,9 +75,16 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
     mode = ModeInfo(single=ModeInfo.Single(mode=SignMode.SIGN_MODE_DIRECT))
     si = SignerInfo(public_key=pub_any, mode_info=mode, sequence=0)
     auth = AuthInfo(signer_infos=[si], fee=fee)
-    return TxRaw(
-        body_bytes=body_bytes, auth_info_bytes=auth.SerializeToString(), signatures=[b"\x00"]
-    ).SerializeToString()
+    auth_bytes = auth.SerializeToString()
+    fee_bytes = fee.SerializeToString()
+    _log.info(
+        "build_tx gas_limit=%d fee_amt=%d fee_hex=%s auth_hex=%s",
+        gas_limit,
+        fee_amt,
+        fee_bytes.hex(),
+        auth_bytes.hex(),
+    )
+    return TxRaw(body_bytes=body_bytes, auth_info_bytes=auth_bytes, signatures=[b"\x00"]).SerializeToString()
 
 
 def simulate_gas(tx_bytes: bytes) -> int:
@@ -84,24 +93,47 @@ def simulate_gas(tx_bytes: bytes) -> int:
 
 
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
-    """Insert transaction into pending_txs DB queue for indexer to broadcast.
+    """Broadcast transaction directly via CometBFT RPC (broadcast_tx_sync).
 
-    The tx_hash is computed deterministically from the transaction bytes.
+    Returns (tx_hash, code, height, raw_log).
     """
+    import base64 as _b64
+
     tx_hash = _hashlib.sha256(tx_bytes).hexdigest().lower()
+    rpc_url = require_runtime().rpc_url
+
+    _log.info("broadcast_tx %s len=%d %s", tx_hash, len(tx_bytes), _extract_auth_hex(tx_bytes))
+
     try:
-        with connect_db(timeout=5.0, busy_timeout_ms=10000) as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO pending_txs(tx_bytes, tx_hash, status, created_at)
-                VALUES(%s, %s, 'pending', %s)
-                """,
-                (tx_bytes, tx_hash, int(_time.time())),
-            )
-        return tx_hash, 0, 0, ""
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "broadcast_tx_sync",
+            "params": {"tx": _b64.b64encode(tx_bytes).decode()},
+        }
+        resp = _requests.post(rpc_url, json=payload, timeout=10)
+        resp.raise_for_status()
+        body = resp.json()
+        result = body.get("result", {})
+        code = int(result.get("code", 0) or 0)
+        raw_log = str(result.get("log", "") or "")
+        _log.info("broadcast %s code=%d resp=%s", tx_hash, code, str(body)[:500])
+        return tx_hash, code, 0, raw_log
     except Exception as e:
+        _log.error("broadcast %s failed: %s", tx_hash, e)
         return tx_hash, 1, 0, str(e)
+
+
+def _extract_auth_hex(tx_bytes: bytes) -> str:
+    """Extract auth_info_bytes hex from TxRaw for diagnostic logging."""
+    try:
+        raw = TxRaw()
+        raw.ParseFromString(tx_bytes)
+        auth = AuthInfo()
+        auth.ParseFromString(raw.auth_info_bytes)
+        return f"gas={auth.fee.gas_limit} fee_hex={raw.auth_info_bytes.hex()[:120]}"
+    except Exception as e:
+        return f"parse_err={e}"
 
 
 def _get_tx_size_cost_per_byte() -> int:
