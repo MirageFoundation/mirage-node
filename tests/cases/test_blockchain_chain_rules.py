@@ -16,63 +16,149 @@ from cosmpy.crypto.keypairs import PrivateKey
 from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgDelegate, MsgUndelegate, MsgBeginRedelegate
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _docker_exec, _run_miraged, _INSIDE_CONTAINER,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _docker_exec,
+    _run_miraged,
+    _INSIDE_CONTAINER,
     DEFAULT_BACKEND,
-    get_status, sign_canonical, compute_pow, check_pow_target,
+    get_status,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
     canon_signed_with_pow,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_delete_raw, _canon_base_delete_user_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_follow_user_raw, _canon_base_unfollow_user_raw,
-    _canon_base_follow_topic_raw, _canon_base_unfollow_topic_raw,
-    _canon_base_enable_agent_raw, _canon_base_disable_agent_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_delete_raw,
+    _canon_base_delete_user_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_follow_user_raw,
+    _canon_base_unfollow_user_raw,
+    _canon_base_follow_topic_raw,
+    _canon_base_unfollow_topic_raw,
+    _canon_base_enable_agent_raw,
+    _canon_base_disable_agent_raw,
     _canon_base_set_agents_raw,
-    _canon_base_block_post_raw, _canon_base_unblock_post_raw,
-    _canon_base_block_user_raw, _canon_base_unblock_user_raw,
-    _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
-    _canon_base_send_tokens_raw, _canon_base_upgrade_level_raw,
-    _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
+    _canon_base_block_post_raw,
+    _canon_base_unblock_post_raw,
+    _canon_base_block_user_raw,
+    _canon_base_unblock_user_raw,
+    _canon_base_block_topic_raw,
+    _canon_base_unblock_topic_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_upgrade_level_raw,
+    _canon_base_set_auto_renewal_raw,
+    _canon_base_award_raw,
     _canon_base_annotate_raw,
     _request_with_retries,
 )
 import tests.blockchain_helpers as _bh
 from tests.blockchain_helpers import (
-    _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
-    _get_chain_profile, _get_profile_full, _assert_capped_deque,
-    _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
-    _broadcast_tx_sync, _wait_for_tx_result, _submit_tx, _sign_relay,
-    _build_msg_post, _build_msg_vote, _build_msg_set_username,
-    _build_msg_set_biography, _build_msg_send_tokens,
-    _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
+    _gen_nonce,
+    _compute_pow_quiet,
+    _pow_digest,
+    _rand_hex,
+    _get_pow_params,
+    _get_chain_params,
+    _get_tier_config,
+    _tier_int,
+    _get_chain_profile,
+    _get_profile_full,
+    _assert_capped_deque,
+    _build_tx_bytes,
+    _simulate_tx_gas,
+    _simulate_tx_bytes_gas,
+    _broadcast_tx_sync,
+    _wait_for_tx_result,
+    _submit_tx,
+    _sign_relay,
+    _build_msg_post,
+    _build_msg_vote,
+    _build_msg_set_username,
+    _build_msg_set_biography,
+    _build_msg_send_tokens,
+    _build_msg_delete,
+    _build_msg_delete_user,
+    _build_msg_award,
+    _build_msg_edit,
+    _build_msg_annotate,
+    _build_msg_block_post,
+    _build_msg_block_user,
+    _build_msg_block_topic,
     _build_msg_upgrade_level,
-    _build_msg_follow_user, _build_msg_unfollow_user,
-    _build_msg_follow_topic, _build_msg_unfollow_topic,
-    _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
-    _build_msg_unblock_post, _build_msg_unblock_user, _build_msg_unblock_topic,
+    _build_msg_follow_user,
+    _build_msg_unfollow_user,
+    _build_msg_follow_topic,
+    _build_msg_unfollow_topic,
+    _build_msg_enable_agent,
+    _build_msg_disable_agent,
+    _build_msg_set_agents,
+    _build_msg_unblock_post,
+    _build_msg_unblock_user,
+    _build_msg_unblock_topic,
     _build_msg_set_auto_renewal,
-    _check_reject, _check_accept, _check_deliver_reject, _check_deliver_accept,
-    _min_gas_price_umirage, _get_grpc_target,
-    DEFAULT_GAS_LIMIT, FILL_GAS_LIMIT, FILL_GAS_BUFFER,
-    COMET_RPC_URL, ESTIMATED_CHECKTX_TOTAL,
-    _validate_validator_funds, _required_validator_fee_budget_umirage,
+    _check_reject,
+    _check_accept,
+    _check_deliver_reject,
+    _check_deliver_accept,
+    _min_gas_price_umirage,
+    _get_grpc_target,
+    DEFAULT_GAS_LIMIT,
+    FILL_GAS_LIMIT,
+    FILL_GAS_BUFFER,
+    COMET_RPC_URL,
+    ESTIMATED_CHECKTX_TOTAL,
+    _validate_validator_funds,
+    _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
 from shared.datatypes import (
-    MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
-    MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
-    MsgEnableAgent, MsgFollowTopic, MsgFollowUser,
-    MsgMintTokens, MsgPost, MsgSendTokens, MsgSetAutoRenewal,
-    MsgSetLevel, MsgSetUsername, MsgSetBiography,
-    MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
-    MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgUpgradeLevel, MsgVote, MsgAnnotate,
+    MsgAward,
+    MsgBlockPost,
+    MsgBlockTopic,
+    MsgBlockUser,
+    MsgBurnTokens,
+    MsgDelete,
+    MsgDeleteUser,
+    MsgEdit,
+    MsgEnableAgent,
+    MsgFollowTopic,
+    MsgFollowUser,
+    MsgMintTokens,
+    MsgPost,
+    MsgSendTokens,
+    MsgSetAutoRenewal,
+    MsgSetLevel,
+    MsgSetUsername,
+    MsgSetBiography,
+    MsgUnblockPost,
+    MsgUnblockTopic,
+    MsgUnblockUser,
+    MsgDisableAgent,
+    MsgSetAgents,
+    MsgUnfollowTopic,
+    MsgUnfollowUser,
+    MsgUpgradeLevel,
+    MsgVote,
+    MsgAnnotate,
 )
 
 
@@ -125,7 +211,6 @@ def test_authority(backend: str) -> None:
     _check_reject("authority.gov_spoof", code, log, "unauthorized")
 
 
-
 def test_fee(backend: str) -> None:
     wallet = WALLETS["sub1"]
     lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
@@ -156,7 +241,6 @@ def test_fee(backend: str) -> None:
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=1
     )
     _check_reject("fee.insufficient_fee_rejected", code, log, "insufficient fee")
-
 
 
 def test_staking(backend: str) -> None:
@@ -217,7 +301,6 @@ def test_staking(backend: str) -> None:
         wallet.public_key().public_key_bytes,
     )
     _check_reject("staking.redelegate_blocked", code, log)
-
 
 
 def test_msg_validation(backend: str) -> None:
@@ -914,7 +997,6 @@ def _validate_validator_funds() -> bool:
     return True
 
 
-
 def test_msg_format(backend: str) -> None:
     """Test invalid field values at chain level (bypassing backend validation)."""
 
@@ -1096,7 +1178,6 @@ def test_msg_format(backend: str) -> None:
     _check_deliver_reject("format.title_oversized", ccode, dcode, dlog)
 
 
-
 def test_malicious_inputs(backend: str) -> None:
     """Test that NUL bytes, control chars, and other dangerous payloads are rejected at chain level."""
 
@@ -1220,5 +1301,3 @@ def test_malicious_inputs(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_reject(f"malicious.{label}", ccode, dcode, dlog)
-
-
