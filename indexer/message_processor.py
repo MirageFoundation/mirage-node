@@ -924,6 +924,20 @@ class MessageProcessor:
         except Exception:
             pass
 
+        # Recompute media dimensions on edit
+        try:
+            probe_urls = media if media else []
+            if not probe_urls and content:
+                first_url = self._extract_first_url(content)
+                if first_url:
+                    probe_urls = [first_url]
+            if probe_urls:
+                probed_meta = self.discover_media_dimensions(probe_urls)
+                if any(m for m in probed_meta if m):
+                    self.db.update_post_media_meta(override, probed_meta)
+        except Exception:
+            pass
+
         # Re-extract @mentions on edit (delete old, insert new)
         if owner and content:
             try:
