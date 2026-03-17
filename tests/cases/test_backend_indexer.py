@@ -79,7 +79,7 @@ def test_indexer(backend: str):
     pre_bal = int((pre_data or {}).get("balance", 0)) if code_pre == 200 else None
     if pre_bal is not None:
         _debug(f"indexer.balance_after_transfer: send 1 to {sub2_addr[:12]}...")
-        resp = _do_send_tokens(backend, sub1, sub2_addr, 1)
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 1, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         if txh:
             deliver = _wait_tx_deliver(txh)
