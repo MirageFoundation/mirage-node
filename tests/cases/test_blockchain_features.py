@@ -11,6 +11,8 @@ import time
 from typing import Optional
 
 import requests
+from cosmpy.aerial.wallet import LocalWallet
+from cosmpy.crypto.keypairs import PrivateKey
 
 from tests.common import (
     _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
@@ -288,11 +290,12 @@ def test_annotate_chain(backend: str) -> None:
     ts = _now_ms()
 
     # First create a post to annotate (via backend for convenience)
-    txh = tb._do_post(backend, free, "test", f"ChainAnnotateTarget {tb._rand_str(6)}", "content")
+    from tests.backend_helpers import _do_post, _wait_indexed
+    txh = _do_post(backend, free, "test", f"ChainAnnotateTarget {_rand_str(6)}", "content")
     if not txh:
         _fail("annotate_chain.create_target")
         return
-    tb._wait_indexed(backend, str(free.address()), txh)
+    _wait_indexed(backend, str(free.address()), txh)
     _pass("annotate_chain.create_target")
 
     # 1. Non-agent submitting annotate should fail

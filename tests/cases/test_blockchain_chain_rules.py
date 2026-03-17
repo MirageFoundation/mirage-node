@@ -11,6 +11,9 @@ import time
 from typing import Optional
 
 import requests
+from cosmpy.aerial.wallet import LocalWallet
+from cosmpy.crypto.keypairs import PrivateKey
+from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgDelegate
 
 from tests.common import (
     _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,

@@ -11,8 +11,11 @@ import time
 from typing import Optional
 
 import requests
+from cosmpy.aerial.wallet import LocalWallet
+from cosmpy.crypto.keypairs import PrivateKey
 
 from tests.common import (
+    _keyring_backend,
     _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
     _fresh_nonce, _lb_bytes,
     WALLETS, INDEX_TIMEOUT_SEC,
@@ -229,7 +232,8 @@ def test_direct_bank(backend: str) -> None:
             _fail("direct_bank.key_add", "missing address")
             return
 
-        if not tb._faucet(backend, addr, 5_000_000):
+        from tests.common import _faucet
+        if not _faucet(backend, addr, 5_000_000):
             _fail("direct_bank.faucet", "faucet failed")
             return
 
