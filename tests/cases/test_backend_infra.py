@@ -527,7 +527,7 @@ def test_failed_tx_status(backend: str):
     if (not vote_tx1) != (not vote_tx2):
         # One rejected before broadcast (e.g., simulate error). Accept this path.
         fail_resp = vote_resp1 if not vote_tx1 else vote_resp2
-        ok_vote = vote_tx2 if vote_tx1 else vote_tx1
+        ok_vote = vote_tx1 if vote_tx1 else vote_tx2
         if fail_resp.get("error") or fail_resp.get("message"):
             _pass("failed_tx.vote.failure_detected", err=fail_resp.get("error") or fail_resp.get("message"))
         else:
@@ -611,7 +611,7 @@ def test_failed_tx_status(backend: str):
         return
     if (not post_tx1) != (not post_tx2):
         fail_resp = post_resp1 if not post_tx1 else post_resp2
-        ok_post = post_tx2 if post_tx1 else post_tx1
+        ok_post = post_tx1 if post_tx1 else post_tx2
         if fail_resp.get("error") or fail_resp.get("message"):
             _pass("failed_tx.post.failure_detected", err=fail_resp.get("error") or fail_resp.get("message"))
         else:

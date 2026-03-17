@@ -929,7 +929,9 @@ def _wait_tx_status_failure(
     return None
 
 
-def _wait_tx_deliver(tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC, from_height: int | None = None) -> tuple[int, str] | None:
+def _wait_tx_deliver(
+    tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC, from_height: int | None = None
+) -> tuple[int, str] | None:
     """Scan blocks for tx_hash and return (code, log) from DeliverTx."""
     if not tx_hash:
         return None
