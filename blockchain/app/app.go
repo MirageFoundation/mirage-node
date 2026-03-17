@@ -255,6 +255,7 @@ func New(
 			logDec := LoggingDecorator{}
 			disableDel := DisableDelegatorStakingDecorator{}
 			validateBasic := authante.NewValidateBasicDecorator()
+			govDec := GovAuthorityDecorator{}
 
 			// Build the standard SDK ante handler for normal (signed) txs
 			stdOpts := authante.HandlerOptions{
@@ -270,6 +271,7 @@ func New(
 			relayAnte := sdk.ChainAnteDecorators(
 				setup,
 				validateBasic,
+				govDec,
 				timeout,
 				gasSize,
 				logDec,
@@ -315,7 +317,7 @@ func New(
 
 				if !isRelayTx {
 					ctx.Logger().Debug("Relay ante: using standard ante", "msg_types", msgTypes)
-					ctxStd, err := stdAnte(ctx, tx, simulate)
+					ctxStd, err := govDec.AnteHandle(ctx, tx, simulate, stdAnte)
 					if err != nil {
 						codespace, code, log := errorsmod.ABCIInfo(err, false)
 						ctx.Logger().Warn("StdAnte rejected tx", "code", code, "codespace", codespace, "log", log)
