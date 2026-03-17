@@ -301,18 +301,25 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
 
 
 def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
-    """Get connected peers from indexer DB chain_stats (if available)."""
-    try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
-            row = cur.fetchone()
-            if row and row[0]:
-                validators = row[0] if isinstance(row[0], list) else []
-                return [{"ip": "", "moniker": v.get("moniker", "")} for v in validators if v.get("moniker")]
-    except Exception:
-        pass
-    return []
+    """Get connected peers from indexer DB chain_stats."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'connected_peers'")
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            raise RuntimeError("connected_peers missing in indexer DB")
+        if not isinstance(row[0], list):
+            raise RuntimeError("connected_peers invalid format in indexer DB")
+        peers = []
+        for p in row[0]:
+            if not isinstance(p, dict):
+                raise RuntimeError("connected_peers entry invalid")
+            ip = str(p.get("ip", "") or "").strip()
+            moniker = str(p.get("moniker", "") or "").strip()
+            if not ip and not moniker:
+                continue
+            peers.append({"ip": ip, "moniker": moniker})
+        return peers
 
 
 __all__ = [

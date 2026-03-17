@@ -700,6 +700,12 @@ class Indexer:
         except Exception as e:
             logger.warning("Startup resync: recent blocks failed: %s", e)
 
+        # 6b. Connected peers
+        try:
+            self._sync_connected_peers()
+        except Exception as e:
+            logger.warning("Startup resync: connected peers failed: %s", e)
+
         # 7. Indexer state
         status = self.chain.get_status()
         chain_height = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
@@ -789,6 +795,22 @@ class Indexer:
         except Exception as e:
             logger.warning("_sync_recent_blocks failed: %s", e)
 
+    def _sync_connected_peers(self):
+        """Fetch connected peers from RPC and store in chain_stats."""
+        info = self.chain.get_net_info()
+        peers_data = ((info or {}).get("result") or {}).get("peers") or []
+        peers: list[dict] = []
+        seen_ips: set[str] = set()
+        for peer in peers_data:
+            ip = str(peer.get("remote_ip", "") or "").strip()
+            if not ip or ip in seen_ips:
+                continue
+            node_info = peer.get("node_info") or {}
+            moniker = str(node_info.get("moniker", "") or "").strip()
+            peers.append({"ip": ip, "moniker": moniker})
+            seen_ips.add(ip)
+        self.db.set_chain_stat("connected_peers", peers, int(time.time()))
+
     def _update_per_block_state(self, height: int, header: dict, result_obj: dict, ts: int, block_hash: str):
         """Per-block updates: recent blocks, balances for touched addresses, indexer state."""
         now = int(time.time())
@@ -850,6 +872,13 @@ class Indexer:
                     self.db.set_indexer_state("chain_head_height", str(chain_height), now)
             except Exception:
                 pass
+
+        # Periodically refresh connected peers
+        if height % 20 == 0:
+            try:
+                self._sync_connected_peers()
+            except Exception as e:
+                logger.warning("Connected peers refresh failed at height %s: %s", height, e)
 
     def _sync_profiles_from_chain(self):
         """

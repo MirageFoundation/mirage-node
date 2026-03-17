@@ -71,6 +71,12 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
+    def get_net_info(self) -> dict:
+        """Get network info (connected peers)."""
+        r = requests.get(f"{self.jsonrpc_url}/net_info", timeout=HTTP_TIMEOUT_SHORT)
+        r.raise_for_status()
+        return r.json()
+
     def get_current_height(self) -> int:
         """Get current block height."""
         data = self.get_status()
