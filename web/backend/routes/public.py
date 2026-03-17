@@ -204,7 +204,7 @@ def _sanitize_wh(w, h) -> dict:
 def _sanitize_media_meta_list(raw_list: list) -> list[dict]:
     """Sanitize a list of media meta dicts, ensuring valid w/h on each."""
     result = []
-    for item in (raw_list or []):
+    for item in raw_list or []:
         if isinstance(item, dict) and item.get("w") and item.get("h"):
             result.append(_sanitize_wh(item["w"], item["h"]))
         else:
