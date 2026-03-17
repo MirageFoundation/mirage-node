@@ -38,7 +38,6 @@ from tests.common import (
 )
 from tests.blockchain_helpers import (
     _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _VALIDATOR_ADDR, _GOV_MODULE_ADDR,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
     _get_chain_profile, _get_profile_full, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
@@ -61,6 +60,7 @@ from tests.blockchain_helpers import (
     _validate_validator_funds, _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
+import tests.blockchain_helpers as _bh
 from shared.datatypes import (
     MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
     MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
@@ -78,7 +78,7 @@ def test_relay_sig(backend: str) -> None:
     other = WALLETS["sub2"]
     lb, diff, _, _ = _get_pow_params(backend, str(wallet.address()))
     ts = _now_ms()
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     signer_pub = wallet.public_key().public_key_bytes
 
     # 1.1 Tampered content
@@ -176,7 +176,7 @@ def test_relay_sig(backend: str) -> None:
 def test_envelope_replay(backend: str) -> None:
     """Test that replaying a relay message with the same nonce is rejected."""
     sub = WALLETS["sub1"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     pub = sub.public_key().public_key_bytes
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(sub.address()))
     ts = _now_ms()
@@ -225,7 +225,7 @@ def test_mandatory_nonce(backend: str) -> None:
         Must be >0; for JS keep <=2^53-1. Include in signature.
     """
     sub = WALLETS["sub1"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     pub = sub.public_key().public_key_bytes
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(sub.address()))
     topic = f"nonce{_rand_str(4)}"
@@ -314,7 +314,7 @@ def test_envelope_fields(backend: str) -> None:
     directly to the chain via protobuf (bypassing the backend HTTP layer).
     """
     wallet = WALLETS["sub1"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     pub = wallet.public_key().public_key_bytes
     lb, diff, _, _ = _get_pow_params(backend, str(wallet.address()))
 

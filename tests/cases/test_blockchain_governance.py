@@ -6,6 +6,7 @@ import json
 import math
 import os
 import random
+import shutil
 import string
 import tempfile
 import time
@@ -42,7 +43,6 @@ from tests.common import (
 )
 from tests.blockchain_helpers import (
     _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _VALIDATOR_ADDR, _GOV_MODULE_ADDR,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
     _get_chain_profile, _get_profile_full, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
@@ -65,6 +65,7 @@ from tests.blockchain_helpers import (
     _validate_validator_funds, _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
+import tests.blockchain_helpers as _bh
 from shared.datatypes import (
     MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
     MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
@@ -82,14 +83,14 @@ def test_governance_reject(backend: str) -> None:
 
     w1 = WALLETS["sub1"]
     w1_addr = str(w1.address())
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     lb, _, _, _ = _get_pow_params(backend, w1_addr)
     ts = _now_ms()
     pub = w1.public_key().public_key_bytes
 
     # 12.1 Regular user submits MsgSetLevel
     msg = MsgSetLevel()
-    msg.authority = _VALIDATOR_ADDR or ""
+    msg.authority = _bh._VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = _lb_bytes(lb)
     msg.envelope_difficulty = 0
@@ -112,7 +113,7 @@ def test_governance_reject(backend: str) -> None:
 
     # 12.2 Regular user submits MsgMintTokens
     msg = MsgMintTokens()
-    msg.authority = _VALIDATOR_ADDR or ""
+    msg.authority = _bh._VALIDATOR_ADDR or ""
     msg.target = w1_addr
     msg.amount = 1_000_000
     msg.reason = "test"
@@ -130,7 +131,7 @@ def test_governance_reject(backend: str) -> None:
 
     # 12.3 Regular user submits MsgBurnTokens
     msg = MsgBurnTokens()
-    msg.authority = _VALIDATOR_ADDR or ""
+    msg.authority = _bh._VALIDATOR_ADDR or ""
     msg.target = w1_addr
     msg.amount = 1_000_000
     msg.reason = "test"
@@ -148,7 +149,7 @@ def test_governance_reject(backend: str) -> None:
 
     # 12.4 Submit MsgSetLevel with gov module authority (but we're not governance)
     msg = MsgSetLevel()
-    msg.authority = _GOV_MODULE_ADDR or ""
+    msg.authority = _bh._GOV_MODULE_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = _lb_bytes(lb)
     msg.envelope_difficulty = 0
@@ -171,7 +172,7 @@ def test_governance_reject(backend: str) -> None:
 
     # 12.5 MsgMintTokens with gov module authority (spoof)
     msg = MsgMintTokens()
-    msg.authority = _GOV_MODULE_ADDR or ""
+    msg.authority = _bh._GOV_MODULE_ADDR or ""
     msg.target = w1_addr
     msg.amount = 1_000_000
     msg.reason = "spoof"
@@ -189,7 +190,7 @@ def test_governance_reject(backend: str) -> None:
 
     # 12.6 MsgBurnTokens with gov module authority (spoof)
     msg = MsgBurnTokens()
-    msg.authority = _GOV_MODULE_ADDR or ""
+    msg.authority = _bh._GOV_MODULE_ADDR or ""
     msg.target = w1_addr
     msg.amount = 1_000_000
     msg.reason = "spoof"

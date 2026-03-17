@@ -40,7 +40,6 @@ from tests.common import (
 )
 from tests.blockchain_helpers import (
     _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _VALIDATOR_ADDR, _GOV_MODULE_ADDR,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
     _get_chain_profile, _get_profile_full, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
@@ -63,6 +62,7 @@ from tests.blockchain_helpers import (
     _validate_validator_funds, _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
+import tests.blockchain_helpers as _bh
 from shared.datatypes import (
     MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
     MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
@@ -83,7 +83,7 @@ def test_follow_limits(backend: str) -> None:
     fw = WALLETS["free"]
     fw_addr = str(fw.address())
     fw_pub = fw.public_key().public_key_bytes
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     tier0 = _get_tier_config(0)
 
     # Query chain (not indexer) for accurate pre-existing list counts.
@@ -428,7 +428,7 @@ def test_follow_limits(backend: str) -> None:
 def test_hard_cap_vs_deque(backend: str) -> None:
     """Test that follow/enable lists use hard cap while block lists use deque."""
 
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
 
     # ── 13.1 blocked_users deque: block more than limit, oldest evicted ──
     bw = WALLETS["free"]

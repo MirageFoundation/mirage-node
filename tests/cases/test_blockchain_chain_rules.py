@@ -13,7 +13,7 @@ from typing import Optional
 import requests
 from cosmpy.aerial.wallet import LocalWallet
 from cosmpy.crypto.keypairs import PrivateKey
-from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgDelegate, MsgUndelegate
+from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgDelegate, MsgUndelegate, MsgBeginRedelegate
 
 from tests.common import (
     _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
@@ -39,9 +39,9 @@ from tests.common import (
     _canon_base_annotate_raw,
     _request_with_retries,
 )
+import tests.blockchain_helpers as _bh
 from tests.blockchain_helpers import (
     _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _VALIDATOR_ADDR, _GOV_MODULE_ADDR,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
     _get_chain_profile, _get_profile_full, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
@@ -113,13 +113,13 @@ def test_authority(backend: str) -> None:
         "Title",
         "content",
         pow_val=0,
-        authority_override=_GOV_MODULE_ADDR,
+        authority_override=_bh._GOV_MODULE_ADDR,
         nonce=_gen_nonce(),
     )
     _, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
-        _VALIDATOR_ADDR or "",
+        _bh._VALIDATOR_ADDR or "",
         wallet.public_key().public_key_bytes,
     )
     _check_reject("authority.gov_spoof", code, log, "unauthorized")
@@ -130,7 +130,7 @@ def test_fee(backend: str) -> None:
     wallet = WALLETS["sub1"]
     lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
     ts = _now_ms()
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     signer_pub = wallet.public_key().public_key_bytes
     msg = _build_msg_post(wallet, lb, 0, ts, f"fee{_rand_str(4)}", "Title", "content", pow_val=0, nonce=_gen_nonce())
 
@@ -164,7 +164,7 @@ def test_staking(backend: str) -> None:
     free_wallet = WALLETS["free"]
     lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
     ts = _now_ms()
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
 
     conf = _request_with_retries("GET", f"{backend}/api/get_node_config", timeout=10).json()
     valoper = str(conf.get("validator_operator_address", "")).strip()
@@ -223,7 +223,7 @@ def test_staking(backend: str) -> None:
 def test_msg_validation(backend: str) -> None:
     w1 = WALLETS["sub1"]
     w2 = WALLETS["sub2"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
     ts = _now_ms()
 
@@ -898,11 +898,11 @@ def _query_spendable_umirage(addr: str) -> int:
 
 def _validate_validator_funds() -> bool:
     """Fail fast if the validator fee payer cannot cover the suite."""
-    if not _VALIDATOR_ADDR:
+    if not _bh._VALIDATOR_ADDR:
         _fail("validator.funds", "validator address not set")
         return False
     required = _required_validator_fee_budget_umirage()
-    balance = _query_spendable_umirage(_VALIDATOR_ADDR)
+    balance = _query_spendable_umirage(_bh._VALIDATOR_ADDR)
     if balance < required:
         _fail(
             "validator.funds",
@@ -919,7 +919,7 @@ def test_msg_format(backend: str) -> None:
     """Test invalid field values at chain level (bypassing backend validation)."""
 
     w1 = WALLETS["sub1"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
     ts = _now_ms()
 
@@ -1101,7 +1101,7 @@ def test_malicious_inputs(backend: str) -> None:
     """Test that NUL bytes, control chars, and other dangerous payloads are rejected at chain level."""
 
     w1 = WALLETS["sub1"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
     ts = _now_ms()
 

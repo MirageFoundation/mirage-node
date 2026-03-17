@@ -40,7 +40,6 @@ from tests.common import (
 )
 from tests.blockchain_helpers import (
     _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _VALIDATOR_ADDR, _GOV_MODULE_ADDR,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
     _get_chain_profile, _get_profile_full, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
@@ -63,6 +62,7 @@ from tests.blockchain_helpers import (
     _validate_validator_funds, _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
+import tests.blockchain_helpers as _bh
 from shared.datatypes import (
     MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
     MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
@@ -80,7 +80,7 @@ def test_chain_auto_renewal(backend: str) -> None:
 
     sub1 = WALLETS["sub1"]
     free_wallet = WALLETS["free"]
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     lb, _, _, _ = _get_pow_params(backend, str(sub1.address()))
     ts = _now_ms()
 
@@ -124,7 +124,7 @@ def test_chain_auto_renewal(backend: str) -> None:
     base = _canon_base_set_auto_renewal_raw(pub, lb_bytes, 0, ts, True)
     sig = _sign_relay(sub1, base, 1)
     msg = MsgSetAutoRenewal()
-    msg.authority = _VALIDATOR_ADDR or ""
+    msg.authority = _bh._VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
     msg.envelope_difficulty = 0
@@ -151,7 +151,7 @@ def test_chain_auto_renewal(backend: str) -> None:
 def test_biography(backend: str) -> None:
     """Test MsgSetBiography: subscriber can set, free user rejected, length limit."""
 
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
 
     # 16.1 Subscriber sets biography (should succeed)
     sub = WALLETS["sub1"]
@@ -282,7 +282,7 @@ def test_annotate_chain(backend: str) -> None:
         _fail("annotate_chain.setup", "wallets not available")
         return
 
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
     signer_pub = agent.public_key().public_key_bytes
 
     # Get chain params
@@ -517,7 +517,7 @@ def test_annotate_chain(backend: str) -> None:
 def test_security(backend: str) -> None:
     """Security checks: tier params, subscription period, bridge threshold, replay rejection."""
 
-    fee_payer = _VALIDATOR_ADDR or ""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
 
     # 1. Verify LevelToTierIndex correctness via chain config endpoint
     #    Agent (level 10) must have a valid tier config (not be skipped)
