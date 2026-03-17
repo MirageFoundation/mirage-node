@@ -71,6 +71,12 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
+    def get_net_info(self) -> dict:
+        """Get network info (connected peers)."""
+        r = requests.get(f"{self.jsonrpc_url}/net_info", timeout=HTTP_TIMEOUT_SHORT)
+        r.raise_for_status()
+        return r.json()
+
     def get_current_height(self) -> int:
         """Get current block height."""
         data = self.get_status()
@@ -310,10 +316,10 @@ class ChainClient:
     def get_current_difficulty(self) -> int:
         """Get current PoW difficulty steps via gRPC."""
         info = self.get_difficulty_info()
-        return info["difficulty"]
+        return int(info.get("current_difficulty", 0))
 
     def get_difficulty_info(self) -> dict:
-        """Get current PoW difficulty steps and message count via gRPC."""
+        """Get full PoW difficulty state via gRPC."""
         try:
             from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 
@@ -325,8 +331,13 @@ class ChainClient:
                 )
                 resp = method(QueryDifficultyRequest(), timeout=GRPC_TIMEOUT)
                 return {
-                    "difficulty": int(resp.current_difficulty),
-                    "msg_count": int(resp.pow_message_count) if resp.pow_message_count else 0,
+                    "current_difficulty": int(resp.current_difficulty),
+                    "previous_difficulty": int(resp.previous_difficulty),
+                    "last_change_height": int(resp.last_change_height),
+                    "pow_message_count": int(resp.pow_message_count) if resp.pow_message_count else 0,
+                    "consecutive_low_usage": int(resp.consecutive_low_usage) if resp.consecutive_low_usage else 0,
+                    "latest_block_hash": str(resp.latest_block_hash or "").lower(),
+                    "current_height": int(resp.current_height),
                 }
         except Exception as e:
             logger.error("Failed to query difficulty info: %s", e)
@@ -346,6 +357,24 @@ class ChainClient:
                 return int(amt)
         except Exception as e:
             logger.warning("Failed to query total supply: %s", e)
+            return 0
+
+    def get_tx_size_cost_per_byte(self) -> int:
+        """Get auth param tx_size_cost_per_byte via gRPC."""
+        try:
+            from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2 as auth_query_pb2
+            from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2_grpc as auth_query_pb2_grpc
+
+            with grpc.insecure_channel(self.grpc_target) as channel:
+                stub = auth_query_pb2_grpc.QueryStub(channel)
+                req = auth_query_pb2.QueryParamsRequest()
+                resp = stub.Params(req, timeout=GRPC_TIMEOUT)
+                params = getattr(resp, "params", None)
+                value = getattr(params, "tx_size_cost_per_byte", 0) if params is not None else 0
+                v = int(value or 0)
+                return v if v > 0 else 0
+        except Exception as e:
+            logger.warning("Failed to query tx_size_cost_per_byte: %s", e)
             return 0
 
     def get_balance(self, address: str) -> int:

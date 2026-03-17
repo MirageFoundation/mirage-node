@@ -318,22 +318,11 @@ def compute_pow(base: bytes, difficulty: int, pow_base_bits: int, pow_factor: fl
     time_cost = 1
     parallelism = 1
 
-    _log(
-        f"[pow] argon2id: difficulty={difficulty} pow_base_bits={pow_base_bits} pow_factor={pow_factor} mem_kib={mem_kib} t={time_cost} p={parallelism}"
-    )
-
     proof = 0
     attempts = 0
     start = time.perf_counter()
-    next_report = start
 
     while True:
-        now = time.perf_counter()
-        if now >= next_report:
-            rate = attempts / max(1e-6, (now - start))
-            _log(f"[pow] attempts={attempts} elapsed={now - start:.2f}s rate={rate:.1f}/s")
-            next_report = now + 0.5
-
         digest = _argon2_hash_raw(
             base + b":" + uvarint(int(proof)),
             salt,
@@ -348,7 +337,7 @@ def compute_pow(base: bytes, difficulty: int, pow_base_bits: int, pow_factor: fl
             total = time.perf_counter() - start
             rate = attempts / max(1e-6, total)
             _log(
-                f"[pow] success proof={proof} difficulty={difficulty} attempts={attempts} time={total:.2f}s rate={rate:.1f}/s"
+                f"[pow] proof={proof} attempts={attempts} time={total:.2f}s rate={rate:.1f}/s"
             )
             return proof
         proof += 1

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-"""Chain query helpers using gRPC.
+"""Chain query helpers — reads from indexer DB (no gRPC/RPC).
 
 Functions:
-- get_difficulty_info(): Full difficulty state via gRPC Query/Difficulty.
-- get_latest_block_hash(): Latest block hash via gRPC Query/Difficulty.
-- get_current_pow_difficulty(): Current dynamic PoW difficulty via gRPC.
+- get_difficulty_info(): Difficulty state from chain_stats DB.
+- get_latest_block_hash(): Latest block hash from recent_blocks DB.
+- get_current_pow_difficulty(): Current dynamic PoW difficulty.
 - get_recent_block_hashes(): Recent block hashes for validation.
 - is_valid_recent_block_hash(): Check if hash is in recent window.
 - get_block_time_seconds(): Read consensus timeout_commit from config.
-- is_node_catching_up(timeout_s=2): True if RPC /status reports catching_up.
+- is_node_catching_up(): True if indexer state indicates lag.
 - classify_reject(raw_log): Parse common reject reasons from logs.
 """
 
@@ -18,163 +18,144 @@ import re
 import time
 from typing import Any, Dict, Optional
 
-
-from google.protobuf.json_format import MessageToDict
-
-from node import require_runtime, get_grpc_channel
-from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
+from db import connect_db
 
 
-# Cache for difficulty info — short TTL so callers don't pay gRPC cost every request
 _DIFFICULTY_CACHE: Optional[Dict[str, Any]] = None
-_DIFFICULTY_CACHE_HEIGHT: int = 0
 _DIFFICULTY_CACHE_TIME: float = 0.0
-_DIFFICULTY_CACHE_TTL: float = 5.0  # seconds
-
-
-def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
-    """Query difficulty info via gRPC."""
-
-    def _deserialize(data: bytes) -> QueryDifficultyResponse:
-        msg = QueryDifficultyResponse()
-        msg.ParseFromString(data)
-        return msg
-
-    ch = get_grpc_channel()
-    method = ch.unary_unary(
-        "/mirage.core.v1.Query/GetDifficulty",
-        request_serializer=lambda msg: msg.SerializeToString(),
-        response_deserializer=_deserialize,
-    )
-    resp = method(QueryDifficultyRequest(), timeout=timeout)
-    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
+_DIFFICULTY_CACHE_TTL: float = 5.0
 
 
 def get_difficulty_info(timeout: float = 3.0, *, force: bool = False) -> Dict[str, Any]:
-    """Get full difficulty state from chain via gRPC.
+    """Get difficulty state from indexer DB chain_stats.
 
-    Returns dict with:
-    - current_difficulty: int
-    - previous_difficulty: int
-    - last_change_height: int
-    - pow_message_count: int
-    - consecutive_low_usage: int
-    - latest_block_hash: str (hex, lowercase)
-    - current_height: int
-
-    Results are cached for _DIFFICULTY_CACHE_TTL seconds. Pass force=True to bypass.
+    Falls back to querying the difficulty_history table if chain_stats is empty.
     """
-    global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_HEIGHT, _DIFFICULTY_CACHE_TIME
+    global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_TIME
 
     now = time.monotonic()
     if not force and _DIFFICULTY_CACHE is not None and (now - _DIFFICULTY_CACHE_TIME) < _DIFFICULTY_CACHE_TTL:
         return _DIFFICULTY_CACHE
 
-    info = _query_difficulty(timeout)
-    height = int(info.get("current_height", 0))
+    info: Dict[str, Any] = {
+        "current_difficulty": 0,
+        "previous_difficulty": 0,
+        "last_change_height": 0,
+        "pow_message_count": 0,
+        "consecutive_low_usage": 0,
+        "latest_block_hash": "",
+        "current_height": 0,
+    }
+
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+
+        # Primary source: chain_stats.difficulty_info
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'difficulty_info'")
+        diff_row = cur.fetchone()
+        if diff_row and isinstance(diff_row[0], dict):
+            info.update(diff_row[0])
+
+        # Fallback: difficulty_history table (most recent)
+        if not info.get("current_height"):
+            cur.execute("SELECT height, difficulty, msg_count FROM difficulty_history ORDER BY height DESC LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                info["current_height"] = int(row[0])
+                info["current_difficulty"] = int(row[1])
+                info["pow_message_count"] = int(row[2]) if row[2] is not None else 0
+
+        # Latest block hash from recent_blocks
+        cur.execute("SELECT height, hash FROM recent_blocks ORDER BY height DESC LIMIT 1")
+        brow = cur.fetchone()
+        if brow:
+            info["latest_block_hash"] = str(brow[1]) if brow[1] else ""
+            if brow[0] and int(brow[0]) > int(info.get("current_height", 0) or 0):
+                info["current_height"] = int(brow[0])
 
     _DIFFICULTY_CACHE = info
-    _DIFFICULTY_CACHE_HEIGHT = height
     _DIFFICULTY_CACHE_TIME = now
-
     return info
 
 
 def get_latest_block_hash(timeout_s: int = 5) -> str:
-    """Get latest block hash via Tendermint RPC /status (hard fail, no fallbacks)."""
-    import urllib.request as _url
-
-    rpc = require_runtime().rpc_url
-    url = f"{rpc}/status"
-    with _url.urlopen(url, timeout=timeout_s) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    raw = (data.get("result", {}).get("sync_info", {}).get("latest_block_hash", "") or "").strip()
-    if not raw or not re.fullmatch(r"[0-9A-Fa-f]{64}", raw):
-        raise RuntimeError("unexpected latest_block_hash format from RPC")
-    return raw
+    """Get latest block hash from indexer DB."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT hash FROM recent_blocks ORDER BY height DESC LIMIT 1")
+        row = cur.fetchone()
+        if row and row[0]:
+            raw = str(row[0]).strip()
+            if raw and re.fullmatch(r"[0-9A-Fa-f]{64}", raw):
+                return raw
+    raise RuntimeError("no recent block hash available in indexer DB")
 
 
 def get_current_pow_difficulty() -> int:
-    """Get current PoW difficulty steps via gRPC Query/Difficulty."""
     info = get_difficulty_info()
     return int(info["current_difficulty"])
 
 
 def get_pow_base_bits() -> int:
-    """Get pow_base_bits (base target bits) from chain params."""
     from params import expect_params
+
     return int(expect_params()["pow_base_bits"])
 
 
 def get_pow_factor() -> float:
-    """Get pow_factor (fractional step) from chain params."""
     from params import expect_params
+
     return float(expect_params()["pow_factor"])
 
 
-# Cache for recent block hashes
 _RECENT_BLOCK_HASHES: list[str] = []
+_RECENT_HASHES_TIME: float = 0.0
+_RECENT_HASHES_TTL: float = 3.0
 
 
 def _get_block_hash_window() -> int:
-    """Get block_hash_window from chain params (cached at startup)."""
     from params import expect_params
 
     return int(expect_params()["block_hash_window"])
 
 
 def get_recent_block_hashes(timeout_s: int = 5) -> list[str]:
-    """Get the last N block hashes (matching chain's block_hash_window param) via Tendermint RPC only."""
-    import urllib.request as _url
+    """Get recent block hashes from indexer DB."""
+    global _RECENT_BLOCK_HASHES, _RECENT_HASHES_TIME
 
-    global _RECENT_BLOCK_HASHES
-
-    window = _get_block_hash_window()
-    rpc = require_runtime().rpc_url
-
-    # Latest height and hash from /status
-    url = f"{rpc}/status"
-    with _url.urlopen(url, timeout=timeout_s) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    latest_height = int((data.get("result", {}).get("sync_info", {}).get("latest_block_height", 0)) or 0)
-    latest_hash = (data.get("result", {}).get("sync_info", {}).get("latest_block_hash", "") or "").strip().upper()
-
-    if not latest_height or not latest_hash or not re.fullmatch(r"[0-9A-Fa-f]{64}", latest_hash):
-        # Hard fail: no caches, no fallbacks
-        raise RuntimeError("unable to fetch latest block height/hash from RPC")
-
-    # If cache already up-to-date
-    if _RECENT_BLOCK_HASHES and _RECENT_BLOCK_HASHES[0].upper() == latest_hash:
+    now = time.monotonic()
+    if _RECENT_BLOCK_HASHES and (now - _RECENT_HASHES_TIME) < _RECENT_HASHES_TTL:
         return _RECENT_BLOCK_HASHES
 
-    # Fetch recent blocks via /block?height=
-    hashes: list[str] = []
-    for i in range(window):
-        h = latest_height - i
-        if h < 1:
-            break
-        url = f"{rpc}/block?height={h}"
-        with _url.urlopen(url, timeout=2) as resp:
-            bdata = json.loads(resp.read().decode("utf-8"))
-        block_hash = (bdata.get("result", {}).get("block_id", {}).get("hash", "") or "").strip().upper()
-        if block_hash and re.fullmatch(r"[0-9A-Fa-f]{64}", block_hash):
-            hashes.append(block_hash)
-        else:
-            break
+    window = _get_block_hash_window()
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT hash FROM recent_blocks ORDER BY height DESC LIMIT %s",
+            (window,),
+        )
+        hashes = [str(r[0]).strip().upper() for r in cur.fetchall() if r[0]]
 
     if not hashes:
-        raise RuntimeError("failed to fetch recent block hashes from RPC")
+        raise RuntimeError("no recent block hashes in indexer DB")
 
     _RECENT_BLOCK_HASHES = hashes
+    _RECENT_HASHES_TIME = now
     return _RECENT_BLOCK_HASHES
 
 
 def is_valid_recent_block_hash(block_hash: str, timeout_s: int = 5) -> bool:
-    """Check if block_hash is within the recent block hash window."""
     if not block_hash or not re.fullmatch(r"[0-9A-Fa-f]{64}", block_hash):
         return False
+    upper = block_hash.upper()
     recent = get_recent_block_hashes(timeout_s)
-    return block_hash.upper() in [h.upper() for h in recent]
+    if upper in recent:
+        return True
+    # Cache may be stale — force refresh and retry once
+    global _RECENT_BLOCK_HASHES, _RECENT_HASHES_TIME
+    _RECENT_HASHES_TIME = 0.0
+    recent = get_recent_block_hashes(timeout_s)
+    return upper in recent
 
 
 _BLOCK_TIME_CACHE: Optional[int] = None
@@ -209,28 +190,42 @@ def get_block_time_seconds() -> int:
 
 _CATCHING_UP_CACHE: Optional[bool] = None
 _CATCHING_UP_CACHE_TIME: float = 0.0
-_CATCHING_UP_CACHE_TTL: float = 5.0  # seconds
+_CATCHING_UP_CACHE_TTL: float = 5.0
 
 
 def is_node_catching_up(timeout_s: int = 2) -> bool:
+    """Check if indexer is behind — uses indexer_state to detect lag.
+
+    Returns True if:
+    - Last processed time is >30s ago (time-based lag), OR
+    - Indexer is >10 blocks behind chain head (height-based lag), OR
+    - Indexer state is unavailable
+    """
     global _CATCHING_UP_CACHE, _CATCHING_UP_CACHE_TIME
-    import urllib.request as _url
 
     now = time.monotonic()
     if _CATCHING_UP_CACHE is not None and (now - _CATCHING_UP_CACHE_TIME) < _CATCHING_UP_CACHE_TTL:
         return _CATCHING_UP_CACHE
 
-    url = f"{require_runtime().rpc_url}/status"
     try:
-        with _url.urlopen(url, timeout=timeout_s) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        val = data.get("result", {}).get("sync_info", {}).get("catching_up", True)
-        if isinstance(val, str):
-            result = val.strip().lower() == "true"
-        else:
-            result = bool(val)
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT key, value FROM indexer_state WHERE key IN ('last_processed_time', 'last_processed_height', 'chain_head_height')"
+            )
+            state = {r[0]: r[1] for r in cur.fetchall()}
+
+            last_ts = int(state.get("last_processed_time", 0) or 0)
+            last_height = int(state.get("last_processed_height", 0) or 0)
+            chain_head = int(state.get("chain_head_height", 0) or 0)
+
+            if not last_ts:
+                result = True
+            else:
+                time_lag = int(time.time()) - last_ts > 30
+                height_lag = chain_head > 0 and (chain_head - last_height) > 10
+                result = time_lag or height_lag
     except Exception:
-        # Treat unknown as catching up to be safe
         result = True
 
     _CATCHING_UP_CACHE = result
@@ -238,20 +233,31 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     return result
 
 
-def classify_reject(raw_log: str) -> Dict[str, Any]:
-    """Classify a chain broadcast rejection into a safe, user-facing message.
+def get_indexer_health() -> Dict[str, Any]:
+    """Return indexer health metrics for monitoring."""
+    try:
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT key, value, updated_at FROM indexer_state")
+            rows = {r[0]: {"value": r[1], "updated_at": r[2]} for r in cur.fetchall()}
+            return {
+                "last_processed_height": int(rows.get("last_processed_height", {}).get("value", 0) or 0),
+                "last_processed_time": int(rows.get("last_processed_time", {}).get("value", 0) or 0),
+                "chain_head_height": int(rows.get("chain_head_height", {}).get("value", 0) or 0),
+                "catching_up": is_node_catching_up(),
+                "lag_seconds": int(time.time()) - int(rows.get("last_processed_time", {}).get("value", 0) or 0),
+            }
+    except Exception as e:
+        return {"error": str(e), "catching_up": True}
 
-    Returns a dict with at least 'reason' and 'message' keys.
-    The 'message' is always a sanitized string safe to return to clients.
-    Raw chain logs are never included (they are logged server-side by callers).
-    """
+
+def classify_reject(raw_log: str) -> Dict[str, Any]:
+    """Classify a chain broadcast rejection into a safe, user-facing message."""
     raw = "" if raw_log is None else str(raw_log)
     msg = raw.lower()
     out: Dict[str, Any] = {"reason": "rejected", "message": "transaction rejected"}
     try:
-        import re as _re
-
-        m = _re.search(r"out of gas.*?gaswanted:\s*(\d+).*?gasused:\s*(\d+)", msg)
+        m = re.search(r"out of gas.*?gaswanted:\s*(\d+).*?gasused:\s*(\d+)", msg)
         if m:
             out.update(
                 {
@@ -262,7 +268,7 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                 }
             )
             return out
-        m = _re.search(r"needs\s*(\d+)([a-z]+).*?has\s*(\d+)([a-z]+)", msg)
+        m = re.search(r"needs\s*(\d+)([a-z]+).*?has\s*(\d+)([a-z]+)", msg)
         if m:
             need_amt, need_den = int(m.group(1)), m.group(2)
             have_amt, have_den = int(m.group(3)), m.group(4)
@@ -276,7 +282,7 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                 }
             )
             return out
-        m = _re.search(r"invalid relay fields.*?gas used: ['\"]?(\d+)", msg)
+        m = re.search(r"invalid relay fields.*?gas used: ['\"]?(\d+)", msg)
         if m:
             out.update(
                 {
@@ -289,88 +295,31 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # If the raw log is empty, note that explicitly.
     if not raw.strip():
         out["message"] = "chain returned empty error log for this transaction"
     return out
 
 
 def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
-    import urllib.request as _url
-    import ipaddress as _ipa
-    import time
-
-    # Cache validator monikers (60 second TTL)
-    cache_key = "_validator_moniker_cache"
-    cache_time_key = "_validator_cache_time"
-    cache_ttl = 60.0
-
-    if not hasattr(get_connected_peers, cache_key):
-        setattr(get_connected_peers, cache_key, None)
-        setattr(get_connected_peers, cache_time_key, 0.0)
-
-    current_time = time.time()
-    cache_time = getattr(get_connected_peers, cache_time_key)
-    validator_cache = getattr(get_connected_peers, cache_key)
-
-    # Refresh validator cache if expired
-    if validator_cache is None or (current_time - cache_time) >= cache_ttl:
-        validator_cache = {}
-        try:
-            from bank import get_all_validators
-
-            for v in get_all_validators():
-                pubkey = v.get("consensus_pubkey", "")
-                moniker = v.get("moniker", "")
-                if pubkey and moniker:
-                    validator_cache[pubkey] = moniker
-            setattr(get_connected_peers, cache_key, validator_cache)
-            setattr(get_connected_peers, cache_time_key, current_time)
-        except Exception:
-            pass
-
-    # Get peers from net_info
-    url = f"{require_runtime().rpc_url}/net_info"
-    with _url.urlopen(url, timeout=timeout_s) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    peers_data = ((data or {}).get("result") or {}).get("peers") or []
-
-    results: list[Dict[str, str]] = []
-    seen_ips = set()
-
-    for p in peers_data:
-        remote_ip = str((p or {}).get("remote_ip", "")).strip()
-        if not remote_ip:
-            continue
-
-        try:
-            # Validate IP
-            _ipa.ip_address(remote_ip)
-        except Exception:
-            continue
-
-        if remote_ip not in seen_ips:
-            seen_ips.add(remote_ip)
-
-            # Query peer's RPC to get validator pubkey and match to on-chain moniker
-            moniker = ""
-            try:
-                peer_rpc = f"http://{remote_ip}:26657"
-                peer_url = f"{peer_rpc}/status"
-                with _url.urlopen(peer_url, timeout=2) as peer_resp:
-                    peer_data = json.loads(peer_resp.read().decode("utf-8"))
-
-                validator_info = ((peer_data or {}).get("result") or {}).get("validator_info") or {}
-                pubkey = validator_info.get("pub_key", {}).get("value", "")
-
-                if pubkey and validator_cache:
-                    moniker = validator_cache.get(pubkey, "")
-            except Exception:
-                pass
-
-            results.append({"ip": remote_ip, "moniker": moniker})
-
-    return results
+    """Get connected peers from indexer DB chain_stats."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'connected_peers'")
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            raise RuntimeError("connected_peers missing in indexer DB")
+        if not isinstance(row[0], list):
+            raise RuntimeError("connected_peers invalid format in indexer DB")
+        peers = []
+        for p in row[0]:
+            if not isinstance(p, dict):
+                raise RuntimeError("connected_peers entry invalid")
+            ip = str(p.get("ip", "") or "").strip()
+            moniker = str(p.get("moniker", "") or "").strip()
+            if not ip and not moniker:
+                continue
+            peers.append({"ip": ip, "moniker": moniker})
+        return peers
 
 
 __all__ = [
@@ -385,4 +334,5 @@ __all__ = [
     "is_node_catching_up",
     "classify_reject",
     "get_connected_peers",
+    "get_indexer_health",
 ]

@@ -29,8 +29,20 @@ import subprocess
 import time
 from typing import List, Optional, Tuple
 
-from bank import get_balance
 from db import connect_db
+
+
+def get_balance(address) -> int:
+    """Read balance from indexer DB."""
+    if not address:
+        return 0
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance FROM balances WHERE address = LOWER(%s)", (str(address),))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
 from node import min_gas_price_umirage
 
 logger = logging.getLogger(__name__)

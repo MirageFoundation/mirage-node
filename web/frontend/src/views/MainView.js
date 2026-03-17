@@ -804,6 +804,52 @@ const AndroidHeroDismiss = styled.button`
     }
 `;
 
+const IPhoneAppHero = styled.div`
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.08) 0%, rgba(88, 86, 214, 0.08) 100%);
+    border: 1px solid rgba(0, 122, 255, 0.3);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 8px;
+        padding: 0.85rem 1rem;
+    }
+`;
+
+const IPhoneHeroButton = styled.a`
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    text-decoration: none;
+    text-align: center;
+    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    color: #fff;
+
+    &:hover {
+        background: linear-gradient(135deg, #0066D6 0%, #4B49B8 100%);
+        transform: translateY(-1px);
+    }
+
+    @media (max-width: 768px) {
+        padding: 0.45rem 1rem;
+        font-size: 0.8rem;
+        flex: 1;
+        min-width: 80px;
+    }
+`;
+
 const HomeFeedInfoTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
@@ -1479,6 +1525,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const dismissAndroidBanner = () => {
         try { Storage.save('android_app_banner_dismissed', true); } catch (_) { }
         setShowAndroidBanner(false);
+    };
+
+    // iPhone app banner: show once for iPhone users until dismissed
+    const isIPhone = (() => { try { return /iPhone/i.test(navigator.userAgent) && !isAndroid; } catch (_) { return false; } })();
+    const [showIPhoneBanner, setShowIPhoneBanner] = useState(() => {
+        if (!isIPhone) return false;
+        try { return !Storage.load('iphone_app_banner_dismissed', false); } catch (_) { return true; }
+    });
+    const dismissIPhoneBanner = () => {
+        try { Storage.save('iphone_app_banner_dismissed', true); } catch (_) { }
+        setShowIPhoneBanner(false);
     };
 
     // NSFW welcome hero: show once for logged-in users until they choose yes/no
@@ -2915,6 +2972,25 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     </AndroidHeroDismiss>
                                 </AndroidHeroButtons>
                             </AndroidAppHero>
+                        )}
+
+                        {showIPhoneBanner && (
+                            <IPhoneAppHero role="region" aria-label="iPhone app available">
+                                <AndroidHeroTitle>
+                                    <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
+                                </AndroidHeroTitle>
+                                <AndroidHeroDescription>
+                                    Get the native iOS app for a faster, smoother experience with push notifications and offline support.
+                                </AndroidHeroDescription>
+                                <AndroidHeroButtons>
+                                    <IPhoneHeroButton href="https://apps.apple.com/us/app/mirage-speak-your-mind/id6757619038" target="_blank" rel="noopener noreferrer">
+                                        Get the app
+                                    </IPhoneHeroButton>
+                                    <AndroidHeroDismiss onClick={dismissIPhoneBanner}>
+                                        No thanks
+                                    </AndroidHeroDismiss>
+                                </AndroidHeroButtons>
+                            </IPhoneAppHero>
                         )}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}

@@ -313,6 +313,9 @@ class DatabaseManager:
                     """
                 )
 
+                # reserve_funds for indexer-only backend reads
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS reserve_funds BIGINT NOT NULL DEFAULT 0")
+
                 # v1.14.0: soft-delete support for MsgDeleteUser
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at BIGINT")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_deleted_at ON profiles(deleted_at)")
@@ -566,6 +569,63 @@ class DatabaseManager:
 
                 # NOTE: Data migrations have been moved to indexer/migrations/
                 # They run automatically on indexer startup via run_migrations()
+
+                # ========== Indexer-Only Backend Tables ==========
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS balances (
+                        address TEXT PRIMARY KEY,
+                        balance BIGINT NOT NULL DEFAULT 0,
+                        updated_at BIGINT NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_balances_address_lower ON balances(LOWER(address))")
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS chain_stats (
+                        key TEXT PRIMARY KEY,
+                        value JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        updated_at BIGINT NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recent_blocks (
+                        height BIGINT PRIMARY KEY,
+                        hash TEXT NOT NULL,
+                        block_time BIGINT NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pending_txs (
+                        id BIGSERIAL PRIMARY KEY,
+                        tx_bytes BYTEA NOT NULL,
+                        tx_hash TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        created_at BIGINT NOT NULL DEFAULT 0,
+                        broadcast_at BIGINT,
+                        error_log TEXT
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_pending_txs_status ON pending_txs(status)")
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS indexer_state (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL DEFAULT '',
+                        updated_at BIGINT NOT NULL DEFAULT 0
+                    )
+                    """
+                )
 
                 # ========== Referral System Tables (prefixed for easy cleanup) ==========
                 # referral_links: who referred whom (immutable once set)
@@ -1525,7 +1585,14 @@ class DatabaseManager:
                       tx_type=EXCLUDED.tx_type,
                       created_at=EXCLUDED.created_at
                     """,
-                    (txhash, int(height), int(code), self._strip_nul(str(raw_log or "")), self._strip_nul(str(tx_type or "unknown")), int(created_at)),
+                    (
+                        txhash,
+                        int(height),
+                        int(code),
+                        self._strip_nul(str(raw_log or "")),
+                        self._strip_nul(str(tx_type or "unknown")),
+                        int(created_at),
+                    ),
                 )
                 cur.execute("SELECT COUNT(*) FROM tx_receipts")
                 total = int((cur.fetchone() or [0])[0] or 0)
@@ -1805,6 +1872,7 @@ class DatabaseManager:
         banner: str,
         flair: str,
         updated_at: int,
+        reserve_funds: int = 0,
     ) -> None:
         """Insert or update a profile with all fields."""
         username = self._strip_nul(username)
@@ -1817,8 +1885,8 @@ class DatabaseManager:
                 cur.execute(
                     """
                     INSERT INTO profiles(owner, username, level, created_at, subscription_expiry,
-                                         auto_renew, biography, avatar, banner, flair, updated_at)
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                         auto_renew, biography, avatar, banner, flair, updated_at, reserve_funds)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(owner) DO UPDATE SET
                       username=EXCLUDED.username,
                       level=EXCLUDED.level,
@@ -1834,6 +1902,7 @@ class DatabaseManager:
                       banner=EXCLUDED.banner,
                       flair=EXCLUDED.flair,
                       updated_at=EXCLUDED.updated_at,
+                      reserve_funds=EXCLUDED.reserve_funds,
                       deleted_at=NULL
                     """,
                     (
@@ -1848,6 +1917,7 @@ class DatabaseManager:
                         banner or "",
                         flair or "",
                         int(updated_at),
+                        int(reserve_funds),
                     ),
                 )
 
@@ -2521,3 +2591,169 @@ class DatabaseManager:
                     (power, attested_power, required_power, tx_hash, msg_type),
                 )
                 return cur.rowcount > 0
+
+    # ========== Balance Methods ==========
+
+    def upsert_balance(self, address: str, balance: int, updated_at: int) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO balances(address, balance, updated_at)
+                    VALUES(LOWER(%s), %s, %s)
+                    ON CONFLICT(address) DO UPDATE SET
+                      balance=EXCLUDED.balance,
+                      updated_at=EXCLUDED.updated_at
+                    """,
+                    (address.lower(), int(balance), int(updated_at)),
+                )
+
+    def upsert_balances_batch(self, entries: list[tuple[str, int]], updated_at: int) -> None:
+        """Batch upsert balances. entries = [(address, balance), ...]"""
+        if not entries:
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO balances(address, balance, updated_at)
+                    VALUES(LOWER(%s), %s, %s)
+                    ON CONFLICT(address) DO UPDATE SET
+                      balance=EXCLUDED.balance,
+                      updated_at=EXCLUDED.updated_at
+                    """,
+                    [(addr.lower(), int(bal), int(updated_at)) for addr, bal in entries],
+                )
+
+    def get_balance(self, address: str) -> int:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT balance FROM balances WHERE address = LOWER(%s)", (address,))
+                row = cur.fetchone()
+                return int(row[0]) if row and row[0] is not None else 0
+
+    def get_balances_batch(self, addresses: list[str]) -> list[tuple[str, int]]:
+        if not addresses:
+            return []
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                lower = [a.lower() for a in addresses]
+                cur.execute("SELECT address, balance FROM balances WHERE address = ANY(%s)", (lower,))
+                found = {r[0]: int(r[1]) for r in cur.fetchall()}
+                return [(a, found.get(a.lower(), 0)) for a in addresses]
+
+    # ========== Chain Stats Methods ==========
+
+    def set_chain_stat(self, key: str, value, updated_at: int) -> None:
+        import json as _json
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO chain_stats(key, value, updated_at)
+                    VALUES(%s, %s::jsonb, %s)
+                    ON CONFLICT(key) DO UPDATE SET
+                      value=EXCLUDED.value,
+                      updated_at=EXCLUDED.updated_at
+                    """,
+                    (key, _json.dumps(value), int(updated_at)),
+                )
+
+    def get_chain_stat(self, key: str):
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM chain_stats WHERE key = %s", (key,))
+                row = cur.fetchone()
+                return row[0] if row else None
+
+    # ========== Recent Blocks Methods ==========
+
+    def upsert_recent_block(self, height: int, block_hash: str, block_time: int) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO recent_blocks(height, hash, block_time)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(height) DO UPDATE SET
+                      hash=EXCLUDED.hash,
+                      block_time=EXCLUDED.block_time
+                    """,
+                    (int(height), block_hash, int(block_time)),
+                )
+
+    def prune_old_blocks(self, keep: int = 1000) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM recent_blocks WHERE height < (SELECT COALESCE(MAX(height), 0) - %s FROM recent_blocks)",
+                    (keep,),
+                )
+
+    def get_recent_block_hashes(self, limit: int = 100) -> list[dict]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT height, hash, block_time FROM recent_blocks ORDER BY height DESC LIMIT %s",
+                    (limit,),
+                )
+                return [{"height": r[0], "hash": r[1], "block_time": r[2]} for r in cur.fetchall()]
+
+    # ========== Pending Txs Methods ==========
+
+    def insert_pending_tx(self, tx_bytes: bytes, tx_hash: str, created_at: int) -> int:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO pending_txs(tx_bytes, tx_hash, status, created_at)
+                    VALUES(%s, %s, 'pending', %s)
+                    RETURNING id
+                    """,
+                    (tx_bytes, tx_hash, int(created_at)),
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+
+    def get_pending_txs(self, limit: int = 50) -> list[dict]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, tx_bytes, tx_hash FROM pending_txs WHERE status = 'pending' ORDER BY id LIMIT %s",
+                    (limit,),
+                )
+                return [{"id": r[0], "tx_bytes": bytes(r[1]), "tx_hash": r[2]} for r in cur.fetchall()]
+
+    def update_pending_tx_status(self, tx_id: int, status: str, error_log: str | None = None) -> None:
+        import time as _time
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE pending_txs SET status = %s, broadcast_at = %s, error_log = %s WHERE id = %s",
+                    (status, int(_time.time()), error_log, tx_id),
+                )
+
+    # ========== Indexer State Methods ==========
+
+    def set_indexer_state(self, key: str, value: str, updated_at: int) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO indexer_state(key, value, updated_at)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(key) DO UPDATE SET
+                      value=EXCLUDED.value,
+                      updated_at=EXCLUDED.updated_at
+                    """,
+                    (key, str(value), int(updated_at)),
+                )
+
+    def get_indexer_state(self, key: str) -> str | None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM indexer_state WHERE key = %s", (key,))
+                row = cur.fetchone()
+                return row[0] if row else None

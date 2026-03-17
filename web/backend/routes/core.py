@@ -57,7 +57,7 @@ from shared.datatypes import (
 
 from logging_utils import log_event, next_request_id, logger
 from node import derive_address_from_pubkey, min_gas_price_umirage, require_runtime
-from params import expect_params, load_params
+from params import expect_params
 from db import connect_db
 from pow import (
     argon2_digest,
@@ -99,11 +99,23 @@ from chain import (
     is_node_catching_up,
     is_valid_recent_block_hash,
 )
-from bank import get_balance
+
+
+def get_balance(address) -> int:
+    """Read balance from indexer DB."""
+    if not address:
+        return 0
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance FROM balances WHERE address = LOWER(%s)", (str(address),))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
 import hashlib
 import json
 import socket
-import urllib.request as _ur
+
 from psycopg.types.json import Jsonb
 
 
@@ -112,21 +124,27 @@ core_bp = Blueprint("core", __name__)
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
 # state changes between simulation and execution, and storage write costs
 # (WriteFlat) that vary based on key/value sizes.
-GAS_BUFFER_MULTIPLIER = 1.30  # 30% buffer
+GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
 
 
-def _query_chain_profile_full(addr: str) -> dict | None:
-    """Query the chain gRPC-gateway for full profile including all lists."""
-    try:
-        rt = require_runtime()
-        api_url = rt.api_url.rstrip("/")
-        url = f"{api_url}/mirage/core/v1/profile/{addr.lower()}"
-        with _ur.urlopen(url, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data
-    except Exception:
-        pass
-    return None
+def _db_get_profile_level(addr: str) -> int | None:
+    """Read profile level from indexer DB. Returns None if profile not found."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (addr,))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+
+def _db_list_contains(table: str, owner: str, target_col: str, target_val: str) -> bool:
+    """Check if a value exists in a profile list table (enabled_agents, followed_users, etc.)."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT 1 FROM {table} WHERE LOWER(owner) = LOWER(%s) AND LOWER({target_col}) = LOWER(%s) LIMIT 1",
+            (owner, target_val),
+        )
+        return cur.fetchone() is not None
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -668,15 +686,7 @@ def core_set_username():
                     is_new_user = not row or not row[0] or row[0].strip() == ""
             except Exception as db_err:
                 log_event(rid, "set_username.profile_check_error", error=str(db_err))
-                try:
-                    chain_profile = _query_chain_profile_full(user_addr)
-                    is_new_user = (
-                        not chain_profile
-                        or not chain_profile.get("username")
-                        or chain_profile.get("username", "").strip() == ""
-                    )
-                except Exception:
-                    is_new_user = True
+                return jsonify({"error": "indexer DB unavailable"}), 503
 
             # ENFORCE REGISTRATION GATE
             if not REGISTRATION_ENABLED and is_new_user:
@@ -1004,16 +1014,14 @@ def core_enable_agent():
             log_event(rid, "enable_agent.self_not_allowed", agent=agent, user_addr=user_addr)
             return jsonify({"error": "cannot enable yourself as an agent"}), 400
 
-        # Check if agent is already enabled
+        # Check if agent is already enabled (indexer DB)
         try:
-            profile = _query_chain_profile_full(user_addr)
-            if profile:
-                enabled = [a.lower() for a in (profile.get("enabled_agents") or [])]
-                if agent.lower() in enabled:
-                    log_event(rid, "enable_agent.already_enabled", agent=agent, user_addr=user_addr)
-                    return jsonify({"error": "agent is already enabled"}), 400
-        except Exception:
-            pass
+            if _db_list_contains("enabled_agents", user_addr, "agent", agent):
+                log_event(rid, "enable_agent.already_enabled", agent=agent, user_addr=user_addr)
+                return jsonify({"error": "agent is already enabled"}), 400
+        except Exception as db_err:
+            log_event(rid, "enable_agent.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -1244,10 +1252,13 @@ def core_set_agents():
         if not isinstance(tiers, list) or not tiers:
             return jsonify({"error": "missing tier config"}), 500
 
-        profile = _query_chain_profile_full(user_addr)
-        if not profile or "level" not in profile:
+        try:
+            user_level = _db_get_profile_level(user_addr)
+        except Exception as db_err:
+            log_event(rid, "set_agents.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
+        if user_level is None:
             return jsonify({"error": "missing profile level"}), 500
-        user_level = int(profile.get("level"))
 
         idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
         if idx < 0 or idx >= len(tiers):
@@ -1387,16 +1398,14 @@ def core_block_post():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        # Check if post is already blocked
+        # Check if post is already blocked (indexer DB)
         try:
-            profile = _query_chain_profile_full(user_addr)
-            if profile:
-                blocked_posts = [p.lower() for p in (profile.get("blocked_posts") or [])]
-                if target in blocked_posts:
-                    log_event(rid, "block_post.already_blocked", target=target, user_addr=user_addr)
-                    return jsonify({"error": "post is already blocked"}), 400
-        except Exception:
-            pass
+            if _db_list_contains("blocked_posts", user_addr, "target", target):
+                log_event(rid, "block_post.already_blocked", target=target, user_addr=user_addr)
+                return jsonify({"error": "post is already blocked"}), 400
+        except Exception as db_err:
+            log_event(rid, "block_post.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -1511,16 +1520,14 @@ def core_block_user():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        # Check if user is already blocked
+        # Check if user is already blocked (indexer DB)
         try:
-            profile = _query_chain_profile_full(user_addr)
-            if profile:
-                blocked_users = [u.lower() for u in (profile.get("blocked_users") or [])]
-                if target in blocked_users:
-                    log_event(rid, "block_user.already_blocked", target=target, user_addr=user_addr)
-                    return jsonify({"error": "user is already blocked"}), 400
-        except Exception:
-            pass
+            if _db_list_contains("blocked_users", user_addr, "target", target):
+                log_event(rid, "block_user.already_blocked", target=target, user_addr=user_addr)
+                return jsonify({"error": "user is already blocked"}), 400
+        except Exception as db_err:
+            log_event(rid, "block_user.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -1824,16 +1831,14 @@ def core_block_topic():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        # Check if topic is already blocked
+        # Check if topic is already blocked (indexer DB)
         try:
-            profile = _query_chain_profile_full(user_addr)
-            if profile:
-                blocked_topics = [t.lower() for t in (profile.get("blocked_topics") or [])]
-                if topic in blocked_topics:
-                    log_event(rid, "block_topic.already_blocked", topic=topic, user_addr=user_addr)
-                    return jsonify({"error": "topic is already blocked"}), 400
-        except Exception:
-            pass
+            if _db_list_contains("blocked_topics", user_addr, "target", topic):
+                log_event(rid, "block_topic.already_blocked", topic=topic, user_addr=user_addr)
+                return jsonify({"error": "topic is already blocked"}), 400
+        except Exception as db_err:
+            log_event(rid, "block_topic.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -2026,16 +2031,14 @@ def core_follow_user():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        # Check if user is already followed
+        # Check if user is already followed (indexer DB)
         try:
-            profile = _query_chain_profile_full(user_addr)
-            if profile:
-                followed_users = [u.lower() for u in (profile.get("followed_users") or [])]
-                if user in followed_users:
-                    log_event(rid, "follow_user.already_followed", user=user, user_addr=user_addr)
-                    return jsonify({"error": "user is already followed"}), 400
-        except Exception:
-            pass
+            if _db_list_contains("followed_users", user_addr, "target", user):
+                log_event(rid, "follow_user.already_followed", user=user, user_addr=user_addr)
+                return jsonify({"error": "user is already followed"}), 400
+        except Exception as db_err:
+            log_event(rid, "follow_user.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -2218,16 +2221,14 @@ def core_follow_topic():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        # Check if topic is already followed
+        # Check if topic is already followed (indexer DB)
         try:
-            profile = _query_chain_profile_full(user_addr)
-            if profile:
-                followed_topics = [t.lower() for t in (profile.get("followed_topics") or [])]
-                if topic in followed_topics:
-                    log_event(rid, "follow_topic.already_followed", topic=topic, user_addr=user_addr)
-                    return jsonify({"error": "topic is already followed"}), 400
-        except Exception:
-            pass
+            if _db_list_contains("followed_topics", user_addr, "topic", topic):
+                log_event(rid, "follow_topic.already_followed", topic=topic, user_addr=user_addr)
+                return jsonify({"error": "topic is already followed"}), 400
+        except Exception as db_err:
+            log_event(rid, "follow_topic.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -2382,11 +2383,6 @@ def core_delete_post():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        # Ensure params cache is initialized (avoids 'params cache uninitialized' until profile is visited)
-        try:
-            load_params(force=False)
-        except Exception:
-            pass
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -2527,11 +2523,6 @@ def core_delete_user():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        # Ensure params cache is initialized (avoids 'params cache uninitialized' until profile is visited)
-        try:
-            load_params(force=False)
-        except Exception:
-            pass
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -2908,14 +2899,18 @@ def core_edit():
             row = cur.fetchone()
             conn.close()
             if not row or not row[0]:
-                return jsonify({"error": "override not found"}), 404
-            owner_of_override = (row[0] or "").lower()
-            if owner_of_override != user_addr.lower():
-                return jsonify({"error": "forbidden"}), 403
-            stored_target = (row[1] or "").lower()
-            if target.lower() != stored_target:
-                log_event(rid, "edit.target_mismatch", supplied=target, stored=stored_target, override=override)
-                return jsonify({"error": "target mismatch: cannot change post parent"}), 400
+                # Indexer may lag briefly behind the chain; don't hard-block relay
+                # on local precheck misses. Chain/indexer validation will enforce
+                # real existence/ownership rules.
+                log_event(rid, "edit.override_precheck_miss", override=override, user_addr=user_addr)
+            else:
+                owner_of_override = (row[0] or "").lower()
+                if owner_of_override != user_addr.lower():
+                    return jsonify({"error": "forbidden"}), 403
+                stored_target = (row[1] or "").lower()
+                if target.lower() != stored_target:
+                    log_event(rid, "edit.target_mismatch", supplied=target, stored=stored_target, override=override)
+                    return jsonify({"error": "target mismatch: cannot change post parent"}), 400
         except Exception:
             # If DB check fails, let chain proceed; indexer will enforce
             pass
@@ -3131,7 +3126,8 @@ def core_annotate():
             cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (override,))
             row = cur.fetchone()
             if not row or not row[0]:
-                return jsonify({"error": "override not found"}), 404
+                # Same as edit route: avoid false negatives during indexer lag.
+                log_event(rid, "annotate.override_precheck_miss", override=override, user_addr=user_addr)
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -3697,11 +3693,6 @@ def core_send_tokens():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        # Ensure params cache is initialized for fee checks
-        try:
-            load_params(force=False)
-        except Exception:
-            pass
         data = request.get_json(force=True) or {}
         log_event(rid, "send_tokens.data", data=data)
 
@@ -3753,8 +3744,9 @@ def core_send_tokens():
         # Insufficient balance precheck (reject before broadcast)
         try:
             have = int(get_balance(user_addr) or 0)
-        except Exception:
-            have = 0
+        except Exception as db_err:
+            log_event(rid, "send_tokens.db_error", error=str(db_err))
+            return jsonify({"error": "indexer DB unavailable"}), 503
         if int(amount) > have:
             return jsonify({"error": f"insufficient balance: have {have}, need {int(amount)}"}), 400
 
@@ -3913,10 +3905,7 @@ def core_upgrade_level():
         # PoW is NOT allowed for upgrade_level - must pay with tokens. No upfront fee field required.
 
         # Backend precheck: ensure user has enough balance for the target tier's period fee
-        try:
-            p = load_params(force=False)
-        except Exception:
-            p = {}
+        p = expect_params()
         period_fee = 0
         try:
             tiers = p.get("tiers") or []
@@ -3928,11 +3917,12 @@ def core_upgrade_level():
         except Exception:
             period_fee = 0
         if level > 0 and period_fee > 0:
-            bal = get_balance(user_addr)
             try:
+                bal = get_balance(user_addr)
                 have = int(bal)
-            except Exception:
-                have = 0
+            except Exception as db_err:
+                log_event(rid, "upgrade_level.db_error", error=str(db_err))
+                return jsonify({"error": "indexer DB unavailable"}), 503
             if have < period_fee:
                 return jsonify({"error": "insufficient balance", "balance": have, "needed": int(period_fee)}), 400
 

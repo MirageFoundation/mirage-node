@@ -7,7 +7,6 @@ PostgreSQL connection helper for backend (hard-fail, no fallbacks).
 import psycopg
 from typing import Optional, Any, Dict
 
-from params import expect_params  # ensure backend waits for chain, not used here but preserves boot order
 from shared.config import get_config
 
 

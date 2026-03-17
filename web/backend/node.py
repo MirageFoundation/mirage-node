@@ -3,7 +3,7 @@ from __future__ import annotations
 """Node and runtime helpers.
 
 Functions:
-- initialize_runtime(): Resolve URLs, keys; verify gRPC.
+- initialize_runtime(): Resolve URLs and local keys at startup.
 - require_runtime(): Return initialized runtime or raise.
 - assert_node_home_ready(): Validate node directories/files.
 - get_rpc_url/get_grpc_url/get_grpc_target(): URL helpers.
@@ -22,8 +22,6 @@ import re
 import subprocess
 from dataclasses import dataclass
 from typing import Optional, Tuple
-import grpc as _grpc
-
 import tomllib as _toml
 
 from bech32 import bech32_encode, bech32_decode, convertbits  # type: ignore
@@ -43,6 +41,9 @@ class Runtime:
     grpc_target: str
     validator_payer_addr: str
     validator_pubkey_bytes: bytes
+    validator_operator_address: str
+    validator_consensus_address: str
+    min_gas_price_umirage: float
 
 
 _RUNTIME: Optional[Runtime] = None
@@ -76,6 +77,8 @@ def get_api_url() -> str:
 
 
 def get_grpc_url() -> str:
+    if _RUNTIME is not None:
+        return _RUNTIME.grpc_url
     cfg = get_config()
     derived = str(cfg.get_node_config()["urls"]["grpc"]).strip()
     if not derived:
@@ -108,6 +111,8 @@ def get_grpc_url() -> str:
 
 
 def get_grpc_target() -> str:
+    if _RUNTIME is not None:
+        return _RUNTIME.grpc_target
     url = get_grpc_url()
     if url.startswith("grpc+http://"):
         url = url[len("grpc+http://") :]
@@ -119,24 +124,8 @@ def get_grpc_target() -> str:
 
 
 def min_gas_price_umirage() -> float:
-    cfg = get_config()
-    home = cfg.get_node_config()["home"]
-    path = os.path.join(home, "config", "app.toml")
-    with open(path, "rb") as f:
-        data = _toml.load(f)
-    raw = str(((data.get("minimum-gas-prices") or data.get("minimum_gas_prices")))).strip()
-    if not raw:
-        raise RuntimeError("minimum-gas-prices missing in app.toml")
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    if not parts:
-        raise RuntimeError("minimum-gas-prices empty")
-    for p in parts:
-        if p.endswith("umirage"):
-            try:
-                return float(p[:-7])
-            except Exception:
-                raise RuntimeError(f"invalid minimum-gas-prices entry: {p}")
-    raise RuntimeError("minimum-gas-prices must include umirage entry")
+    rt = require_runtime()
+    return float(rt.min_gas_price_umirage)
 
 
 def _get_node_consensus_pubkey_bytes() -> bytes:
@@ -156,32 +145,18 @@ _CACHED_CONSENSUS_ADDRESS: Optional[str] = None
 
 
 def find_local_operator_address() -> str:
-    global _CACHED_OPERATOR_ADDRESS
-    if _CACHED_OPERATOR_ADDRESS is not None:
-        return _CACHED_OPERATOR_ADDRESS
+    """Return cached validator operator address (loaded at startup)."""
+    rt = require_runtime()
+    return rt.validator_operator_address
 
-    local_cons_pub = _get_node_consensus_pubkey_bytes()
-    import urllib.request as _url
-    import json as _json
 
-    rpc = get_rpc_url()
-    url = f"{rpc}/validators"
-    with _url.urlopen(url, timeout=2) as resp:
-        data = _json.loads(resp.read().decode("utf-8"))
-    vals = ((data or {}).get("result") or {}).get("validators") or []
-    for ent in vals:
-        pk_b64 = str(((ent or {}).get("pub_key") or {}).get("value") or "")
-        if not pk_b64:
-            continue
-        try:
-            if base64.b64decode(pk_b64) == local_cons_pub:
-                break
-        except Exception:
-            continue
-    else:
-        raise RuntimeError("local consensus key not found in current validator set")
+def find_local_consensus_address() -> str:
+    """Return cached validator consensus address (loaded at startup)."""
+    rt = require_runtime()
+    return rt.validator_consensus_address
 
-    addr = resolve_validator_payer_address()
+
+def _derive_valoper_from_account(addr: str) -> str:
     hrp, data5 = bech32_decode(addr)
     if not hrp or not data5:
         raise RuntimeError("invalid bech32 account address for validator key")
@@ -191,26 +166,40 @@ def find_local_operator_address() -> str:
     data5_new = convertbits(bytes(data8), 8, 5)
     if not data5_new:
         raise RuntimeError("bech32 convertbits 8->5 failed")
-    _CACHED_OPERATOR_ADDRESS = bech32_encode("miragevaloper", data5_new)
-    return _CACHED_OPERATOR_ADDRESS
+    return bech32_encode("miragevaloper", data5_new)
 
 
-def find_local_consensus_address() -> str:
-    global _CACHED_CONSENSUS_ADDRESS
-    if _CACHED_CONSENSUS_ADDRESS is not None:
-        return _CACHED_CONSENSUS_ADDRESS
-
+def _derive_valcons_from_pubkey(cons_pub: bytes) -> str:
     import hashlib as _hl
 
-    cons_pub = _get_node_consensus_pubkey_bytes()
     if not cons_pub:
         raise RuntimeError("missing consensus pubkey bytes")
     h20 = _hl.sha256(cons_pub).digest()[:20]
     data5 = convertbits(h20, 8, 5)
     if not data5:
         raise RuntimeError("bech32 convertbits 8->5 failed for valcons")
-    _CACHED_CONSENSUS_ADDRESS = bech32_encode("miragevalcons", data5)
-    return _CACHED_CONSENSUS_ADDRESS
+    return bech32_encode("miragevalcons", data5)
+
+
+def _load_min_gas_price_umirage() -> float:
+    cfg = get_config()
+    home = cfg.get_node_config()["home"]
+    path = os.path.join(home, "config", "app.toml")
+    with open(path, "rb") as f:
+        data = _toml.load(f)
+    raw = str(((data.get("minimum-gas-prices") or data.get("minimum_gas_prices")))).strip()
+    if not raw:
+        raise RuntimeError("minimum-gas-prices missing in app.toml")
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        raise RuntimeError("minimum-gas-prices empty")
+    for p in parts:
+        if p.endswith("umirage"):
+            try:
+                return float(p[:-7])
+            except Exception:
+                raise RuntimeError(f"invalid minimum-gas-prices entry: {p}")
+    raise RuntimeError("minimum-gas-prices must include umirage entry")
 
 
 def resolve_validator_payer_address() -> str:
@@ -295,6 +284,9 @@ def initialize_runtime() -> Runtime:
     grpc_target = get_grpc_target()
     validator_payer_addr = resolve_validator_payer_address()
     validator_pubkey_bytes = resolve_validator_pubkey_bytes()
+    validator_operator_address = _derive_valoper_from_account(validator_payer_addr)
+    validator_consensus_address = _derive_valcons_from_pubkey(_get_node_consensus_pubkey_bytes())
+    min_gas_price = _load_min_gas_price_umirage()
     _RUNTIME = Runtime(
         rpc_url=rpc_url,
         api_url=api_url,
@@ -302,8 +294,10 @@ def initialize_runtime() -> Runtime:
         grpc_target=grpc_target,
         validator_payer_addr=validator_payer_addr,
         validator_pubkey_bytes=validator_pubkey_bytes,
+        validator_operator_address=validator_operator_address,
+        validator_consensus_address=validator_consensus_address,
+        min_gas_price_umirage=min_gas_price,
     )
-    assert_grpc_ready(timeout_s=2.0)
     return _RUNTIME
 
 
@@ -313,46 +307,10 @@ def require_runtime() -> Runtime:
     return _RUNTIME
 
 
-_GRPC_CHANNEL = None
-
-
-def get_grpc_channel():
-    """Return a persistent gRPC channel to the local node.
-
-    gRPC channels are thread-safe and handle reconnection internally.
-    Reusing a single channel avoids TCP + HTTP/2 handshake on every call.
-    """
-    global _GRPC_CHANNEL
-    if _GRPC_CHANNEL is None:
-        _GRPC_CHANNEL = _grpc.insecure_channel(require_runtime().grpc_target)
-    return _GRPC_CHANNEL
-
-
-def assert_grpc_ready(timeout_s: float = 2.0, max_retries: int = 360, retry_interval: float = 10.0) -> None:
-    """Wait for gRPC to be ready, retrying for up to 1 hour by default."""
-    import logging
-    log = logging.getLogger(__name__)
-    target = require_runtime().grpc_target
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            ch = _grpc.insecure_channel(target)
-            _grpc.channel_ready_future(ch).result(timeout=timeout_s)
-            return
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries - 1:
-                log.warning(f"gRPC not ready (attempt {attempt + 1}/{max_retries}): {e}")
-                import time
-                time.sleep(retry_interval)
-    raise RuntimeError(f"gRPC not ready after {max_retries} attempts: {last_error}")
-
-
 __all__ = [
     "Runtime",
     "initialize_runtime",
     "require_runtime",
-    "assert_grpc_ready",
     "assert_node_home_ready",
     "get_rpc_url",
     "get_api_url",
@@ -364,5 +322,4 @@ __all__ = [
     "find_local_operator_address",
     "find_local_consensus_address",
     "derive_address_from_pubkey",
-    "get_grpc_channel",
 ]

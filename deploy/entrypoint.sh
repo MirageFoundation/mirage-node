@@ -109,6 +109,7 @@ echo "Moniker:   $MONIKER"
 echo "==> Running initialization..."
 bash "$ROOT_DIR/deploy/init.sh"
 
+# NOTE: compact-db is legacy and should be removed.
 COMPACT_DB_BIN="$ROOT_DIR/blockchain/bin/compact-db"
 if [ ! -x "$COMPACT_DB_BIN" ]; then
   echo "ERROR: compact-db binary missing at $COMPACT_DB_BIN" >&2

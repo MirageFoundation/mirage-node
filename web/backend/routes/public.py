@@ -29,7 +29,7 @@ from flask import Blueprint, jsonify, request
 
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
-from node import require_runtime, find_local_operator_address, find_local_consensus_address
+from node import require_runtime
 from params import load_params, expect_params
 from settings import (
     IGNORE_DELETIONS,
@@ -56,59 +56,117 @@ from chain import (
     is_node_catching_up as _is_catching_up,
     get_connected_peers as _get_connected_peers,
 )
-from bank import (
-    get_balance as _get_balance,
-    get_total_supply as _get_total_supply,
-    get_balances_batch as _get_balances_batch,
-    get_staked_balance as _get_staked_balance,
-    get_validator as _get_validator,
-)
+
+
+def _get_balance(address) -> int:
+    """Read balance from indexer DB."""
+    if not address:
+        return 0
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance FROM balances WHERE address = LOWER(%s)", (str(address),))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
+def _get_total_supply() -> int:
+    """Read total supply from indexer DB chain_stats."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'total_supply'")
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return int(row[0]) if isinstance(row[0], (int, float)) else int(row[0])
+        return 0
+
+
+def _get_balances_batch(addresses) -> list:
+    """Read balances for multiple addresses from indexer DB."""
+    if not addresses:
+        return []
+    lower = [a.lower() for a in addresses]
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT address, balance FROM balances WHERE address = ANY(%s)", (lower,))
+        found = {r[0]: int(r[1]) for r in cur.fetchall()}
+        return [(a, found.get(a.lower(), 0)) for a in addresses]
+
+
+def _get_staked_balance(address) -> int:
+    """Read staked balance for validator operator from indexer DB chain_stats."""
+    if not address:
+        return 0
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
+        row = cur.fetchone()
+        if not row or not isinstance(row[0], list):
+            return 0
+        validators = row[0]
+        # address here is expected to be valoper
+        for v in validators:
+            if v.get("operator_address") == address:
+                return int(v.get("tokens") or 0)
+        return 0
+
+
+def _get_validator(valoper) -> dict:
+    """Read validator info from indexer DB chain_stats."""
+    if not valoper:
+        return {}
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
+        row = cur.fetchone()
+        if row and row[0]:
+            validators = row[0] if isinstance(row[0], list) else []
+            for v in validators:
+                if v.get("operator_address") == valoper:
+                    return {
+                        "moniker": v.get("moniker", ""),
+                        "tokens": v.get("tokens", "0"),
+                        "status": v.get("status", 0),
+                    }
+    return {}
+
+
 import base64
-import urllib.request as _ur
-import urllib.parse as _up
 from user_agents import parse as parse_user_agent
 
 
 def _inject_balance(resp: dict, addr: str) -> dict:
     """Add balance to response dict if address is provided."""
     if addr and addr.lower() != "guest":
-        try:
-            resp["balance"] = int(_get_balance(addr))
-        except Exception:
-            pass
+        resp["balance"] = int(_get_balance(addr))
     return resp
 
 
-def _query_chain_profile(addr: str) -> dict | None:
-    """Query the chain directly for a profile's current state (including real-time subscription_expiry)."""
-    try:
-        rpc = require_runtime().rpc_url
-        key_hex = f"profiles/{addr}".encode().hex()
-        # Tendermint ABCI expects the path quoted as a JSON string in the URL
-        path = _up.quote('"/store/core/key"')
-        url = f"{rpc}/abci_query?path={path}&data=0x{key_hex}"
-        with _ur.urlopen(url, timeout=3) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        value_b64 = (((data or {}).get("result") or {}).get("response") or {}).get("value")
-        if value_b64:
-            return json.loads(base64.b64decode(value_b64).decode())
-    except Exception:
-        pass
-    return None
-
-
-def _query_chain_profile_full(addr: str) -> dict | None:
-    """Query the chain gRPC-gateway for full profile including all lists."""
-    try:
-        rt = require_runtime()
-        api_url = rt.api_url.rstrip("/")
-        url = f"{api_url}/mirage/core/v1/profile/{addr.lower()}"
-        with _ur.urlopen(url, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data
-    except Exception:
-        pass
-    return None
+def _db_get_profile_scalars(addr: str) -> dict | None:
+    """Read profile scalar fields from indexer DB. Returns None if profile not found."""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT owner, username, level, created_at, subscription_expiry,
+                      auto_renew, biography, avatar, banner, flair, reserve_funds
+               FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1""",
+            (addr,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "owner": row[0] or addr.lower(),
+            "username": row[1] or "",
+            "level": int(row[2]) if row[2] is not None else 0,
+            "created_at": int(row[3]) if row[3] is not None else 0,
+            "subscription_expiry": int(row[4]) if row[4] is not None else 0,
+            "auto_renew": bool(row[5]) if row[5] is not None else False,
+            "biography": row[6] or "",
+            "avatar": row[7] or "",
+            "banner": row[8] or "",
+            "flair": row[9] or "",
+            "reserve_funds": int(row[10]) if row[10] is not None else 0,
+        }
 
 
 public_bp = Blueprint("public", __name__)
@@ -279,6 +337,9 @@ def reload_params():
         rt = require_runtime()
         load_params(force=True)
         params = expect_params()
+        global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
+        _CHAIN_CONFIG_CACHE = None
+        _CHAIN_CONFIG_CACHE_TIME = 0.0
         log_event(rid, "reload_params.success", params_keys=list(params.keys()))
         return jsonify({"status": "ok", "params": params})
     except Exception as e:
@@ -735,7 +796,7 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
 
 @public_bp.route("/api/get_profile")
 def get_profile():
-    """Get profile: scalar fields from chain, list fields from indexer (full history)."""
+    """Get profile: all fields from indexer DB."""
     address = request.args.get("address", default="", type=str)
     if not address:
         return jsonify({"error": "address is required"}), 400
@@ -744,7 +805,7 @@ def get_profile():
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
-        profile = _query_chain_profile_full(address.lower())
+        profile = _db_get_profile_scalars(address)
         lists = _get_profile_lists_from_indexer(address)
 
         if not profile:
@@ -757,17 +818,7 @@ def get_profile():
             return jsonify(_inject_balance(resp, address))
 
         resp = {
-            "owner": profile.get("owner", address.lower()),
-            "username": profile.get("username", ""),
-            "level": int(profile.get("level", 0)),
-            "created_at": int(profile.get("created_at", 0) or profile.get("createdAt", 0)),
-            "subscription_expiry": int(profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)),
-            "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
-            "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
-            "flair": profile.get("flair", ""),
-            "biography": profile.get("biography", ""),
-            "avatar": profile.get("avatar", ""),
-            "banner": profile.get("banner", ""),
+            **profile,
             **lists,
         }
         return jsonify(_inject_balance(resp, address))
@@ -2467,6 +2518,7 @@ def get_tx_status():
         out = {
             "found": True,
             "tx_hash": tx_hash,
+            "code": 0,
             "success": True,
             "indexed": True,
             "tx_type": tx_type,
@@ -2515,7 +2567,7 @@ def get_parameters():
             _PARAMS_CACHE["expires"] = now + _PARAMS_CACHE_TTL
             cache_hit = False
 
-        op_addr = find_local_operator_address()
+        op_addr = require_runtime().validator_operator_address
         bal = _get_balance(addr) if addr else None
         log_event(
             rid,
@@ -2560,8 +2612,7 @@ def get_user_status():
         inbox_last_viewed_at = 0
 
         # Query DB for profile
-        try:
-            conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
             cur.execute(
                 "SELECT username, level, created_at, subscription_expiry, inbox_last_viewed_at FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
@@ -2574,28 +2625,21 @@ def get_user_status():
                 profile_registered_at = int(row[2]) if row[2] is not None else None
                 subscription_expiry = int(row[3]) if row[3] is not None else 0
                 inbox_last_viewed_at = int(row[4]) if len(row) > 4 and row[4] is not None else 0
-            conn.close()
-        except Exception:
-            pass
 
-        # Query chain for real-time subscription data (use full gRPC query to get level)
-        chain_profile = _query_chain_profile_full(addr)
-        if chain_profile:
-            if chain_profile.get("level") is not None:
-                user_level = int(chain_profile["level"])
-            if chain_profile.get("subscription_expiry") is not None:
-                subscription_expiry = int(chain_profile["subscription_expiry"])
-            if chain_profile.get("auto_renew") is not None:
-                auto_renew = bool(chain_profile["auto_renew"])
-            if chain_profile.get("reserve_funds") is not None:
-                reserve_funds = int(chain_profile["reserve_funds"])
+        # Read subscription data from indexer DB (auto_renew, reserve_funds)
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn2:
+            cur2 = conn2.cursor()
+            cur2.execute(
+                "SELECT auto_renew, reserve_funds FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+                (addr,),
+            )
+            row2 = cur2.fetchone()
+            if row2:
+                auto_renew = bool(row2[0]) if row2[0] is not None else False
+                reserve_funds = int(row2[1]) if row2[1] is not None else 0
 
         # Get balance
-        balance = 0
-        try:
-            balance = int(_get_balance(addr))
-        except Exception:
-            pass
+        balance = int(_get_balance(addr))
 
         # Get recent votes (limit 100 for login sync) and inbox timestamp
         recent_votes = []
@@ -2917,15 +2961,15 @@ _staked_balance_cache: Dict[str, Any] = {"value": 0, "expires": 0}
 
 
 def _get_cached_staked_balance() -> int:
-    """Get total staked (delegated) balance for the validator via gRPC, cached 60s."""
+    """Get staked balance for the validator from indexer DB, cached 60s."""
     now = int(time.time())
     if _staked_balance_cache["expires"] > now:
         return _staked_balance_cache["value"]
     total = 0
     try:
         rt = require_runtime()
-        if rt.validator_payer_addr:
-            total = _get_staked_balance(rt.validator_payer_addr)
+        if rt.validator_operator_address:
+            total = _get_staked_balance(rt.validator_operator_address)
     except Exception:
         pass
     _staked_balance_cache["value"] = total
@@ -2952,12 +2996,8 @@ def get_network_stats():
         diff_info = _get_difficulty_info()
 
         # Get server balance
-        server_balance = 0
-        try:
-            rt = require_runtime()
-            server_balance = int(_get_balance(rt.validator_payer_addr))
-        except Exception:
-            pass
+        rt = require_runtime()
+        server_balance = int(_get_balance(rt.validator_payer_addr))
 
         # Get staked balance (cached 60s)
         staked_balance = 0
@@ -3241,11 +3281,7 @@ def get_chain_config():
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
-        try:
-            p = load_params(force=False)
-        except Exception as e:
-            log_event(rid, "get_chain_config.params_err", error=str(e))
-            return safe_error(e, context="get_chain_config.params")
+        p = expect_params()
 
         resp: Dict[str, Any] = {
             "max_username_size": p["max_username_size"],
@@ -3297,19 +3333,18 @@ def get_node_config():
             return jsonify({"error": "node_catching_up"}), 503
 
         rt = require_runtime()
-        valoper = find_local_operator_address()
-        valcons = find_local_consensus_address()
+
+        valoper = rt.validator_operator_address
+        valcons = rt.validator_consensus_address
+        val_account = rt.validator_payer_addr
 
         validator_moniker = ""
-        try:
-            if valoper:
-                val_info = _get_validator(valoper)
-                validator_moniker = val_info.get("moniker", "")
-        except Exception:
-            pass
+        if valoper:
+            val_info = _get_validator(valoper)
+            validator_moniker = val_info.get("moniker", "")
 
         resp: Dict[str, Any] = {
-            "validator_account_address": rt.validator_payer_addr,
+            "validator_account_address": val_account,
             "validator_operator_address": valoper,
             "validator_consensus_address": valcons,
             "validator_moniker": validator_moniker,
@@ -7465,16 +7500,15 @@ def get_stats():
 
 
 def _is_admin(address: str) -> bool:
-    """Check if address is an admin (level >= 100 on chain)."""
+    """Check if address is an admin (level >= 100 from indexer DB)."""
     if not address:
         return False
-    try:
-        profile = _query_chain_profile_full(address)
-        if profile:
-            level = int(profile.get("level", 0) or 0)
-            return level >= 100
-    except Exception:
-        pass
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (address,))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return int(row[0]) >= 100
     return False
 
 
