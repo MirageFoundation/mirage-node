@@ -68,6 +68,7 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 
 # CLEANUP!!!
 - now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
+- Remove legacy `compact-db` binary and its usage in `deploy/entrypoint.sh`
 
 # Other Ideas:
 - Allow only 3 new profiles (set_username) per minute
