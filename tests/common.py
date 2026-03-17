@@ -616,12 +616,22 @@ def setup_test_wallets(backend: str) -> bool:
     for name, w in WALLETS.items():
         print(f"  Wallet {name:4s}: {w.address()}")
 
+    # Capture height before sending any txs so _wait_tx_deliver scans from here
+    from tests.backend_helpers import _rpc_latest_height
+    try:
+        _send_start_height = _rpc_latest_height()
+    except Exception:
+        _send_start_height = 1
+
     # Set usernames for all wallets (required before any other core transaction)
     username_tx_hashes: list[tuple[str, str]] = []
     for name, w in WALLETS.items():
         uname = f"test{name}{_rand_str(4)}"
         resp = _do_set_username_raw(backend, w, uname, skip_pow=False)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        if resp and resp.get("error"):
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: {resp.get('error')}")
+            return False
         if txh:
             username_tx_hashes.append((name, txh))
             print(f"  Username {name:4s}: {uname} (tx: {txh[:16]}...)")
@@ -632,7 +642,7 @@ def setup_test_wallets(backend: str) -> bool:
 
     # Wait for each set_username tx to be delivered in a block before polling indexer
     for name, txh in username_tx_hashes:
-        result = _wait_tx_deliver(txh)
+        result = _wait_tx_deliver(txh, from_height=_send_start_height)
         if result is None:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: tx not delivered in block")
             return False

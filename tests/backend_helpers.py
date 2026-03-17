@@ -929,16 +929,19 @@ def _wait_tx_status_failure(
     return None
 
 
-def _wait_tx_deliver(tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> tuple[int, str] | None:
+def _wait_tx_deliver(tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC, from_height: int | None = None) -> tuple[int, str] | None:
     """Scan blocks for tx_hash and return (code, log) from DeliverTx."""
     if not tx_hash:
         return None
     h = tx_hash.strip().lower().removeprefix("0x")
     deadline = time.perf_counter() + timeout
-    try:
-        last_height = max(1, _rpc_latest_height() - 1)
-    except Exception:
-        last_height = 1
+    if from_height is not None:
+        last_height = max(1, from_height - 1)
+    else:
+        try:
+            last_height = max(1, _rpc_latest_height() - 1)
+        except Exception:
+            last_height = 1
     while time.perf_counter() < deadline:
         cur = _rpc_latest_height()
         for height in range(last_height + 1, cur + 1):

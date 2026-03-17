@@ -124,7 +124,7 @@ core_bp = Blueprint("core", __name__)
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
 # state changes between simulation and execution, and storage write costs
 # (WriteFlat) that vary based on key/value sizes.
-GAS_BUFFER_MULTIPLIER = 1.30  # 30% buffer
+GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
 
 
 def _db_get_profile_level(addr: str) -> int | None:
