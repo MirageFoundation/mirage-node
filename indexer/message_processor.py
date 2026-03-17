@@ -64,7 +64,7 @@ from indexer.settings import (
     COMMUNITY_VOTE_BOOST_MULTIPLIER,
 )
 from indexer.quest_tracker import QuestTracker
-from indexer.database import Database
+from indexer.database import DatabaseManager
 import re
 import socket
 import ipaddress
@@ -2104,7 +2104,7 @@ class MessageProcessor:
             w_raw = qs.get("w", [None])[0]
             h_raw = qs.get("h", [None])[0]
             if w_raw and h_raw:
-                return Database._sanitize_wh(int(w_raw), int(h_raw))
+                return DatabaseManager._sanitize_wh(int(w_raw), int(h_raw))
 
             # Cloudflare Stream → probe the auto-generated thumbnail
             uid = self._extract_stream_uid(url)
@@ -2112,22 +2112,22 @@ class MessageProcessor:
                 thumb_url = f"https://videodelivery.net/{uid}/thumbnails/thumbnail.jpg?time=1s"
                 dims = self._probe_dimensions(thumb_url)
                 if dims:
-                    return Database._sanitize_wh(dims[0], dims[1])
+                    return DatabaseManager._sanitize_wh(dims[0], dims[1])
                 return {}
 
             # Direct image → probe directly
             if self._is_raster_image_url(url):
                 dims = self._probe_dimensions(url)
                 if dims:
-                    return Database._sanitize_wh(dims[0], dims[1])
+                    return DatabaseManager._sanitize_wh(dims[0], dims[1])
                 return {}
 
             # YouTube → detect shorts vs standard
             yt_id = self._extract_youtube_video_id(url)
             if yt_id:
                 if parsed.path.startswith("/shorts/"):
-                    return Database._sanitize_wh(1080, 1920)
-                return Database._sanitize_wh(1280, 720)
+                    return DatabaseManager._sanitize_wh(1080, 1920)
+                return DatabaseManager._sanitize_wh(1280, 720)
 
             # Redgifs → probe meta tags (og:video:width/height)
             if "redgifs.com" in host:
@@ -2135,7 +2135,7 @@ class MessageProcessor:
                 if html:
                     dims = self._extract_html_meta_dimensions(html)
                     if dims:
-                        return Database._sanitize_wh(dims[0], dims[1])
+                        return DatabaseManager._sanitize_wh(dims[0], dims[1])
                 return {}
 
             return {}
