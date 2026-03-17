@@ -147,8 +147,15 @@ def get_recent_block_hashes(timeout_s: int = 5) -> list[str]:
 def is_valid_recent_block_hash(block_hash: str, timeout_s: int = 5) -> bool:
     if not block_hash or not re.fullmatch(r"[0-9A-Fa-f]{64}", block_hash):
         return False
+    upper = block_hash.upper()
     recent = get_recent_block_hashes(timeout_s)
-    return block_hash.upper() in [h.upper() for h in recent]
+    if upper in recent:
+        return True
+    # Cache may be stale — force refresh and retry once
+    global _RECENT_BLOCK_HASHES, _RECENT_HASHES_TIME
+    _RECENT_HASHES_TIME = 0.0
+    recent = get_recent_block_hashes(timeout_s)
+    return upper in recent
 
 
 _BLOCK_TIME_CACHE: Optional[int] = None
