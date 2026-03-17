@@ -909,6 +909,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
     const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
     const feedReasonRef = useRef(null);
+    const [mediaExpanded, setMediaExpanded] = useState(false);
 
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
@@ -1772,6 +1773,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     // Check if post has actual media content to display in media mode
     const hasMediaModeContent = isMediaMode && firstLinkInContent && (isDirectImage || isPrimaryVideo);
 
+    // Desktop expand/collapse for media-only posts (no text content, just image/video)
+    const isMediaOnlyPost = (() => {
+        if (isMobile || hasMediaModeContent) return false;
+        if (!firstLinkInContent || (!isDirectImage && !isPrimaryVideo)) return false;
+        const rawContent = (post?.content || '').trim();
+        if (!rawContent) return true;
+        const withoutUrls = rawContent.replace(/https?:\/\/[^\s<>"']+/gi, '').trim();
+        return !withoutUrls;
+    })();
+
     const renderCommentCount = () => {
         const currentCount = Number.isFinite(Number(post.comments)) ? Math.round(Number(post.comments)) : 0;
         return `${currentCount} comments`;
@@ -2230,11 +2241,42 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {title}
                         </div>
                     ) : (
-                        <HideOnMobileTitle style={compactTitleStyle}>
+                        <HideOnMobileTitle style={isMediaOnlyPost ? { ...compactTitleStyle, display: 'flex', alignItems: 'baseline', gap: '0' } : compactTitleStyle}>
                             {title}
+                            {isMediaOnlyPost && (
+                                <>
+                                    <MetaSeparator style={{ margin: '0 0.35rem', alignSelf: 'center' }}>·</MetaSeparator>
+                                    <span
+                                        onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
+                                        style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', flexShrink: 0, opacity: 0.5, transition: 'opacity 0.15s', userSelect: 'none' }}
+                                        onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; }}
+                                    >
+                                        <svg viewBox="0 0 24 24" style={{ width: '16px', height: '16px', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
+                                            {mediaExpanded ? (
+                                                <>
+                                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                                                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                                                    <line x1="1" y1="1" x2="23" y2="23" />
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                                    <circle cx="12" cy="12" r="3" />
+                                                </>
+                                            )}
+                                        </svg>
+                                    </span>
+                                </>
+                            )}
                         </HideOnMobileTitle>
                     )}
                     {hasMediaModeContent && (
+                        <MediaModeContainer $blur={shouldBlurMedia}>
+                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
+                        </MediaModeContainer>
+                    )}
+                    {isMediaOnlyPost && mediaExpanded && (
                         <MediaModeContainer $blur={shouldBlurMedia}>
                             <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
                         </MediaModeContainer>
