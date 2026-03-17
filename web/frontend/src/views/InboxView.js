@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
+import { signPlainPayload } from '../utils/signPlain';
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
@@ -257,14 +258,19 @@ export default function InboxView({ state }) {
                     setReplies(prev => [...prev, ...res.replies]);
                 } else {
                     setReplies(res.replies);
-                    // Mark inbox as viewed on first page load so server resets unread count
-                    Api.post('mark_inbox_viewed', { address: viewerAddress })
+                    signPlainPayload((ts, n) => `mark_inbox_viewed:${viewerAddress.toLowerCase()}:${ts}:${n}`)
+                        .then(sig => {
+                            console.debug("[Inbox] mark_inbox_viewed send", { address: viewerAddress });
+                            return Api.post('mark_inbox_viewed', { address: viewerAddress, ...sig });
+                        })
                         .then((res) => {
                             if (res && typeof res.inbox_last_viewed_at === 'number') {
                                 persistInboxLastViewed(res.inbox_last_viewed_at);
                             }
                         })
-                        .catch(() => { });
+                        .catch((err) => {
+                            console.error("[Inbox] mark_inbox_viewed failed", err);
+                        });
                     // Clear badge immediately — don't wait for next API response
                     setBadgeCount(0);
                 }
@@ -295,14 +301,19 @@ export default function InboxView({ state }) {
         const allReplyIds = replies.map(r => r.reply_id);
         Storage.markAllRepliesAsViewed(allReplyIds);
         setReplies(prev => prev.map(r => ({ ...r, isUnread: false })));
-        // Tell server to reset inbox viewed timestamp
-        Api.post('mark_inbox_viewed', { address: viewerAddress })
+        signPlainPayload((ts, n) => `mark_inbox_viewed:${viewerAddress.toLowerCase()}:${ts}:${n}`)
+            .then(sig => {
+                console.debug("[Inbox] mark_inbox_viewed send", { address: viewerAddress });
+                return Api.post('mark_inbox_viewed', { address: viewerAddress, ...sig });
+            })
             .then((res) => {
                 if (res && typeof res.inbox_last_viewed_at === 'number') {
                     persistInboxLastViewed(res.inbox_last_viewed_at);
                 }
             })
-            .catch(() => { });
+            .catch((err) => {
+                console.error("[Inbox] mark_inbox_viewed failed", err);
+            });
         // Clear badge immediately
         setBadgeCount(0);
     };

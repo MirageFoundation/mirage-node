@@ -4086,6 +4086,7 @@ function ViewPostView({ state, updatePost }) {
                                                 const displayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
                                                 const displayContent = displayPost.content || '';
                                                 const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
+                                                const displayMediaMeta = Array.isArray(displayPost.media_meta) ? displayPost.media_meta : [];
                                                 const hasContent = !!(displayContent || displayMedia.length > 0);
                                                 if (isCollapsed || !hasContent) return null;
                                                 if (state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') return null;
@@ -4100,9 +4101,9 @@ function ViewPostView({ state, updatePost }) {
                                                                 const Inline = require("../components/InlineMedia").default;
                                                                 const Gallery = require("../components/MediaGallery").default;
                                                                 const mediaNode = (mediaArr.length > 1 && Gallery)
-                                                                    ? React.createElement(Gallery, { items: mediaArr, variant: isRoot ? 'root_post' : undefined })
+                                                                    ? React.createElement(Gallery, { items: mediaArr, variant: isRoot ? 'root_post' : undefined, mediaMeta: displayMediaMeta })
                                                                     : (Inline
-                                                                        ? React.createElement(Inline, { url: mediaArr[0], variant: isRoot ? 'root_post' : undefined })
+                                                                        ? React.createElement(Inline, { url: mediaArr[0], variant: isRoot ? 'root_post' : undefined, mediaMeta: displayMediaMeta[0] || null })
                                                                         : null);
                                                                 return (
                                                                     <>

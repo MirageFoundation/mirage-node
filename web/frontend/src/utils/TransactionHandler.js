@@ -7,6 +7,7 @@ import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils
 import Api from '../lib/api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 import { generateEnvelopeNonce } from './canonicalEncoding';
+import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
 
@@ -14,9 +15,9 @@ let __CosmSecp256k1 = null;
 let __CosmSha256 = null;
 async function ensureCosmCrypto() {
     if (!__CosmSecp256k1 || !__CosmSha256) {
-        const mod = await import('@cosmjs/crypto');
-        __CosmSecp256k1 = mod.Secp256k1;
-        __CosmSha256 = mod.sha256;
+        const { Secp256k1, sha256 } = await ensureCosmCryptoShared();
+        __CosmSecp256k1 = Secp256k1;
+        __CosmSha256 = sha256;
     }
 }
 

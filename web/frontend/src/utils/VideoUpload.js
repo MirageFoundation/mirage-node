@@ -23,7 +23,7 @@ export async function uploadToStreamCancellable(file, uploadUrl, onProgress, xhr
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         if (xhrRef) {
-            try { xhrRef.current = xhr; } catch (_) {}
+            try { xhrRef.current = xhr; } catch (_) { }
         }
         if (onProgress && xhr.upload) {
             xhr.upload.addEventListener('progress', (e) => {
@@ -32,7 +32,7 @@ export async function uploadToStreamCancellable(file, uploadUrl, onProgress, xhr
         }
         xhr.addEventListener('load', () => {
             if (xhrRef) {
-                try { xhrRef.current = null; } catch (_) {}
+                try { xhrRef.current = null; } catch (_) { }
             }
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
@@ -61,13 +61,13 @@ export async function uploadToStreamCancellable(file, uploadUrl, onProgress, xhr
         });
         xhr.addEventListener('error', () => {
             if (xhrRef) {
-                try { xhrRef.current = null; } catch (_) {}
+                try { xhrRef.current = null; } catch (_) { }
             }
             reject(new Error('Network error during upload'));
         });
         xhr.addEventListener('abort', () => {
             if (xhrRef) {
-                try { xhrRef.current = null; } catch (_) {}
+                try { xhrRef.current = null; } catch (_) { }
             }
             reject(new Error('Upload aborted'));
         });
@@ -78,13 +78,16 @@ export async function uploadToStreamCancellable(file, uploadUrl, onProgress, xhr
     });
 }
 
-function getVideoDuration(file) {
+function getVideoMeta(file) {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
         video.preload = 'metadata';
         video.onloadedmetadata = () => {
+            const duration = video.duration;
+            const width = video.videoWidth || 0;
+            const height = video.videoHeight || 0;
             window.URL.revokeObjectURL(video.src);
-            resolve(video.duration);
+            resolve({ duration, width, height });
         };
         video.onerror = () => {
             reject(new Error('Invalid video file'));
@@ -93,13 +96,19 @@ function getVideoDuration(file) {
     });
 }
 
+function appendDimensionsToUrl(url, width, height) {
+    if (!width || !height) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}w=${width}&h=${height}`;
+}
+
 /**
  * High-level: upload a video file to Stream and return an embeddable iframe URL
  */
 export async function uploadVideo(file, onProgress) {
-    const duration = await getVideoDuration(file);
-    if (duration > 60) {
-        throw new Error(`Video is too long (${Math.round(duration)}s). Maximum allowed duration is 60 seconds.`);
+    const meta = await getVideoMeta(file);
+    if (meta.duration > 60) {
+        throw new Error(`Video is too long (${Math.round(meta.duration)}s). Maximum allowed duration is 60 seconds.`);
     }
     const { uploadURL, uid } = await getUploadUrlVideo();
     const returnedUid = await uploadToStreamCancellable(file, uploadURL, onProgress);
@@ -107,8 +116,7 @@ export async function uploadVideo(file, onProgress) {
     if (!finalUid) {
         throw new Error('Could not determine video UID from upload response');
     }
-    // Return immediately after upload success
-    return `https://videodelivery.net/${finalUid}/manifest/video.m3u8`;
+    return appendDimensionsToUrl(`https://videodelivery.net/${finalUid}/manifest/video.m3u8`, meta.width, meta.height);
 }
 
 /**
@@ -116,9 +124,9 @@ export async function uploadVideo(file, onProgress) {
  */
 export async function uploadVideoWithCancel(file, onProgress, xhrRef) {
     try {
-        const duration = await getVideoDuration(file);
-        if (duration > 60) {
-            throw new Error(`Video is too long (${Math.round(duration)}s). Maximum allowed duration is 60 seconds.`);
+        const meta = await getVideoMeta(file);
+        if (meta.duration > 60) {
+            throw new Error(`Video is too long (${Math.round(meta.duration)}s). Maximum allowed duration is 60 seconds.`);
         }
         const { uploadURL, uid } = await getUploadUrlVideo();
         const returnedUid = await uploadToStreamCancellable(file, uploadURL, onProgress, xhrRef);
@@ -126,8 +134,7 @@ export async function uploadVideoWithCancel(file, onProgress, xhrRef) {
         if (!finalUid) {
             throw new Error('Could not determine video UID from upload response');
         }
-        const hlsUrl = `https://videodelivery.net/${finalUid}/manifest/video.m3u8`;
-        return hlsUrl;
+        return appendDimensionsToUrl(`https://videodelivery.net/${finalUid}/manifest/video.m3u8`, meta.width, meta.height);
     } catch (e) {
         console.error('[VideoUpload] Upload error:', e);
         throw e;

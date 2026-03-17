@@ -29,6 +29,9 @@ REGISTRATION_ENABLED = require_bool_env("REGISTRATION_ENABLED")
 REGISTRATION_INVITE_CODE_REQUIRED = require_bool_env("REGISTRATION_INVITE_CODE_REQUIRED")
 QUESTS_ENABLED = require_bool_env("QUESTS_ENABLED")
 QUESTS_PAYOUTS_ENABLED = require_bool_env("QUESTS_PAYOUTS_ENABLED")
+PUSH_NOTIFICATIONS_ENABLED = require_bool_env("PUSH_NOTIFICATIONS_ENABLED")
+
+EXPO_ACCESS_TOKEN = os.environ.get("EXPO_ACCESS_TOKEN", "")
 
 # Moderation Settings
 # When false (default), standard moderation rules apply:

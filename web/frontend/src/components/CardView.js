@@ -1633,6 +1633,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     // v1.12.0: Prefer media array if available
     const mediaArr = (post && Array.isArray(post.media) && post.media.length > 0) ? post.media : null;
+    const mediaMetaArr = (post && Array.isArray(post.media_meta)) ? post.media_meta : [];
     const firstLinkInContent = (() => {
         // v1.12.0: Use media[0] if available
         if (mediaArr) {
@@ -2235,7 +2236,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {hasMediaModeContent && (
                         <MediaModeContainer $blur={shouldBlurMedia}>
-                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay />
+                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
                         </MediaModeContainer>
                     )}
                     {post && post.feed_bucket && post.feed_bucket !== 'guest' && hasMediaModeContent && (

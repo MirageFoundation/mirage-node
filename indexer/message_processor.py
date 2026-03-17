@@ -5,6 +5,7 @@ Message processing logic for the indexer.
 import base64
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, wait
 from google.protobuf.json_format import MessageToDict
 from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
 from shared.datatypes import (
@@ -63,6 +64,7 @@ from indexer.settings import (
     COMMUNITY_VOTE_BOOST_MULTIPLIER,
 )
 from indexer.quest_tracker import QuestTracker
+from indexer.database import Database
 import re
 import socket
 import ipaddress
@@ -312,7 +314,16 @@ class MessageProcessor:
                 if thumb:
                     self.db.update_post_thumbnail(txhash, thumb)
         except Exception:
-            # Do not fail indexing if thumbnail discovery fails
+            pass
+
+        # Dimension probing for all posts with media
+        try:
+            if media:
+                probed_meta = self.discover_media_dimensions(media)
+                if any(m for m in probed_meta if m):
+                    self.db.update_post_media_meta(txhash, probed_meta)
+                    logger.debug("media_meta probed tx=%s meta=%s", txhash[:12], probed_meta)
+        except Exception:
             pass
 
         # existing shape may differ; always log insert/update
@@ -2059,6 +2070,100 @@ class MessageProcessor:
             return out
         except Exception:
             return None
+
+    @staticmethod
+    def _extract_html_meta_dimensions(html: str) -> tuple[int, int] | None:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+        except Exception:
+            return None
+        meta_map = {}
+        for tag in soup.find_all("meta"):
+            prop = (tag.get("property") or tag.get("name") or "").lower()
+            if prop in ("og:video:width", "og:video:height", "og:image:width", "og:image:height"):
+                meta_map[prop] = tag.get("content")
+        try:
+            w = int(meta_map.get("og:video:width") or meta_map.get("og:image:width") or 0)
+            h = int(meta_map.get("og:video:height") or meta_map.get("og:image:height") or 0)
+            if w > 0 and h > 0:
+                return w, h
+        except Exception:
+            return None
+        return None
+
+    def _probe_media_dimensions(self, url: str) -> dict:
+        """Probe a single URL for dimensions. Returns {} if unknown."""
+        from urllib.parse import parse_qs
+
+        try:
+            parsed = urlparse(url or "")
+            host = (parsed.hostname or "").lower()
+
+            # Already encoded in query params (our upload flow)
+            qs = parse_qs(parsed.query)
+            w_raw = qs.get("w", [None])[0]
+            h_raw = qs.get("h", [None])[0]
+            if w_raw and h_raw:
+                return Database._sanitize_wh(int(w_raw), int(h_raw))
+
+            # Cloudflare Stream → probe the auto-generated thumbnail
+            uid = self._extract_stream_uid(url)
+            if uid:
+                thumb_url = f"https://videodelivery.net/{uid}/thumbnails/thumbnail.jpg?time=1s"
+                dims = self._probe_dimensions(thumb_url)
+                if dims:
+                    return Database._sanitize_wh(dims[0], dims[1])
+                return {}
+
+            # Direct image → probe directly
+            if self._is_raster_image_url(url):
+                dims = self._probe_dimensions(url)
+                if dims:
+                    return Database._sanitize_wh(dims[0], dims[1])
+                return {}
+
+            # YouTube → detect shorts vs standard
+            yt_id = self._extract_youtube_video_id(url)
+            if yt_id:
+                if parsed.path.startswith("/shorts/"):
+                    return Database._sanitize_wh(1080, 1920)
+                return Database._sanitize_wh(1280, 720)
+
+            # Redgifs → probe meta tags (og:video:width/height)
+            if "redgifs.com" in host:
+                html = self._fetch_html(url)
+                if html:
+                    dims = self._extract_html_meta_dimensions(html)
+                    if dims:
+                        return Database._sanitize_wh(dims[0], dims[1])
+                return {}
+
+            return {}
+        except Exception:
+            logger.debug("[media_meta] probe failed for %s", url, exc_info=True)
+            return {}
+
+    def discover_media_dimensions(self, media_urls: list[str]) -> list[dict]:
+        """Probe dimensions for each media URL. Returns list parallel to media_urls."""
+        urls = list(media_urls or [])
+        if not urls:
+            return []
+        results = [{} for _ in urls]
+        max_workers = min(4, len(urls))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {executor.submit(self._probe_media_dimensions, url): idx for idx, url in enumerate(urls)}
+            done, not_done = wait(future_to_idx, timeout=10)
+            for fut in done:
+                idx = future_to_idx[fut]
+                try:
+                    results[idx] = fut.result() or {}
+                except Exception:
+                    results[idx] = {}
+            if not_done:
+                logger.debug("[media_meta] probe timeout urls=%d unfinished=%d", len(urls), len(not_done))
+                for fut in not_done:
+                    fut.cancel()
+        return results
 
     def discover_post_thumbnail(self, content: str) -> str | None:
         """Discover a thumbnail for root post content. Returns absolute image URL or None."""
