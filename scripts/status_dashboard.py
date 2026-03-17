@@ -8,8 +8,7 @@ statuses in a card/tile layout.
 Services monitored:
   - CometBFT (blockchain node)
   - Validator (if configured)
-  - PostgreSQL database
-  - Backend API
+  - Backend API (includes PostgreSQL sub-check)
   - Indexer
   - Endpoints (Caddy + public chain RPC/REST/gRPC)
   - System (disk, ~/.mirage usage, memory, CPU)
@@ -1128,9 +1127,8 @@ def check_postgres() -> ServiceStatus:
 
 
 def check_backend() -> ServiceStatus:
-    """Check backend API status."""
+    """Check backend API status (includes PostgreSQL sub-check)."""
     try:
-        # Count gunicorn workers first
         workers = 0
         try:
             result = subprocess.run(["pgrep", "-c", "-f", "gunicorn.*factory:app"], capture_output=True, text=True)
@@ -1139,13 +1137,12 @@ def check_backend() -> ServiceStatus:
         except Exception:
             pass
 
-        # Try the parameters endpoint (simple GET that should always work)
         start = time.time()
         resp = requests.get("http://127.0.0.1:5000/api/get_parameters", timeout=3)
         response_ms = int((time.time() - start) * 1000)
 
         if resp.status_code >= 400:
-            return ServiceStatus(
+            backend = ServiceStatus(
                 name="Backend",
                 status=Status.ERROR,
                 message=f"HTTP {resp.status_code}",
@@ -1155,21 +1152,31 @@ def check_backend() -> ServiceStatus:
                     "workers": workers,
                 },
             )
-
-        return ServiceStatus(
-            name="Backend",
-            status=Status.OK,
-            message="Running",
-            details={
-                "status_code": resp.status_code,
-                "response_ms": response_ms,
-                "workers": workers,
-            },
-        )
+        else:
+            backend = ServiceStatus(
+                name="Backend",
+                status=Status.OK,
+                message="Running",
+                details={
+                    "status_code": resp.status_code,
+                    "response_ms": response_ms,
+                    "workers": workers,
+                },
+            )
     except requests.exceptions.ConnectionError:
-        return ServiceStatus(name="Backend", status=Status.ERROR, message="Not reachable", details={})
+        backend = ServiceStatus(name="Backend", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
-        return ServiceStatus(name="Backend", status=Status.ERROR, message=str(e)[:25], details={})
+        backend = ServiceStatus(name="Backend", status=Status.ERROR, message=str(e)[:25], details={})
+
+    pg = check_postgres()
+    backend.details["pg_status"] = pg.status.value
+    backend.details["pg_message"] = pg.message
+    if pg.details.get("size"):
+        backend.details["pg_size"] = pg.details["size"]
+    if pg.status == Status.ERROR and backend.status == Status.OK:
+        backend.status = Status.WARN
+        backend.message = f"Running (DB: {pg.message})"
+    return backend
 
 
 def check_grpc() -> ServiceStatus:
@@ -2397,12 +2404,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             else:
                 lines.append(f"{bullet}{Colors.BRIGHT_RED}JAILED!{Colors.RESET}")
 
-    elif status.name == "PostgreSQL":
-        if details.get("size"):
-            lines.append(f"{bullet}{Colors.DIM}Size:{Colors.RESET} {details['size']}")
-        if details.get("connections") is not None:
-            lines.append(f"{bullet}{Colors.DIM}Connections:{Colors.RESET} {details['connections']}")
-
     elif status.name == "Backend":
         if details.get("response_ms") is not None:
             ms = details["response_ms"]
@@ -2412,6 +2413,12 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             code = details["status_code"]
             code_color = Colors.BRIGHT_GREEN if code < 400 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
+        pg_st = details.get("pg_status")
+        if pg_st:
+            pg_color = Colors.BRIGHT_GREEN if pg_st == "ok" else Colors.BRIGHT_RED if pg_st == "error" else Colors.BRIGHT_YELLOW
+            pg_label = details.get("pg_message", pg_st)
+            pg_extra = f" ({details['pg_size']})" if details.get("pg_size") else ""
+            lines.append(f"{bullet}{Colors.DIM}DB:{Colors.RESET} {pg_color}{pg_label}{pg_extra}{Colors.RESET}")
 
     elif status.name == "Indexer":
         if details.get("height"):
@@ -2556,7 +2563,6 @@ def render_dashboard(refresh_secs: int):
         check_node(),
         check_retention(),
         check_validator(),
-        check_postgres(),
         check_backend(),
         check_rewards(),
         check_indexer(),
@@ -2571,7 +2577,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
+        or s.name in ("CometBFT", "Retention", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
     # Render header
@@ -2645,7 +2651,6 @@ def run_health_check_json(required_services: list[str]) -> dict:
     all_statuses = [
         check_node(),
         check_validator(),
-        check_postgres(),
         check_backend(),
         check_indexer(),
         check_endpoints(),
@@ -2696,7 +2701,7 @@ def main():
     parser.add_argument(
         "--require",
         type=str,
-        default="CometBFT,Validator,PostgreSQL,Backend,Indexer,Endpoints",
+        default="CometBFT,Validator,Backend,Indexer,Endpoints",
         help="Comma-separated list of required services for --json health check",
     )
     parser.add_argument(

@@ -4124,7 +4124,7 @@ function ViewPostView({ state, updatePost }) {
                                                                 return (
                                                                     <>
                                                                         {require("../components/InlineMedia").default
-                                                                            ? React.createElement(require("../components/InlineMedia").default, { url: first, variant: isRoot ? 'root_post' : undefined })
+                                                                            ? React.createElement(require("../components/InlineMedia").default, { url: first, variant: isRoot ? 'root_post' : undefined, mediaMeta: displayMediaMeta[0] || null })
                                                                             : null}
                                                                         {restRaw ? <div style={{ height: '0.5rem' }} /> : null}
                                                                         {restRaw ? <MarkdownRenderer text={restRaw} /> : null}

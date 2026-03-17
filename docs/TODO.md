@@ -80,6 +80,9 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 - Allow only 3 new profiles (set_username) per minute
 
 
+# We should explicitly add LINK as field (like media)
+- and something like youtube or redgifs link should just be media link?
+
 # New agent ideas:
 - Real User agent: keeps tabs on every user and assigns them a trust score
 

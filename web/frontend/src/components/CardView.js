@@ -1741,10 +1741,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     };
 
 
-    const InlineTeaserMedia = ({ url }) => {
+    const InlineTeaserMedia = ({ url, mediaMeta }) => {
         return (
             <MediaWrapper>
-                <InlineMedia url={pickInlineMediaUrl(url)} />
+                <InlineMedia url={pickInlineMediaUrl(url)} mediaMeta={mediaMeta || null} />
             </MediaWrapper>
         );
     };
@@ -2596,7 +2596,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         </div>
                     )}
                     {showContent && post.content && (
-                        <InlineTeaserMedia url={sanitizeUrlForLink(extractFirstUrl(post.content) || post.content)} />
+                        <InlineTeaserMedia url={sanitizeUrlForLink(extractFirstUrl(post.content) || post.content)} mediaMeta={mediaMetaArr[0] || null} />
                     )}
                     {footer && (
                         <StyledFooter>{footer}</StyledFooter>

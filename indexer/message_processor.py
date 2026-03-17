@@ -316,10 +316,15 @@ class MessageProcessor:
         except Exception:
             pass
 
-        # Dimension probing for all posts with media
+        # Dimension probing for posts with media or content-embedded media URLs
         try:
-            if media:
-                probed_meta = self.discover_media_dimensions(media)
+            probe_urls = media if media else []
+            if not probe_urls and content:
+                first_url = self._extract_first_url(content)
+                if first_url:
+                    probe_urls = [first_url]
+            if probe_urls:
+                probed_meta = self.discover_media_dimensions(probe_urls)
                 if any(m for m in probed_meta if m):
                     self.db.update_post_media_meta(txhash, probed_meta)
                     logger.debug("media_meta probed tx=%s meta=%s", txhash[:12], probed_meta)
