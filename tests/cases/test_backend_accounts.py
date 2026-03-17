@@ -47,6 +47,7 @@ from tests.backend_helpers import (
     _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
     _wait_comment_indexed,
     _rpc_latest_height, _wait_next_block,
+    _feed_has_post, _feed_missing_post,
 )
 
 
@@ -276,41 +277,6 @@ def test_profile_fields(backend: str):
 # ---------------------------------------------------------------------------
 # 26  Agent Block Propagation
 # ---------------------------------------------------------------------------
-
-
-def _feed_has_post(backend: str, viewer_addr: str, post_id: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
-    """Check if a post appears in the newest feed for the given viewer."""
-    deadline = time.perf_counter() + timeout
-    pid = (post_id or "").lower()
-    while time.perf_counter() < deadline:
-        code, feed = _get(f"{backend}/api/get_posts", {"limit": 100, "by": "newest", "address": viewer_addr})
-        if code == 200:
-            posts = (feed or {}).get("posts") or []
-            if any(str(p.get("post_id", "")).lower() == pid for p in posts):
-                return True
-        time.sleep(1)
-    return False
-
-
-def _feed_missing_post(backend: str, viewer_addr: str, post_id: str, timeout: float = 8.0) -> bool:
-    """Confirm a post does NOT appear in the newest feed for the given viewer.
-
-    Polls a few times to account for indexer lag.  Returns True when the post
-    is consistently absent.
-    """
-    pid = (post_id or "").lower()
-    checks = 0
-    for _ in range(int(timeout)):
-        code, feed = _get(f"{backend}/api/get_posts", {"limit": 100, "by": "newest", "address": viewer_addr})
-        if code == 200:
-            posts = (feed or {}).get("posts") or []
-            if any(str(p.get("post_id", "")).lower() == pid for p in posts):
-                return False
-            checks += 1
-            if checks >= 3:
-                return True
-        time.sleep(1)
-    return checks >= 2
 
 
 def _ensure_subscriber(backend: str, wallet: LocalWallet, name: str, expected_level: int = 1) -> bool:

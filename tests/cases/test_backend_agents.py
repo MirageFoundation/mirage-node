@@ -47,6 +47,7 @@ from tests.backend_helpers import (
     _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
     _wait_comment_indexed,
     _rpc_latest_height, _wait_next_block,
+    _feed_has_post, _feed_missing_post,
 )
 from tests.cases.test_backend_accounts import _ensure_subscriber
 
