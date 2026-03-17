@@ -286,17 +286,21 @@ def _send_push_to_user(owner: str, title: str, body: str, data: dict) -> None:
     """Send push to all devices for an owner, respecting budget."""
     tokens = _get_tokens_for_owner(owner)
     if not tokens:
+        logger.debug("[Push] No tokens for %s, skipping", owner[:16])
         return
 
     if not _decrement_budget(owner):
-        logger.debug("[Push] Budget exhausted for %s", owner)
+        logger.debug("[Push] Budget exhausted for %s", owner[:16])
         return
 
     messages = [_build_expo_message(token, title, body, data) for token, _platform in tokens]
     tickets = _send_expo_push_batch(messages)
+    ok_count = 0
     for token, ticket_id in tickets:
         if ticket_id:
             _store_receipt(ticket_id, token)
+            ok_count += 1
+    logger.info("[Push] Sent %d/%d to %s: %s", ok_count, len(messages), owner[:16], title)
 
 
 def _fire_and_forget(fn, *args):
@@ -314,8 +318,10 @@ def send_push_for_reply(
 ) -> None:
     """Fire push for a reply/comment. Called after successful broadcast."""
     if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping reply push for %s", tx_hash[:16])
         return
 
+    logger.info("[Push] Firing reply push: poster=%s target=%s tx=%s", poster_addr[:16], target_txhash[:16], tx_hash[:16])
     _fire_and_forget(_do_reply_push, poster_addr, poster_username, target_txhash, content, tx_hash)
 
 
@@ -328,13 +334,14 @@ def _do_reply_push(
 ) -> None:
     target_owner = _get_post_owner(target_txhash)
     if not target_owner:
-        logger.warning("[Push] Missing reply target owner for %s", target_txhash)
+        logger.warning("[Push] Missing reply target owner for %s", target_txhash[:16])
         return
     if target_owner == poster_addr.lower():
+        logger.debug("[Push] Self-reply, skipping push for %s", tx_hash[:16])
         return
     root_post_id = _get_root_post_id(target_txhash)
     if not root_post_id:
-        logger.warning("[Push] Missing root_post_id for reply target %s", target_txhash)
+        logger.warning("[Push] Missing root_post_id for reply target %s", target_txhash[:16])
         return
 
     display_name = f"@{poster_username}" if poster_username else poster_addr[:12]
@@ -355,6 +362,7 @@ def send_push_for_mentions(
 ) -> None:
     """Fire pushes for @mentions in content. Called after successful broadcast."""
     if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping mention push for %s", tx_hash[:16])
         return
     _fire_and_forget(_do_mentions_push, poster_addr, poster_username, content, tx_hash, target_txhash)
 
@@ -419,10 +427,12 @@ def send_push_for_award(
 ) -> None:
     """Fire push for an award. Called after successful broadcast."""
     if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping award push for %s", target_txhash[:16])
         return
 
     if post_owner == awarder_addr.lower():
         return
+    logger.info("[Push] Firing award push: awarder=%s recipient=%s target=%s", awarder_addr[:16], post_owner[:16], target_txhash[:16])
     _fire_and_forget(_do_award_push, awarder_addr, awarder_username, post_owner, target_txhash, award_type)
 
 

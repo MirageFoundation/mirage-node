@@ -387,8 +387,11 @@ class MessageProcessor:
                 logger.exception("Failed to extract mentions for post %s", txhash)
 
         # Push notifications for new posts only (skip edits and old blocks during catch-up)
-        if not existing and owner and int(time.time()) - ts < 120:
+        age = int(time.time()) - ts
+        if not existing and owner and age < 120:
             self._fire_push_for_post(owner, txhash, target, content)
+        elif not existing and owner and age >= 120:
+            logger.debug("[Push] Skipped stale post %s (age=%ds)", txhash[:16], age)
 
     def _extract_and_store_mentions(self, content: str, post_txhash: str, mentioner_address: str, ts: int):
         """Parse @username mentions from content and store them in the mentions table.

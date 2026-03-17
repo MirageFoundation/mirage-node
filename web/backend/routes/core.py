@@ -4364,7 +4364,9 @@ def core_register_push_token():
                     (user_addr.lower(), token, platform, now_ts, now_ts),
                 )
 
-        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform)
+        is_new = not existing
+        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform,
+                  token=token[:30], new=is_new)
         return jsonify({"ok": True})
     except Exception as e:
         log_event(rid, "register_push_token.err", error=str(e))
@@ -4424,8 +4426,10 @@ def core_unregister_push_token():
                     "DELETE FROM push_tokens WHERE token = %s AND LOWER(owner) = LOWER(%s)",
                     (token, user_addr),
                 )
+                deleted = cur.rowcount
 
-        log_event(rid, "unregister_push_token.ok", user=user_addr)
+        log_event(rid, "unregister_push_token.ok", user=user_addr,
+                  token=token[:30], deleted=deleted)
         return jsonify({"ok": True})
     except Exception as e:
         log_event(rid, "unregister_push_token.err", error=str(e))
