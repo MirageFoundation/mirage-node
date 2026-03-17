@@ -589,7 +589,8 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
         raise RuntimeError(f"required award types missing from chain config: {missing}")
 
     token_send_amount = 1000  # test_tokens.happy_path
-    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount
+    indexer_transfer_test = 1  # test_backend_indexer.balance_after_transfer
+    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test
 
 
 def setup_test_wallets(backend: str) -> bool:

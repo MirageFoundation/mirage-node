@@ -169,7 +169,7 @@ def test_indexer(backend: str):
             )
 
         # 3.2 tier structure
-        required_tier_fields = {"level", "max_posts", "max_votes"}
+        required_tier_fields = {"period_fee", "max_title_length", "vote_weight"}
         if isinstance(tiers, list) and tiers:
             t0 = tiers[0] if isinstance(tiers[0], dict) else {}
             present = required_tier_fields & set(t0.keys())
