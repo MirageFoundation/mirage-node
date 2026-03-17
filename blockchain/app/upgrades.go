@@ -1846,6 +1846,27 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.21.0: Gov authority spoofing protection + mandatory nonce cleanup ──
+	// - GovAuthorityDecorator rejects broadcast txs claiming governance module authority
+	// - Legacy nonce compat branches fully removed (envelope_nonce always mandatory)
+	// - Relay ante chain refactored to use sdk.ChainAnteDecorators()
+	// - No state migration needed, binary-only changes
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.21.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.21.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.21.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.21.0 complete")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

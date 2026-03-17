@@ -31,6 +31,7 @@ from tests.cases.test_backend_subscriptions import test_subscriber, test_auto_re
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
 from tests.cases.test_backend_security import test_security, test_validation
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
+from tests.cases.test_backend_indexer import test_indexer
 
 ALL_CATEGORIES = {
     "params": test_params,
@@ -62,6 +63,7 @@ ALL_CATEGORIES = {
     "edit_target": test_edit_target_immutability,
     "tx_status": test_tx_status,
     "failed_tx": test_failed_tx_status,
+    "indexer": test_indexer,
 }
 
 STATELESS_CATEGORIES = {

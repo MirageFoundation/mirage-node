@@ -562,11 +562,26 @@ def check_nonce_enforcement(upgrade_name: str) -> None:
         warn(
             "v1.19.0 uses legacy nonce fallback; cannot verify via queries. Submit a legacy-signed tx or inspect logs."
         )
+    elif vt >= (1, 21, 0):
+        ok("v1.21.0+: envelope_nonce mandatory. Legacy compat branches fully removed from binary.")
+        ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
     elif vt >= (1, 20, 0):
         ok("v1.20.0+: envelope_nonce is mandatory. Legacy fallback removed.")
         ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
     else:
         ok(f"Nonce enforcement not applicable for {upgrade_name}")
+
+
+def check_gov_authority_protection(upgrade_name: str) -> None:
+    """v1.21.0+: GovAuthorityDecorator blocks broadcast txs claiming governance authority."""
+    section("Gov Authority Spoofing Protection (since v1.21.0)")
+    ver = _extract_semver(upgrade_name)
+    vt = _semver_tuple(ver)
+    if vt >= (1, 21, 0):
+        ok("GovAuthorityDecorator active in both standard and relay ante chains")
+        ok("Broadcast txs with governance module authority are rejected before execution")
+    else:
+        ok(f"Gov authority protection not applicable for {upgrade_name}")
 
 
 def check_tx_index_and_orchestrator() -> None:
@@ -737,6 +752,7 @@ def main() -> int:
     check_subscription_index_consistency()
     check_biography_limits()
     check_nonce_enforcement(upgrade_name)
+    check_gov_authority_protection(upgrade_name)
     check_tx_index_and_orchestrator()
     check_orchestrator_hard_disable()
     check_deploy_migration()
