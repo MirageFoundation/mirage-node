@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
 
 import requests
+from cosmpy.crypto.keypairs import PrivateKey
+from cosmpy.aerial.wallet import LocalWallet
 
 from tests.common import (
     _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
@@ -46,6 +48,7 @@ from tests.backend_helpers import (
     _wait_comment_indexed,
     _rpc_latest_height, _wait_next_block,
 )
+from tests.cases.test_backend_accounts import _ensure_subscriber
 
 
 def test_agents(backend: str):

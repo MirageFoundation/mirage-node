@@ -215,12 +215,12 @@ This allows the backend to identify the sender without requiring them to explici
 │     c. Set envelope fields (pubkey, signature, pow, timestamp, block_hash)    │
 │     d. Wrap in TxBody with memo=""                                            │
 │     e. Estimate gas limit                                                     │
-│     f. Simulate transaction                                                   │
+│     f. Simulate transaction (REST)                                            │
 │     g. Build TxRaw with fee (paid by validator)                               │
 │                                                                               │
 │  4. Broadcast                                                                 │
 │     a. Compute tx_hash = SHA256(tx_bytes)                                     │
-│     b. Broadcast async via gRPC                                               │
+│     b. Broadcast via REST (sync)                                              │
 │     c. Return tx_hash immediately (don't wait for inclusion)                  │
 │                                                                               │
 │  5. Response                                                                  │
@@ -461,26 +461,29 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
 
 ### Broadcasting
 
-Transactions are broadcast asynchronously (fire-and-forget):
+Transactions are broadcast synchronously via the Cosmos tx REST service:
 
 ```python
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
-    """Broadcast transaction asynchronously."""
-    # tx_hash is deterministic from bytes
+    """Broadcast transaction via REST (BROADCAST_MODE_SYNC)."""
     tx_hash = hashlib.sha256(tx_bytes).hexdigest().lower()
-    
-    with grpc.insecure_channel(grpc_target) as ch:
-        stub = ServiceStub(ch)
-        req = BroadcastTxRequest(
-            tx_bytes=tx_bytes,
-            mode=BroadcastMode.BROADCAST_MODE_ASYNC
-        )
-        stub.BroadcastTx(req)
-    
-    return tx_hash, 0, 0, ""
+    payload = {
+        "tx_bytes": base64.b64encode(tx_bytes).decode(),
+        "mode": "BROADCAST_MODE_SYNC",
+    }
+    resp = requests.post(f"{api_url}/cosmos/tx/v1beta1/txs", json=payload, timeout=10)
+    resp.raise_for_status()
+    body = resp.json()
+    tx_resp = body.get("tx_response") or {}
+    return (
+        tx_resp.get("txhash", tx_hash).lower(),
+        int(tx_resp.get("code", 0) or 0),
+        int(tx_resp.get("height", 0) or 0),
+        str(tx_resp.get("raw_log", "") or ""),
+    )
 ```
 
-**Why async?** The backend returns the tx_hash immediately. The frontend can poll for confirmation via `GET /api/get_tx_status`.
+**Why sync?** It returns the CheckTx result immediately while staying non-blocking on DeliverTx. The frontend still polls `GET /api/get_tx_status` for indexing.
 
 ---
 

@@ -28,12 +28,8 @@ _log = _logging.getLogger("tx")
 _TX_SIZE_COST_PER_BYTE: Optional[int] = None
 
 
-def estimate_total_gas_limit(body_bytes: bytes, content_len: int, extra_gas: int = 0) -> int:
-    """Heuristic gas estimator.
-
-    extra_gas: additional gas for handlers that do more KV work than a single
-    write (e.g. MsgSetUsername does claim+release+profile update → extra ~2000).
-    """
+def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
+    """Heuristic gas estimator (uniform across message types)."""
     # Fixed ante overhead: account lookup, balance read/write, nonce read/write,
     # difficulty read, auth-params read, etc.  ~11-12k empirically.
     ante_gas = 12_000
@@ -57,7 +53,7 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int, extra_gas: int
     gas_guess = max(ante_gas, 1)
     for _ in range(3):
         size_gas = tx_size_ppb * _txraw_len(int(gas_guess))
-        msg_gas = 1000 + 2000 + (30 * max(0, int(content_len))) + int(extra_gas)
+        msg_gas = 1000 + 2000 + (30 * max(0, int(content_len)))
         raw = ante_gas + size_gas + msg_gas
         new_gas = int(_math.ceil(raw * 1.10))  # 10% safety margin
         if new_gas % 64 != 0:
@@ -97,15 +93,19 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
 
 
 def simulate_gas(tx_bytes: bytes) -> int:
-    """Simulate gas via REST (tx service). Returns gas_used."""
+    """Simulate gas via REST (tx service).
+
+    Returns gas_used on success. Any HTTP error is treated as a hard failure.
+    """
     rt = require_runtime()
     url = f"{rt.api_url}/cosmos/tx/v1beta1/simulate"
     payload = {"tx_bytes": _b64.b64encode(tx_bytes).decode()}
     try:
         resp = _requests.post(url, json=payload, timeout=10)
-        resp.raise_for_status()
     except Exception as e:
-        raise RuntimeError(f"simulate_gas failed: {e}")
+        raise RuntimeError(f"simulate_gas connection failed: {e}")
+    if resp.status_code != 200:
+        raise RuntimeError(f"simulate_gas http {resp.status_code}: {resp.text[:500]}")
     try:
         body = resp.json()
     except Exception as e:
@@ -114,10 +114,7 @@ def simulate_gas(tx_bytes: bytes) -> int:
     gas_used = gas_info.get("gas_used") or gas_info.get("gas_wanted")
     if gas_used is None or str(gas_used).strip() == "":
         raise RuntimeError(f"simulate_gas missing gas_used: {str(body)[:200]}")
-    try:
-        return int(gas_used)
-    except Exception as e:
-        raise RuntimeError(f"simulate_gas invalid gas_used: {gas_used} ({e})")
+    return int(gas_used)
 
 
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
@@ -131,26 +128,29 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 
     _log.info("broadcast_tx %s len=%d %s", tx_hash, len(tx_bytes), _extract_auth_hex(tx_bytes))
 
+    payload = {
+        "tx_bytes": _b64.b64encode(tx_bytes).decode(),
+        "mode": "BROADCAST_MODE_SYNC",
+    }
     try:
-        payload = {
-            "tx_bytes": _b64.b64encode(tx_bytes).decode(),
-            "mode": "BROADCAST_MODE_SYNC",
-        }
         resp = _requests.post(url, json=payload, timeout=10)
-        resp.raise_for_status()
-        body = resp.json()
-        tx_resp = body.get("tx_response") or {}
-        code = int(tx_resp.get("code", 0) or 0)
-        raw_log = str(tx_resp.get("raw_log", "") or "")
-        height = int(tx_resp.get("height", 0) or 0)
-        resp_hash = str(tx_resp.get("txhash", "") or "").strip().lower()
-        if resp_hash:
-            tx_hash = resp_hash
-        _log.info("broadcast %s code=%d resp=%s", tx_hash, code, str(body)[:500])
-        return tx_hash, code, height, raw_log
     except Exception as e:
-        _log.error("broadcast %s failed: %s", tx_hash, e)
-        return tx_hash, 1, 0, str(e)
+        raise RuntimeError(f"broadcast_tx connection failed: {e}")
+    if resp.status_code != 200:
+        raise RuntimeError(f"broadcast_tx http {resp.status_code}: {resp.text[:500]}")
+    try:
+        body = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"broadcast_tx invalid json: {e}")
+    tx_resp = body.get("tx_response") or {}
+    code = int(tx_resp.get("code", 0) or 0)
+    raw_log = str(tx_resp.get("raw_log", "") or "")
+    height = int(tx_resp.get("height", 0) or 0)
+    resp_hash = str(tx_resp.get("txhash", "") or "").strip().lower()
+    if resp_hash:
+        tx_hash = resp_hash
+    _log.info("broadcast %s code=%d resp=%s", tx_hash, code, str(body)[:500])
+    return tx_hash, code, height, raw_log
 
 
 def _extract_auth_hex(tx_bytes: bytes) -> str:

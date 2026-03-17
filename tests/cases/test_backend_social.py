@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
 
 import requests
+from cosmpy.crypto.keypairs import PrivateKey
+from cosmpy.aerial.wallet import LocalWallet
 
 from tests.common import (
     _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,

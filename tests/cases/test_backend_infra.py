@@ -14,37 +14,96 @@ from typing import Optional, Tuple
 import requests
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_upgrade_level, _docker_exec, _run_miraged, _miraged_cmd,
-    _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    FAUCET_AMOUNTS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _fetch_params,
+    _do_upgrade_level,
+    _docker_exec,
+    _run_miraged,
+    _miraged_cmd,
+    _keyring_backend,
+    _INSIDE_CONTAINER,
+    _check_local_docker,
     DEFAULT_BACKEND,
-    get_status, get_user_status, get_username_from_address, get_address_from_username,
-    sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_annotate_raw, _canon_base_report_raw,
+    get_status,
+    get_user_status,
+    get_username_from_address,
+    get_address_from_username,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
+    _difficulty_factor,
+    _BASE_DIFFICULTY_FACTOR,
+    _canon_base_upgrade_level_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_award_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_annotate_raw,
+    _canon_base_report_raw,
     canon_signed_with_pow,
-    _generate_wallet, _faucet, _resolve_validator_key_addr,
-    _get_spendable_balance, _required_sub1_spend_budget_umirage,
+    _generate_wallet,
+    _faucet,
+    _resolve_validator_key_addr,
+    _get_spendable_balance,
+    _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_post, _do_post_with_nonce, _do_post_with_media,
-    _do_vote, _do_vote_with_nonce,
-    _do_edit, _do_annotate, _do_delete, _do_delete_user,
-    _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
-    _do_set_username_raw, _do_set_biography, _do_report,
-    _do_enable_agent, _do_set_agents, _do_set_auto_renewal,
-    _do_send_tokens, _do_award,
-    _wait_indexed, _wait_username, _wait_list_count,
-    _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,
-    _wait_followed_user, _wait_followed_topic,
-    _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
+    _do_post,
+    _do_post_with_nonce,
+    _do_post_with_media,
+    _do_vote,
+    _do_vote_with_nonce,
+    _do_edit,
+    _do_annotate,
+    _do_delete,
+    _do_delete_user,
+    _do_follow_user,
+    _do_follow_topic,
+    _do_block,
+    _do_block_topic,
+    _do_set_username_raw,
+    _do_set_biography,
+    _do_report,
+    _do_enable_agent,
+    _do_set_agents,
+    _do_set_auto_renewal,
+    _do_send_tokens,
+    _do_award,
+    _wait_indexed,
+    _wait_username,
+    _wait_list_count,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_tx_deliver,
+    _wait_followed_user,
+    _wait_followed_topic,
+    _wait_blocked_user,
+    _wait_blocked_topic,
+    _wait_blocked_topic_state,
     _wait_comment_indexed,
-    _rpc_latest_height, _wait_next_block,
+    _rpc_latest_height,
+    _wait_next_block,
 )
 
 
@@ -202,6 +261,7 @@ def test_params(backend: str):
 # Category 2: Account & Username
 # =========================================================================
 
+
 def test_search(backend: str):
 
     # 8.1 get_topics returns list
@@ -261,6 +321,7 @@ def test_search(backend: str):
 # =========================================================================
 # Category 9: Edge Cases & Validation
 # =========================================================================
+
 
 def test_reports(backend: str):
 
@@ -348,6 +409,7 @@ def test_reports(backend: str):
 # Category 17: Frontend Bypass Validation
 # =========================================================================
 
+
 def test_tx_status(backend: str):
     """Test indexer-only get_tx_status (no CometBFT tx_index dependency)."""
 
@@ -425,7 +487,6 @@ def test_tx_status(backend: str):
         _fail("tx_status.response_shape", "no status data")
 
 
-
 def test_failed_tx_status(backend: str):
     """Test indexer receipts for failed vote/post transactions."""
 
@@ -460,27 +521,62 @@ def test_failed_tx_status(backend: str):
     vote_tx1 = str(vote_resp1.get("tx_hash", "") or "").lower()
     vote_tx2 = str(vote_resp2.get("tx_hash", "") or "").lower()
     _debug(f"failed_tx.vote tx1={vote_tx1} tx2={vote_tx2} nonce={vote_nonce}")
-    if not vote_tx1 or not vote_tx2:
+    if not vote_tx1 and not vote_tx2:
         _fail("failed_tx.vote.submit", f"tx1={vote_tx1} tx2={vote_tx2}")
         return
-
-    fail1 = _wait_tx_status_failure(backend, vote_tx1, expect_type="vote")
-    fail2 = _wait_tx_status_failure(backend, vote_tx2, expect_type="vote")
-    if bool(fail1) == bool(fail2):
-        _fail("failed_tx.vote.failure_detected", f"fail1={bool(fail1)} fail2={bool(fail2)}")
-    else:
-        fail_vote = fail1 or fail2
-        ok_vote = vote_tx2 if fail1 else vote_tx1
-        _pass("failed_tx.vote.failure_detected", tx=fail_vote.get("tx_hash"))
+    if (not vote_tx1) != (not vote_tx2):
+        # One rejected before broadcast (e.g., simulate error). Accept this path.
+        fail_resp = vote_resp1 if not vote_tx1 else vote_resp2
+        ok_vote = vote_tx2 if vote_tx1 else vote_tx1
+        if fail_resp.get("error") or fail_resp.get("message"):
+            _pass("failed_tx.vote.failure_detected", err=fail_resp.get("error") or fail_resp.get("message"))
+        else:
+            _fail("failed_tx.vote.failure_detected", f"fail={fail_resp}")
         ok_status = _wait_tx_status(backend, ok_vote, expect_type="vote")
         if ok_status and ok_status.get("success") is True:
             _pass("failed_tx.vote.success_detected", tx=ok_vote)
         else:
             _fail("failed_tx.vote.success_detected", f"status={ok_status}")
-        if fail_vote.get("code", 0) and fail_vote.get("error_details"):
+        return
+
+    code1 = int(vote_resp1.get("code", 0) or 0)
+    code2 = int(vote_resp2.get("code", 0) or 0)
+
+    # If both were accepted, fall back to indexer failure detection (legacy behavior).
+    if (code1 == 0) and (code2 == 0):
+        fail1 = _wait_tx_status_failure(backend, vote_tx1, expect_type="vote")
+        fail2 = _wait_tx_status_failure(backend, vote_tx2, expect_type="vote")
+        if bool(fail1) == bool(fail2):
+            _fail("failed_tx.vote.failure_detected", f"fail1={bool(fail1)} fail2={bool(fail2)}")
+        else:
+            fail_vote = fail1 or fail2
+            ok_vote = vote_tx2 if fail1 else vote_tx1
+            _pass("failed_tx.vote.failure_detected", tx=fail_vote.get("tx_hash"))
+            ok_status = _wait_tx_status(backend, ok_vote, expect_type="vote")
+            if ok_status and ok_status.get("success") is True:
+                _pass("failed_tx.vote.success_detected", tx=ok_vote)
+            else:
+                _fail("failed_tx.vote.success_detected", f"status={ok_status}")
+            if fail_vote.get("code", 0) and fail_vote.get("error_details"):
+                _pass("failed_tx.vote.error_details_present")
+            else:
+                _fail("failed_tx.vote.error_details_present", f"fail={fail_vote}")
+    elif (code1 == 0) != (code2 == 0):
+        # One rejected at submit (CheckTx) — expect an immediate error response.
+        fail_resp = vote_resp1 if code1 != 0 else vote_resp2
+        ok_vote = vote_tx2 if code1 != 0 else vote_tx1
+        _pass("failed_tx.vote.failure_detected", tx=fail_resp.get("tx_hash"))
+        ok_status = _wait_tx_status(backend, ok_vote, expect_type="vote")
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_tx.vote.success_detected", tx=ok_vote)
+        else:
+            _fail("failed_tx.vote.success_detected", f"status={ok_status}")
+        if fail_resp.get("code", 0) and (fail_resp.get("reason") or fail_resp.get("message")):
             _pass("failed_tx.vote.error_details_present")
         else:
-            _fail("failed_tx.vote.error_details_present", f"fail={fail_vote}")
+            _fail("failed_tx.vote.error_details_present", f"fail={fail_resp}")
+    else:
+        _fail("failed_tx.vote.failure_detected", f"both rejected code1={code1} code2={code2}")
 
     # ── Failed post: two txs with same nonce in the same block
     try:
@@ -510,26 +606,56 @@ def test_failed_tx_status(backend: str):
     post_tx1 = str(post_resp1.get("tx_hash", "") or "").lower()
     post_tx2 = str(post_resp2.get("tx_hash", "") or "").lower()
     _debug(f"failed_tx.post tx1={post_tx1} tx2={post_tx2} nonce={post_nonce}")
-    if not post_tx1 or not post_tx2:
+    if not post_tx1 and not post_tx2:
         _fail("failed_tx.post.submit", f"tx1={post_tx1} tx2={post_tx2}")
         return
-
-    pfail1 = _wait_tx_status_failure(backend, post_tx1, expect_type="post")
-    pfail2 = _wait_tx_status_failure(backend, post_tx2, expect_type="post")
-    if bool(pfail1) == bool(pfail2):
-        _fail("failed_tx.post.failure_detected", f"fail1={bool(pfail1)} fail2={bool(pfail2)}")
-    else:
-        fail_post = pfail1 or pfail2
-        ok_post = post_tx2 if pfail1 else post_tx1
-        _pass("failed_tx.post.failure_detected", tx=fail_post.get("tx_hash"))
+    if (not post_tx1) != (not post_tx2):
+        fail_resp = post_resp1 if not post_tx1 else post_resp2
+        ok_post = post_tx2 if post_tx1 else post_tx1
+        if fail_resp.get("error") or fail_resp.get("message"):
+            _pass("failed_tx.post.failure_detected", err=fail_resp.get("error") or fail_resp.get("message"))
+        else:
+            _fail("failed_tx.post.failure_detected", f"fail={fail_resp}")
         ok_status = _wait_tx_status(backend, ok_post, expect_type="post")
         if ok_status and ok_status.get("success") is True:
             _pass("failed_tx.post.success_detected", tx=ok_post)
         else:
             _fail("failed_tx.post.success_detected", f"status={ok_status}")
-        if fail_post.get("code", 0) and fail_post.get("error_details"):
+        return
+
+    code1 = int(post_resp1.get("code", 0) or 0)
+    code2 = int(post_resp2.get("code", 0) or 0)
+
+    if (code1 == 0) and (code2 == 0):
+        pfail1 = _wait_tx_status_failure(backend, post_tx1, expect_type="post")
+        pfail2 = _wait_tx_status_failure(backend, post_tx2, expect_type="post")
+        if bool(pfail1) == bool(pfail2):
+            _fail("failed_tx.post.failure_detected", f"fail1={bool(pfail1)} fail2={bool(pfail2)}")
+        else:
+            fail_post = pfail1 or pfail2
+            ok_post = post_tx2 if pfail1 else post_tx1
+            _pass("failed_tx.post.failure_detected", tx=fail_post.get("tx_hash"))
+            ok_status = _wait_tx_status(backend, ok_post, expect_type="post")
+            if ok_status and ok_status.get("success") is True:
+                _pass("failed_tx.post.success_detected", tx=ok_post)
+            else:
+                _fail("failed_tx.post.success_detected", f"status={ok_status}")
+            if fail_post.get("code", 0) and fail_post.get("error_details"):
+                _pass("failed_tx.post.error_details_present")
+            else:
+                _fail("failed_tx.post.error_details_present", f"fail={fail_post}")
+    elif (code1 == 0) != (code2 == 0):
+        fail_resp = post_resp1 if code1 != 0 else post_resp2
+        ok_post = post_tx2 if code1 != 0 else post_tx1
+        _pass("failed_tx.post.failure_detected", tx=fail_resp.get("tx_hash"))
+        ok_status = _wait_tx_status(backend, ok_post, expect_type="post")
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_tx.post.success_detected", tx=ok_post)
+        else:
+            _fail("failed_tx.post.success_detected", f"status={ok_status}")
+        if fail_resp.get("code", 0) and (fail_resp.get("reason") or fail_resp.get("message")):
             _pass("failed_tx.post.error_details_present")
         else:
-            _fail("failed_tx.post.error_details_present", f"fail={fail_post}")
-
-
+            _fail("failed_tx.post.error_details_present", f"fail={fail_resp}")
+    else:
+        _fail("failed_tx.post.failure_detected", f"both rejected code1={code1} code2={code2}")
