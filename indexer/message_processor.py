@@ -5,6 +5,7 @@ Message processing logic for the indexer.
 import base64
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from google.protobuf.json_format import MessageToDict
 from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
@@ -385,6 +386,10 @@ class MessageProcessor:
             except Exception:
                 logger.exception("Failed to extract mentions for post %s", txhash)
 
+        # Push notifications for new posts only (skip edits and old blocks during catch-up)
+        if not existing and owner and int(time.time()) - ts < 120:
+            self._fire_push_for_post(owner, txhash, target, content)
+
     def _extract_and_store_mentions(self, content: str, post_txhash: str, mentioner_address: str, ts: int):
         """Parse @username mentions from content and store them in the mentions table.
 
@@ -422,6 +427,33 @@ class MessageProcessor:
             post_txhash,
             [u for u, a in username_to_addr.items() if a.lower() != mentioner_lower],
         )
+
+    def _fire_push_for_post(self, owner: str, txhash: str, target: str, content: str) -> None:
+        """Send push notifications for a new post/comment (reply + mentions)."""
+        try:
+            from shared.push import send_push_for_reply, send_push_for_mentions
+
+            profile = self.db.get_profile(owner)
+            poster_username = profile[0] if profile else ""
+
+            if target:
+                send_push_for_reply(owner, poster_username, target, content, txhash)
+
+            send_push_for_mentions(owner, poster_username, content, txhash, target or "")
+        except Exception:
+            logger.exception("[Push] Failed to fire push for post %s", txhash)
+
+    def _fire_push_for_award(self, awarder: str, post_owner: str, target: str, award_type: str) -> None:
+        """Send push notification for an award."""
+        try:
+            from shared.push import send_push_for_award
+
+            profile = self.db.get_profile(awarder)
+            awarder_username = profile[0] if profile else ""
+
+            send_push_for_award(awarder, awarder_username, post_owner, target, award_type)
+        except Exception:
+            logger.exception("[Push] Failed to fire push for award on %s", target)
 
     def _handle_vote(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgVote."""
@@ -1134,6 +1166,10 @@ class MessageProcessor:
                 self.quest_tracker.update_progress(target_author, "award_received", ts, target=target)
                 if award_type == "quality_post":
                     self.quest_tracker.update_progress(target_author, "quality_award_received", ts, target=target)
+
+            # Push notification for award (skip old blocks during catch-up)
+            if target_author and int(time.time()) - ts < 120:
+                self._fire_push_for_award(owner, target_author, target, award_type)
         except Exception as e:
             logger.error("Error handling MsgAward %s: %s", tx_hash, e, exc_info=True)
 

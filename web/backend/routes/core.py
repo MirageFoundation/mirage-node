@@ -3517,19 +3517,6 @@ def core_post():
         except Exception:
             pass
 
-        try:
-            from push import send_push_for_reply, send_push_for_mentions
-
-            if not poster_username:
-                poster_username = _get_username_for_owner(user_addr)
-
-            if is_comment and target:
-                send_push_for_reply(user_addr, poster_username, target, content, tx_hash)
-
-            send_push_for_mentions(user_addr, poster_username, content, tx_hash, target or "")
-        except Exception as push_err:
-            log_event(rid, "post.push_err", error=str(push_err))
-
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
@@ -4292,14 +4279,6 @@ def core_award():
                 _inbox_cache.pop(recipient, None)
         except Exception:
             pass
-
-        try:
-            from push import send_push_for_award
-
-            awarder_username = _get_username_for_owner(user_addr)
-            send_push_for_award(user_addr, awarder_username, post_owner, target, award_type)
-        except Exception as push_err:
-            log_event(rid, "award.push_err", error=str(push_err))
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:

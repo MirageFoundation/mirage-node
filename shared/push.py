@@ -1,23 +1,40 @@
 """
 Expo push notification sender with budget enforcement and receipt processing.
 
-Sends inline from request handlers — no cron or background workers.
+Used by backend and indexer; no cron or background workers.
 Budget: max 3 pushes per user, resets when mark_inbox_viewed is called.
+
+Self-contained: reads DB URL from shared.config and env vars directly,
+so it can be imported from both the backend and the indexer.
 """
+
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
 from typing import Optional
 
+import psycopg
 import requests as http_requests
 
-from db import connect_db
-from settings import PUSH_NOTIFICATIONS_ENABLED, EXPO_ACCESS_TOKEN
+from shared.config import get_config
 
 logger = logging.getLogger(__name__)
+
+PUSH_NOTIFICATIONS_ENABLED: bool = os.environ.get("PUSH_NOTIFICATIONS_ENABLED", "").strip().lower() == "true"
+EXPO_ACCESS_TOKEN: str = os.environ.get("EXPO_ACCESS_TOKEN", "")
+
+
+def _connect_db() -> psycopg.Connection:
+    cfg = get_config()
+    url = cfg.get_indexer_config().get("database_url")
+    if not url:
+        raise RuntimeError("INDEXER_DB_URL is required")
+    return psycopg.connect(url, autocommit=True)
+
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts"
@@ -86,7 +103,7 @@ def _send_expo_push_batch(messages: list[dict]) -> list[tuple[str, Optional[str]
 
 def _remove_token(token: str) -> None:
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM push_tokens WHERE token = %s", (token,))
         logger.info("[Push] Removed invalid token: %s…", token[:20])
@@ -98,7 +115,7 @@ def _decrement_budget(owner: str) -> bool:
     """Atomically decrement push budget. Returns True if budget was available."""
     owner_lower = owner.lower()
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -120,7 +137,7 @@ def _decrement_budget(owner: str) -> bool:
 
 def _store_receipt(ticket_id: str, token: str) -> None:
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO push_receipts (ticket_id, token, created_at) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
@@ -142,7 +159,7 @@ def _check_old_receipts() -> None:
                 return
             _last_receipt_check_ts = now
         cutoff = int(time.time()) - RECEIPT_CHECK_AGE_SECONDS
-        with connect_db(timeout=5.0, busy_timeout_ms=10000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, ticket_id, token FROM push_receipts WHERE created_at < %s LIMIT 100",
@@ -178,9 +195,7 @@ def _check_old_receipts() -> None:
                             logger.info("[Push] Receipt: removed stale token %s…", token[:20])
 
                 if ids_to_delete:
-                    cur.execute(
-                        "DELETE FROM push_receipts WHERE id = ANY(%s)", (ids_to_delete,)
-                    )
+                    cur.execute("DELETE FROM push_receipts WHERE id = ANY(%s)", (ids_to_delete,))
     except Exception as e:
         logger.error("[Push] Receipt check failed: %s", e)
 
@@ -188,7 +203,7 @@ def _check_old_receipts() -> None:
 def _get_tokens_for_owner(owner: str) -> list[tuple[str, str]]:
     """Returns list of (token, platform) for an owner."""
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT token, platform FROM push_tokens WHERE LOWER(owner) = LOWER(%s)",
@@ -204,7 +219,7 @@ def _resolve_usernames_to_owners(usernames: list[str]) -> dict[str, str]:
     if not usernames:
         return {}
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 placeholders = ",".join(["%s"] * len(usernames))
                 cur.execute(
@@ -227,7 +242,7 @@ def _get_post_owner(txhash: str) -> str | None:
     if not txhash:
         return None
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (txhash,))
                 row = cur.fetchone()
@@ -240,7 +255,7 @@ def _get_root_post_id(target_txhash: str) -> str | None:
     if not target_txhash:
         return None
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COALESCE(root_post_id, ''), COALESCE(target, '') FROM posts "
@@ -264,17 +279,17 @@ def _get_root_post_id(target_txhash: str) -> str | None:
 def _truncate(text: str, max_len: int = 150) -> str:
     if len(text) <= max_len:
         return text
-    return text[:max_len - 1] + "…"
+    return text[: max_len - 1] + "…"
 
 
 def _send_push_to_user(owner: str, title: str, body: str, data: dict) -> None:
     """Send push to all devices for an owner, respecting budget."""
-    if not _decrement_budget(owner):
-        logger.debug("[Push] Budget exhausted for %s", owner)
-        return
-
     tokens = _get_tokens_for_owner(owner)
     if not tokens:
+        return
+
+    if not _decrement_budget(owner):
+        logger.debug("[Push] Budget exhausted for %s", owner)
         return
 
     messages = [_build_expo_message(token, title, body, data) for token, _platform in tokens]
@@ -342,6 +357,7 @@ def send_push_for_mentions(
     if not PUSH_NOTIFICATIONS_ENABLED:
         return
     _fire_and_forget(_do_mentions_push, poster_addr, poster_username, content, tx_hash, target_txhash)
+
 
 def _do_mentions_push(
     poster_addr: str,
@@ -431,7 +447,7 @@ def reset_push_budget(owner: str) -> None:
     if not PUSH_NOTIFICATIONS_ENABLED:
         return
     try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        with _connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """

@@ -6280,7 +6280,7 @@ def mark_inbox_viewed():
         _invalidate_inbox_cache(addr_lower)
 
         try:
-            from push import reset_push_budget
+            from shared.push import reset_push_budget
 
             reset_push_budget(addr_lower)
         except Exception as push_err:
