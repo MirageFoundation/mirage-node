@@ -590,7 +590,9 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
 
     token_send_amount = 1000  # test_tokens.happy_path
     indexer_transfer_test = 1  # test_backend_indexer.balance_after_transfer
-    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test
+    # Fee buffer: sub1 sends many txs across backend tests (posts/votes/etc).
+    fee_buffer = 25_000_000_000  # 25k MIRAGE in umirage
+    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test + fee_buffer
 
 
 def setup_test_wallets(backend: str) -> bool:
@@ -619,6 +621,7 @@ def setup_test_wallets(backend: str) -> bool:
 
     # Capture height before sending any txs so _wait_tx_deliver scans from here
     from tests.backend_helpers import _rpc_latest_height
+
     try:
         _send_start_height = _rpc_latest_height()
     except Exception:
