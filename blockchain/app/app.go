@@ -305,7 +305,7 @@ func New(
 				}
 
 				// Reject transactions that mix relay and non-relay messages.
-				// Without this, a non-relay message (e.g. bank.MsgSend) would bypass
+				// Without this, a non-relay message `(e.g. bank.MsgSend) would bypass
 				// SDK signature verification entirely since the relay ante chain does
 				// not include SigVerificationDecorator.
 				if isRelayTx && hasNonRelay {

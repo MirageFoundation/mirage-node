@@ -5,11 +5,12 @@ from __future__ import annotations
 Functions:
 - estimate_total_gas_limit(body_bytes, content_len): Heuristic gas estimator.
 - build_tx_bytes(body_bytes, gas_limit): Construct TxRaw bytes with payer.
-- simulate_gas(tx_bytes): Returns 0 (simulation handled heuristically).
-- broadcast_tx(tx_bytes): Broadcast via CometBFT RPC; returns (tx_hash, code, height, raw_log).
+- simulate_gas(tx_bytes): Simulate via REST; returns gas_used.
+- broadcast_tx(tx_bytes): Broadcast via REST; returns (tx_hash, code, height, raw_log).
 """
 
 from typing import Tuple, Optional
+import base64 as _b64
 import hashlib as _hashlib
 import logging as _logging
 import math as _math
@@ -27,7 +28,12 @@ _log = _logging.getLogger("tx")
 _TX_SIZE_COST_PER_BYTE: Optional[int] = None
 
 
-def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
+def estimate_total_gas_limit(body_bytes: bytes, content_len: int, extra_gas: int = 0) -> int:
+    """Heuristic gas estimator.
+
+    extra_gas: additional gas for handlers that do more KV work than a single
+    write (e.g. MsgSetUsername does claim+release+profile update → extra ~2000).
+    """
     # Fixed ante overhead: account lookup, balance read/write, nonce read/write,
     # difficulty read, auth-params read, etc.  ~11-12k empirically.
     ante_gas = 12_000
@@ -51,7 +57,7 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
     gas_guess = max(ante_gas, 1)
     for _ in range(3):
         size_gas = tx_size_ppb * _txraw_len(int(gas_guess))
-        msg_gas = 1000 + 2000 + (30 * max(0, int(content_len)))
+        msg_gas = 1000 + 2000 + (30 * max(0, int(content_len))) + int(extra_gas)
         raw = ante_gas + size_gas + msg_gas
         new_gas = int(_math.ceil(raw * 1.10))  # 10% safety margin
         if new_gas % 64 != 0:
@@ -91,37 +97,57 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
 
 
 def simulate_gas(tx_bytes: bytes) -> int:
-    """Skip simulation — gas is estimated heuristically. Indexer may re-simulate."""
-    return 0
+    """Simulate gas via REST (tx service). Returns gas_used."""
+    rt = require_runtime()
+    url = f"{rt.api_url}/cosmos/tx/v1beta1/simulate"
+    payload = {"tx_bytes": _b64.b64encode(tx_bytes).decode()}
+    try:
+        resp = _requests.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"simulate_gas failed: {e}")
+    try:
+        body = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"simulate_gas invalid json: {e}")
+    gas_info = body.get("gas_info") or {}
+    gas_used = gas_info.get("gas_used") or gas_info.get("gas_wanted")
+    if gas_used is None or str(gas_used).strip() == "":
+        raise RuntimeError(f"simulate_gas missing gas_used: {str(body)[:200]}")
+    try:
+        return int(gas_used)
+    except Exception as e:
+        raise RuntimeError(f"simulate_gas invalid gas_used: {gas_used} ({e})")
 
 
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
-    """Broadcast transaction directly via CometBFT RPC (broadcast_tx_sync).
+    """Broadcast transaction via REST (tx service).
 
     Returns (tx_hash, code, height, raw_log).
     """
-    import base64 as _b64
-
     tx_hash = _hashlib.sha256(tx_bytes).hexdigest().lower()
-    rpc_url = require_runtime().rpc_url
+    api_url = require_runtime().api_url
+    url = f"{api_url}/cosmos/tx/v1beta1/txs"
 
     _log.info("broadcast_tx %s len=%d %s", tx_hash, len(tx_bytes), _extract_auth_hex(tx_bytes))
 
     try:
         payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "broadcast_tx_sync",
-            "params": {"tx": _b64.b64encode(tx_bytes).decode()},
+            "tx_bytes": _b64.b64encode(tx_bytes).decode(),
+            "mode": "BROADCAST_MODE_SYNC",
         }
-        resp = _requests.post(rpc_url, json=payload, timeout=10)
+        resp = _requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         body = resp.json()
-        result = body.get("result", {})
-        code = int(result.get("code", 0) or 0)
-        raw_log = str(result.get("log", "") or "")
+        tx_resp = body.get("tx_response") or {}
+        code = int(tx_resp.get("code", 0) or 0)
+        raw_log = str(tx_resp.get("raw_log", "") or "")
+        height = int(tx_resp.get("height", 0) or 0)
+        resp_hash = str(tx_resp.get("txhash", "") or "").strip().lower()
+        if resp_hash:
+            tx_hash = resp_hash
         _log.info("broadcast %s code=%d resp=%s", tx_hash, code, str(body)[:500])
-        return tx_hash, code, 0, raw_log
+        return tx_hash, code, height, raw_log
     except Exception as e:
         _log.error("broadcast %s failed: %s", tx_hash, e)
         return tx_hash, 1, 0, str(e)

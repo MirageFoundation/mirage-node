@@ -747,7 +747,7 @@ def core_set_username():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         content_len = len(msg.username)
-        gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
+        gas_est = int(estimate_total_gas_limit(body_bytes, content_len, extra_gas=2000))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
