@@ -87,11 +87,21 @@ BIN="$ROOT_DIR/blockchain/bin/miraged"
 CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 
+# Log retention (from node.env, hard fail if missing/invalid)
+if [ -z "${LOG_RETENTION_DAYS:-}" ]; then
+  echo "ERROR: LOG_RETENTION_DAYS not set in node.env" >&2
+  exit 1
+fi
+if ! [[ "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$LOG_RETENTION_DAYS" -le 0 ]; then
+  echo "ERROR: LOG_RETENTION_DAYS must be a positive integer" >&2
+  exit 1
+fi
+
 # Create centralized log directory structure
 mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,caddy,referrals,deploy,orchestrator}
 
-# Clean up old log files (older than 30 days)
-find "$LOGS_DIR" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
+# Clean up old log files on startup
+find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
 
 # Export variables needed by init.sh and render_template.py
 export MONIKER CHAIN_ID LOGS_DIR
@@ -394,6 +404,6 @@ while true; do
     if [ "$SECONDS_SINCE_CLEANUP" -ge "$CLEANUP_INTERVAL" ]; then
         SECONDS_SINCE_CLEANUP=0
         find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
-        find "$LOGS_DIR" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
+        find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
     fi
 done

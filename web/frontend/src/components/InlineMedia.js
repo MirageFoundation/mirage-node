@@ -63,9 +63,9 @@ const MAX_INITIAL_HEIGHT_ROOT = 600;
 const MAX_INITIAL_HEIGHT_COMMENT = 225;
 const MAX_INITIAL_WIDTH = 600;
 
-export default function InlineMedia({ url, variant, autoPlay = false }) {
-    const [naturalWidth, setNaturalWidth] = React.useState(0);
-    const [naturalHeight, setNaturalHeight] = React.useState(0);
+export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta = null }) {
+    const [naturalWidth, setNaturalWidth] = React.useState((mediaMeta && mediaMeta.w) || 0);
+    const [naturalHeight, setNaturalHeight] = React.useState((mediaMeta && mediaMeta.h) || 0);
     const [displayWidth, setDisplayWidth] = React.useState(null);
     const [containerMaxWidth, setContainerMaxWidth] = React.useState(0);
     const wrapperRef = React.useRef(null);
@@ -286,7 +286,7 @@ export default function InlineMedia({ url, variant, autoPlay = false }) {
                 const path = (u.pathname || '').replace(/^\//, '');
                 return path ? path.split('/')[0].split('?')[0] : null;
             }
-        } catch (_) {}
+        } catch (_) { }
         return null;
     };
 

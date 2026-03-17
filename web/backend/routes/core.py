@@ -20,7 +20,7 @@ import time
 from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
-from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED
+from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED, PUSH_NOTIFICATIONS_ENABLED
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
@@ -125,6 +125,8 @@ core_bp = Blueprint("core", __name__)
 # state changes between simulation and execution, and storage write costs
 # (WriteFlat) that vary based on key/value sizes.
 GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
+PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
+PUSH_NONCE_TTL_SECONDS = 60 * 60
 
 
 def _db_get_profile_level(addr: str) -> int | None:
@@ -322,6 +324,40 @@ def _parse_envelope_nonce(data: dict):
         return nonce, None
     except (TypeError, ValueError):
         return 0, (jsonify({"error": "invalid envelope_nonce"}), 400)
+
+
+def _guard_push_request(owner: str, action: str, timestamp_ms: int, nonce: int):
+    """Reject replayed or stale push-related requests."""
+    if timestamp_ms < 10_000_000_000:
+        return False, (jsonify({"error": "timestamp must be milliseconds"}), 400)
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - timestamp_ms) > PUSH_TIMESTAMP_SKEW_MS:
+        return False, (jsonify({"error": "timestamp outside allowed window"}), 400)
+
+    owner_lc = (owner or "").strip().lower()
+    if not owner_lc:
+        return False, (jsonify({"error": "invalid owner"}), 400)
+
+    try:
+        cutoff = int(time.time()) - PUSH_NONCE_TTL_SECONDS
+        with connect_db(timeout=5.0, busy_timeout_ms=10000) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM push_nonces WHERE created_at < %s", (cutoff,))
+                cur.execute(
+                    """
+                    INSERT INTO push_nonces (owner, action, nonce, created_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    RETURNING nonce
+                    """,
+                    (owner_lc, action, nonce, int(time.time())),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, (jsonify({"error": "replayed envelope_nonce"}), 400)
+        return True, None
+    except Exception:
+        return False, (jsonify({"error": "indexer DB unavailable"}), 503)
 
 
 def _hex_to_bytes(s: str) -> bytes:
@@ -3470,15 +3506,17 @@ def core_post():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/post", "MsgPost", code, tx_hash, raw_log, extra)
+        poster_username = ""
         try:
             client_ip = _get_trusted_client_ip()
             if client_ip:
                 target_log = str(target or "").strip().lower()
                 action = "create_comment" if target_log else "create_post"
-                username = _get_username_for_owner(user_addr)
-                _log_user_action(username, client_ip, action, target_log, str(tx_hash or "").lower())
+                poster_username = _get_username_for_owner(user_addr)
+                _log_user_action(poster_username, client_ip, action, target_log, str(tx_hash or "").lower())
         except Exception:
             pass
+
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
@@ -4245,6 +4283,156 @@ def core_award():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "award.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+# ========== Push Token Endpoints ==========
+
+
+@core_bp.route("/api/core/register_push_token", methods=["POST"])
+def core_register_push_token():
+    rid = next_request_id()
+    log_event(rid, "register_push_token.begin")
+    try:
+        if not PUSH_NOTIFICATIONS_ENABLED:
+            return jsonify({"error": "push notifications not enabled on this node"}), 404
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+
+        data = request.get_json(force=True) or {}
+        pub_b64 = str(data.get("pubkey", "")).strip()
+        sig_b64 = str(data.get("signature", "")).strip()
+        token = str(data.get("token", "")).strip()
+        platform = str(data.get("platform", "")).strip()
+
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
+
+        if not (pub_b64 and sig_b64 and token and platform):
+            return jsonify({"error": "missing required fields"}), 400
+
+        if platform not in ("ios", "android"):
+            return jsonify({"error": "platform must be ios or android"}), 400
+
+        if len(token) > 200:
+            return jsonify({"error": "invalid expo push token length"}), 400
+        if not re.fullmatch(r"ExponentPushToken\[[A-Za-z0-9_-]+\]", token):
+            return jsonify({"error": "invalid expo push token format"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields"}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        signed_payload = f"register_push_token:{token}:{platform}:{timestamp}:{nonce}"
+        if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+            return jsonify({"error": "invalid signature"}), 400
+        ok, err = _guard_push_request(user_addr, "register_push_token", timestamp, nonce)
+        if not ok:
+            return err[0], err[1]
+
+        now_ts = int(time.time())
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT owner FROM push_tokens WHERE token = %s LIMIT 1", (token,))
+                existing = cur.fetchone()
+                if existing and existing[0] and existing[0].strip().lower() != user_addr.lower():
+                    return jsonify({"error": "push token already registered to another account"}), 409
+                cur.execute(
+                    """
+                    INSERT INTO push_tokens (owner, token, platform, created_at, last_used_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (token) DO UPDATE SET
+                        owner = EXCLUDED.owner,
+                        platform = EXCLUDED.platform,
+                        last_used_at = EXCLUDED.last_used_at
+                    """,
+                    (user_addr.lower(), token, platform, now_ts, now_ts),
+                )
+
+        is_new = not existing
+        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform,
+                  token=token[:30], new=is_new)
+        return jsonify({"ok": True})
+    except Exception as e:
+        log_event(rid, "register_push_token.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/unregister_push_token", methods=["POST"])
+def core_unregister_push_token():
+    rid = next_request_id()
+    log_event(rid, "unregister_push_token.begin")
+    try:
+        if not PUSH_NOTIFICATIONS_ENABLED:
+            return jsonify({"error": "push notifications not enabled on this node"}), 404
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+
+        data = request.get_json(force=True) or {}
+        pub_b64 = str(data.get("pubkey", "")).strip()
+        sig_b64 = str(data.get("signature", "")).strip()
+        token = str(data.get("token", "")).strip()
+
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
+
+        if not (pub_b64 and sig_b64 and token):
+            return jsonify({"error": "missing required fields"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields"}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        signed_payload = f"unregister_push_token:{token}:{timestamp}:{nonce}"
+        if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+            return jsonify({"error": "invalid signature"}), 400
+        ok, err = _guard_push_request(user_addr, "unregister_push_token", timestamp, nonce)
+        if not ok:
+            return err[0], err[1]
+
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM push_tokens WHERE token = %s AND LOWER(owner) = LOWER(%s)",
+                    (token, user_addr),
+                )
+                deleted = cur.rowcount
+
+        log_event(rid, "unregister_push_token.ok", user=user_addr,
+                  token=token[:30], deleted=deleted)
+        return jsonify({"ok": True})
+    except Exception as e:
+        log_event(rid, "unregister_push_token.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 

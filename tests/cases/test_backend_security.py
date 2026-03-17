@@ -16,37 +16,96 @@ from cosmpy.crypto.keypairs import PrivateKey
 from cosmpy.aerial.wallet import LocalWallet
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_upgrade_level, _docker_exec, _run_miraged, _miraged_cmd,
-    _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    FAUCET_AMOUNTS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _fetch_params,
+    _do_upgrade_level,
+    _docker_exec,
+    _run_miraged,
+    _miraged_cmd,
+    _keyring_backend,
+    _INSIDE_CONTAINER,
+    _check_local_docker,
     DEFAULT_BACKEND,
-    get_status, get_user_status, get_username_from_address, get_address_from_username,
-    sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_annotate_raw, _canon_base_report_raw,
+    get_status,
+    get_user_status,
+    get_username_from_address,
+    get_address_from_username,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
+    _difficulty_factor,
+    _BASE_DIFFICULTY_FACTOR,
+    _canon_base_upgrade_level_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_award_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_annotate_raw,
+    _canon_base_report_raw,
     canon_signed_with_pow,
-    _generate_wallet, _faucet, _resolve_validator_key_addr,
-    _get_spendable_balance, _required_sub1_spend_budget_umirage,
+    _generate_wallet,
+    _faucet,
+    _resolve_validator_key_addr,
+    _get_spendable_balance,
+    _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_post, _do_post_with_nonce, _do_post_with_media,
-    _do_vote, _do_vote_with_nonce,
-    _do_edit, _do_annotate, _do_delete, _do_delete_user,
-    _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
-    _do_set_username_raw, _do_set_biography, _do_report,
-    _do_enable_agent, _do_set_agents, _do_set_auto_renewal,
-    _do_send_tokens, _do_award,
-    _wait_indexed, _wait_username, _wait_list_count,
-    _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,
-    _wait_followed_user, _wait_followed_topic,
-    _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
+    _do_post,
+    _do_post_with_nonce,
+    _do_post_with_media,
+    _do_vote,
+    _do_vote_with_nonce,
+    _do_edit,
+    _do_annotate,
+    _do_delete,
+    _do_delete_user,
+    _do_follow_user,
+    _do_follow_topic,
+    _do_block,
+    _do_block_topic,
+    _do_set_username_raw,
+    _do_set_biography,
+    _do_report,
+    _do_enable_agent,
+    _do_set_agents,
+    _do_set_auto_renewal,
+    _do_send_tokens,
+    _do_award,
+    _wait_indexed,
+    _wait_username,
+    _wait_list_count,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_tx_deliver,
+    _wait_followed_user,
+    _wait_followed_topic,
+    _wait_blocked_user,
+    _wait_blocked_topic,
+    _wait_blocked_topic_state,
     _wait_comment_indexed,
-    _rpc_latest_height, _wait_next_block,
+    _rpc_latest_height,
+    _wait_next_block,
 )
 
 
@@ -579,10 +638,137 @@ def test_security(backend: str):
     else:
         _pass("attack.null_bytes_username skipped (registration disabled)")
 
+    # ------ Push notification authorization ------
+    push_enabled = (_ncfg or {}).get("push_notifications_enabled", False) if _code == 200 else False
+    if not push_enabled:
+        _pass("attack.push_notifications skipped (push disabled)")
+    else:
+
+        def _sign_plain(wallet: LocalWallet, payload_str: str) -> str:
+            sig = sign_canonical(wallet, payload_str.encode("utf-8"))
+            return _b64(sig)
+
+        try:
+            # 10.19 Register push token with invalid signature → rejected
+            token_a = f"ExponentPushToken[{_rand_str(22)}]"
+            token_b = f"ExponentPushToken[{_rand_str(22)}]"
+            ts = _now_ms()
+            nonce = _fresh_nonce()
+            sig = _sign_plain(free_wallet, f"register_push_token:{token_a}:ios:{ts}:{nonce}")
+            payload = {
+                "pubkey": _b64(free_wallet.public_key().public_key_bytes),
+                "signature": sig,
+                "timestamp": ts,
+                "envelope_nonce": str(nonce),
+                "token": token_b,  # mismatched token
+                "platform": "ios",
+            }
+            code, resp = _post(f"{backend}/api/core/register_push_token", payload)
+            if code >= 400:
+                _pass("attack.push_register_invalid_signature_rejected")
+            else:
+                _fail("attack.push_register_invalid_signature_rejected", f"code={code}")
+        except Exception as e:
+            _fail("attack.push_register_invalid_signature_rejected", str(e))
+
+        try:
+            # 10.20 Token hijack attempt — register token to one user, then another
+            token = f"ExponentPushToken[{_rand_str(22)}]"
+            ts1 = _now_ms()
+            nonce1 = _fresh_nonce()
+            sig1 = _sign_plain(free_wallet, f"register_push_token:{token}:ios:{ts1}:{nonce1}")
+            payload1 = {
+                "pubkey": _b64(free_wallet.public_key().public_key_bytes),
+                "signature": sig1,
+                "timestamp": ts1,
+                "envelope_nonce": str(nonce1),
+                "token": token,
+                "platform": "ios",
+            }
+            code1, resp1 = _post(f"{backend}/api/core/register_push_token", payload1)
+            if code1 != 200:
+                _fail("attack.push_token_hijack_rejected", f"setup failed code={code1}")
+            else:
+                ts2 = _now_ms()
+                nonce2 = _fresh_nonce()
+                sig2 = _sign_plain(sub_wallet, f"register_push_token:{token}:ios:{ts2}:{nonce2}")
+                payload2 = {
+                    "pubkey": _b64(sub_wallet.public_key().public_key_bytes),
+                    "signature": sig2,
+                    "timestamp": ts2,
+                    "envelope_nonce": str(nonce2),
+                    "token": token,
+                    "platform": "ios",
+                }
+                code2, resp2 = _post(f"{backend}/api/core/register_push_token", payload2)
+                err2 = str(resp2.get("error", "")).lower()
+                if code2 == 409 or "already registered" in err2:
+                    _pass("attack.push_token_hijack_rejected")
+                else:
+                    _fail("attack.push_token_hijack_rejected", f"code={code2}")
+
+            # 10.21 Unauthorized unregister should not release token
+            ts3 = _now_ms()
+            nonce3 = _fresh_nonce()
+            sig3 = _sign_plain(sub_wallet, f"unregister_push_token:{token}:{ts3}:{nonce3}")
+            payload3 = {
+                "pubkey": _b64(sub_wallet.public_key().public_key_bytes),
+                "signature": sig3,
+                "timestamp": ts3,
+                "envelope_nonce": str(nonce3),
+                "token": token,
+            }
+            _post(f"{backend}/api/core/unregister_push_token", payload3)
+
+            ts4 = _now_ms()
+            nonce4 = _fresh_nonce()
+            sig4 = _sign_plain(sub_wallet, f"register_push_token:{token}:ios:{ts4}:{nonce4}")
+            payload4 = {
+                "pubkey": _b64(sub_wallet.public_key().public_key_bytes),
+                "signature": sig4,
+                "timestamp": ts4,
+                "envelope_nonce": str(nonce4),
+                "token": token,
+                "platform": "ios",
+            }
+            code4, resp4 = _post(f"{backend}/api/core/register_push_token", payload4)
+            err4 = str(resp4.get("error", "")).lower()
+            if code4 == 409 or "already registered" in err4:
+                _pass("attack.push_unreg_foreign_token_rejected")
+            else:
+                _fail("attack.push_unreg_foreign_token_rejected", f"code={code4}")
+        except Exception as e:
+            _fail("attack.push_token_hijack_rejected", str(e))
+
+    # 10.22 mark_inbox_viewed with mismatched address/pubkey → rejected
+    try:
+        ts = _now_ms()
+        nonce = _fresh_nonce()
+        free_addr_lc = str(free_wallet.address()).lower()
+        sig = sign_canonical(
+            free_wallet,
+            f"mark_inbox_viewed:{free_addr_lc}:{ts}:{nonce}".encode("utf-8"),
+        )
+        payload = {
+            "pubkey": _b64(free_wallet.public_key().public_key_bytes),
+            "signature": _b64(sig),
+            "timestamp": ts,
+            "envelope_nonce": str(nonce),
+            "address": str(sub_wallet.address()),
+        }
+        code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
+        if code >= 400:
+            _pass("attack.mark_inbox_viewed_mismatch_rejected")
+        else:
+            _fail("attack.mark_inbox_viewed_mismatch_rejected", f"code={code}")
+    except Exception as e:
+        _fail("attack.mark_inbox_viewed_mismatch_rejected", str(e))
+
 
 # =========================================================================
 # Category 11: Input Validation
 # =========================================================================
+
 
 def test_validation(backend: str):
 

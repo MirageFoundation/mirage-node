@@ -45,11 +45,12 @@ const HIDDEN_STYLE = { visibility: 'hidden', height: 0, overflow: 'hidden' };
 
 /* ── component ──────────────────────────────────────────── */
 
-export default function MediaGallery({ items, variant, autoPlay = false }) {
+export default function MediaGallery({ items, variant, autoPlay = false, mediaMeta = null }) {
     const urls = React.useMemo(
         () => (Array.isArray(items) ? items.filter(Boolean) : []),
         [items]
     );
+    const metaArr = Array.isArray(mediaMeta) ? mediaMeta : [];
     const [index, setIndex] = React.useState(0);
     const touchStartXRef = React.useRef(null);
 
@@ -67,7 +68,7 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
 
     if (!urls.length) return null;
     if (urls.length === 1) {
-        return <InlineMedia url={urls[0]} variant={variant} autoPlay={autoPlay} />;
+        return <InlineMedia url={urls[0]} variant={variant} autoPlay={autoPlay} mediaMeta={metaArr[0] || null} />;
     }
 
     /* ── navigation ── */
@@ -103,7 +104,7 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
             </NavBar>
             {urls.map((url, i) => (
                 <div key={url} style={i === index ? undefined : HIDDEN_STYLE}>
-                    <InlineMedia url={url} variant={variant} autoPlay={i === index && autoPlay} />
+                    <InlineMedia url={url} variant={variant} autoPlay={i === index && autoPlay} mediaMeta={metaArr[i] || null} />
                 </div>
             ))}
         </div>

@@ -75,6 +75,8 @@ class DatabaseManager:
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media TEXT NOT NULL DEFAULT '[]'")
                 # v1.18.0: relayer (validator/node address)
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS relayer TEXT")
+                # v1.19.0: media_meta (JSON array of {w,h} objects parallel to media)
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_meta TEXT NOT NULL DEFAULT '[]'")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_owner_lower ON posts(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_target_lower ON posts(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_txhash_lower ON posts(LOWER(txhash))")
@@ -918,6 +920,60 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_edits_agent ON agent_edits(LOWER(agent_address))")
                 cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_edits_txhash ON agent_edits(edit_txhash)")
 
+                # ========== Push Notification Tables ==========
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS push_tokens (
+                        id SERIAL PRIMARY KEY,
+                        owner TEXT NOT NULL,
+                        token TEXT NOT NULL UNIQUE,
+                        platform TEXT NOT NULL,
+                        created_at BIGINT NOT NULL,
+                        last_used_at BIGINT NOT NULL
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_tokens_owner_lower ON push_tokens(LOWER(owner))")
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS push_budget (
+                        owner TEXT PRIMARY KEY,
+                        remaining INT NOT NULL DEFAULT 3,
+                        last_reset_at BIGINT NOT NULL DEFAULT 0,
+                        CONSTRAINT push_budget_owner_lower CHECK (owner = LOWER(owner))
+                    )
+                    """
+                )
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS push_receipts (
+                        id SERIAL PRIMARY KEY,
+                        ticket_id TEXT NOT NULL UNIQUE,
+                        token TEXT NOT NULL,
+                        created_at BIGINT NOT NULL
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_receipts_created_at ON push_receipts(created_at)")
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS push_nonces (
+                        id SERIAL PRIMARY KEY,
+                        owner TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        nonce BIGINT NOT NULL,
+                        created_at BIGINT NOT NULL,
+                        CONSTRAINT push_nonces_owner_lower CHECK (owner = LOWER(owner)),
+                        UNIQUE(owner, action, nonce)
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_nonces_owner_lower ON push_nonces(LOWER(owner))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_nonces_created_at ON push_nonces(created_at)")
+
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
         with self._connect() as conn:
@@ -1050,6 +1106,36 @@ class DatabaseManager:
             return None
         return val.replace("\x00", "")
 
+    @staticmethod
+    def _sanitize_wh(w: int, h: int) -> dict:
+        """Return {"w": w, "h": h} if both are valid ints in [1, 10000], else {}."""
+        try:
+            w, h = int(w), int(h)
+        except (TypeError, ValueError):
+            return {}
+        if 1 <= w <= 10000 and 1 <= h <= 10000:
+            return {"w": w, "h": h}
+        return {}
+
+    @staticmethod
+    def _extract_media_meta(media_urls: list[str]) -> list[dict]:
+        """Extract w/h metadata from media URL query params."""
+        from urllib.parse import urlparse, parse_qs
+
+        meta = []
+        for url in media_urls or []:
+            entry = {}
+            try:
+                parsed = urlparse(url)
+                qs = parse_qs(parsed.query)
+                w = int(qs["w"][0]) if "w" in qs else 0
+                h = int(qs["h"][0]) if "h" in qs else 0
+                entry = Database._sanitize_wh(w, h)
+            except Exception:
+                pass
+            meta.append(entry)
+        return meta
+
     def upsert_post(
         self,
         txhash: str,
@@ -1082,6 +1168,7 @@ class DatabaseManager:
         root_post_id = self._strip_nul(root_post_id)
         relayer = self._strip_nul(relayer)
         media_json = _json.dumps(media or [])
+        media_meta_json = _json.dumps(self._extract_media_meta(media or []))
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1102,9 +1189,10 @@ class DatabaseManager:
                         root_topic,
                         root_post_id,
                         media,
-                        relayer
+                        relayer,
+                        media_meta
                     )
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
                       owner=EXCLUDED.owner,
                       topic=EXCLUDED.topic,
@@ -1120,7 +1208,8 @@ class DatabaseManager:
                       root_topic=COALESCE(EXCLUDED.root_topic, posts.root_topic),
                       root_post_id=COALESCE(EXCLUDED.root_post_id, posts.root_post_id),
                       media=EXCLUDED.media,
-                      relayer=EXCLUDED.relayer
+                      relayer=EXCLUDED.relayer,
+                      media_meta=EXCLUDED.media_meta
                     """,
                     (
                         txhash,
@@ -1139,6 +1228,7 @@ class DatabaseManager:
                         (root_post_id or None),
                         media_json,
                         relayer,
+                        media_meta_json,
                     ),
                 )
 
@@ -1439,6 +1529,19 @@ class DatabaseManager:
                 cur.execute(
                     "UPDATE posts SET thumbnail_url = %s WHERE LOWER(txhash) = LOWER(%s)",
                     (thumbnail_url, txhash),
+                )
+
+    def update_post_media_meta(self, txhash: str, meta: list[dict]) -> None:
+        """Update media_meta JSON for a post (only if it contains real data)."""
+        import json as _json
+        sanitized = [self._sanitize_wh(m.get("w", 0), m.get("h", 0)) if m else {} for m in (meta or [])]
+        if not any(sanitized):
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE posts SET media_meta = %s WHERE LOWER(txhash) = LOWER(%s)",
+                    (_json.dumps(sanitized), txhash),
                 )
 
     def upsert_auto_vote(

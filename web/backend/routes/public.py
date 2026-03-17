@@ -29,7 +29,7 @@ from flask import Blueprint, jsonify, request
 
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
-from node import require_runtime
+from node import require_runtime, derive_address_from_pubkey
 from params import load_params, expect_params
 from settings import (
     IGNORE_DELETIONS,
@@ -40,6 +40,7 @@ from settings import (
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
     NEW_USER_HIGHLIGHT_DAYS,
+    PUSH_NOTIFICATIONS_ENABLED,
 )
 import time
 import hashlib
@@ -187,6 +188,73 @@ def _deleted_filter() -> str:
 def _deleted_filter_bare() -> str:
     """Return SQL clause to filter deleted posts without table prefix."""
     return "" if IGNORE_DELETIONS else "AND deleted = FALSE"
+
+
+def _sanitize_wh(w, h) -> dict:
+    """Return {"w": w, "h": h} if both are valid ints in [1, 10000], else {}."""
+    try:
+        w, h = int(w), int(h)
+    except (TypeError, ValueError):
+        return {}
+    if 1 <= w <= 10000 and 1 <= h <= 10000:
+        return {"w": w, "h": h}
+    return {}
+
+
+def _sanitize_media_meta_list(raw_list: list) -> list[dict]:
+    """Sanitize a list of media meta dicts, ensuring valid w/h on each."""
+    result = []
+    for item in raw_list or []:
+        if isinstance(item, dict) and item.get("w") and item.get("h"):
+            result.append(_sanitize_wh(item["w"], item["h"]))
+        else:
+            result.append({})
+    return result
+
+
+def _extract_media_meta(media_urls: list) -> list[dict]:
+    """Extract w/h from media URL query params. Used only for agent-edited media."""
+    from urllib.parse import urlparse, parse_qs
+
+    meta = []
+    for url in media_urls or []:
+        entry = {}
+        try:
+            parsed = urlparse(str(url))
+            qs = parse_qs(parsed.query)
+            w = int(qs["w"][0]) if "w" in qs else 0
+            h = int(qs["h"][0]) if "h" in qs else 0
+            entry = _sanitize_wh(w, h)
+        except Exception:
+            pass
+        meta.append(entry)
+    return meta
+
+
+def _enrich_media_meta(cur, posts: list[dict]) -> None:
+    """Batch-read media_meta from DB and set it on each post dict."""
+    if not posts:
+        return
+    post_ids = [p["post_id"] for p in posts if p.get("post_id")]
+    if not post_ids:
+        return
+    ph = ",".join(["%s"] * len(post_ids))
+    cur.execute(
+        f"SELECT LOWER(txhash), COALESCE(media_meta, '[]') FROM posts WHERE LOWER(txhash) IN ({ph})",
+        post_ids,
+    )
+    meta_map: dict[str, list[dict]] = {}
+    for pid, meta_raw in cur.fetchall():
+        try:
+            parsed = json.loads(meta_raw or "[]")
+            if isinstance(parsed, list):
+                meta_map[pid] = _sanitize_media_meta_list(parsed)
+        except Exception:
+            pass
+    for post in posts:
+        pid = post.get("post_id", "")
+        if pid in meta_map:
+            post["media_meta"] = meta_map[pid]
 
 
 # Allowed content tags used for topic safety classification
@@ -583,6 +651,8 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
                         "text": edit["appendix"],
                     }
                 )
+        if "media" in applied:
+            post["media_meta"] = _extract_media_meta(post["media"])
         if applied or appendices:
             post["agent_edited"] = True
             post["agent_edits_meta"] = applied
@@ -961,6 +1031,7 @@ def _load_candidate_posts(
                 "edited_at": int(edited_at or 0),
                 "thumbnail": thumbnail or "",
                 "media": media,
+                "media_meta": [],
             }
         )
 
@@ -2207,6 +2278,7 @@ def _row_to_post(
         "edited_at": int(edited_at or 0),
         "thumbnail": thumbnail or "",
         "media": media,
+        "media_meta": [],
         "relayer": relayer_lower,
     }
 
@@ -3354,6 +3426,7 @@ def get_node_config():
             "quests_enabled": QUESTS_ENABLED,
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
             "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
+            "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
         }
 
         _NODE_CONFIG_CACHE = resp
@@ -4422,6 +4495,7 @@ def _format_search_posts(
                 "tag": tag or "",
                 "thumbnail": thumbnail or "",
                 "media": media_val,
+                "media_meta": [],
                 "relayer": relayer_lower,
                 "points": vote_totals.get(pid, 0),
                 "comments": comment_counts.get(pid, 0),
@@ -4515,6 +4589,7 @@ def get_posts():
                 )
 
             if resp.get("posts"):
+                _enrich_media_meta(cur, resp["posts"])
                 _apply_agent_edits(cur, resp["posts"], address)
             conn.close()
             return jsonify(resp)
@@ -4806,6 +4881,7 @@ def get_posts():
         has_more = (page * limit) < total
 
         if result:
+            _enrich_media_meta(cur, result)
             _apply_agent_edits(cur, result, address)
 
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
@@ -5098,6 +5174,7 @@ def get_user_posts():
                     "edited_at": int(edited_at or 0),
                     "thumbnail": thumbnail,
                     "media": media_val,
+                    "media_meta": [],
                     "relayer": relayer_lower,
                     "points": vote_totals.get(pid, 0),
                     "comments": comment_counts.get(pid, 0),
@@ -5106,6 +5183,7 @@ def get_user_posts():
                 }
             )
         if result:
+            _enrich_media_meta(cur, result)
             _apply_agent_edits(cur, result, viewer)
         conn.close()
         has_more = (page * limit) < total
@@ -5334,6 +5412,7 @@ def _fetch_post(
         "edited_at": edited_at_val,
         "thumbnail": thumbnail_val,
         "media": media_val,
+        "media_meta": [],
         "relayer": relayer_val,
         "points": points,
         "comments": comments,
@@ -5480,6 +5559,7 @@ def _fetch_comment_tree_batch(
             "edited_at": edited_at_val,
             "thumbnail": thumbnail_val,
             "media": media_val,
+            "media_meta": [],
             "relayer": relayer_val,
             "points": 0,  # Will be populated later
             "comments": 0,  # Will be computed from tree
@@ -5723,6 +5803,7 @@ def get_comments():
 
         all_posts_for_overlay = [root]
         _collect_posts(children, all_posts_for_overlay)
+        _enrich_media_meta(cur, all_posts_for_overlay)
         _apply_agent_edits(cur, all_posts_for_overlay, address)
 
         resp = {"root": root, "children": children}
@@ -6142,11 +6223,49 @@ def mark_inbox_viewed():
     """Set the user's inbox_last_viewed_at to now, clearing their unread count."""
     rid = next_request_id()
     data = request.get_json(silent=True) or {}
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
     address = (data.get("address") or "").strip()
-    if not address:
-        return jsonify({"error": "address is required"}), 400
+    if "timestamp" not in data:
+        return jsonify({"error": "timestamp required"}), 400
+    try:
+        timestamp = int(data.get("timestamp"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid timestamp"}), 400
+    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
 
-    addr_lower = address.lower()
+    nonce, err = _parse_envelope_nonce(data)
+    if err is not None:
+        return err[0], err[1]
+
+    if not (pub_b64 and sig_b64):
+        return jsonify({"error": "missing required fields"}), 400
+
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return jsonify({"error": "invalid relay fields"}), 400
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return jsonify({"error": "invalid relay fields"}), 400
+
+    user_addr = derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return jsonify({"error": "invalid pubkey"}), 400
+
+    if address and address.lower() != user_addr.lower():
+        return jsonify({"error": "address does not match pubkey"}), 400
+
+    signed_payload = f"mark_inbox_viewed:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return jsonify({"error": "invalid signature"}), 400
+    ok, err = _guard_push_request(user_addr, "mark_inbox_viewed", timestamp, nonce)
+    if not ok:
+        return err[0], err[1]
+
+    addr_lower = user_addr.lower()
     now_ts = int(time.time())
 
     try:
@@ -6159,6 +6278,14 @@ def mark_inbox_viewed():
         conn.commit()
         conn.close()
         _invalidate_inbox_cache(addr_lower)
+
+        try:
+            from shared.push import reset_push_budget
+
+            reset_push_budget(addr_lower)
+        except Exception as push_err:
+            log_event(rid, "mark_inbox_viewed.push_budget_err", error=str(push_err))
+
         log_event(rid, "mark_inbox_viewed.ok", address=addr_lower)
         return jsonify({"ok": True, "inbox_last_viewed_at": now_ts})
     except Exception as e:
