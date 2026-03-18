@@ -54,6 +54,7 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 
 ## Content / UX
 - Add blocking keywords (in topics or posts)?
+- **On-chain `allowed_tags` (content filter preferences):** Currently `allowed_tags` is a client-side localStorage preference passed as a query param. Move it to `ProfileCore` on-chain so preferences sync across devices and the backend can enforce without trusting the client. Requires: proto field on `ProfileCore`, upgrade handler, indexer migration, backend reads from indexer DB instead of query param, new `MsgSetContentFilter` tx type. The backend would still accept the query param as an override for unauthenticated/guest users.
 
 ## Engagement
 - **Streaks:** Track consecutive days of activity (posting, voting, etc.). Could be implemented as a quest type — e.g. "7-day streak" quest with token reward. Resets on missed day.

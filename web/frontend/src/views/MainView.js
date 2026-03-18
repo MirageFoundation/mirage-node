@@ -9,6 +9,7 @@ import QuestHeroCard from "../components/QuestHeroCard";
 import styled from "styled-components";
 import { Link, useLocation, useParams, useNavigationType } from 'react-router-dom';
 import Storage from '../utils/Storage';
+import { getAllowedTagsParam } from '../utils/ContentTags';
 import Api from '../lib/api';
 import { isSubscribed, subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
 import { fetchFollowedUsers } from '../utils/FollowUsers';
@@ -1518,24 +1519,22 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     // Android app banner: show once for Android users until dismissed
     const isAndroid = (() => { try { return /android/i.test(navigator.userAgent); } catch (_) { return false; } })();
-    const [showAndroidBanner, setShowAndroidBanner] = useState(() => {
-        if (!isAndroid) return false;
-        try { return !Storage.load('android_app_banner_dismissed', false); } catch (_) { return true; }
+    const [androidBannerDismissed, setAndroidBannerDismissed] = useState(() => {
+        try { return Storage.load('android_app_banner_dismissed', false); } catch (_) { return false; }
     });
     const dismissAndroidBanner = () => {
         try { Storage.save('android_app_banner_dismissed', true); } catch (_) { }
-        setShowAndroidBanner(false);
+        setAndroidBannerDismissed(true);
     };
 
     // iPhone app banner: show once for iPhone users until dismissed
     const isIPhone = (() => { try { return /iPhone/i.test(navigator.userAgent) && !isAndroid; } catch (_) { return false; } })();
-    const [showIPhoneBanner, setShowIPhoneBanner] = useState(() => {
-        if (!isIPhone) return false;
-        try { return !Storage.load('iphone_app_banner_dismissed', false); } catch (_) { return true; }
+    const [iphoneBannerDismissed, setIphoneBannerDismissed] = useState(() => {
+        try { return Storage.load('iphone_app_banner_dismissed', false); } catch (_) { return false; }
     });
     const dismissIPhoneBanner = () => {
         try { Storage.save('iphone_app_banner_dismissed', true); } catch (_) { }
-        setShowIPhoneBanner(false);
+        setIphoneBannerDismissed(true);
     };
 
     // NSFW welcome hero: show once for logged-in users until they choose yes/no
@@ -1569,8 +1568,35 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         }
     }, [nodeConfigTick]);
 
+    if (nodeConfigTick > 0 && !nodeConfig) {
+        try { console.error('[MainView] nodeConfig missing after fetch attempt'); } catch (_) { }
+        throw new Error('MainView requires nodeConfig to render app banners');
+    }
+
+    if (nodeConfig && (typeof nodeConfig.android_banner_enabled !== 'boolean' || typeof nodeConfig.ios_banner_enabled !== 'boolean')) {
+        try {
+            console.error('[MainView] nodeConfig missing banner flags', {
+                android_banner_enabled: nodeConfig.android_banner_enabled,
+                ios_banner_enabled: nodeConfig.ios_banner_enabled,
+            });
+        } catch (_) { }
+        throw new Error('MainView requires android_banner_enabled and ios_banner_enabled in nodeConfig');
+    }
+
+    useEffect(() => {
+        if (!nodeConfig) return;
+        try {
+            console.debug('[MainView] app banner flags', {
+                android_banner_enabled: nodeConfig.android_banner_enabled,
+                ios_banner_enabled: nodeConfig.ios_banner_enabled,
+            });
+        } catch (_) { }
+    }, [nodeConfig?.android_banner_enabled, nodeConfig?.ios_banner_enabled]);
+
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
+    const showAndroidBanner = Boolean(nodeConfig) && isAndroid && !androidBannerDismissed && nodeConfig.android_banner_enabled;
+    const showIPhoneBanner = Boolean(nodeConfig) && isIPhone && !iphoneBannerDismissed && nodeConfig.ios_banner_enabled;
 
     // Invite code state
     const [inviteCodes, setInviteCodes] = useState([]);
@@ -2085,17 +2111,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             try { loadMoreLockRef.current = false; } catch (_) { }
         };
 
-        // Build allowed_tags list from settings (default: only sensitive shown)
-        const getAllowedTags = () => {
-            const tags = [];
-            if (Storage.load('show_tag_sensitive', true) !== false) tags.push('sensitive');
-            if (Storage.load('show_tag_porn', false) === true) tags.push('porn');
-            if (Storage.load('show_tag_violence', false) === true) tags.push('violence');
-            if (Storage.load('show_tag_gore', false) === true) tags.push('gore');
-            if (Storage.load('show_tag_death', false) === true) tags.push('death');
-            return tags;
-        };
-
         // Determine sort mode
         const mode = overrideChrono !== null
             ? (overrideChrono ? 'newest' : 'magic')
@@ -2104,14 +2119,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (isHomeFeed || isFollowingFeed) {
             const params = { feed: topic, limit: 15, page: page, address: viewerAddress };
             params.by = mode;
-            params.allowed_tags = getAllowedTags().join(',');
+            params.allowed_tags = getAllowedTagsParam();
             Api.get('get_posts', params)
                 .then(handleResponse)
                 .catch(onError);
         } else {
             const params = { topic, limit: 15, page: page, address: viewerAddress };
             params.by = mode;
-            params.allowed_tags = getAllowedTags().join(',');
+            params.allowed_tags = getAllowedTagsParam();
             Api.get('get_posts', params)
                 .then(handleResponse)
                 .catch(onError);

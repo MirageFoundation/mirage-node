@@ -41,6 +41,8 @@ from settings import (
     QUESTS_PAYOUTS_ENABLED,
     NEW_USER_HIGHLIGHT_DAYS,
     PUSH_NOTIFICATIONS_ENABLED,
+    ANDROID_BANNER_ENABLED,
+    IOS_BANNER_ENABLED,
 )
 import time
 import hashlib
@@ -3426,6 +3428,8 @@ def get_node_config():
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
             "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
             "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
+            "android_banner_enabled": ANDROID_BANNER_ENABLED,
+            "ios_banner_enabled": IOS_BANNER_ENABLED,
         }
 
         _NODE_CONFIG_CACHE = resp
@@ -3751,6 +3755,8 @@ def get_topics():
     limit = request.args.get("limit", 50, type=int)
     limit = min(max(1, limit), 200)
     min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
+    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
+    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
     try:
         # Get min/max topic size from chain params
         p = expect_params()
@@ -3804,6 +3810,10 @@ def get_topics():
             )
             small_topics_count = cur.fetchone()[0] or 0
 
+        # Avoid hinting at hidden topics when content filters are active
+        if not set(_TOPIC_TAGS).issubset(allowed_tags):
+            small_topics_count = 0
+
         # Filter out blocked topics for the viewer
         viewer_addr = request.args.get("address", default="", type=str)
         viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
@@ -3839,16 +3849,22 @@ def get_topics():
         if topics_dict:
             lower_to_key = {k.lower(): k for k in topics_dict.keys()}
             stats = _compute_dominant_flags(cur, list(lower_to_key.keys()))
+            remove_keys = []
             for t_lower, info in stats.items():
                 key = lower_to_key.get(t_lower)
                 if not key or key not in topics_dict:
                     continue
                 dominant_tag = (info.get("dominant_tag") or "") if info else ""
                 dominant_ratio = float(info.get("dominant_ratio") or 0)
+                if dominant_tag and dominant_tag not in allowed_tags:
+                    remove_keys.append(key)
+                    continue
                 flags = {tag: dominant_tag == tag for tag in _TOPIC_TAGS}
                 topics_dict[key]["flags"] = flags
                 topics_dict[key]["dominant_tag"] = dominant_tag or None
                 topics_dict[key]["dominant_ratio"] = dominant_ratio
+            for k in remove_keys:
+                topics_dict.pop(k, None)
 
         topics = list(topics_dict.values())
         conn.close()
@@ -3868,6 +3884,8 @@ def search_topics():
     offset = request.args.get("offset", 0, type=int)
     limit = min(max(1, limit), 50)
     offset = max(0, offset)
+    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
+    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
 
     q_raw = request.args.get("q", default="", type=str)
     q = re.sub(r"[^a-zA-Z0-9]", "", str(q_raw or "")).lower()
@@ -3941,6 +3959,8 @@ def search_topics():
             stat = stats.get(topic, {}) if stats else {}
             dominant_tag = str(stat.get("dominant_tag") or "").lower()
             dominant_ratio = float(stat.get("dominant_ratio") or 0)
+            if dominant_tag and dominant_tag not in allowed_tags:
+                continue
             flags = {tag: dominant_tag == tag for tag in _TOPIC_TAGS}
             topics.append(
                 {
@@ -3983,6 +4003,9 @@ def search():
     offset = request.args.get("offset", 0, type=int)
     offset = max(0, offset)
     viewer = request.args.get("address", default="", type=str).strip()
+
+    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
+    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
 
     # Detect search type from prefix
     if q_raw.startswith("@"):
@@ -4108,6 +4131,7 @@ def search():
                     deleted_bare,
                     blocked_topics_exact,
                     blocked_topic_prefixes,
+                    allowed_tags=allowed_tags,
                 )
                 result["posts"] = posts
 
@@ -4162,6 +4186,8 @@ def search():
                 stat = stats.get(topic, {}) if stats else {}
                 dom_tag = str(stat.get("dominant_tag") or "").lower()
                 dom_ratio = float(stat.get("dominant_ratio") or 0)
+                if dom_tag and dom_tag not in allowed_tags:
+                    continue
                 topics.append(
                     {
                         "topic": topic,
@@ -4227,6 +4253,8 @@ def search():
                     stat = stats.get(topic, {}) if stats else {}
                     dom_tag = str(stat.get("dominant_tag") or "").lower()
                     dom_ratio = float(stat.get("dominant_ratio") or 0)
+                    if dom_tag and dom_tag not in allowed_tags:
+                        continue
                     topics.append(
                         {
                             "topic": topic,
@@ -4315,6 +4343,7 @@ def search():
                     deleted_bare,
                     blocked_topics_exact,
                     blocked_topic_prefixes,
+                    allowed_tags=allowed_tags,
                 )
                 result["posts"] = posts
                 result["has_more_posts"] = has_more_posts
@@ -4326,18 +4355,31 @@ def search():
 
 
 def _format_search_posts(
-    cur, rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics=None, blocked_topic_prefixes=None
+    cur,
+    rows,
+    blocked_posts,
+    blocked_users,
+    viewer,
+    deleted_bare,
+    blocked_topics=None,
+    blocked_topic_prefixes=None,
+    allowed_tags=None,
 ):
     """Format post rows for search results with vote counts."""
-    # Filter blocked posts, users, and topics
+    if allowed_tags is None:
+        allowed_tags = {"sensitive"}
+    # Filter blocked posts, users, topics, and disallowed tags
     filtered = []
     for r in rows:
         txhash = (r[0] or "").lower()
         owner = (r[1] or "").lower()
         topic = (r[3] or "").strip().lower() if len(r) > 3 else ""
+        tag = (r[8] or "").strip().lower() if len(r) > 8 else ""
         if txhash in blocked_posts or owner in blocked_users:
             continue
         if _topic_is_blocked(topic, blocked_topics or set(), blocked_topic_prefixes or tuple()):
+            continue
+        if tag and tag not in allowed_tags:
             continue
         filtered.append(r)
 
@@ -4908,6 +4950,7 @@ def get_posts():
 
 @public_bp.route("/api/get_user_posts")
 def get_user_posts():
+    rid = next_request_id()
     owner = request.args.get("owner", type=str)
     viewer = request.args.get("address", default="", type=str)
     limit = request.args.get("limit", 10, type=int)
@@ -4916,6 +4959,11 @@ def get_user_posts():
     limit = min(max(1, limit), 50)
     page = max(1, page)
     offset = (page - 1) * limit
+
+    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
+    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    if not allowed_tags:
+        log_event(rid, "get_user_posts.allowed_tags.empty", owner=owner[:12] if owner else None)
 
     if not owner:
         return jsonify({"error": "owner is required"}), 400
@@ -4947,16 +4995,18 @@ def get_user_posts():
                    COALESCE(pr.level, 0) as author_level,
                    COALESCE(p.media, '[]') as media,
                    COALESCE(pr.created_at, 0) as author_created_at,
-                   COALESCE(p.relayer, '') as relayer
+                   COALESCE(p.relayer, '') as relayer,
+                   COALESCE(p.tag, '') as tag
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
               {deleted_clause}
               {type_filter}
+              AND (COALESCE(p.target, '') != '' OR COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
             ORDER BY p.created_at DESC
             LIMIT %s OFFSET %s
             """,
-            (owner, limit, offset),
+            (owner, list(allowed_tags), limit, offset),
         )
         rows = cur.fetchall()
         rows = [
@@ -5051,8 +5101,9 @@ def get_user_posts():
                 WHERE LOWER(p.owner) = LOWER(%s)
                   {deleted_clause}
                   {type_filter}
+                  AND (COALESCE(p.target, '') != '' OR COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
                 """,
-                (owner,),
+                (owner, list(allowed_tags)),
             )
             total_row = cur.fetchone()
             total = int(total_row[0] or 0) if total_row else 0
@@ -5065,7 +5116,27 @@ def get_user_posts():
 
             media_raw = "[]"
             author_created_at = 0
-            if len(row) >= 15:
+            tag = ""
+            if len(row) >= 16:
+                (
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
+                    author_created_at,
+                    relayer,
+                    tag,
+                ) = row[:16]
+            elif len(row) >= 15:
                 (
                     txhash,
                     owner_addr,
@@ -5132,19 +5203,10 @@ def get_user_posts():
                     edited_at,
                     thumbnail,
                     author_level,
-                ) = row
-                relayer = ""
-            elif len(row) >= 11:
-                txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail = row
-                author_level = 0
-                relayer = ""
-            elif len(row) == 10:
-                txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at = row
-                thumbnail = ""
-                author_level = 0
+                ) = row[:12]
                 relayer = ""
             else:
-                txhash, owner_addr, ts, topic, title, content, uname, target = row
+                txhash, owner_addr, ts, topic, title, content, uname, target = row[:8]
                 edited, edited_at = 0, 0
                 thumbnail = ""
                 author_level = 0
@@ -5168,6 +5230,7 @@ def get_user_posts():
                     "topic": topic,
                     "title": title,
                     "content": content,
+                    "tag": tag or "",
                     "target": target,
                     "edited": bool(edited_at),
                     "edited_at": int(edited_at or 0),

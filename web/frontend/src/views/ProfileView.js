@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from "../utils/Storage";
+import { getAllowedTagsParam } from '../utils/ContentTags';
 import Api from '../lib/api';
 import * as tx from '../utils/tx';
 import Sidebar from "../components/Sidebar";
@@ -585,6 +586,7 @@ export default function ProfileView({ state }) {
                 if (recentPostsFilter === 'submissions' || recentPostsFilter === 'comments') {
                     params.type = recentPostsFilter;
                 }
+                params.allowed_tags = getAllowedTagsParam();
                 const res = await Api.get('get_user_posts', params);
                 if (cancelled) return;
                 const incoming = Array.isArray(res?.posts) ? res.posts : [];

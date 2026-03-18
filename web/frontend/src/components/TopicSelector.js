@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import styled from "styled-components";
 import Storage from '../utils/Storage';
+import { getAllowedTags, getAllowedTagsParam } from '../utils/ContentTags';
 import Api from '../lib/api';
 import { fetchFollowedTopics } from '../utils/Subscriptions';
 
@@ -254,7 +255,12 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
             if (!cached || !cached.lastFetched || !Array.isArray(cached.topicsWithCounts)) return false;
             const age = Date.now() - new Date(cached.lastFetched).getTime();
             if (age > CACHE_TTL_MS) return false;
-            applyTopics(cached.topicsWithCounts);
+            const allowed = new Set(getAllowedTags());
+            const filtered = cached.topicsWithCounts.filter((t) => {
+                const dom = String(t?.dominant_tag || '').toLowerCase();
+                return !dom || allowed.has(dom);
+            });
+            applyTopics(filtered);
             return true;
         } catch (_) {
             return false;
@@ -288,7 +294,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                 // Always fetch fresh from backend - it filters by min/max topic size
                 // Show all topics when selecting for posting
                 try {
-                    const data = await Api.get('get_topics', { limit: 100, min_posts: 1 });
+                    const data = await Api.get('get_topics', { limit: 100, min_posts: 1, allowed_tags: getAllowedTagsParam() });
                     if (data && Array.isArray(data.topics)) {
                         const topicsWithCounts = data.topics
                             .filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '')
@@ -364,7 +370,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
 
         const handle = setTimeout(async () => {
             try {
-                const data = await Api.get('search_topics', { q: sanitizedSearch, limit: 20 }, { timeoutMs: 8000 });
+                const data = await Api.get('search_topics', { q: sanitizedSearch, limit: 20, allowed_tags: getAllowedTagsParam() }, { timeoutMs: 8000 });
                 if (searchRequestId.current !== requestId) return;
                 const topics = Array.isArray(data?.topics) ? data.topics : [];
                 const normalized = topics

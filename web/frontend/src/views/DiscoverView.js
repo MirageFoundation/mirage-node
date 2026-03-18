@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
 import styled from 'styled-components';
 import Storage from '../utils/Storage';
+import { getAllowedTagsParam } from '../utils/ContentTags';
 import Api from '../lib/api';
 import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
 import { usePendingFollows } from '../utils/useFollowState';
@@ -161,7 +162,7 @@ export default function DiscoverView({ state }) {
     useEffect(() => {
         let alive = true;
         setLoading(true);
-        Api.get('get_topics', { limit: 200, min_posts: 10, address: viewerAddress })
+        Api.get('get_topics', { limit: 200, min_posts: 10, address: viewerAddress, allowed_tags: getAllowedTagsParam() })
             .then((data) => {
                 if (!alive || !mountedRef.current) return;
                 if (data && Array.isArray(data.topics)) {
@@ -224,7 +225,7 @@ export default function DiscoverView({ state }) {
 
         const handle = setTimeout(async () => {
             try {
-                const data = await Api.get('search_topics', { q: term, limit: 50 }, { timeoutMs: 8000 });
+                const data = await Api.get('search_topics', { q: term, limit: 50, allowed_tags: getAllowedTagsParam() }, { timeoutMs: 8000 });
                 if (searchRequestId.current !== requestId || !mountedRef.current) return;
                 const results = Array.isArray(data?.topics) ? data.topics : [];
                 // Filter out topics already in the main list
