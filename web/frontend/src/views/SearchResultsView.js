@@ -8,6 +8,7 @@ import MobileHeader from '../components/MobileHeader';
 import Button from '../components/Button';
 import CardView from '../components/CardView';
 import Storage from '../utils/Storage';
+import { getAllowedTagsParam } from '../utils/ContentTags';
 import Api from '../lib/api';
 import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from '../styled/Layout';
 import { getAuthorColor, getAuthorTooltip } from '../utils/tierColors';
@@ -220,6 +221,7 @@ export default function SearchResultsView({ state }) {
             try {
                 const params = { q: query, limit: 10 };
                 if (viewerAddress) params.address = viewerAddress;
+                params.allowed_tags = getAllowedTagsParam();
 
                 const data = await Api.get('search', params, { timeoutMs: 15000 });
                 if (cancelled || !mountedRef.current) return;
@@ -254,6 +256,7 @@ export default function SearchResultsView({ state }) {
         try {
             const params = { q: query, type: 'topics', limit: 10, offset: topicsOffset };
             if (viewerAddress) params.address = viewerAddress;
+            params.allowed_tags = getAllowedTagsParam();
 
             const data = await Api.get('search', params, { timeoutMs: 15000 });
             if (!mountedRef.current) return;
@@ -276,6 +279,7 @@ export default function SearchResultsView({ state }) {
         try {
             const params = { q: query, type: 'users', limit: 10, offset: usersOffset };
             if (viewerAddress) params.address = viewerAddress;
+            params.allowed_tags = getAllowedTagsParam();
 
             const data = await Api.get('search', params, { timeoutMs: 15000 });
             if (!mountedRef.current) return;
@@ -298,6 +302,7 @@ export default function SearchResultsView({ state }) {
         try {
             const params = { q: query, type: 'posts', limit: 10, offset: postsOffset };
             if (viewerAddress) params.address = viewerAddress;
+            params.allowed_tags = getAllowedTagsParam();
 
             const data = await Api.get('search', params, { timeoutMs: 15000 });
             if (!mountedRef.current) return;

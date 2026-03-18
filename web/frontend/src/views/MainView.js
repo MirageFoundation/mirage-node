@@ -9,6 +9,7 @@ import QuestHeroCard from "../components/QuestHeroCard";
 import styled from "styled-components";
 import { Link, useLocation, useParams, useNavigationType } from 'react-router-dom';
 import Storage from '../utils/Storage';
+import { getAllowedTagsParam } from '../utils/ContentTags';
 import Api from '../lib/api';
 import { isSubscribed, subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
 import { fetchFollowedUsers } from '../utils/FollowUsers';
@@ -2085,17 +2086,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             try { loadMoreLockRef.current = false; } catch (_) { }
         };
 
-        // Build allowed_tags list from settings (default: only sensitive shown)
-        const getAllowedTags = () => {
-            const tags = [];
-            if (Storage.load('show_tag_sensitive', true) !== false) tags.push('sensitive');
-            if (Storage.load('show_tag_porn', false) === true) tags.push('porn');
-            if (Storage.load('show_tag_violence', false) === true) tags.push('violence');
-            if (Storage.load('show_tag_gore', false) === true) tags.push('gore');
-            if (Storage.load('show_tag_death', false) === true) tags.push('death');
-            return tags;
-        };
-
         // Determine sort mode
         const mode = overrideChrono !== null
             ? (overrideChrono ? 'newest' : 'magic')
@@ -2104,14 +2094,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (isHomeFeed || isFollowingFeed) {
             const params = { feed: topic, limit: 15, page: page, address: viewerAddress };
             params.by = mode;
-            params.allowed_tags = getAllowedTags().join(',');
+            params.allowed_tags = getAllowedTagsParam();
             Api.get('get_posts', params)
                 .then(handleResponse)
                 .catch(onError);
         } else {
             const params = { topic, limit: 15, page: page, address: viewerAddress };
             params.by = mode;
-            params.allowed_tags = getAllowedTags().join(',');
+            params.allowed_tags = getAllowedTagsParam();
             Api.get('get_posts', params)
                 .then(handleResponse)
                 .catch(onError);
