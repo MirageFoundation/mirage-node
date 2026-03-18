@@ -738,7 +738,7 @@ def test_tx_status_matrix(backend: str):
     agent1_addr = str(agent1.address())
     agent2_addr = str(agent2.address())
     post_topic = "test"
-    follow_topic = f"matrix-{_rand_str(4)}"
+    follow_topic = f"matrix{_rand_str(4)}"
 
     # Use sub1 (subscriber, level>=1) as primary actor — free (level 0) has
     # max_biography_length=0 and low follow limits that cause chain rejections.
