@@ -4950,6 +4950,7 @@ def get_posts():
 
 @public_bp.route("/api/get_user_posts")
 def get_user_posts():
+    rid = next_request_id()
     owner = request.args.get("owner", type=str)
     viewer = request.args.get("address", default="", type=str)
     limit = request.args.get("limit", 10, type=int)
@@ -4961,6 +4962,8 @@ def get_user_posts():
 
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
     allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    if not allowed_tags:
+        log_event(rid, "get_user_posts.allowed_tags.empty", owner=owner[:12] if owner else None)
 
     if not owner:
         return jsonify({"error": "owner is required"}), 400
@@ -4996,16 +4999,14 @@ def get_user_posts():
                    COALESCE(p.tag, '') as tag
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
-            LEFT JOIN posts root_p ON root_p.txhash = p.root_post_id
             WHERE LOWER(p.owner) = LOWER(%s)
               {deleted_clause}
               {type_filter}
-              AND (COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
-              AND (COALESCE(p.target, '') = '' OR COALESCE(root_p.tag, '') = '' OR LOWER(COALESCE(root_p.tag, '')) = ANY(%s))
+              AND (COALESCE(p.target, '') != '' OR COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
             ORDER BY p.created_at DESC
             LIMIT %s OFFSET %s
             """,
-            (owner, list(allowed_tags), list(allowed_tags), limit, offset),
+            (owner, list(allowed_tags), limit, offset),
         )
         rows = cur.fetchall()
         rows = [
@@ -5097,14 +5098,12 @@ def get_user_posts():
                 f"""
                 SELECT COUNT(1)
                 FROM posts p
-                LEFT JOIN posts root_p ON root_p.txhash = p.root_post_id
                 WHERE LOWER(p.owner) = LOWER(%s)
                   {deleted_clause}
                   {type_filter}
-                  AND (COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
-                  AND (COALESCE(p.target, '') = '' OR COALESCE(root_p.tag, '') = '' OR LOWER(COALESCE(root_p.tag, '')) = ANY(%s))
+                  AND (COALESCE(p.target, '') != '' OR COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
                 """,
-                (owner, list(allowed_tags), list(allowed_tags)),
+                (owner, list(allowed_tags)),
             )
             total_row = cur.fetchone()
             total = int(total_row[0] or 0) if total_row else 0
