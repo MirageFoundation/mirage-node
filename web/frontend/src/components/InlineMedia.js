@@ -408,10 +408,14 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                         maxWidth: '100%',
                         overflow: 'hidden',
                         borderRadius: '4px',
-                        cursor: isMobile ? 'auto' : 'ew-resize'
                     }}
-                    {...resizeHandlers}
                 >
+                    {!isMobile && (
+                        <>
+                            <div style={{ position: 'absolute', top: 0, left: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />
+                            <div style={{ position: 'absolute', top: 0, right: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />
+                        </>
+                    )}
                     {isProcessing && (
                         <div style={{
                             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -458,10 +462,14 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                         maxWidth: '100%',
                         overflow: 'hidden',
                         borderRadius: '4px',
-                        cursor: isMobile ? 'auto' : 'ew-resize'
                     }}
-                    {...resizeHandlers}
                 >
+                    {!isMobile && (
+                        <>
+                            <div style={{ position: 'absolute', top: 0, left: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />
+                            <div style={{ position: 'absolute', top: 0, right: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />
+                        </>
+                    )}
                     <video
                         src={src}
                         controls

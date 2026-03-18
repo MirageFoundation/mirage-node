@@ -115,6 +115,34 @@ TYPE_URL_TO_PROTO = {
 }
 
 
+_TYPE_URL_PREFIX = "/mirage.core.v1.Msg"
+
+
+def type_url_to_tx_type(type_url: str) -> str:
+    """Map a protobuf type_url to a short tx_type string for tx_index.
+
+    E.g. '/mirage.core.v1.MsgSetUsername' -> 'set_username'
+    """
+    if not type_url or not type_url.startswith(_TYPE_URL_PREFIX):
+        return "unknown"
+    # Strip prefix to get e.g. 'SetUsername'
+    camel = type_url[len(_TYPE_URL_PREFIX) :]
+    if not camel:
+        return "unknown"
+    # CamelCase -> snake_case
+    parts: list[str] = []
+    buf: list[str] = []
+    for ch in camel:
+        if ch.isupper() and buf:
+            parts.append("".join(buf).lower())
+            buf = [ch]
+        else:
+            buf.append(ch)
+    if buf:
+        parts.append("".join(buf).lower())
+    return "_".join(parts)
+
+
 class MessageProcessor:
     """Handles processing of all message types."""
 

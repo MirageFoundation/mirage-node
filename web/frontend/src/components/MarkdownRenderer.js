@@ -76,6 +76,16 @@ const MentionLink = styled.a`
 	}
 `;
 
+const HashtagLink = styled.a`
+	color: ${({ theme }) => theme?.colors?.link || theme?.colors?.text || '#DFD0B8'};
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+	&:hover {
+		text-decoration: underline;
+	}
+`;
+
 function Spoiler({ children }) {
     const [revealed, setRevealed] = useState(false);
     return (
@@ -177,6 +187,50 @@ function remarkMentions() {
 }
 
 /**
+ * Remark plugin: converts #topicname into clickable topic links when the
+ * topic exists (validated at render time via the hashtag-tag component).
+ */
+function remarkHashtags() {
+    return (tree) => {
+        visit(tree, 'text', (node, index, parent) => {
+            if (!node.value || typeof node.value !== 'string') return;
+            if (!node.value.includes('#')) return;
+
+            const regex = /(?<![#\w])#([a-zA-Z0-9]{3,50})(?![a-zA-Z0-9])/g;
+            const parts = [];
+            let lastIndex = 0;
+            let match;
+
+            while ((match = regex.exec(node.value)) !== null) {
+                if (match.index > lastIndex) {
+                    parts.push({ type: 'text', value: node.value.slice(lastIndex, match.index) });
+                }
+                parts.push({
+                    type: 'hashtag',
+                    data: {
+                        hName: 'hashtag-tag',
+                        hProperties: { topic: match[1].toLowerCase() },
+                    },
+                    children: [{ type: 'text', value: '#' + match[1] }],
+                });
+                lastIndex = match.index + match[0].length;
+            }
+
+            if (lastIndex === 0) return;
+
+            if (lastIndex < node.value.length) {
+                parts.push({ type: 'text', value: node.value.slice(lastIndex) });
+            }
+
+            if (parent && Array.isArray(parent.children)) {
+                parent.children.splice(index, 1, ...parts);
+                return index + parts.length;
+            }
+        });
+    };
+}
+
+/**
  * AST transformation to treat soft line breaks (single newlines) as hard breaks.
  * This mimics GitHub-style line breaks where a single Enter creates a new line.
  * 
@@ -259,7 +313,7 @@ export default function MarkdownRenderer({ text }) {
     return (
         <Container>
             <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkSpoiler, remarkMentions, remarkSoftBreaks]}
+                remarkPlugins={[remarkGfm, remarkSpoiler, remarkMentions, remarkHashtags, remarkSoftBreaks]}
                 components={{
                     img: ({ src }) => <InlineMedia url={src} />,
                     a: ({ href, children }) => (
@@ -273,6 +327,11 @@ export default function MarkdownRenderer({ text }) {
                         <MentionLink href={`/u/${username}`}>
                             {children}
                         </MentionLink>
+                    ),
+                    'hashtag-tag': ({ topic, children }) => (
+                        <HashtagLink href={`/t/${encodeURIComponent(topic)}`}>
+                            {children}
+                        </HashtagLink>
                     ),
                 }}
             >

@@ -229,31 +229,52 @@ class Indexer:
                     if idx < len(txs_results):
                         code = int(txs_results[idx].get("code", 0))
                         if code != 0:
+                            from indexer.message_processor import type_url_to_tx_type
+
                             tx_type = "unknown"
                             for any_msg in tx_body.messages:
-                                if any_msg.type_url == "/mirage.core.v1.MsgVote":
-                                    tx_type = "vote"
-                                    break
-                                if any_msg.type_url == "/mirage.core.v1.MsgPost":
-                                    tx_type = "post"
+                                if any_msg.type_url.startswith("/mirage.core.v1."):
+                                    tx_type = type_url_to_tx_type(any_msg.type_url)
                                     break
                             raw_log = str(txs_results[idx].get("log", "") or "")
-                            self.db.upsert_tx_receipt_failure(
+                            self.db.upsert_tx_index(
                                 tx_hash,
-                                height,
+                                tx_type,
                                 code,
                                 raw_log,
-                                tx_type,
+                                height,
                                 ts,
                             )
                             logger.debug(
-                                "Recorded failed tx receipt (height=%s code=%s tx_type=%s txhash=%s)",
+                                "Recorded failed tx (height=%s code=%s tx_type=%s txhash=%s)",
                                 height,
                                 code,
                                 tx_type,
                                 tx_hash,
                             )
                             continue
+
+                    # Successful tx: record once in tx_index using the first core message type.
+                    from indexer.message_processor import type_url_to_tx_type
+
+                    core_types = [
+                        any_msg.type_url
+                        for any_msg in tx_body.messages
+                        if any_msg.type_url.startswith("/mirage.core.v1.")
+                    ]
+                    if core_types:
+                        if len(core_types) == 1:
+                            tx_type = type_url_to_tx_type(core_types[0])
+                        else:
+                            tx_type = "multi"
+                        self.db.upsert_tx_index(
+                            tx_hash,
+                            tx_type,
+                            0,
+                            "",
+                            height,
+                            ts,
+                        )
 
                     pending_proposals: list[list[dict]] = []
                     for any_msg in tx_body.messages:

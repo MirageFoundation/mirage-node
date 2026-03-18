@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 
@@ -8,13 +9,24 @@ import requests
 from tests.common import (
     _pass,
     _fail,
+    _skip,
     _debug,
     _get,
+    _rand_str,
+    _fresh_nonce,
+    _docker_exec,
+    _check_local_docker,
     WALLETS,
 )
 from tests.backend_helpers import (
     _do_send_tokens,
+    _do_follow_user,
+    _do_follow_user_with_nonce,
+    _do_set_biography,
     _wait_tx_deliver,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_next_block,
 )
 
 
@@ -214,7 +226,10 @@ def test_indexer(backend: str):
         else:
             _fail("indexer.params_pow_base_bits_present", f"pow_base_bits={pb}")
     else:
-        _fail("indexer.params_pow_base_bits_present", f"pow_base_bits={params.get('pow_base_bits') if isinstance(params, dict) else None}")
+        _fail(
+            "indexer.params_pow_base_bits_present",
+            f"pow_base_bits={params.get('pow_base_bits') if isinstance(params, dict) else None}",
+        )
 
     # ── Group 4: Recent blocks & difficulty ──────────────────────────────
 
@@ -431,3 +446,172 @@ def test_indexer(backend: str):
         _pass("indexer.welcome_stats_shape")
     else:
         _fail("indexer.welcome_stats_shape", f"code={code}")
+
+
+def test_tx_index(backend: str):
+    """Verify tx_index table behaviour: successful non-post/vote txs are indexed,
+    failed txs (same-nonce) are indexed with error details, and the old tx_receipts
+    table is dropped.
+    """
+
+    free = WALLETS.get("free")
+    sub1 = WALLETS.get("sub1")
+    if not free or not sub1:
+        _skip("tx_index.setup", "free/sub1 wallets not available")
+        return
+
+    _debug("tx_index: begin")
+    free_addr = str(free.address())
+    sub2_addr = str(WALLETS["sub2"].address())
+    agent1_addr = str(WALLETS["agent1"].address())
+    agent2_addr = str(WALLETS["agent2"].address())
+
+    # Use sub1 (subscriber, level>=1) as actor — free (tier 0) has low limits.
+
+    def _pick_unfollowed_user() -> str:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": str(sub1.address())})
+        if code != 200:
+            _fail("tx_index.follow_user.target_lookup", f"code={code} data={data}")
+            return ""
+        users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+        candidates = [free_addr, sub2_addr, agent1_addr, agent2_addr]
+        for addr in candidates:
+            if not any(addr.lower() in json.dumps(u).lower() for u in users):
+                return addr
+        _fail("tx_index.follow_user.target_lookup", "no unfollowed target available")
+        return ""
+
+    # ── 1. Successful non-post/vote tx is resolvable via tx_index ─────
+
+    bio_resp = _do_set_biography(backend, sub1, f"txidx bio {_rand_str(6)}", skip_pow=True)
+    if not isinstance(bio_resp, dict):
+        _fail("tx_index.success_write", f"set_biography submit failed: {bio_resp}")
+    else:
+        bio_txh_raw = bio_resp.get("tx_hash")
+        bio_txh = str(bio_txh_raw).lower() if bio_txh_raw else ""
+        if not bio_txh or len(bio_txh) != 64:
+            _fail("tx_index.success_write", f"set_biography submit failed: {bio_resp}")
+        else:
+            status = _wait_tx_status(backend, bio_txh, expect_type="set_biography", require_details=False)
+            if status and status.get("found") and status.get("indexed") and status.get("success") is True:
+                _pass("tx_index.success_write", tx_type=status.get("tx_type"))
+            else:
+                _fail("tx_index.success_write", f"status={status}")
+
+    # ── 2. Successful tx has correct tx_type field ────────────────────
+
+    follow_target = _pick_unfollowed_user()
+    if not follow_target:
+        return
+    follow_resp = _do_follow_user(backend, sub1, follow_target, follow=True, skip_pow=True)
+    if not isinstance(follow_resp, dict):
+        _fail("tx_index.tx_type_correct", f"follow submit failed: {follow_resp}")
+    else:
+        follow_txh_raw = follow_resp.get("tx_hash")
+        follow_txh = str(follow_txh_raw).lower() if follow_txh_raw else ""
+        if not follow_txh or len(follow_txh) != 64:
+            _fail("tx_index.tx_type_correct", f"follow submit failed: {follow_resp}")
+        else:
+            fstatus = _wait_tx_status(backend, follow_txh, expect_type="follow_user", require_details=False)
+            if fstatus and fstatus.get("tx_type") == "follow_user":
+                _pass("tx_index.tx_type_correct", tx_type="follow_user")
+            else:
+                _fail("tx_index.tx_type_correct", f"status={fstatus}")
+
+    # Clean up follow
+    try:
+        _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
+    except Exception:
+        pass
+
+    # ── 3. Failed tx (same-nonce) is recorded with success=false ──────
+
+    try:
+        _wait_next_block()
+    except Exception as e:
+        _fail("tx_index.failure_write.block_sync", str(e))
+        return
+
+    nonce = _fresh_nonce()
+    r1 = _do_follow_user_with_nonce(backend, sub1, follow_target, nonce, follow=True, skip_pow=True)
+    r2 = _do_follow_user_with_nonce(backend, sub1, follow_target, nonce, follow=True, skip_pow=True)
+    if not isinstance(r1, dict) or not isinstance(r2, dict):
+        _fail("tx_index.failure_write", f"resp1={r1} resp2={r2}")
+        return
+    t1_raw = r1.get("tx_hash")
+    t2_raw = r2.get("tx_hash")
+    t1 = str(t1_raw).lower() if t1_raw else ""
+    t2 = str(t2_raw).lower() if t2_raw else ""
+
+    if not t1 and not t2:
+        _fail("tx_index.failure_write", "both txs failed to submit")
+    elif (not t1) != (not t2):
+        # One rejected at CheckTx — ensure we captured an error response
+        fail_resp = r1 if not t1 else r2
+        if fail_resp.get("code", 0) or fail_resp.get("error") or fail_resp.get("message") or fail_resp.get("reason"):
+            _pass("tx_index.failure_write", note="one rejected at CheckTx")
+        else:
+            _fail("tx_index.failure_write", f"checktx fail_resp={fail_resp}")
+    else:
+        c1 = int(r1.get("code", 0) or 0)
+        c2 = int(r2.get("code", 0) or 0)
+        if c1 == 0 and c2 == 0:
+            fail1 = _wait_tx_status_failure(backend, t1, expect_type="follow_user")
+            fail2 = _wait_tx_status_failure(backend, t2, expect_type="follow_user")
+            if bool(fail1) != bool(fail2):
+                ftx = fail1 or fail2
+                _pass("tx_index.failure_write", code=ftx.get("code"))
+                if ftx.get("error_details"):
+                    _pass("tx_index.failure_has_error_details")
+                else:
+                    _fail("tx_index.failure_has_error_details", f"fail={ftx}")
+            else:
+                _fail("tx_index.failure_write", f"fail1={bool(fail1)} fail2={bool(fail2)}")
+        elif (c1 == 0) != (c2 == 0):
+            fail_resp = r1 if c1 != 0 else r2
+            if fail_resp.get("code", 0) and (
+                fail_resp.get("reason") or fail_resp.get("message") or fail_resp.get("error")
+            ):
+                _pass("tx_index.failure_write", note="one rejected at CheckTx")
+            else:
+                _fail("tx_index.failure_write", f"checktx fail_resp={fail_resp}")
+        else:
+            _fail("tx_index.failure_write", f"both rejected c1={c1} c2={c2}")
+
+    # Clean up
+    try:
+        _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
+    except Exception:
+        pass
+
+    # ── 4. Direct DB check: tx_index exists, tx_receipts is gone ──────
+
+    if not _check_local_docker():
+        _skip("tx_index.db_table_exists", "not running in local-docker")
+        _skip("tx_index.tx_receipts_dropped", "not running in local-docker")
+        return
+
+    rc, out = _docker_exec(
+        """su - postgres -c "psql -d mirage -tAc 'SELECT count(*) FROM tx_index' 2>&1" """,
+        timeout=10,
+    )
+    if rc == 0:
+        try:
+            cnt = int(out.strip())
+            if cnt >= 0:
+                _pass("tx_index.db_table_exists", row_count=cnt)
+            else:
+                _fail("tx_index.db_table_exists", f"unexpected count={cnt}")
+        except ValueError:
+            _fail("tx_index.db_table_exists", f"non-numeric output: {out}")
+    else:
+        _fail("tx_index.db_table_exists", f"rc={rc} out={out}")
+
+    rc2, out2 = _docker_exec(
+        """su - postgres -c "psql -d mirage -tAc 'SELECT count(*) FROM tx_receipts' 2>&1" """,
+        timeout=10,
+    )
+    if rc2 != 0 or "does not exist" in out2:
+        _pass("tx_index.tx_receipts_dropped")
+    else:
+        _fail("tx_index.tx_receipts_dropped", f"tx_receipts still exists: rc={rc2} out={out2}")

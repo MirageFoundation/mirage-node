@@ -2473,11 +2473,12 @@ def _get_guest_feed_magic(
 
 @public_bp.route("/api/get_tx_status")
 def get_tx_status():
-    """Indexer-only tx status. No CometBFT tx_index dependency.
+    """Indexer-only tx status for all tx types.
 
-    Queries the indexer DB for the txhash. If found in posts or votes,
-    returns details. If not found, returns {found:false} — the frontend
-    treats this as "not indexed yet" and keeps polling.
+    Queries votes/posts for rich details first, then falls back to
+    the universal tx_index table for any other tx type (set_username,
+    follow, block, bridge, etc.). Returns {found:false} only when
+    the tx hasn't been indexed yet.
     """
     rid = next_request_id()
     try:
@@ -2546,32 +2547,30 @@ def get_tx_status():
             if tx_type == "unknown":
                 cur.execute(
                     """
-                    SELECT height, code, raw_log, tx_type
-                    FROM tx_receipts WHERE LOWER(txhash) = %s
+                    SELECT tx_type, code, raw_log, height
+                    FROM tx_index WHERE txhash = %s
                     """,
                     (tx_hash,),
                 )
-                fail_row = cur.fetchone()
-                if fail_row:
-                    fail_height, fail_code, fail_log, fail_type = fail_row
-                    out = {
-                        "found": True,
-                        "tx_hash": tx_hash,
-                        "height": int(fail_height or 0),
-                        "code": int(fail_code or 0),
-                        "success": False,
-                        "indexed": True,
-                        "tx_type": str(fail_type or "unknown"),
-                        "error_details": _classify_reject(str(fail_log or "")),
-                    }
-                    log_event(
-                        rid,
-                        "get_tx_status.failed",
-                        tx_hash=tx_hash,
-                        tx_type=out["tx_type"],
-                        code=out["code"],
-                    )
-                    return jsonify(out)
+                idx_row = cur.fetchone()
+                if idx_row:
+                    idx_type, idx_code, idx_log, idx_height = idx_row
+                    if int(idx_code or 0) != 0:
+                        out = {
+                            "found": True,
+                            "tx_hash": tx_hash,
+                            "height": int(idx_height or 0),
+                            "code": int(idx_code),
+                            "success": False,
+                            "indexed": True,
+                            "tx_type": str(idx_type or "unknown"),
+                            "error_details": _classify_reject(str(idx_log or "")),
+                        }
+                        log_event(
+                            rid, "get_tx_status.failed", tx_hash=tx_hash, tx_type=out["tx_type"], code=out["code"]
+                        )
+                        return jsonify(out)
+                    tx_type = str(idx_type or "unknown")
 
         except Exception as db_err:
             log_event(rid, "get_tx_status.db_error", tx_hash=tx_hash, error=str(db_err))
