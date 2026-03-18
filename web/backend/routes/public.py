@@ -41,6 +41,8 @@ from settings import (
     QUESTS_PAYOUTS_ENABLED,
     NEW_USER_HIGHLIGHT_DAYS,
     PUSH_NOTIFICATIONS_ENABLED,
+    ANDROID_BANNER_ENABLED,
+    IOS_BANNER_ENABLED,
 )
 import time
 import hashlib
@@ -3426,6 +3428,8 @@ def get_node_config():
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
             "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
             "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
+            "android_banner_enabled": ANDROID_BANNER_ENABLED,
+            "ios_banner_enabled": IOS_BANNER_ENABLED,
         }
 
         _NODE_CONFIG_CACHE = resp
@@ -4992,14 +4996,16 @@ def get_user_posts():
                    COALESCE(p.tag, '') as tag
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
+            LEFT JOIN posts root_p ON root_p.txhash = p.root_post_id
             WHERE LOWER(p.owner) = LOWER(%s)
               {deleted_clause}
               {type_filter}
               AND (COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
+              AND (COALESCE(p.target, '') = '' OR COALESCE(root_p.tag, '') = '' OR LOWER(COALESCE(root_p.tag, '')) = ANY(%s))
             ORDER BY p.created_at DESC
             LIMIT %s OFFSET %s
             """,
-            (owner, list(allowed_tags), limit, offset),
+            (owner, list(allowed_tags), list(allowed_tags), limit, offset),
         )
         rows = cur.fetchall()
         rows = [
@@ -5091,11 +5097,14 @@ def get_user_posts():
                 f"""
                 SELECT COUNT(1)
                 FROM posts p
+                LEFT JOIN posts root_p ON root_p.txhash = p.root_post_id
                 WHERE LOWER(p.owner) = LOWER(%s)
                   {deleted_clause}
                   {type_filter}
+                  AND (COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
+                  AND (COALESCE(p.target, '') = '' OR COALESCE(root_p.tag, '') = '' OR LOWER(COALESCE(root_p.tag, '')) = ANY(%s))
                 """,
-                (owner,),
+                (owner, list(allowed_tags), list(allowed_tags)),
             )
             total_row = cur.fetchone()
             total = int(total_row[0] or 0) if total_row else 0

@@ -33,6 +33,9 @@ PUSH_NOTIFICATIONS_ENABLED = require_bool_env("PUSH_NOTIFICATIONS_ENABLED")
 
 EXPO_ACCESS_TOKEN = os.environ.get("EXPO_ACCESS_TOKEN", "")
 
+ANDROID_BANNER_ENABLED = require_bool_env("ANDROID_BANNER_ENABLED")
+IOS_BANNER_ENABLED = require_bool_env("IOS_BANNER_ENABLED")
+
 # Moderation Settings
 # When false (default), standard moderation rules apply:
 # - Deleted posts are hidden
