@@ -10,7 +10,7 @@ import psycopg
 logger = logging.getLogger(__name__)
 
 INDEXER_LIST_CAP = 100_000
-TX_RECEIPTS_CAP = 1000
+TX_INDEX_CAP = 5000
 
 
 class DatabaseManager:
@@ -178,21 +178,21 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_created_at ON votes(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_relayer_lower ON votes(LOWER(relayer))")
 
-                # tx receipts (failed txs only)
+                # tx_index: universal tx tracking (all types, success + failure)
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS tx_receipts (
+                    CREATE TABLE IF NOT EXISTS tx_index (
                         txhash TEXT PRIMARY KEY,
-                        height BIGINT NOT NULL,
-                        code INTEGER NOT NULL,
-                        raw_log TEXT,
                         tx_type TEXT NOT NULL DEFAULT 'unknown',
-                        created_at BIGINT NOT NULL
+                        code INTEGER NOT NULL DEFAULT 0,
+                        raw_log TEXT NOT NULL DEFAULT '',
+                        height BIGINT NOT NULL DEFAULT 0,
+                        created_at BIGINT NOT NULL DEFAULT 0
                     )
                     """
                 )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_receipts_txhash_lower ON tx_receipts(LOWER(txhash))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_receipts_created_at ON tx_receipts(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_index_tx_type ON tx_index(tx_type)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_index_created_at ON tx_index(created_at DESC)")
 
                 # Awards (burn-only signals on posts/comments)
                 cur.execute(
@@ -1534,6 +1534,7 @@ class DatabaseManager:
     def update_post_media_meta(self, txhash: str, meta: list[dict]) -> None:
         """Update media_meta JSON for a post (only if it contains real data)."""
         import json as _json
+
         sanitized = [self._sanitize_wh(m.get("w", 0), m.get("h", 0)) if m else {} for m in (meta or [])]
         if not any(sanitized):
             return
@@ -1665,53 +1666,53 @@ class DatabaseManager:
                     (txhash, owner, target, float(user_vote), float(user_weight), int(created_at), bool(paid), relayer),
                 )
 
-    def upsert_tx_receipt_failure(
+    def upsert_tx_index(
         self,
         txhash: str,
-        height: int,
+        tx_type: str,
         code: int,
         raw_log: str,
-        tx_type: str,
+        height: int,
         created_at: int,
     ) -> None:
-        """Insert or update a failed transaction receipt."""
+        """Insert or update a tx in the universal tx_index (success + failure)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO tx_receipts(txhash, height, code, raw_log, tx_type, created_at)
+                    INSERT INTO tx_index(txhash, tx_type, code, raw_log, height, created_at)
                     VALUES(%s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
-                      height=EXCLUDED.height,
+                      tx_type=EXCLUDED.tx_type,
                       code=EXCLUDED.code,
                       raw_log=EXCLUDED.raw_log,
-                      tx_type=EXCLUDED.tx_type,
+                      height=EXCLUDED.height,
                       created_at=EXCLUDED.created_at
                     """,
                     (
                         txhash,
-                        int(height),
+                        self._strip_nul(str(tx_type or "unknown")),
                         int(code),
                         self._strip_nul(str(raw_log or "")),
-                        self._strip_nul(str(tx_type or "unknown")),
+                        int(height),
                         int(created_at),
                     ),
                 )
-                cur.execute("SELECT COUNT(*) FROM tx_receipts")
+                cur.execute("SELECT COUNT(*) FROM tx_index")
                 total = int((cur.fetchone() or [0])[0] or 0)
-                if total > TX_RECEIPTS_CAP:
+                if total > TX_INDEX_CAP:
                     cur.execute(
                         """
-                        DELETE FROM tx_receipts
+                        DELETE FROM tx_index
                         WHERE txhash NOT IN (
-                            SELECT txhash FROM tx_receipts
+                            SELECT txhash FROM tx_index
                             ORDER BY created_at DESC, height DESC
                             LIMIT %s
                         )
                         """,
-                        (TX_RECEIPTS_CAP,),
+                        (TX_INDEX_CAP,),
                     )
-                    logger.debug("Pruned tx_receipts to cap=%s (total=%s)", TX_RECEIPTS_CAP, total)
+                    logger.debug("Pruned tx_index to cap=%s (total=%s)", TX_INDEX_CAP, total)
 
     def is_topic_followed(self, owner: str, topic: str) -> bool:
         """Return True if the owner currently follows the given topic."""

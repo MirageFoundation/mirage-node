@@ -6,7 +6,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { generateMnemonic } from 'bip39';
 import Storage from "../utils/Storage.js";
 import seedVault from "../utils/SeedVault.js";
-import { updateNotification } from "../utils/notifications.js";
+
 import { deriveKeysFromSeed } from '../utils/CryptoUtils.js';
 import * as tx from "../utils/tx";
 import Api from '../lib/api';
@@ -405,45 +405,15 @@ function CreateAccountView({ state, setCredentials }) {
                 return;
             }
 
-            // Stage 2: Submitting (show for 1-2 seconds)
-            setButtonStatus("submitting");
-            setStatusStartTime(Date.now());
-            await new Promise(r => setTimeout(r, 50)); // Let React render
-            const submittingDuration = 1000 + Math.random() * 1000; // 1.0 to 2.0 seconds
-            await new Promise(r => setTimeout(r, submittingDuration));
-
-            // Stage 3: Verifying (4s initial, then 2s intervals, max 5 attempts)
-            setButtonStatus("verifying");
-            setStatusStartTime(Date.now());
-            await new Promise(r => setTimeout(r, 50)); // Let React render
-            // Confirm on-chain before establishing session
-            try {
-                const txHash = (result && result.tx_hash) ? String(result.tx_hash).toLowerCase() : "";
-                if (!txHash) throw new Error("missing tx hash");
-                const pollResult = await tx.pollTxStatus(txHash);
-                if (!pollResult) throw new Error('confirmation timeout');
-                if (!pollResult.success) {
-                    throw new Error(pollResult.error_details?.message || 'transaction rejected');
-                }
-                // Invite code is now marked as used by the backend in the set_username call
-                // Navigate to welcome FIRST (before setCredentials triggers useEffect redirect to /profile)
-                const finalUsername = `Anon-${base}`;
-                try { Storage.remove('username_pending'); } catch (_) { }
-                try { Storage.remove('publicKey_pending'); } catch (_) { }
-                navigate('/welcome', { state: { username: finalUsername, seedPhrase }, replace: true });
-                // Establish session after navigation
-                setCredentials(publicKey, finalUsername, seedPhrase);
-            } catch (e) {
-                setSubmitError(String(e && e.message ? e.message : 'Failed to confirm account on-chain'));
-                try { Storage.remove('username_pending'); } catch (_) { }
-                try { Storage.remove('publicKey_pending'); } catch (_) { }
-                updateNotification('There was an error creating your account. You have been signed out.', 5.0, true);
-                setButtonStatus("idle");
-                setStatusStartTime(null);
-                navigate('/sign_out');
-            }
-            // Persist some context for later
+            // Transaction broadcast succeeded (code=0 from BROADCAST_MODE_SYNC).
+            // Navigate to welcome and show seed phrase IMMEDIATELY — never gate
+            // seed phrase display on indexer confirmation. The account exists on-chain.
+            const finalUsername = `Anon-${base}`;
+            try { Storage.remove('username_pending'); } catch (_) { }
+            try { Storage.remove('publicKey_pending'); } catch (_) { }
             try { localStorage.setItem('user_balance', String(localStorage.getItem('user_balance') || '0')); } catch (_) { }
+            navigate('/welcome', { state: { username: finalUsername, seedPhrase }, replace: true });
+            setCredentials(publicKey, finalUsername, seedPhrase);
         } catch (e) {
             setSubmitError(String(e?.message || e || "Submit failed"));
             setButtonStatus("idle");

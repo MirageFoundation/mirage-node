@@ -499,6 +499,41 @@ def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, s
     return resp
 
 
+def _do_follow_user_with_nonce(
+    backend: str, wallet, user_addr: str, nonce: int, follow: bool = True, skip_pow: bool = False
+) -> dict:
+    """Follow/unfollow with a caller-supplied nonce (for duplicate-nonce failure tests)."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_follow_user_raw if follow else _canon_base_unfollow_user_raw
+    endpoint = "follow_user" if follow else "unfollow_user"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, user_addr, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": addr,
+        "user": user_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
 def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip_pow: bool = False) -> dict:
     """Follow or unfollow a topic."""
     addr = str(wallet.address())
@@ -571,6 +606,45 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
     return resp
 
 
+def _do_block_with_nonce(
+    backend: str, wallet, target: str, block_type: str, nonce: int, block: bool = True, skip_pow: bool = False
+) -> dict:
+    """Block/unblock with a caller-supplied nonce (for duplicate-nonce failure tests)."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    if block_type == "post":
+        canon_fn = _canon_base_block_post_raw if block else _canon_base_unblock_post_raw
+        endpoint = "block_post" if block else "unblock_post"
+    else:
+        canon_fn = _canon_base_block_user_raw if block else _canon_base_unblock_user_raw
+        endpoint = "block_user" if block else "unblock_user"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, target, nonce)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "target": target,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
 def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_pow: bool = False) -> dict:
     """Block or unblock a topic."""
     addr = str(wallet.address())
@@ -605,7 +679,13 @@ def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_p
     return resp
 
 
-def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = False) -> dict:
+def _do_set_username_raw(
+    backend: str,
+    wallet,
+    username: str,
+    skip_pow: bool = False,
+    invite_code: str | None = None,
+) -> dict:
     """Set username via the backend API (raw payload construction)."""
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -633,6 +713,8 @@ def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = F
     }
     if not skip_pow:
         payload["pow"] = int(proof)
+    if invite_code:
+        payload["invite_code"] = str(invite_code).strip().upper()
     code, resp = _post(f"{backend}/api/core/set_username", payload)
     return resp
 
@@ -886,6 +968,7 @@ def _wait_tx_status(
     tx_hash: str,
     expect_type: str | None = None,
     timeout: float = INDEX_TIMEOUT_SEC,
+    require_details: bool = True,
 ) -> dict | None:
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
@@ -898,8 +981,12 @@ def _wait_tx_status(
             if expect_type and data.get("tx_type") != expect_type:
                 time.sleep(0.5)
                 continue
-            if data.get("indexed") and data.get("details"):
-                return data
+            if require_details:
+                if data.get("indexed") and data.get("details"):
+                    return data
+            else:
+                if data.get("indexed"):
+                    return data
         time.sleep(0.5)
     return None
 

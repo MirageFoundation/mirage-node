@@ -75,12 +75,13 @@ from tests.backend_helpers import (
     _do_vote,
     _do_vote_with_nonce,
     _do_edit,
-    _do_annotate,
     _do_delete,
     _do_delete_user,
     _do_follow_user,
+    _do_follow_user_with_nonce,
     _do_follow_topic,
     _do_block,
+    _do_block_with_nonce,
     _do_block_topic,
     _do_set_username_raw,
     _do_set_biography,
@@ -487,8 +488,66 @@ def test_tx_status(backend: str):
         _fail("tx_status.response_shape", "no status data")
 
 
+def test_tx_status_non_post_vote(backend: str):
+    """Test tx_index resolves non-post/vote types (set_username, follow, etc.)."""
+
+    free = WALLETS.get("free")
+    if not free:
+        _skip("tx_status_npv.setup", "free wallet not available")
+        return
+
+    # If invite codes are required, grab an existing unused code.
+    invite_code = ""
+    try:
+        _code, ncfg = _get(f"{backend}/api/get_node_config")
+        if (ncfg or {}).get("registration_invite_code_required") is True:
+            addrs = []
+            validator_addr = str((ncfg or {}).get("validator_account_address") or "").strip()
+            if validator_addr:
+                addrs.append(validator_addr)
+            # fall back to known test wallets
+            for w in WALLETS.values():
+                try:
+                    addrs.append(str(w.address()))
+                except Exception:
+                    pass
+            for addr in addrs:
+                code, data = _get(f"{backend}/api/get_invite_codes", {"address": addr})
+                if code != 200:
+                    continue
+                codes = (data or {}).get("codes") or []
+                unused = next((c for c in codes if not c.get("is_used")), None)
+                if unused and unused.get("code"):
+                    invite_code = str(unused["code"])
+                    break
+            if not invite_code:
+                _fail("tx_status_npv.invite_code_missing", "invite code required but none available")
+                return
+    except Exception as e:
+        _fail("tx_status_npv.invite_code_lookup", str(e))
+        return
+
+    # Submit a set_username and check that get_tx_status can find it via tx_index
+    uname = f"Anon-txidx{_rand_str(4)}"
+    resp = _do_set_username_raw(backend, free, uname, invite_code=invite_code or None)
+    txh = str(resp.get("tx_hash", "") or "").lower()
+    if not txh or len(txh) != 64:
+        _fail("tx_status_npv.set_username_submit", f"resp={resp}")
+        return
+    _pass("tx_status_npv.set_username_submit", tx=txh)
+
+    status = _wait_tx_status(backend, txh, expect_type="set_username", require_details=False)
+    if status and status.get("found") and status.get("indexed"):
+        if status.get("success") is True and status.get("tx_type") == "set_username":
+            _pass("tx_status_npv.set_username_found")
+        else:
+            _fail("tx_status_npv.set_username_found", f"status={status}")
+    else:
+        _fail("tx_status_npv.set_username_found", f"status={status}")
+
+
 def test_failed_tx_status(backend: str):
-    """Test indexer receipts for failed vote/post transactions."""
+    """Test tx_index records for failed vote/post transactions."""
 
     free = WALLETS.get("free")
     if not free:
@@ -659,3 +718,313 @@ def test_failed_tx_status(backend: str):
             _fail("failed_tx.post.error_details_present", f"fail={fail_resp}")
     else:
         _fail("failed_tx.post.failure_detected", f"both rejected code1={code1} code2={code2}")
+
+
+def test_tx_status_matrix(backend: str):
+    """Matrix test: submit one tx per core type, verify get_tx_status resolves each."""
+
+    free = WALLETS.get("free")
+    sub1 = WALLETS.get("sub1")
+    if not free or not sub1:
+        _skip("tx_matrix.setup", "free/sub1 wallets not available")
+        return
+
+    _debug("tx_matrix: begin")
+    free_addr = str(free.address())
+    sub1_addr = str(sub1.address())
+    post_topic = "test"
+    follow_topic = f"matrix-{_rand_str(4)}"
+
+    def _extract_tx_hash(label: str, resp: dict | None) -> str:
+        if not isinstance(resp, dict):
+            _fail(f"tx_matrix.{label}.submit", f"resp={resp}")
+            return ""
+        txh_raw = resp.get("tx_hash")
+        if not txh_raw:
+            _fail(f"tx_matrix.{label}.submit", f"resp={resp}")
+            return ""
+        txh = str(txh_raw).lower()
+        if len(txh) != 64:
+            _fail(f"tx_matrix.{label}.submit", f"resp={resp}")
+            return ""
+        _pass(f"tx_matrix.{label}.submit", tx=txh[:16])
+        return txh
+
+    def _check(label: str, tx_hash: str, expected_type: str, expect_details: bool = False):
+        """Poll get_tx_status and assert the response matches expectations."""
+        status = _wait_tx_status(backend, tx_hash, expect_type=expected_type, require_details=expect_details)
+        if not status:
+            _fail(f"tx_matrix.{label}", f"timeout waiting for tx_hash={tx_hash[:16]}...")
+            return
+        if not (status.get("found") and status.get("indexed")):
+            _fail(f"tx_matrix.{label}", f"not indexed: {status}")
+            return
+        if status.get("success") is not True:
+            _fail(f"tx_matrix.{label}", f"not successful: {status}")
+            return
+        if status.get("tx_type") != expected_type:
+            _fail(f"tx_matrix.{label}", f"tx_type={status.get('tx_type')} expected={expected_type}")
+            return
+        if expect_details and not status.get("details"):
+            _fail(f"tx_matrix.{label}", "expected details but got none")
+            return
+        _pass(f"tx_matrix.{label}", tx=tx_hash[:16])
+
+    # 1. set_biography
+    bio_resp = _do_set_biography(backend, free, f"Matrix bio {_rand_str(6)}")
+    bio_txh = _extract_tx_hash("set_biography", bio_resp)
+    if bio_txh:
+        _check("set_biography", bio_txh, "set_biography")
+
+    # 2. follow_user
+    follow_resp = _do_follow_user(backend, free, sub1_addr, follow=True)
+    follow_txh = _extract_tx_hash("follow_user", follow_resp)
+    if follow_txh:
+        _check("follow_user", follow_txh, "follow_user")
+
+    # 3. unfollow (clean up the follow)
+    unfollow_resp = _do_follow_user(backend, free, sub1_addr, follow=False)
+    unfollow_txh = _extract_tx_hash("unfollow_user", unfollow_resp)
+    if unfollow_txh:
+        _check("unfollow_user", unfollow_txh, "unfollow_user")
+
+    # 4. follow_topic
+    ftopic_resp = _do_follow_topic(backend, free, follow_topic, follow=True)
+    ftopic_txh = _extract_tx_hash("follow_topic", ftopic_resp)
+    if ftopic_txh:
+        _check("follow_topic", ftopic_txh, "follow_topic")
+
+    # 5. unfollow_topic (clean up follow)
+    utopic_resp = _do_follow_topic(backend, free, follow_topic, follow=False)
+    utopic_txh = _extract_tx_hash("unfollow_topic", utopic_resp)
+    if utopic_txh:
+        _check("unfollow_topic", utopic_txh, "unfollow_topic")
+
+    # 6. send_tokens
+    send_resp = _do_send_tokens(backend, sub1, free_addr, 1, skip_pow=True)
+    send_txh = _extract_tx_hash("send_tokens", send_resp)
+    if send_txh:
+        _check("send_tokens", send_txh, "send_tokens")
+
+    # 7. post (should have details)
+    post_txh = _do_post(backend, free, post_topic, f"Matrix Post {_rand_str(6)}", f"Body {_rand_str(8)}")
+    if not post_txh or len(post_txh) != 64:
+        _fail("tx_matrix.post.submit", f"tx={post_txh}")
+        return
+    _pass("tx_matrix.post.submit", tx=post_txh[:16])
+    _check("post", post_txh, "post", expect_details=True)
+
+    # 8. vote (should have details)
+    vote_resp = _do_vote(backend, free, post_txh, 1)
+    vote_txh = _extract_tx_hash("vote", vote_resp)
+    if vote_txh:
+        _check("vote", vote_txh, "vote", expect_details=True)
+
+    # 9. edit (needs indexed post)
+    if post_txh and _wait_indexed(backend, free_addr, post_txh):
+        edit_resp = _do_edit(
+            backend, free, post_txh, post_topic, f"Edited Title {_rand_str(4)}", f"Edited Body {_rand_str(6)}"
+        )
+        edit_txh = _extract_tx_hash("edit", edit_resp)
+        if edit_txh:
+            _check("edit", edit_txh, "edit")
+    else:
+        _fail("tx_matrix.edit.submit", "post not indexed in time")
+
+    # 10. report
+    if post_txh:
+        report_resp = _do_report(backend, sub1, post_txh, "spam")
+        report_txh = _extract_tx_hash("report", report_resp)
+        if report_txh:
+            _check("report", report_txh, "report")
+
+    # 11. delete (own post)
+    if post_txh:
+        delete_resp = _do_delete(backend, free, post_txh)
+        delete_txh = _extract_tx_hash("delete", delete_resp)
+        if delete_txh:
+            _check("delete", delete_txh, "delete")
+
+    # 12. block_user
+    block_resp = _do_block(backend, free, sub1_addr, "user", block=True)
+    block_txh = _extract_tx_hash("block_user", block_resp)
+    if block_txh:
+        _check("block_user", block_txh, "block_user")
+
+    # 13. unblock_user (clean up)
+    unblock_resp = _do_block(backend, free, sub1_addr, "user", block=False)
+    unblock_txh = _extract_tx_hash("unblock_user", unblock_resp)
+    if unblock_txh:
+        _check("unblock_user", unblock_txh, "unblock_user")
+
+
+def test_failed_tx_non_post_vote(backend: str):
+    """Test tx_index failure detection for non-post/vote types (follow_user via same-nonce)."""
+
+    free = WALLETS.get("free")
+    sub1 = WALLETS.get("sub1")
+    if not free or not sub1:
+        _skip("failed_npv.setup", "free/sub1 wallets not available")
+        return
+
+    sub1_addr = str(sub1.address())
+
+    # ── Failed follow_user: two txs with same nonce in the same block ──
+    try:
+        blk = _wait_next_block()
+        _debug(f"failed_npv.follow next_block={blk}")
+    except Exception as e:
+        _fail("failed_npv.follow.block_sync", str(e))
+        return
+
+    nonce = _fresh_nonce()
+    resp1 = _do_follow_user_with_nonce(backend, free, sub1_addr, nonce, follow=True)
+    resp2 = _do_follow_user_with_nonce(backend, free, sub1_addr, nonce, follow=True)
+    if not isinstance(resp1, dict) or not isinstance(resp2, dict):
+        _fail("failed_npv.follow.submit", f"resp1={resp1} resp2={resp2}")
+        return
+    tx1_raw = resp1.get("tx_hash")
+    tx2_raw = resp2.get("tx_hash")
+    tx1 = str(tx1_raw).lower() if tx1_raw else ""
+    tx2 = str(tx2_raw).lower() if tx2_raw else ""
+    _debug(f"failed_npv.follow tx1={tx1} tx2={tx2} nonce={nonce}")
+
+    if not tx1 and not tx2:
+        _fail("failed_npv.follow.submit", f"tx1={tx1} tx2={tx2}")
+        return
+    if (not tx1) != (not tx2):
+        fail_resp = resp1 if not tx1 else resp2
+        ok_tx = tx1 if tx1 else tx2
+        if fail_resp.get("error") or fail_resp.get("message"):
+            _pass("failed_npv.follow.failure_detected", err=fail_resp.get("error") or fail_resp.get("message"))
+        else:
+            _fail("failed_npv.follow.failure_detected", f"fail={fail_resp}")
+        ok_status = _wait_tx_status(backend, ok_tx, expect_type="follow_user", require_details=False)
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_npv.follow.success_detected", tx=ok_tx[:16])
+        else:
+            _fail("failed_npv.follow.success_detected", f"status={ok_status}")
+        return
+
+    code1 = int(resp1.get("code", 0) or 0)
+    code2 = int(resp2.get("code", 0) or 0)
+
+    if (code1 == 0) and (code2 == 0):
+        fail1 = _wait_tx_status_failure(backend, tx1, expect_type="follow_user")
+        fail2 = _wait_tx_status_failure(backend, tx2, expect_type="follow_user")
+        if bool(fail1) == bool(fail2):
+            _fail("failed_npv.follow.failure_detected", f"fail1={bool(fail1)} fail2={bool(fail2)}")
+        else:
+            fail_tx = fail1 or fail2
+            ok_tx = tx2 if fail1 else tx1
+            _pass("failed_npv.follow.failure_detected", tx=fail_tx.get("tx_hash", "")[:16])
+            ok_status = _wait_tx_status(backend, ok_tx, expect_type="follow_user", require_details=False)
+            if ok_status and ok_status.get("success") is True:
+                _pass("failed_npv.follow.success_detected", tx=ok_tx[:16])
+            else:
+                _fail("failed_npv.follow.success_detected", f"status={ok_status}")
+            if fail_tx.get("code", 0) and fail_tx.get("error_details"):
+                _pass("failed_npv.follow.error_details_present")
+            else:
+                _fail("failed_npv.follow.error_details_present", f"fail={fail_tx}")
+    elif (code1 == 0) != (code2 == 0):
+        fail_resp = resp1 if code1 != 0 else resp2
+        ok_tx = tx2 if code1 != 0 else tx1
+        _pass("failed_npv.follow.failure_detected", tx=fail_resp.get("tx_hash", "")[:16])
+        ok_status = _wait_tx_status(backend, ok_tx, expect_type="follow_user", require_details=False)
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_npv.follow.success_detected", tx=ok_tx[:16])
+        else:
+            _fail("failed_npv.follow.success_detected", f"status={ok_status}")
+        if fail_resp.get("code", 0) and (fail_resp.get("reason") or fail_resp.get("message")):
+            _pass("failed_npv.follow.error_details_present")
+        else:
+            _fail("failed_npv.follow.error_details_present", f"fail={fail_resp}")
+    else:
+        _fail("failed_npv.follow.failure_detected", f"both rejected code1={code1} code2={code2}")
+
+    # Clean up: unfollow so state is reset
+    try:
+        _do_follow_user(backend, free, sub1_addr, follow=False)
+    except Exception:
+        pass
+
+    # ── Failed block_user: two txs with same nonce in the same block ──
+    try:
+        blk = _wait_next_block()
+        _debug(f"failed_npv.block next_block={blk}")
+    except Exception as e:
+        _fail("failed_npv.block.block_sync", str(e))
+        return
+
+    nonce2 = _fresh_nonce()
+    bresp1 = _do_block_with_nonce(backend, free, sub1_addr, "user", nonce2, block=True)
+    bresp2 = _do_block_with_nonce(backend, free, sub1_addr, "user", nonce2, block=True)
+    if not isinstance(bresp1, dict) or not isinstance(bresp2, dict):
+        _fail("failed_npv.block.submit", f"resp1={bresp1} resp2={bresp2}")
+        return
+    btx1_raw = bresp1.get("tx_hash")
+    btx2_raw = bresp2.get("tx_hash")
+    btx1 = str(btx1_raw).lower() if btx1_raw else ""
+    btx2 = str(btx2_raw).lower() if btx2_raw else ""
+    _debug(f"failed_npv.block tx1={btx1} tx2={btx2} nonce={nonce2}")
+
+    if not btx1 and not btx2:
+        _fail("failed_npv.block.submit", f"tx1={btx1} tx2={btx2}")
+        return
+    if (not btx1) != (not btx2):
+        fail_resp = bresp1 if not btx1 else bresp2
+        ok_tx = btx1 if btx1 else btx2
+        if fail_resp.get("error") or fail_resp.get("message"):
+            _pass("failed_npv.block.failure_detected", err=fail_resp.get("error") or fail_resp.get("message"))
+        else:
+            _fail("failed_npv.block.failure_detected", f"fail={fail_resp}")
+        ok_status = _wait_tx_status(backend, ok_tx, expect_type="block_user", require_details=False)
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_npv.block.success_detected", tx=ok_tx[:16])
+        else:
+            _fail("failed_npv.block.success_detected", f"status={ok_status}")
+        return
+
+    bcode1 = int(bresp1.get("code", 0) or 0)
+    bcode2 = int(bresp2.get("code", 0) or 0)
+
+    if (bcode1 == 0) and (bcode2 == 0):
+        bfail1 = _wait_tx_status_failure(backend, btx1, expect_type="block_user")
+        bfail2 = _wait_tx_status_failure(backend, btx2, expect_type="block_user")
+        if bool(bfail1) == bool(bfail2):
+            _fail("failed_npv.block.failure_detected", f"fail1={bool(bfail1)} fail2={bool(bfail2)}")
+        else:
+            fail_tx = bfail1 or bfail2
+            ok_tx = btx2 if bfail1 else btx1
+            _pass("failed_npv.block.failure_detected", tx=fail_tx.get("tx_hash", "")[:16])
+            ok_status = _wait_tx_status(backend, ok_tx, expect_type="block_user", require_details=False)
+            if ok_status and ok_status.get("success") is True:
+                _pass("failed_npv.block.success_detected", tx=ok_tx[:16])
+            else:
+                _fail("failed_npv.block.success_detected", f"status={ok_status}")
+            if fail_tx.get("code", 0) and fail_tx.get("error_details"):
+                _pass("failed_npv.block.error_details_present")
+            else:
+                _fail("failed_npv.block.error_details_present", f"fail={fail_tx}")
+    elif (bcode1 == 0) != (bcode2 == 0):
+        fail_resp = bresp1 if bcode1 != 0 else bresp2
+        ok_tx = btx2 if bcode1 != 0 else btx1
+        _pass("failed_npv.block.failure_detected", tx=fail_resp.get("tx_hash", "")[:16])
+        ok_status = _wait_tx_status(backend, ok_tx, expect_type="block_user", require_details=False)
+        if ok_status and ok_status.get("success") is True:
+            _pass("failed_npv.block.success_detected", tx=ok_tx[:16])
+        else:
+            _fail("failed_npv.block.success_detected", f"status={ok_status}")
+        if fail_resp.get("code", 0) and (fail_resp.get("reason") or fail_resp.get("message")):
+            _pass("failed_npv.block.error_details_present")
+        else:
+            _fail("failed_npv.block.error_details_present", f"fail={fail_resp}")
+    else:
+        _fail("failed_npv.block.failure_detected", f"both rejected code1={bcode1} code2={bcode2}")
+
+    # Clean up: unblock
+    try:
+        _do_block(backend, free, sub1_addr, "user", block=False)
+    except Exception:
+        pass

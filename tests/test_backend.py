@@ -15,7 +15,16 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from tests.common import run_suite
-from tests.cases.test_backend_infra import test_params, test_search, test_reports, test_tx_status, test_failed_tx_status
+from tests.cases.test_backend_infra import (
+    test_params,
+    test_search,
+    test_reports,
+    test_tx_status,
+    test_tx_status_non_post_vote,
+    test_failed_tx_status,
+    test_tx_status_matrix,
+    test_failed_tx_non_post_vote,
+)
 from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_upgrade_level_validation
 from tests.cases.test_backend_content import (
     test_post_lifecycle,
@@ -31,7 +40,7 @@ from tests.cases.test_backend_subscriptions import test_subscriber, test_auto_re
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
 from tests.cases.test_backend_security import test_security, test_validation
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
-from tests.cases.test_backend_indexer import test_indexer
+from tests.cases.test_backend_indexer import test_indexer, test_tx_index
 
 ALL_CATEGORIES = {
     "params": test_params,
@@ -62,8 +71,12 @@ ALL_CATEGORIES = {
     "annotate": test_annotate,
     "edit_target": test_edit_target_immutability,
     "tx_status": test_tx_status,
+    "tx_status_npv": test_tx_status_non_post_vote,
+    "tx_status_matrix": test_tx_status_matrix,
     "failed_tx": test_failed_tx_status,
+    "failed_tx_npv": test_failed_tx_non_post_vote,
     "indexer": test_indexer,
+    "tx_index": test_tx_index,
 }
 
 STATELESS_CATEGORIES = {
