@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 
@@ -460,11 +461,29 @@ def test_tx_index(backend: str):
         return
 
     _debug("tx_index: begin")
-    sub1_addr = str(sub1.address())
+    free_addr = str(free.address())
+    sub2_addr = str(WALLETS["sub2"].address())
+    agent1_addr = str(WALLETS["agent1"].address())
+    agent2_addr = str(WALLETS["agent2"].address())
+
+    # Use sub1 (subscriber, level>=1) as actor — free (tier 0) has low limits.
+
+    def _pick_unfollowed_user() -> str:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": str(sub1.address())})
+        if code != 200:
+            _fail("tx_index.follow_user.target_lookup", f"code={code} data={data}")
+            return ""
+        users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+        candidates = [free_addr, sub2_addr, agent1_addr, agent2_addr]
+        for addr in candidates:
+            if not any(addr.lower() in json.dumps(u).lower() for u in users):
+                return addr
+        _fail("tx_index.follow_user.target_lookup", "no unfollowed target available")
+        return ""
 
     # ── 1. Successful non-post/vote tx is resolvable via tx_index ─────
 
-    bio_resp = _do_set_biography(backend, free, f"txidx bio {_rand_str(6)}")
+    bio_resp = _do_set_biography(backend, sub1, f"txidx bio {_rand_str(6)}", skip_pow=True)
     if not isinstance(bio_resp, dict):
         _fail("tx_index.success_write", f"set_biography submit failed: {bio_resp}")
     else:
@@ -481,7 +500,10 @@ def test_tx_index(backend: str):
 
     # ── 2. Successful tx has correct tx_type field ────────────────────
 
-    follow_resp = _do_follow_user(backend, free, sub1_addr, follow=True)
+    follow_target = _pick_unfollowed_user()
+    if not follow_target:
+        return
+    follow_resp = _do_follow_user(backend, sub1, follow_target, follow=True, skip_pow=True)
     if not isinstance(follow_resp, dict):
         _fail("tx_index.tx_type_correct", f"follow submit failed: {follow_resp}")
     else:
@@ -498,7 +520,7 @@ def test_tx_index(backend: str):
 
     # Clean up follow
     try:
-        _do_follow_user(backend, free, sub1_addr, follow=False)
+        _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
     except Exception:
         pass
 
@@ -511,8 +533,8 @@ def test_tx_index(backend: str):
         return
 
     nonce = _fresh_nonce()
-    r1 = _do_follow_user_with_nonce(backend, free, sub1_addr, nonce, follow=True)
-    r2 = _do_follow_user_with_nonce(backend, free, sub1_addr, nonce, follow=True)
+    r1 = _do_follow_user_with_nonce(backend, sub1, follow_target, nonce, follow=True, skip_pow=True)
+    r2 = _do_follow_user_with_nonce(backend, sub1, follow_target, nonce, follow=True, skip_pow=True)
     if not isinstance(r1, dict) or not isinstance(r2, dict):
         _fail("tx_index.failure_write", f"resp1={r1} resp2={r2}")
         return
@@ -558,7 +580,7 @@ def test_tx_index(backend: str):
 
     # Clean up
     try:
-        _do_follow_user(backend, free, sub1_addr, follow=False)
+        _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
     except Exception:
         pass
 
@@ -570,7 +592,7 @@ def test_tx_index(backend: str):
         return
 
     rc, out = _docker_exec(
-        'psql -U mirage -d mirage -tAc "SELECT count(*) FROM tx_index"',
+        """su - postgres -c "psql -d mirage -tAc 'SELECT count(*) FROM tx_index' 2>&1" """,
         timeout=10,
     )
     if rc == 0:
@@ -586,7 +608,7 @@ def test_tx_index(backend: str):
         _fail("tx_index.db_table_exists", f"rc={rc} out={out}")
 
     rc2, out2 = _docker_exec(
-        'psql -U mirage -d mirage -tAc "SELECT count(*) FROM tx_receipts" 2>&1',
+        """su - postgres -c "psql -d mirage -tAc 'SELECT count(*) FROM tx_receipts' 2>&1" """,
         timeout=10,
     )
     if rc2 != 0 or "does not exist" in out2:

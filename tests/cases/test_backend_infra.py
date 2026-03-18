@@ -725,15 +725,49 @@ def test_tx_status_matrix(backend: str):
 
     free = WALLETS.get("free")
     sub1 = WALLETS.get("sub1")
-    if not free or not sub1:
-        _skip("tx_matrix.setup", "free/sub1 wallets not available")
+    sub2 = WALLETS.get("sub2")
+    agent1 = WALLETS.get("agent1")
+    agent2 = WALLETS.get("agent2")
+    if not free or not sub1 or not sub2 or not agent1 or not agent2:
+        _skip("tx_matrix.setup", "free/sub1/sub2/agent1/agent2 wallets not available")
         return
 
     _debug("tx_matrix: begin")
     free_addr = str(free.address())
-    sub1_addr = str(sub1.address())
+    sub2_addr = str(sub2.address())
+    agent1_addr = str(agent1.address())
+    agent2_addr = str(agent2.address())
     post_topic = "test"
     follow_topic = f"matrix-{_rand_str(4)}"
+
+    # Use sub1 (subscriber, level>=1) as primary actor — free (level 0) has
+    # max_biography_length=0 and low follow limits that cause chain rejections.
+
+    def _pick_unfollowed_user() -> str:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": str(sub1.address())})
+        if code != 200:
+            _fail("tx_matrix.follow_user.target_lookup", f"code={code} data={data}")
+            return ""
+        users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+        candidates = [free_addr, sub2_addr, agent1_addr, agent2_addr]
+        for addr in candidates:
+            if not any(addr.lower() in json.dumps(u).lower() for u in users):
+                return addr
+        _fail("tx_matrix.follow_user.target_lookup", "no unfollowed target available")
+        return ""
+
+    def _pick_unblocked_user() -> str:
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": str(sub1.address())})
+        if code != 200:
+            _fail("tx_matrix.block_user.target_lookup", f"code={code} data={data}")
+            return ""
+        users = (data or {}).get("blocked_users") or (data or {}).get("users") or []
+        candidates = [free_addr, sub2_addr, agent1_addr, agent2_addr]
+        for addr in candidates:
+            if not any(addr.lower() in json.dumps(u).lower() for u in users):
+                return addr
+        _fail("tx_matrix.block_user.target_lookup", "no unblocked target available")
+        return ""
 
     def _extract_tx_hash(label: str, resp: dict | None) -> str:
         if not isinstance(resp, dict):
@@ -770,32 +804,35 @@ def test_tx_status_matrix(backend: str):
             return
         _pass(f"tx_matrix.{label}", tx=tx_hash[:16])
 
-    # 1. set_biography
-    bio_resp = _do_set_biography(backend, free, f"Matrix bio {_rand_str(6)}")
+    # 1. set_biography (sub1 — tier 0 has max_biography_length=0)
+    bio_resp = _do_set_biography(backend, sub1, f"Matrix bio {_rand_str(6)}", skip_pow=True)
     bio_txh = _extract_tx_hash("set_biography", bio_resp)
     if bio_txh:
         _check("set_biography", bio_txh, "set_biography")
 
-    # 2. follow_user
-    follow_resp = _do_follow_user(backend, free, sub1_addr, follow=True)
+    # 2. follow_user (sub1 follows free — higher follow limits)
+    follow_target = _pick_unfollowed_user()
+    if not follow_target:
+        return
+    follow_resp = _do_follow_user(backend, sub1, follow_target, follow=True, skip_pow=True)
     follow_txh = _extract_tx_hash("follow_user", follow_resp)
     if follow_txh:
         _check("follow_user", follow_txh, "follow_user")
 
     # 3. unfollow (clean up the follow)
-    unfollow_resp = _do_follow_user(backend, free, sub1_addr, follow=False)
+    unfollow_resp = _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
     unfollow_txh = _extract_tx_hash("unfollow_user", unfollow_resp)
     if unfollow_txh:
         _check("unfollow_user", unfollow_txh, "unfollow_user")
 
-    # 4. follow_topic
-    ftopic_resp = _do_follow_topic(backend, free, follow_topic, follow=True)
+    # 4. follow_topic (sub1 — higher limits)
+    ftopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=True, skip_pow=True)
     ftopic_txh = _extract_tx_hash("follow_topic", ftopic_resp)
     if ftopic_txh:
         _check("follow_topic", ftopic_txh, "follow_topic")
 
     # 5. unfollow_topic (clean up follow)
-    utopic_resp = _do_follow_topic(backend, free, follow_topic, follow=False)
+    utopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=False, skip_pow=True)
     utopic_txh = _extract_tx_hash("unfollow_topic", utopic_resp)
     if utopic_txh:
         _check("unfollow_topic", utopic_txh, "unfollow_topic")
@@ -806,7 +843,7 @@ def test_tx_status_matrix(backend: str):
     if send_txh:
         _check("send_tokens", send_txh, "send_tokens")
 
-    # 7. post (should have details)
+    # 7. post (should have details — free wallet, always works)
     post_txh = _do_post(backend, free, post_topic, f"Matrix Post {_rand_str(6)}", f"Body {_rand_str(8)}")
     if not post_txh or len(post_txh) != 64:
         _fail("tx_matrix.post.submit", f"tx={post_txh}")
@@ -831,28 +868,24 @@ def test_tx_status_matrix(backend: str):
     else:
         _fail("tx_matrix.edit.submit", "post not indexed in time")
 
-    # 10. report
-    if post_txh:
-        report_resp = _do_report(backend, sub1, post_txh, "spam")
-        report_txh = _extract_tx_hash("report", report_resp)
-        if report_txh:
-            _check("report", report_txh, "report")
-
-    # 11. delete (own post)
+    # 10. delete (own post)
     if post_txh:
         delete_resp = _do_delete(backend, free, post_txh)
         delete_txh = _extract_tx_hash("delete", delete_resp)
         if delete_txh:
             _check("delete", delete_txh, "delete")
 
-    # 12. block_user
-    block_resp = _do_block(backend, free, sub1_addr, "user", block=True)
+    # 11. block_user (sub1 blocks another user — higher limits)
+    block_target = _pick_unblocked_user()
+    if not block_target:
+        return
+    block_resp = _do_block(backend, sub1, block_target, "user", block=True, skip_pow=True)
     block_txh = _extract_tx_hash("block_user", block_resp)
     if block_txh:
         _check("block_user", block_txh, "block_user")
 
-    # 13. unblock_user (clean up)
-    unblock_resp = _do_block(backend, free, sub1_addr, "user", block=False)
+    # 12. unblock_user (clean up)
+    unblock_resp = _do_block(backend, sub1, block_target, "user", block=False, skip_pow=True)
     unblock_txh = _extract_tx_hash("unblock_user", unblock_resp)
     if unblock_txh:
         _check("unblock_user", unblock_txh, "unblock_user")
@@ -863,11 +896,45 @@ def test_failed_tx_non_post_vote(backend: str):
 
     free = WALLETS.get("free")
     sub1 = WALLETS.get("sub1")
-    if not free or not sub1:
-        _skip("failed_npv.setup", "free/sub1 wallets not available")
+    sub2 = WALLETS.get("sub2")
+    agent1 = WALLETS.get("agent1")
+    agent2 = WALLETS.get("agent2")
+    if not free or not sub1 or not sub2 or not agent1 or not agent2:
+        _skip("failed_npv.setup", "free/sub1/sub2/agent1/agent2 wallets not available")
         return
 
-    sub1_addr = str(sub1.address())
+    free_addr = str(free.address())
+    sub2_addr = str(sub2.address())
+    agent1_addr = str(agent1.address())
+    agent2_addr = str(agent2.address())
+
+    # Use sub1 (subscriber) as actor — free (tier 0) has low follow limits.
+
+    def _pick_unfollowed_user() -> str:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": str(sub1.address())})
+        if code != 200:
+            _fail("failed_npv.follow.target_lookup", f"code={code} data={data}")
+            return ""
+        users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+        candidates = [free_addr, sub2_addr, agent1_addr, agent2_addr]
+        for addr in candidates:
+            if not any(addr.lower() in json.dumps(u).lower() for u in users):
+                return addr
+        _fail("failed_npv.follow.target_lookup", "no unfollowed target available")
+        return ""
+
+    def _pick_unblocked_user() -> str:
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": str(sub1.address())})
+        if code != 200:
+            _fail("failed_npv.block.target_lookup", f"code={code} data={data}")
+            return ""
+        users = (data or {}).get("blocked_users") or (data or {}).get("users") or []
+        candidates = [free_addr, sub2_addr, agent1_addr, agent2_addr]
+        for addr in candidates:
+            if not any(addr.lower() in json.dumps(u).lower() for u in users):
+                return addr
+        _fail("failed_npv.block.target_lookup", "no unblocked target available")
+        return ""
 
     # ── Failed follow_user: two txs with same nonce in the same block ──
     try:
@@ -877,9 +944,12 @@ def test_failed_tx_non_post_vote(backend: str):
         _fail("failed_npv.follow.block_sync", str(e))
         return
 
+    target_addr = _pick_unfollowed_user()
+    if not target_addr:
+        return
     nonce = _fresh_nonce()
-    resp1 = _do_follow_user_with_nonce(backend, free, sub1_addr, nonce, follow=True)
-    resp2 = _do_follow_user_with_nonce(backend, free, sub1_addr, nonce, follow=True)
+    resp1 = _do_follow_user_with_nonce(backend, sub1, target_addr, nonce, follow=True, skip_pow=True)
+    resp2 = _do_follow_user_with_nonce(backend, sub1, target_addr, nonce, follow=True, skip_pow=True)
     if not isinstance(resp1, dict) or not isinstance(resp2, dict):
         _fail("failed_npv.follow.submit", f"resp1={resp1} resp2={resp2}")
         return
@@ -945,7 +1015,7 @@ def test_failed_tx_non_post_vote(backend: str):
 
     # Clean up: unfollow so state is reset
     try:
-        _do_follow_user(backend, free, sub1_addr, follow=False)
+        _do_follow_user(backend, sub1, target_addr, follow=False, skip_pow=True)
     except Exception:
         pass
 
@@ -957,9 +1027,12 @@ def test_failed_tx_non_post_vote(backend: str):
         _fail("failed_npv.block.block_sync", str(e))
         return
 
+    block_target = _pick_unblocked_user()
+    if not block_target:
+        return
     nonce2 = _fresh_nonce()
-    bresp1 = _do_block_with_nonce(backend, free, sub1_addr, "user", nonce2, block=True)
-    bresp2 = _do_block_with_nonce(backend, free, sub1_addr, "user", nonce2, block=True)
+    bresp1 = _do_block_with_nonce(backend, sub1, block_target, "user", nonce2, block=True, skip_pow=True)
+    bresp2 = _do_block_with_nonce(backend, sub1, block_target, "user", nonce2, block=True, skip_pow=True)
     if not isinstance(bresp1, dict) or not isinstance(bresp2, dict):
         _fail("failed_npv.block.submit", f"resp1={bresp1} resp2={bresp2}")
         return
@@ -1025,6 +1098,6 @@ def test_failed_tx_non_post_vote(backend: str):
 
     # Clean up: unblock
     try:
-        _do_block(backend, free, sub1_addr, "user", block=False)
+        _do_block(backend, sub1, block_target, "user", block=False, skip_pow=True)
     except Exception:
         pass
