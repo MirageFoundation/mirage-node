@@ -192,6 +192,70 @@ def _deleted_filter_bare() -> str:
     return "" if IGNORE_DELETIONS else "AND deleted = FALSE"
 
 
+def _is_tag_allowed(tag: str, allowed_tags: set[str]) -> bool:
+    """Return True if tag is empty (safe) or in allowed_tags."""
+    t = (tag or "").strip().lower()
+    return not t or t in allowed_tags
+
+
+def _filter_posts_by_allowed_tags(posts: list[dict], allowed_tags: set[str], rid: str, context: str) -> list[dict]:
+    """Filter posts by allowed_tags after agent edits are applied."""
+    if not posts:
+        return posts
+    filtered = [p for p in posts if _is_tag_allowed(p.get("tag", ""), allowed_tags)]
+    removed = len(posts) - len(filtered)
+    if removed:
+        logger.debug(
+            "allowed_tags filtered %d posts after agent edits ctx=%s rid=%s allowed=%s",
+            removed,
+            context,
+            rid,
+            sorted(allowed_tags),
+        )
+    return filtered
+
+
+def _filter_user_posts_by_allowed_tags(
+    posts: list[dict],
+    allowed_tags: set[str],
+    root_tag_map: dict[str, str],
+    rid: str,
+    context: str,
+) -> list[dict]:
+    """Filter profile posts by allowed_tags (comments use root post effective tag)."""
+    if not posts:
+        return posts
+    filtered = []
+    removed = 0
+    for post in posts:
+        target = (post.get("target") or "").strip()
+        if target:
+            root_id = (post.get("_root_post_id") or "").strip().lower()
+            if not root_id or root_id not in root_tag_map:
+                removed += 1
+                continue
+            root_tag = root_tag_map.get(root_id, "")
+            if not _is_tag_allowed(root_tag, allowed_tags):
+                removed += 1
+                continue
+        else:
+            if not _is_tag_allowed(post.get("tag", ""), allowed_tags):
+                removed += 1
+                continue
+        filtered.append(post)
+    if removed:
+        logger.debug(
+            "allowed_tags filtered %d profile posts after agent edits ctx=%s rid=%s allowed=%s",
+            removed,
+            context,
+            rid,
+            sorted(allowed_tags),
+        )
+    for post in filtered:
+        post.pop("_root_post_id", None)
+    return filtered
+
+
 def _sanitize_wh(w, h) -> dict:
     """Return {"w": w, "h": h} if both are valid ints in [1, 10000], else {}."""
     try:
@@ -968,7 +1032,7 @@ def _load_candidate_posts(
     )
     rows = cur.fetchall()
 
-    # Filter blocked posts/users and disallowed tags
+    # Filter blocked posts/users and blocked topics
     candidates = []
     for row in rows:
         (
@@ -996,7 +1060,6 @@ def _load_candidate_posts(
         pid = (txhash or "").lower()
         author = (owner or "").lower()
         relayer_lower = (relayer or "").strip().lower()
-        tag_lower = (tag or "").strip().lower()
         topic_raw = (topic or "").strip()
         topic_lower = topic_raw.lower()
         root_topic_raw = (root_topic or topic or "").strip()
@@ -1005,8 +1068,6 @@ def _load_candidate_posts(
         if pid in blocked_posts or author in blocked_users:
             continue
         if _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
-            continue
-        if tag_lower and tag_lower not in allowed_tags:
             continue
         if not topic_lower:
             continue
@@ -2249,8 +2310,6 @@ def _row_to_post(
         return None
     topic_lower = (topic or "").strip().lower()
     if _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
-        return None
-    if (tag or "").strip() and (tag or "").lower() not in allowed_tags:
         return None
 
     # Parse media JSON array
@@ -4632,6 +4691,12 @@ def get_posts():
             if resp.get("posts"):
                 _enrich_media_meta(cur, resp["posts"])
                 _apply_agent_edits(cur, resp["posts"], address)
+                resp["posts"] = _filter_posts_by_allowed_tags(
+                    resp["posts"],
+                    allowed_tags,
+                    rid=rid,
+                    context=f"get_posts.feed.{feed or 'unknown'}",
+                )
             conn.close()
             return jsonify(resp)
 
@@ -4728,18 +4793,13 @@ def get_posts():
         rows = cur.fetchall()
         select_ms = (time.monotonic() - t_select) * 1000
 
-        # Filter blocked posts, posts from blocked users, and posts with disallowed tags
-        def _tag_allowed(row_tag):
-            t = (row_tag or "").strip().lower()
-            return not t or t in allowed_tags  # Empty tag (safe) is always allowed
-
+        # Filter blocked posts, posts from blocked users, and blocked topics
         rows = [
             r
             for r in rows
             if (r[0] or "").lower() not in blocked_posts
             and (r[1] or "").lower() not in blocked_users
             and not _topic_is_blocked((r[3] or "").strip().lower(), blocked_topics_exact, blocked_topic_prefixes)
-            and _tag_allowed(r[6] if len(r) > 6 else "")
         ]
         post_ids = [r[0].lower() for r in rows]
         vote_totals: Dict[str, int] = {}
@@ -4924,6 +4984,12 @@ def get_posts():
         if result:
             _enrich_media_meta(cur, result)
             _apply_agent_edits(cur, result, address)
+            result = _filter_posts_by_allowed_tags(
+                result,
+                allowed_tags,
+                rid=rid,
+                context=f"get_posts.topic.{topic or 'all'}",
+            )
 
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
         total_ms = (time.monotonic() - t_start) * 1000
@@ -4964,6 +5030,15 @@ def get_user_posts():
     allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
     if not allowed_tags:
         log_event(rid, "get_user_posts.allowed_tags.empty", owner=owner[:12] if owner else None)
+    if post_type == "comments":
+        try:
+            logging.getLogger(__name__).debug(
+                "get_user_posts comment tag filter active rid=%s allowed_tags=%s",
+                rid,
+                sorted(allowed_tags),
+            )
+        except Exception:
+            pass
 
     if not owner:
         return jsonify({"error": "owner is required"}), 400
@@ -4996,17 +5071,17 @@ def get_user_posts():
                    COALESCE(p.media, '[]') as media,
                    COALESCE(pr.created_at, 0) as author_created_at,
                    COALESCE(p.relayer, '') as relayer,
-                   COALESCE(p.tag, '') as tag
+                   COALESCE(p.tag, '') as tag,
+                   COALESCE(p.root_post_id, '') as root_post_id
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
               {deleted_clause}
               {type_filter}
-              AND (COALESCE(p.target, '') != '' OR COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
             ORDER BY p.created_at DESC
             LIMIT %s OFFSET %s
             """,
-            (owner, list(allowed_tags), limit, offset),
+            (owner, limit, offset),
         )
         rows = cur.fetchall()
         rows = [
@@ -5016,6 +5091,22 @@ def get_user_posts():
             and (r[1] or "").lower() not in blocked_users
             and not _topic_is_blocked((r[3] or "").strip().lower(), blocked_topics_exact, blocked_topic_prefixes)
         ]
+        root_tag_map: dict[str, str] = {}
+        comment_root_ids = {
+            (r[16] or "").strip().lower()
+            for r in rows
+            if len(r) > 16 and (r[7] or "").strip() and (r[16] or "").strip()
+        }
+        if comment_root_ids:
+            ph = ",".join(["%s"] * len(comment_root_ids))
+            cur.execute(
+                f"SELECT LOWER(txhash), COALESCE(tag, '') FROM posts WHERE LOWER(txhash) IN ({ph})",
+                list(comment_root_ids),
+            )
+            root_posts = [{"post_id": pid, "tag": tag or ""} for pid, tag in cur.fetchall()]
+            if root_posts:
+                _apply_agent_edits(cur, root_posts, viewer)
+                root_tag_map = {p["post_id"]: p.get("tag", "") or "" for p in root_posts}
         post_ids = [r[0].lower() for r in rows]
         vote_totals: Dict[str, int] = {}
         comment_counts: Dict[str, int] = {}
@@ -5101,9 +5192,8 @@ def get_user_posts():
                 WHERE LOWER(p.owner) = LOWER(%s)
                   {deleted_clause}
                   {type_filter}
-                  AND (COALESCE(p.target, '') != '' OR COALESCE(p.tag, '') = '' OR LOWER(COALESCE(p.tag, '')) = ANY(%s))
                 """,
-                (owner, list(allowed_tags)),
+                (owner,),
             )
             total_row = cur.fetchone()
             total = int(total_row[0] or 0) if total_row else 0
@@ -5117,7 +5207,28 @@ def get_user_posts():
             media_raw = "[]"
             author_created_at = 0
             tag = ""
-            if len(row) >= 16:
+            root_post_id = ""
+            if len(row) >= 17:
+                (
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
+                    author_created_at,
+                    relayer,
+                    tag,
+                    root_post_id,
+                ) = row[:17]
+            elif len(row) >= 16:
                 (
                     txhash,
                     owner_addr,
@@ -5219,9 +5330,11 @@ def get_user_posts():
                 media_val = []
             pid = (txhash or "").lower()
             relayer_lower = (relayer or "").strip().lower()
+            root_post_id_lower = (root_post_id or "").strip().lower()
             result.append(
                 {
                     "post_id": pid,
+                    "_root_post_id": root_post_id_lower,
                     "user_id": owner_addr,
                     "username": uname,
                     "author_level": int(author_level) if author_level else 0,
@@ -5247,6 +5360,13 @@ def get_user_posts():
         if result:
             _enrich_media_meta(cur, result)
             _apply_agent_edits(cur, result, viewer)
+            result = _filter_user_posts_by_allowed_tags(
+                result,
+                allowed_tags,
+                root_tag_map,
+                rid=rid,
+                context=f"get_user_posts.{post_type or 'all'}",
+            )
         conn.close()
         has_more = (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
