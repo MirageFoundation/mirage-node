@@ -4697,6 +4697,8 @@ def get_posts():
                     rid=rid,
                     context=f"get_posts.feed.{feed or 'unknown'}",
                 )
+                if len(resp["posts"]) < limit:
+                    resp["has_more"] = False
             conn.close()
             return jsonify(resp)
 
@@ -4979,8 +4981,6 @@ def get_posts():
                 }
                 result.append(post)
 
-        has_more = (page * limit) < total
-
         if result:
             _enrich_media_meta(cur, result)
             _apply_agent_edits(cur, result, address)
@@ -4991,6 +4991,7 @@ def get_posts():
                 context=f"get_posts.topic.{topic or 'all'}",
             )
 
+        has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
         total_ms = (time.monotonic() - t_start) * 1000
         if max(total_ms, count_ms, select_ms) > 2000:
@@ -5368,7 +5369,7 @@ def get_user_posts():
                 context=f"get_user_posts.{post_type or 'all'}",
             )
         conn.close()
-        has_more = (page * limit) < total
+        has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
         return jsonify(_inject_balance(resp, viewer))
     except Exception as e:
