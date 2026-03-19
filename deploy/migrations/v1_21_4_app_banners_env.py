@@ -3,30 +3,29 @@ from pathlib import Path
 from deploy.migrations._helpers import append_env_value, backup_file
 
 MIGRATION_KEY = "v1.21.4-app-banners-env"
-DESCRIPTION = "Add ANDROID_BANNER_ENABLED and IOS_BANNER_ENABLED env vars to backend.env"
+DESCRIPTION = "Add ANDROID_BANNER_ENABLED and IOS_BANNER_ENABLED env vars to frontend.env"
 
 
 def run(config_dir, logger):
     config_dir = Path(config_dir)
-    backend_env = config_dir / "backend.env"
+    frontend_env = config_dir / "frontend.env"
 
-    if not backend_env.exists():
-        raise FileNotFoundError(f"backend.env not found: {backend_env}")
+    if not frontend_env.exists():
+        raise FileNotFoundError(f"frontend.env not found: {frontend_env}")
 
-    backup_file(backend_env)
+    backup_file(frontend_env)
 
     added_android = append_env_value(
-        backend_env,
+        frontend_env,
         "ANDROID_BANNER_ENABLED",
         "true",
-        comment="Android app download banner - set to false to hide on the web frontend",
+        comment="App download banners (read by backend get_node_config at runtime)",
     )
 
     added_ios = append_env_value(
-        backend_env,
+        frontend_env,
         "IOS_BANNER_ENABLED",
         "true",
-        comment="iOS app download banner - set to false to hide on the web frontend",
     )
 
     if added_android:
