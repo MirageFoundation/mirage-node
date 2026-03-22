@@ -747,12 +747,12 @@ def test_security(backend: str):
             now = int(time.time())
             cooldown_until = now + 7200
             rc, out = _docker_exec(
-                f"""su - postgres -c "psql -d mirage -tAc '"""
+                f"""su - postgres -c "psql -d mirage -tAc \\""""
                 f"""INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) """
-                f"""VALUES ('{owner_lc}', {now}, 5, 3, {cooldown_until}) """
+                f"""VALUES (:'owner', {now}, 5, 3, {cooldown_until}) """
                 f"""ON CONFLICT (owner) DO UPDATE SET """
                 f"""window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"""
-                f"""' 2>&1" """,
+                f"""\\" -v owner='{owner_lc}' 2>&1" """,
                 timeout=10,
             )
             if rc != 0:
@@ -776,9 +776,9 @@ def test_security(backend: str):
                     _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"code={code} resp={resp}")
                 else:
                     rc2, out2 = _docker_exec(
-                        f"""su - postgres -c "psql -d mirage -tAc '"""
-                        f"""SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner='{owner_lc}' LIMIT 1;"""
-                        f"""' 2>&1" """,
+                        f"""su - postgres -c "psql -d mirage -tAc \\""""
+                        f"""SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner=:'owner' LIMIT 1;"""
+                        f"""\\" -v owner='{owner_lc}' 2>&1" """,
                         timeout=10,
                     )
                     if rc2 != 0:
