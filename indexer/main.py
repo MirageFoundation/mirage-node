@@ -585,8 +585,6 @@ class Indexer:
 
     def on_close(self, ws, close_status_code, close_msg):
         logger.warning("WebSocket closed: %s - %s", close_status_code, close_msg)
-        if self.running:
-            self._reconnect()
 
     def on_open(self, ws):
         logger.info("WebSocket connected")
@@ -594,34 +592,35 @@ class Indexer:
             json.dumps({"jsonrpc": "2.0", "method": "subscribe", "id": 1, "params": {"query": "tm.event='NewBlock'"}})
         )
 
-    def start_websocket(self):
-        """Start WebSocket connection."""
-        self.ws = self.chain.create_websocket_app(
-            self.on_open,
-            self.on_message,
-            self.on_error,
-            self.on_close,
-        )
-        self.chain.run_websocket_forever(self.ws, self.running)
-
-    def _reconnect(self):
-        """Reconnect loop with fixed retry delay."""
-        attempt = 0
+    def _run_websocket_loop(self):
+        """Non-recursive WebSocket loop. run_forever() blocks until close,
+        then this loop handles reconnection without nesting stack frames."""
         delay = WS_RECONNECT_DELAY
+        attempt = 0
         while self.running:
-            attempt += 1
             try:
                 if not self.chain.wait_for_rpc_ready():
                     time.sleep(delay)
                     continue
 
-                logger.info("Reconnecting websocket (attempt %s, delay %ss)...", attempt, delay)
-                self.start_websocket()
+                if attempt > 0:
+                    logger.info("Reconnecting websocket (attempt %s, delay %ss)...", attempt, delay)
+
+                self.ws = self.chain.create_websocket_app(
+                    self.on_open,
+                    self.on_message,
+                    self.on_error,
+                    self.on_close,
+                )
+                self.chain.run_websocket_forever(self.ws, self.running)
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                logger.error("Reconnect error: %s", e, exc_info=True)
-            time.sleep(delay)
+                logger.error("WebSocket loop error: %s", e, exc_info=True)
+
+            attempt += 1
+            if self.running:
+                time.sleep(delay)
 
     def start(self):
         """Start the indexer."""
@@ -658,7 +657,7 @@ class Indexer:
 
         logger.info("Transitioning to live mode (WebSocket)")
         try:
-            self.start_websocket()
+            self._run_websocket_loop()
         except KeyboardInterrupt:
             pass
 
