@@ -112,6 +112,7 @@ class Indexer:
         self._skipped_proposals: set[int] = set()  # Track proposals we've already logged as skipped
         self._catch_up_mode: bool = False
         self._last_height = self.db.get_last_height()
+        self._last_summary_flush_ts: float = 0.0
 
         self._lock_file = None
         try:
@@ -899,6 +900,15 @@ class Indexer:
                 self._sync_connected_peers()
             except Exception as e:
                 logger.warning("Connected peers refresh failed at height %s: %s", height, e)
+
+        # Flush pending push summary notifications (at most once per 60s, skip during catch-up)
+        if not self._catch_up_mode and (now - self._last_summary_flush_ts) >= 60:
+            self._last_summary_flush_ts = now
+            try:
+                from shared.push import flush_pending_summaries
+                flush_pending_summaries()
+            except Exception as e:
+                logger.warning("Push summary flush failed at height %s: %s", height, e)
 
     def _sync_profiles_from_chain(self):
         """

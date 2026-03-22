@@ -6,8 +6,10 @@ The backend now supports Expo push notifications for inbox events (replies, ment
 
 **Key rules:**
 
-- Max **3 server-side pushes** per user, then silence until the user views their inbox.
-- The same 3-notification budget is shared with local polling — the mobile app must respect it client-side.
+- Max **5 server-side pushes** per user in any **30-minute window**. After that, new events are suppressed.
+- When the 30-minute window expires and events were suppressed, the server automatically sends a single summary push ("You have N unread messages").
+- After a summary, pushes are **paused for 3 hours** or until `mark_inbox_viewed` is called.
+- There is **no client-side budget** to track — the server handles all throttling.
 - Push tokens must be explicitly unregistered on **logout** and **server switch**.
 - Notification banners must be **suppressed** when the inbox screen is active.
 
@@ -16,7 +18,7 @@ The backend now supports Expo push notifications for inbox events (replies, ment
 - Push support is gated by `push_notifications_enabled` in `/api/get_node_config`. If false, skip all push registration and keep local polling only.
 - `register_push_token`, `unregister_push_token`, and `mark_inbox_viewed` are signed endpoints that require `pubkey`, `signature`, `timestamp` (ms), and `envelope_nonce`.
 - A push token can only be registered to one account at a time; attempting to register a token owned by another user returns `409`.
-- The 3-notification budget resets only when `mark_inbox_viewed` succeeds.
+- Push notifications are throttled to **5 per 30 minutes** per user. Suppressed events trigger a summary push after the window expires.
 - `EXPO_ACCESS_TOKEN` is optional and only needed if the node enables "Enhanced Push Security" in the EAS dashboard.
 
 ---
@@ -173,7 +175,21 @@ When the backend sends a push notification, the payload looks like:
 }
 ```
 
-The `data.type` field is one of: `"reply"`, `"mention"`, `"award"`.
+The `data.type` field is one of: `"reply"`, `"mention"`, `"award"`, `"summary"`.
+
+Summary notifications are sent automatically by the server when the user's 30-minute throttle window expires with suppressed events. They look like:
+
+```json
+{
+  "title": "Mirage",
+  "body": "You have 7 unread messages",
+  "data": { "type": "summary" },
+  "sound": "default",
+  "channelId": "inbox"
+}
+```
+
+When receiving a `"summary"` type, navigate to the inbox screen rather than a specific post.
 
 Create an Android notification channel `"inbox"` at app startup:
 
@@ -187,21 +203,13 @@ Notifications.setNotificationChannelAsync("inbox", {
 
 ---
 
-## 5. Notification Budget (Client-Side)
+## 5. Throttle and Summary Notifications
 
-The server enforces a budget of 3 pushes, but the mobile app's **local polling** must also respect this shared budget. The combined total of server pushes + locally-generated notifications must not exceed 3.
+The server enforces a **5-per-30-minute** sliding window per user. The mobile app does **not** need to track any client-side budget.
 
-### Tracking
+When a user receives more than 5 inbox events within 30 minutes, extra events are silently suppressed. Once the window expires, the server sends a single summary push with the total unread count (e.g., "You have 12 unread messages").
 
-Use MMKV to store a counter:
-
-```
-push-budget-remaining: number  (initialize to 3)
-```
-
-- When a push notification arrives (via `Notifications.addNotificationReceivedListener`), decrement the counter.
-- When local polling would fire a notification, check the counter first — skip if 0.
-- When `mark_inbox_viewed` succeeds, reset the counter to 3. **This endpoint now requires a signed payload** (see below).
+After sending a summary, the server pauses all pushes for **3 hours**. The cooldown ends early if the user calls `mark_inbox_viewed`.
 
 ### Deduplication
 
@@ -215,7 +223,6 @@ Notifications.addNotificationReceivedListener((notification) => {
   if (data?.replyId) {
     addToNotifiedIds(data.replyId);
   }
-  decrementBudget();
 });
 ```
 
@@ -245,6 +252,8 @@ Notifications.setNotificationHandler({
 ## 7. Signing `mark_inbox_viewed`
 
 `POST /api/mark_inbox_viewed` now requires a signed payload.
+
+Calling this endpoint also clears any active push cooldown for the user.
 
 **Request body:**
 
@@ -282,8 +291,7 @@ mark_inbox_viewed:{address}:{timestamp}:{nonce}
 - [ ] On logout: unregister token **before** wallet wipe.
 - [ ] On server switch: unregister from old server, register on new (if supported).
 - [ ] Create `"inbox"` Android notification channel at startup.
-- [ ] Add push received listener: track `replyId` in notified-ids, decrement budget.
-- [ ] Local polling: check budget before firing, skip if 0.
-- [ ] `mark_inbox_viewed`: reset local budget counter to 3.
+- [ ] Add push received listener: track `replyId` in notified-ids for deduplication.
+- [ ] Handle `data.type === "summary"` — navigate to inbox screen.
 - [ ] Suppress notification banners when inbox screen is active.
 - [ ] Handle deep linking from notification taps (navigate to `rootPostId`).

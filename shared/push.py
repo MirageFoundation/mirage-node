@@ -1,8 +1,11 @@
 """
-Expo push notification sender with budget enforcement and receipt processing.
+Expo push notification sender with sliding-window throttle and receipt processing.
 
 Used by backend and indexer; no cron or background workers.
-Budget: max 3 pushes per user, resets when mark_inbox_viewed is called.
+Throttle: max 5 pushes per user per 30 minutes.  When throttled, suppressed
+events are counted and a single summary push ("You have N unread messages")
+is sent once the window expires. After a summary, pushes pause for 3 hours
+or until the inbox is viewed.
 
 Self-contained: reads DB URL from shared.config and env vars directly,
 so it can be imported from both the backend and the indexer.
@@ -21,6 +24,7 @@ import psycopg
 import requests as http_requests
 
 from shared.config import get_config
+from shared.inbox import compute_unread_count
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +42,9 @@ def _connect_db() -> psycopg.Connection:
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts"
-MAX_BUDGET = 3
+THROTTLE_WINDOW_SECONDS = 30 * 60
+THROTTLE_MAX_SENDS = 5
+SUMMARY_COOLDOWN_SECONDS = 3 * 60 * 60
 MAX_MENTION_PUSHES = 10
 _MENTION_RE = re.compile(r"(?<!\w)@([A-Za-z0-9-]+)")
 _FENCED_CODE_RE = re.compile(r"```[\s\S]*?```")
@@ -111,28 +117,85 @@ def _remove_token(token: str) -> None:
         logger.error("[Push] Failed to remove token: %s", e)
 
 
-def _decrement_budget(owner: str) -> bool:
-    """Atomically decrement push budget. Returns True if budget was available."""
+def _try_throttle_send(owner: str) -> bool:
+    """Try to claim a send slot in the current 30-min window.
+
+    If the window has expired **and** there are no pending suppressed events,
+    resets the window and allows the send.  If suppressed events are still
+    pending (summary hasn't been flushed yet), the new event is added to the
+    suppressed count instead so the summary accurately reflects all missed
+    events.
+    """
     owner_lower = owner.lower()
-    try:
-        with _connect_db() as conn:
-            with conn.cursor() as cur:
+    now = int(time.time())
+    with _connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT window_start, sent_count, suppressed_count, cooldown_until FROM push_throttle WHERE owner = %s",
+                (owner_lower,),
+            )
+            row = cur.fetchone()
+            if row is None:
                 cur.execute(
-                    """
-                    INSERT INTO push_budget (owner, remaining, last_reset_at)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (owner) DO UPDATE SET
-                        remaining = push_budget.remaining - 1
-                    WHERE push_budget.remaining > 0
-                    RETURNING remaining
-                    """,
-                    (owner_lower, MAX_BUDGET - 1, int(time.time())),
+                    "INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) "
+                    "VALUES (%s, %s, 1, 0, 0)",
+                    (owner_lower, now),
                 )
-                row = cur.fetchone()
-                return row is not None
-    except Exception as e:
-        logger.error("[Push] Budget check failed: %s", e)
-        return False
+                logger.debug("[Push][Throttle] New window for %s (1/%d)", owner_lower[:16], THROTTLE_MAX_SENDS)
+                return True
+
+            window_start, sent_count, suppressed_count, cooldown_until = (
+                int(row[0]),
+                int(row[1]),
+                int(row[2]),
+                int(row[3]),
+            )
+
+            if cooldown_until > now:
+                cur.execute(
+                    "UPDATE push_throttle SET suppressed_count = suppressed_count + 1 WHERE owner = %s",
+                    (owner_lower,),
+                )
+                logger.debug("[Push][Throttle] Cooldown active for %s; suppressed", owner_lower[:16])
+                return False
+
+            window_expired = (now - window_start) >= THROTTLE_WINDOW_SECONDS
+            if window_expired:
+                if suppressed_count > 0:
+                    cur.execute(
+                        "UPDATE push_throttle SET suppressed_count = suppressed_count + 1 WHERE owner = %s",
+                        (owner_lower,),
+                    )
+                    logger.debug(
+                        "[Push][Throttle] Window expired for %s with pending summary (%d suppressed); suppressed",
+                        owner_lower[:16],
+                        suppressed_count,
+                    )
+                    return False
+
+                cur.execute(
+                    "UPDATE push_throttle SET window_start = %s, sent_count = 1, suppressed_count = 0 WHERE owner = %s",
+                    (now, owner_lower),
+                )
+                logger.debug("[Push][Throttle] Window reset for %s (1/%d)", owner_lower[:16], THROTTLE_MAX_SENDS)
+                return True
+
+            if sent_count < THROTTLE_MAX_SENDS:
+                cur.execute(
+                    "UPDATE push_throttle SET sent_count = sent_count + 1 WHERE owner = %s",
+                    (owner_lower,),
+                )
+                logger.debug(
+                    "[Push][Throttle] Allowed for %s (%d/%d)", owner_lower[:16], sent_count + 1, THROTTLE_MAX_SENDS
+                )
+                return True
+
+            cur.execute(
+                "UPDATE push_throttle SET suppressed_count = suppressed_count + 1 WHERE owner = %s",
+                (owner_lower,),
+            )
+            logger.debug("[Push][Throttle] Limit reached for %s; suppressed", owner_lower[:16])
+            return False
 
 
 def _store_receipt(ticket_id: str, token: str) -> None:
@@ -283,14 +346,14 @@ def _truncate(text: str, max_len: int = 150) -> str:
 
 
 def _send_push_to_user(owner: str, title: str, body: str, data: dict) -> None:
-    """Send push to all devices for an owner, respecting budget."""
+    """Send push to all devices for an owner, respecting the 5/30-min throttle."""
     tokens = _get_tokens_for_owner(owner)
     if not tokens:
         logger.debug("[Push] No tokens for %s, skipping", owner[:16])
         return
 
-    if not _decrement_budget(owner):
-        logger.debug("[Push] Budget exhausted for %s", owner[:16])
+    if not _try_throttle_send(owner):
+        logger.debug("[Push] Throttled for %s, suppressed", owner[:16])
         return
 
     messages = [_build_expo_message(token, title, body, data) for token, _platform in tokens]
@@ -321,7 +384,9 @@ def send_push_for_reply(
         logger.debug("[Push] Disabled, skipping reply push for %s", tx_hash[:16])
         return
 
-    logger.info("[Push] Firing reply push: poster=%s target=%s tx=%s", poster_addr[:16], target_txhash[:16], tx_hash[:16])
+    logger.info(
+        "[Push] Firing reply push: poster=%s target=%s tx=%s", poster_addr[:16], target_txhash[:16], tx_hash[:16]
+    )
     _fire_and_forget(_do_reply_push, poster_addr, poster_username, target_txhash, content, tx_hash)
 
 
@@ -432,7 +497,12 @@ def send_push_for_award(
 
     if post_owner == awarder_addr.lower():
         return
-    logger.info("[Push] Firing award push: awarder=%s recipient=%s target=%s", awarder_addr[:16], post_owner[:16], target_txhash[:16])
+    logger.info(
+        "[Push] Firing award push: awarder=%s recipient=%s target=%s",
+        awarder_addr[:16],
+        post_owner[:16],
+        target_txhash[:16],
+    )
     _fire_and_forget(_do_award_push, awarder_addr, awarder_username, post_owner, target_txhash, award_type)
 
 
@@ -452,22 +522,109 @@ def _do_award_push(
     _check_old_receipts()
 
 
-def reset_push_budget(owner: str) -> None:
-    """Reset push budget to MAX_BUDGET. Called from mark_inbox_viewed."""
-    if not PUSH_NOTIFICATIONS_ENABLED:
+def clear_push_throttle(owner: str) -> None:
+    """Clear throttle state after the user views their inbox."""
+    owner_lower = owner.lower()
+    now = int(time.time())
+    with _connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until)
+                VALUES (%s, %s, 0, 0, 0)
+                ON CONFLICT (owner) DO UPDATE SET
+                    window_start = EXCLUDED.window_start,
+                    sent_count = 0,
+                    suppressed_count = 0,
+                    cooldown_until = 0
+                """,
+                (owner_lower, now),
+            )
+
+
+def get_unread_count(owner: str) -> int:
+    """Count replies + @mentions + awards after the user's last inbox view.
+
+    Mirrors the logic in backend _get_new_inbox_count but runs against a fresh
+    connection so it can be called from the indexer or push module.
+    """
+    with _connect_db() as conn:
+        with conn.cursor() as cur:
+            count, _last_seen = compute_unread_count(cur, owner)
+            return count
+
+
+def _send_summary_to_user(owner: str, unread_count: int) -> None:
+    """Send an aggregated summary push (not subject to the throttle window)."""
+    tokens = _get_tokens_for_owner(owner)
+    if not tokens:
+        logger.debug("[Push][Summary] No tokens for %s, skipping", owner[:16])
         return
-    try:
-        with _connect_db() as conn:
+
+    title = "Mirage"
+    body = f"You have {unread_count} unread message{'s' if unread_count != 1 else ''}"
+    data = {"type": "summary"}
+
+    messages = [_build_expo_message(token, title, body, data) for token, _platform in tokens]
+    tickets = _send_expo_push_batch(messages)
+    ok_count = 0
+    for token, ticket_id in tickets:
+        if ticket_id:
+            _store_receipt(ticket_id, token)
+            ok_count += 1
+    logger.info("[Push][Summary] Sent %d/%d to %s: %s", ok_count, len(messages), owner[:16], body)
+
+
+def flush_pending_summaries() -> int:
+    """Find owners whose throttle window expired with suppressed events and
+    send them a summary push.  Resets their window afterwards.
+
+    Called periodically by the indexer (not by individual push paths).
+    Returns the number of summaries sent.
+    """
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        return 0
+    now = int(time.time())
+    cutoff = now - THROTTLE_WINDOW_SECONDS
+    sent = 0
+    with _connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT owner FROM push_throttle "
+                "WHERE suppressed_count > 0 AND window_start <= %s AND cooldown_until <= %s "
+                "LIMIT 50",
+                (cutoff, now),
+            )
+            owners = [r[0] for r in cur.fetchall()]
+
+        for owner in owners:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO push_budget (owner, remaining, last_reset_at)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (owner) DO UPDATE SET
-                        remaining = %s,
-                        last_reset_at = %s
-                    """,
-                    (owner.lower(), MAX_BUDGET, int(time.time()), MAX_BUDGET, int(time.time())),
-                )
-    except Exception as e:
-        logger.error("[Push] Budget reset failed for %s: %s", owner, e)
+                unread, _last_seen = compute_unread_count(cur, owner)
+                if unread > 0:
+                    _send_summary_to_user(owner, unread)
+                    sent += 1
+                    cooldown_until = now + SUMMARY_COOLDOWN_SECONDS
+                    cur.execute(
+                        "UPDATE push_throttle "
+                        "SET window_start = %s, sent_count = 0, suppressed_count = 0, cooldown_until = %s "
+                        "WHERE owner = %s",
+                        (now, cooldown_until, owner),
+                    )
+                    logger.debug(
+                        "[Push][Summary] Summary sent to %s (unread=%d), cooldown=%ds",
+                        owner[:16],
+                        unread,
+                        SUMMARY_COOLDOWN_SECONDS,
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE push_throttle "
+                        "SET window_start = %s, sent_count = 0, suppressed_count = 0, cooldown_until = 0 "
+                        "WHERE owner = %s",
+                        (now, owner),
+                    )
+                    logger.debug("[Push][Summary] No unread for %s, cleared suppressed", owner[:16])
+
+    if sent > 0:
+        logger.info("[Push][Summary] Flushed %d summaries (checked %d owners)", sent, len(owners))
+    return sent

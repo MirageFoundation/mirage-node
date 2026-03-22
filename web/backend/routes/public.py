@@ -827,75 +827,13 @@ def _get_new_inbox_count(cur, address: str) -> int:
     if cached and cached[1] > now:
         return cached[0]
 
-    last_seen = 0
-    reply_count = 0
-    mention_count = 0
-    award_count = 0
     try:
-        # Count new replies
-        cur.execute(
-            """
-            SELECT pr.inbox_last_viewed_at,
-                   COUNT(r.txhash)
-            FROM profiles pr
-            LEFT JOIN posts p ON LOWER(p.owner) = LOWER(pr.owner)
-            LEFT JOIN posts r
-              ON r.target = p.txhash
-             AND LOWER(r.owner) != LOWER(pr.owner)
-             AND r.deleted = FALSE
-             AND r.created_at > pr.inbox_last_viewed_at
-            WHERE LOWER(pr.owner) = %s
-            GROUP BY pr.inbox_last_viewed_at
-            """,
-            (viewer,),
-        )
-        row = cur.fetchone()
-        last_seen = int(row[0]) if row and row[0] else 0
-        reply_count = int(row[1]) if row and row[1] else 0
+        from shared.inbox import compute_unread_count
+
+        count, last_seen = compute_unread_count(cur, viewer)
     except Exception:
+        count = 0
         last_seen = 0
-        reply_count = 0
-
-    try:
-        # Count new @mentions (exclude mentions that are already direct replies to viewer's posts)
-        cur.execute(
-            """
-            SELECT COUNT(*) FROM mentions m
-            JOIN posts p ON p.txhash = m.post_txhash AND p.deleted = FALSE
-            WHERE LOWER(m.mentioned_address) = %s
-              AND LOWER(m.mentioner_address) != %s
-              AND m.created_at > %s
-              AND NOT EXISTS (
-                  SELECT 1 FROM posts tp
-                  WHERE tp.txhash = p.target
-                    AND LOWER(tp.owner) = %s
-              )
-            """,
-            (viewer, viewer, last_seen, viewer),
-        )
-        mrow = cur.fetchone()
-        mention_count = int(mrow[0]) if mrow and mrow[0] else 0
-    except Exception:
-        mention_count = 0
-
-    try:
-        # Count new awards
-        cur.execute(
-            """
-            SELECT COUNT(*) FROM awards a
-            JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
-            WHERE LOWER(p.owner) = %s
-              AND LOWER(a.owner) != %s
-              AND a.created_at > %s
-            """,
-            (viewer, viewer, last_seen),
-        )
-        arow = cur.fetchone()
-        award_count = int(arow[0]) if arow and arow[0] else 0
-    except Exception:
-        award_count = 0
-
-    count = reply_count + mention_count + award_count
 
     # Evict expired entries if cache is too large
     if len(_inbox_cache) >= _INBOX_CACHE_MAX:
@@ -6668,11 +6606,11 @@ def mark_inbox_viewed():
         _invalidate_inbox_cache(addr_lower)
 
         try:
-            from shared.push import reset_push_budget
+            from shared.push import clear_push_throttle
 
-            reset_push_budget(addr_lower)
+            clear_push_throttle(addr_lower)
         except Exception as push_err:
-            log_event(rid, "mark_inbox_viewed.push_budget_err", error=str(push_err))
+            log_event(rid, "mark_inbox_viewed.push_throttle_err", error=str(push_err))
 
         log_event(rid, "mark_inbox_viewed.ok", address=addr_lower)
         return jsonify({"ok": True, "inbox_last_viewed_at": now_ts})
