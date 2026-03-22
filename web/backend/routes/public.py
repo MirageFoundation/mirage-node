@@ -1307,7 +1307,13 @@ def _load_following_candidates(
     candidates: list[dict] = []
     for row in cur.fetchall():
         post = _row_to_post(
-            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+            row,
+            blocked_posts,
+            blocked_users,
+            allowed_tags,
+            seen,
+            blocked_topics,
+            blocked_topic_prefixes,
             viewer=viewer_lower,
         )
         if post:
@@ -1620,7 +1626,13 @@ def _get_home_feed_newest(
             break
         for row in rows:
             post = _row_to_post(
-                row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+                row,
+                blocked_posts,
+                blocked_users,
+                allowed_tags,
+                seen,
+                blocked_topics,
+                blocked_topic_prefixes,
                 viewer=viewer,
             )
             if post:
@@ -1694,6 +1706,7 @@ def _get_home_feed_magic(
     from similarity import get_or_compute_similarities
 
     viewer_lower = viewer.strip().lower() if viewer else ""
+    now_ts = int(time.time())
 
     # 1. Load user preferences
     topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
@@ -1713,6 +1726,7 @@ def _get_home_feed_magic(
         blocked_users,
         allowed_tags,
         per_source,
+        now_ts,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
     )
@@ -1732,7 +1746,6 @@ def _get_home_feed_magic(
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
     # 6. Score each post with Magic algorithm
-    now_ts = int(time.time())
     scored_posts = []
 
     for post in candidates:
@@ -1772,6 +1785,13 @@ def _get_home_feed_magic(
 
     # 8. Interleave fresh/random picks with ranked posts, then paginate
     interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
+    interleaved_posts = _prioritize_viewer_own_posts_in_interleaved(
+        interleaved_posts,
+        scored_posts,
+        viewer_lower,
+        now_ts,
+        max_pin=min(15, max(limit, 5)),
+    )
     start = (page - 1) * limit
     end = start + limit
     page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
@@ -1788,6 +1808,45 @@ def _get_home_feed_magic(
         "limit": limit,
         "has_more": has_more,
     }
+
+
+def _prioritize_viewer_own_posts_in_interleaved(
+    interleaved: list[dict],
+    scored_posts: list[dict],
+    viewer_lower: str,
+    now_ts: int,
+    max_pin: int = 15,
+) -> list[dict]:
+    """Move the viewer's own root posts to the front so home magic page 1 surfaces recent ones.
+
+    Only posts created within the last 24 hours are pinned; older own posts keep normal order.
+    Interleaving can bury own posts past the first page; Source 0 caps can omit them if the user
+    has many submissions. This reorder only affects posts already present in ``interleaved``.
+    """
+    if not viewer_lower or viewer_lower == "guest" or not interleaved:
+        return interleaved
+    own_sorted = [
+        p for p in scored_posts if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower
+    ]
+    own_sorted.sort(key=lambda p: -int(p.get("timestamp") or 0))
+    min_ts = int(now_ts) - 86400
+    own_sorted = [p for p in own_sorted if int(p.get("timestamp") or 0) >= min_ts]
+    if not own_sorted:
+        return interleaved
+    pin_ids = [p["post_id"] for p in own_sorted[:max_pin]]
+    pin_set = set(pin_ids)
+    id_in_interleaved = {p["post_id"]: p for p in interleaved}
+    pins = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
+    if not pins:
+        return interleaved
+    rest = [p for p in interleaved if p["post_id"] not in pin_set]
+    logger.debug(
+        "home_magic.prioritize_own viewer=%s pinned=%d interleaved=%d max_age_h=24",
+        viewer_lower[:12],
+        len(pins),
+        len(interleaved),
+    )
+    return pins + rest
 
 
 def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -> list[dict]:
@@ -2155,6 +2214,7 @@ def _load_home_candidates(
     blocked_users: set[str],
     allowed_tags: set[str],
     max_posts: int,
+    now_ts: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
 ) -> list[dict]:
@@ -2180,6 +2240,8 @@ def _load_home_candidates(
         blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
     )
 
+    min_ts = int(now_ts) - 86400
+
     # Source 0: Own posts (always included so the viewer always sees their content)
     cur.execute(
         f"""SELECT {_POST_COLS}
@@ -2187,14 +2249,21 @@ def _load_home_candidates(
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE LOWER(p.owner) = %s
           AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          AND p.created_at >= %s
           {bt_clause}
         ORDER BY p.created_at DESC
         LIMIT %s""",
-        [viewer] + bt_params + [max_posts],
+        [viewer] + bt_params + [min_ts, max_posts],
     )
     for row in cur.fetchall():
         post = _row_to_post(
-            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+            row,
+            blocked_posts,
+            blocked_users,
+            allowed_tags,
+            seen,
+            blocked_topics,
+            blocked_topic_prefixes,
             viewer=viewer,
         )
         if post:
@@ -2218,7 +2287,13 @@ def _load_home_candidates(
         )
         for row in cur.fetchall():
             post = _row_to_post(
-                row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+                row,
+                blocked_posts,
+                blocked_users,
+                allowed_tags,
+                seen,
+                blocked_topics,
+                blocked_topic_prefixes,
                 viewer=viewer,
             )
             if post:
@@ -2245,7 +2320,13 @@ def _load_home_candidates(
         )
         for row in cur.fetchall():
             post = _row_to_post(
-                row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+                row,
+                blocked_posts,
+                blocked_users,
+                allowed_tags,
+                seen,
+                blocked_topics,
+                blocked_topic_prefixes,
                 viewer=viewer,
             )
             if post:
@@ -2265,7 +2346,13 @@ def _load_home_candidates(
     )
     for row in cur.fetchall():
         post = _row_to_post(
-            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+            row,
+            blocked_posts,
+            blocked_users,
+            allowed_tags,
+            seen,
+            blocked_topics,
+            blocked_topic_prefixes,
             viewer=viewer,
         )
         if post:
@@ -2293,7 +2380,13 @@ def _load_home_candidates(
     )
     for row in cur.fetchall():
         post = _row_to_post(
-            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes,
+            row,
+            blocked_posts,
+            blocked_users,
+            allowed_tags,
+            seen,
+            blocked_topics,
+            blocked_topic_prefixes,
             viewer=viewer,
         )
         if post:
@@ -4971,7 +5064,13 @@ def get_posts():
         candidates: list[dict] = []
         for row in rows:
             post = _row_to_post(
-                row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics_exact, blocked_topic_prefixes,
+                row,
+                blocked_posts,
+                blocked_users,
+                allowed_tags,
+                seen,
+                blocked_topics_exact,
+                blocked_topic_prefixes,
                 viewer=address,
             )
             if not post:
@@ -5629,7 +5728,9 @@ def _fetch_post(
             return None
         if owner in blocked_users:
             return None
-        if _topic_is_blocked((topic_val or "").strip().lower(), blocked_topics or set(), blocked_topic_prefixes or tuple()):
+        if _topic_is_blocked(
+            (topic_val or "").strip().lower(), blocked_topics or set(), blocked_topic_prefixes or tuple()
+        ):
             return None
 
     # Filter votes from blocked users; use user_weight for points
@@ -6138,7 +6239,11 @@ def _find_root_post_id(cur, comment_id: str):
 
 
 def _fetch_parent_chain(
-    cur, comment_id: str, max_depth: int = 3, blocked_posts: set[str] = None, blocked_users: set[str] = None,
+    cur,
+    comment_id: str,
+    max_depth: int = 3,
+    blocked_posts: set[str] = None,
+    blocked_users: set[str] = None,
     viewer: str = "",
 ):
     """Fetch up to max_depth parent comments in the chain."""
