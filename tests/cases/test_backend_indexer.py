@@ -447,6 +447,83 @@ def test_indexer(backend: str):
     else:
         _fail("indexer.welcome_stats_shape", f"code={code}")
 
+    _test_indexer_ws_reconnect_loop()
+
+
+def _test_indexer_ws_reconnect_loop() -> None:
+    _debug("indexer.ws_reconnect_loop: start")
+    try:
+        import indexer.main as indexer_main
+    except Exception as e:
+        _fail("indexer.ws_reconnect_loop.import", str(e))
+        return
+
+    class DummyWS:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        def send(self, msg: str) -> None:
+            self.sent.append(msg)
+
+    class FakeChain:
+        def __init__(self, indexer) -> None:
+            self.indexer = indexer
+            self.run_count = 0
+            self.open_count = 0
+            self.close_count = 0
+            self._on_open = None
+            self._on_close = None
+
+        def wait_for_rpc_ready(self) -> bool:
+            return True
+
+        def create_websocket_app(self, on_open, on_message, on_error, on_close):
+            self._on_open = on_open
+            self._on_close = on_close
+            return DummyWS()
+
+        def run_websocket_forever(self, ws, running: bool) -> None:
+            self.run_count += 1
+            try:
+                if self._on_open:
+                    self._on_open(ws)
+                self.open_count += 1
+            except Exception as e:
+                _fail("indexer.ws_reconnect_loop.open", f"{type(e).__name__}: {e}")
+                self.indexer.running = False
+                return
+            try:
+                if self._on_close:
+                    self._on_close(ws, 1000, "test-close")
+                self.close_count += 1
+            except Exception as e:
+                _fail("indexer.ws_reconnect_loop.close", f"{type(e).__name__}: {e}")
+                self.indexer.running = False
+                return
+            if self.run_count >= 3:
+                self.indexer.running = False
+
+    idx = indexer_main.Indexer.__new__(indexer_main.Indexer)
+    idx.running = True
+    idx.ws = None
+    idx.chain = FakeChain(idx)
+
+    prev_delay = indexer_main.WS_RECONNECT_DELAY
+    indexer_main.WS_RECONNECT_DELAY = 0
+    try:
+        idx._run_websocket_loop()
+    except Exception as e:
+        _fail("indexer.ws_reconnect_loop", f"{type(e).__name__}: {e}")
+    finally:
+        indexer_main.WS_RECONNECT_DELAY = prev_delay
+
+    runs = idx.chain.run_count
+    closes = idx.chain.close_count
+    if runs == 3 and closes == 3:
+        _pass("indexer.ws_reconnect_loop", runs=runs, closes=closes)
+    else:
+        _fail("indexer.ws_reconnect_loop", f"runs={runs} closes={closes}")
+
 
 def test_tx_index(backend: str):
     """Verify tx_index table behaviour: successful non-post/vote txs are indexed,
