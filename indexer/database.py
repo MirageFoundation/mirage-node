@@ -948,6 +948,23 @@ class DatabaseManager:
 
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS push_throttle (
+                        owner TEXT PRIMARY KEY,
+                        window_start BIGINT NOT NULL DEFAULT 0,
+                        sent_count INT NOT NULL DEFAULT 0,
+                        suppressed_count INT NOT NULL DEFAULT 0,
+                        cooldown_until BIGINT NOT NULL DEFAULT 0,
+                        CONSTRAINT push_throttle_owner_lower CHECK (owner = LOWER(owner))
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_push_throttle_summary_due "
+                    "ON push_throttle (cooldown_until, window_start) WHERE suppressed_count > 0"
+                )
+
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS push_receipts (
                         id SERIAL PRIMARY KEY,
                         ticket_id TEXT NOT NULL UNIQUE,

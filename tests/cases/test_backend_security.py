@@ -740,6 +740,61 @@ def test_security(backend: str):
         except Exception as e:
             _fail("attack.push_token_hijack_rejected", str(e))
 
+    # 10.21b mark_inbox_viewed clears push throttle cooldown
+    if _check_local_docker():
+        try:
+            owner_lc = str(free_wallet.address()).lower()
+            now = int(time.time())
+            cooldown_until = now + 7200
+            rc, out = _docker_exec(
+                f"""su - postgres -c "psql -d mirage -tAc '"""
+                f"""INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) """
+                f"""VALUES ('{owner_lc}', {now}, 5, 3, {cooldown_until}) """
+                f"""ON CONFLICT (owner) DO UPDATE SET """
+                f"""window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"""
+                f"""' 2>&1" """,
+                timeout=10,
+            )
+            if rc != 0:
+                _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"seed rc={rc} out={out}")
+            else:
+                ts = _now_ms()
+                nonce = _fresh_nonce()
+                sig = sign_canonical(
+                    free_wallet,
+                    f"mark_inbox_viewed:{owner_lc}:{ts}:{nonce}".encode("utf-8"),
+                )
+                payload = {
+                    "pubkey": _b64(free_wallet.public_key().public_key_bytes),
+                    "signature": _b64(sig),
+                    "timestamp": ts,
+                    "envelope_nonce": str(nonce),
+                    "address": owner_lc,
+                }
+                code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
+                if code != 200:
+                    _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"code={code} resp={resp}")
+                else:
+                    rc2, out2 = _docker_exec(
+                        f"""su - postgres -c "psql -d mirage -tAc '"""
+                        f"""SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner='{owner_lc}' LIMIT 1;"""
+                        f"""' 2>&1" """,
+                        timeout=10,
+                    )
+                    if rc2 != 0:
+                        _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"query rc={rc2} out={out2}")
+                    else:
+                        raw = out2.strip()
+                        parts = [p.strip() for p in raw.split("|")] if raw else []
+                        if len(parts) == 2 and parts[0] == "0" and parts[1] == "0":
+                            _pass("attack.mark_inbox_viewed_clears_push_cooldown")
+                        else:
+                            _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"got={raw}")
+        except Exception as e:
+            _fail("attack.mark_inbox_viewed_clears_push_cooldown", str(e))
+    else:
+        _skip("attack.mark_inbox_viewed_clears_push_cooldown", "not running in local-docker")
+
     # 10.22 mark_inbox_viewed with mismatched address/pubkey → rejected
     try:
         ts = _now_ms()
