@@ -2191,7 +2191,7 @@ def _load_home_candidates(
           {bt_clause}
         ORDER BY p.created_at DESC
         LIMIT %s""",
-        [viewer] + bt_params + [min_ts, max_posts],
+        [viewer, min_ts] + bt_params + [max_posts],
     )
     for row in cur.fetchall():
         post = _row_to_post(
