@@ -1755,11 +1755,11 @@ def _prioritize_viewer_own_posts_in_interleaved(
     now_ts: int,
     max_pin: int = 15,
 ) -> list[dict]:
-    """Move the viewer's own root posts to the front so home magic page 1 surfaces recent ones.
+    """Interleave recent own posts into home magic without clustering.
 
-    Only posts created within the last 24 hours are pinned; older own posts keep normal order.
-    Interleaving can bury own posts past the first page; Source 0 caps can omit them if the user
-    has many submissions. This reorder only affects posts already present in ``interleaved``.
+    Pattern: own -> fresh(random) -> ranked(score) -> fresh -> ranked -> ...
+    Only posts created within the last 24 hours are inserted; older own posts keep normal order.
+    This reorder only affects posts already present in ``interleaved``.
     """
     if not viewer_lower or viewer_lower == "guest" or not interleaved:
         return interleaved
@@ -1774,17 +1774,43 @@ def _prioritize_viewer_own_posts_in_interleaved(
     pin_ids = [p["post_id"] for p in own_sorted[:max_pin]]
     pin_set = set(pin_ids)
     id_in_interleaved = {p["post_id"]: p for p in interleaved}
-    pins = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
-    if not pins:
+    own_posts = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
+    if not own_posts:
         return interleaved
+
     rest = [p for p in interleaved if p["post_id"] not in pin_set]
+    fresh_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") == "fresh"]
+    ranked_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") != "fresh"]
+
+    out: list[dict] = []
+    consumed: set[str] = set()
+    f_idx = 0
+    r_idx = 0
+    for own in own_posts:
+        out.append(own)
+        if f_idx < len(fresh_queue):
+            picked = fresh_queue[f_idx]
+            f_idx += 1
+            consumed.add(picked["post_id"])
+            out.append(picked)
+        if r_idx < len(ranked_queue):
+            picked = ranked_queue[r_idx]
+            r_idx += 1
+            consumed.add(picked["post_id"])
+            out.append(picked)
+
+    if consumed:
+        rest = [p for p in rest if p["post_id"] not in consumed]
+    out.extend(rest)
+
     logger.debug(
-        "home_magic.prioritize_own viewer=%s pinned=%d interleaved=%d max_age_h=24",
+        "home_magic.own_interleave viewer=%s own=%d consumed=%d interleaved=%d max_age_h=24",
         viewer_lower[:12],
-        len(pins),
+        len(own_posts),
+        len(consumed),
         len(interleaved),
     )
-    return pins + rest
+    return out
 
 
 def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -> list[dict]:
