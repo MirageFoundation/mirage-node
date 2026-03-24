@@ -19,8 +19,7 @@
                     "/topics",
                     "/settings",
                     "/subscription",
-                    "/agents",
-                    "/create_account*"
+                    "/agents"
                 ]
             }
         ]

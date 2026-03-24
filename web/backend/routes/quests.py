@@ -454,9 +454,6 @@ def get_rewards_summary():
         owner = (request.args.get("owner") or "").strip().lower()
         if not owner:
             return jsonify({"error": "owner required"}), 400
-        update_user_last_seen(owner, source=request.path)
-        update_user_last_seen(owner, source=request.path)
-        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
@@ -1241,7 +1238,6 @@ def debug_complete_quest():
             return jsonify({"error": "owner required"}), 400
         if not quest_id:
             return jsonify({"error": "quest_id required"}), 400
-        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
@@ -1377,7 +1373,6 @@ def debug_set_completed_count():
             return jsonify({"error": "owner required"}), 400
         if target_count < 0:
             return jsonify({"error": "count must be >= 0"}), 400
-        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
 

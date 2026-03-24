@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 from typing import Any, Dict, List, Optional
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, has_request_context
 
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
@@ -135,7 +135,6 @@ def _get_validator(valoper) -> dict:
 
 
 import base64
-from user_agents import parse as parse_user_agent
 
 
 def _inject_balance(resp: dict, addr: str) -> dict:
@@ -179,7 +178,8 @@ public_bp = Blueprint("public", __name__)
 def derive_address_from_pubkey(pub_dec: bytes) -> str:
     addr = _derive_address_from_pubkey(pub_dec)
     if addr:
-        update_user_last_seen(addr, source=request.path)
+        source = request.path if has_request_context() else ""
+        update_user_last_seen(addr, source=source)
     return addr
 
 
@@ -6992,98 +6992,12 @@ def stream_proxy(video_uid, path):
         return safe_error(e)
 
 
-_STATS_BOT_NAMES = {
-    "googlebot",
-    "applebot",
-    "bingbot",
-    "yandexbot",
-    "baiduspider",
-    "duckduckbot",
-    "slurp",
-    "facebook",
-    "facebookexternalhit",
-    "facebot",
-    "twitterbot",
-    "twitter",
-    "linkedinbot",
-    "pinterest",
-    "semrushbot",
-    "ahrefsbot",
-    "mj12bot",
-    "dotbot",
-    "petalbot",
-    "bytespider",
-}
-
-
 @public_bp.route("/api/stats/event", methods=["POST"])
 def stats_event():
-    """Record analytics events (visits, sessions, page views). Bot requests are silently discarded.
-
-    The raw User-Agent is never stored. Only coarse categories are persisted
-    (e.g. "Chrome", "Windows", "desktop") which are shared by millions of users.
-    """
+    """Stats event tracking disabled (page/visit tracking removed)."""
     rid = next_request_id()
-    try:
-        # Server-side: parse User-Agent for bot detection + coarse category extraction
-        ua_string = request.headers.get("User-Agent", "")
-        browser_family = None
-        os_family = None
-        device_type = None
-        if ua_string:
-            try:
-                ua = parse_user_agent(ua_string)
-                if ua.is_bot or (ua.browser.family or "").lower() in _STATS_BOT_NAMES:
-                    return jsonify({"success": True})
-                # Extract coarse categories only (never store the raw UA string)
-                browser_family = ua.browser.family or None
-                os_family = ua.os.family or None
-                if ua.is_mobile:
-                    device_type = "mobile"
-                elif ua.is_tablet:
-                    device_type = "tablet"
-                elif ua.is_pc:
-                    device_type = "desktop"
-                else:
-                    device_type = "other"
-            except Exception:
-                pass
-
-        data = request.get_json(force=True) or {}
-        event_type = str(data.get("event_type", "")).strip()
-        session_id = str(data.get("session_id", "")).strip()
-        user_address = data.get("user_address")
-        user_address = str(user_address).strip().lower() if user_address else None
-        page_path = data.get("page_path")
-        page_path = str(page_path).strip() if page_path else None
-
-        if not event_type or not session_id:
-            return jsonify({"error": "missing required fields"}), 400
-
-        if event_type not in ("visit", "session_start", "session_end", "page_view"):
-            return jsonify({"error": "invalid event_type"}), 400
-
-        timestamp = int(time.time())
-        if user_address:
-            update_user_last_seen(user_address, source=request.path, ts=timestamp)
-
-        conn = connect_backend_db()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO stats_events(event_type, user_address, session_id, created_at, page_path, browser_family, os_family, device_type)
-                VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (event_type, user_address, session_id, timestamp, page_path, browser_family, os_family, device_type),
-            )
-        finally:
-            conn.close()
-
-        return jsonify({"success": True})
-    except Exception as e:
-        log_event(rid, "stats_event.err", error=str(e))
-        return safe_error(e)
+    log_event(rid, "stats_event.disabled")
+    return jsonify({"error": "stats_event_disabled"}), 410
 
 
 def _get_stats_analytics(rid: int):

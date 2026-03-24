@@ -14,7 +14,7 @@ import random
 import time
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, has_request_context
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 
@@ -48,8 +48,10 @@ bridge_bp = Blueprint("bridge", __name__)
 def derive_address_from_pubkey(pub_dec: bytes) -> str:
     addr = _derive_address_from_pubkey(pub_dec)
     if addr:
-        update_user_last_seen(addr, source=request.path)
+        source = request.path if has_request_context() else ""
+        update_user_last_seen(addr, source=source)
     return addr
+
 
 _MAX_ADDR_LEN = 128
 _MAX_CHAIN_LEN = 64

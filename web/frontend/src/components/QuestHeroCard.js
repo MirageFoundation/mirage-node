@@ -895,6 +895,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     }
 
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+    const flashTarget = flashQuest?.target || 0;
+    const flashProgress = flashQuest ? Math.min(flashQuest.progress || 0, flashTarget) : 0;
+    const flashProgressTarget = flashTarget > 0 ? flashTarget : 1;
 
     return (
         <>
@@ -927,6 +930,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             const downvotes = quest.downvotes || 0;
                             const targetUpvotes = quest.target_upvotes || 0;
                             const targetDownvotes = quest.target_downvotes || 0;
+                            const target = quest.target || 0;
+                            const clampedProgress = Math.min(quest.progress || 0, target);
+                            const progressTarget = target > 0 ? target : 1;
                             const clampedUpvotes = Math.min(upvotes, targetUpvotes);
                             const clampedDownvotes = Math.min(downvotes, targetDownvotes);
                             if (
@@ -967,8 +973,8 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             <ProgressContainer>
                                                 <ProgressBar>
                                                     <ProgressFill
-                                                        $progress={quest.progress}
-                                                        $target={quest.target}
+                                                        $progress={clampedProgress}
+                                                        $target={progressTarget}
                                                         $completed={quest.completed}
                                                     />
                                                 </ProgressBar>
@@ -985,7 +991,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                     </BalancedProgressText>
                                                 ) : (
                                                     <ProgressText>
-                                                        {quest.progress}/{quest.target}
+                                                        {clampedProgress}/{quest.target}
                                                     </ProgressText>
                                                 )}
                                             </ProgressContainer>
@@ -1026,13 +1032,13 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                     <ProgressContainer>
                                         <ProgressBar>
                                             <ProgressFill
-                                                $progress={flashQuest.progress}
-                                                $target={flashQuest.target}
+                                                $progress={flashProgress}
+                                                $target={flashProgressTarget}
                                                 $completed={flashQuest.completed}
                                             />
                                         </ProgressBar>
                                         <ProgressText>
-                                            {flashQuest.progress}/{flashQuest.target}
+                                            {flashProgress}/{flashQuest.target}
                                         </ProgressText>
                                     </ProgressContainer>
                                 )}

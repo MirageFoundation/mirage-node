@@ -135,7 +135,7 @@ function LoginView({ state, setCredentials }) {
             if (!username) {
                 // Account not found - redirect to create account with the provided seed
                 if (mountedRef.current) setLoading(false);
-                navigate('/create_account', {
+                navigate('/signup', {
                     state: {
                         importedSeed: normalizedSeed,
                         fromRecovery: true
@@ -221,11 +221,11 @@ function LoginView({ state, setCredentials }) {
                             <div style={{ marginTop: '0.25rem', fontSize: '0.6rem', color: '#999' }}>
                                 Don't have an account?{' '}
                                 <a
-                                    href="/create_account"
+                                    href="/signup"
                                     style={{ color: '#4a9eff', cursor: 'pointer', fontSize: '0.6rem', textDecoration: 'none' }}
                                     onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
                                     onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
-                                    onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate('/create_account'); } }}
+                                    onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate('/signup'); } }}
                                 >
                                     Create one here
                                 </a>.

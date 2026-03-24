@@ -1704,7 +1704,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Handle copying invite code
     const handleCopyInviteCode = () => {
         if (!nextAvailableCode) return;
-        const shareUrl = `${window.location.origin}/create_account?invite=${nextAvailableCode.code}`;
+        const shareUrl = `${window.location.origin}/signup?invite=${nextAvailableCode.code}`;
         navigator.clipboard.writeText(shareUrl);
         setInviteCodeCopied(true);
         setTimeout(() => setInviteCodeCopied(false), 2000);
@@ -1730,7 +1730,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Generate share URLs
     const getShareUrl = () => {
         if (!nextAvailableCode) return '';
-        return `${window.location.origin}/create_account?invite=${nextAvailableCode.code}`;
+        return `${window.location.origin}/signup?invite=${nextAvailableCode.code}`;
     };
 
     const SHARE_TEXTS = [
@@ -3151,7 +3151,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     Have an invite code? Join the community today.
                                 </InviteOnlyHeroDescription>
                                 <InviteOnlyHeroButtons>
-                                    <Button to="/create_account" size="md">
+                                    <Button to="/signup" size="md">
                                         Create Account
                                     </Button>
                                     <Button to="/login" variant="ghost" size="md">

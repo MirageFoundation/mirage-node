@@ -20,7 +20,7 @@ import time
 import threading
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, has_request_context
 from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED, PUSH_NOTIFICATIONS_ENABLED
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
@@ -128,8 +128,10 @@ core_bp = Blueprint("core", __name__)
 def derive_address_from_pubkey(pub_dec: bytes) -> str:
     addr = _derive_address_from_pubkey(pub_dec)
     if addr:
-        update_user_last_seen(addr, source=request.path)
+        source = request.path if has_request_context() else ""
+        update_user_last_seen(addr, source=source)
     return addr
+
 
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
 # state changes between simulation and execution, and storage write costs
@@ -3544,14 +3546,20 @@ def core_post():
         now_ts = int(time.time())
         quest_action = "comment" if target else "post"
         _track_quest_progress(
-            user_addr, quest_action, now_ts,
-            topic=topic, target_topic=topic,
+            user_addr,
+            quest_action,
+            now_ts,
+            topic=topic,
+            target_topic=topic,
             content_length=len(content),
         )
         if not target and topic:
             _track_quest_progress(
-                user_addr, "unique_topic_post", now_ts,
-                topic=topic, content_length=len(content),
+                user_addr,
+                "unique_topic_post",
+                now_ts,
+                topic=topic,
+                content_length=len(content),
             )
 
         try:
@@ -3774,13 +3782,19 @@ def core_vote():
 
         now_ts = int(time.time())
         _track_quest_progress(
-            user_addr, "vote", now_ts,
-            target=target, vote_direction=int(direction),
+            user_addr,
+            "vote",
+            now_ts,
+            target=target,
+            vote_direction=int(direction),
             vote_is_change=False,
         )
         _track_quest_progress(
-            user_addr, "balanced_vote", now_ts,
-            target=target, vote_direction=int(direction),
+            user_addr,
+            "balanced_vote",
+            now_ts,
+            target=target,
+            vote_direction=int(direction),
             vote_is_change=False,
         )
 
@@ -4442,8 +4456,7 @@ def core_register_push_token():
                 )
 
         is_new = not existing
-        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform,
-                  token=token[:30], new=is_new)
+        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform, token=token[:30], new=is_new)
         return jsonify({"ok": True})
     except Exception as e:
         log_event(rid, "register_push_token.err", error=str(e))
@@ -4505,8 +4518,7 @@ def core_unregister_push_token():
                 )
                 deleted = cur.rowcount
 
-        log_event(rid, "unregister_push_token.ok", user=user_addr,
-                  token=token[:30], deleted=deleted)
+        log_event(rid, "unregister_push_token.ok", user=user_addr, token=token[:30], deleted=deleted)
         return jsonify({"ok": True})
     except Exception as e:
         log_event(rid, "unregister_push_token.err", error=str(e))

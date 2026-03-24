@@ -41,6 +41,7 @@ def init_backend_schema() -> None:
     try:
         logger.debug("backend.schema.init.begin")
         with conn.cursor() as cur:
+
             def _assert_table_schema(
                 table: str,
                 expected_cols: set[str],
@@ -56,24 +57,20 @@ def init_backend_schema() -> None:
                 )
                 rows = cur.fetchall()
                 if not rows:
-                    return
+                    raise RuntimeError(f"{table} schema mismatch: table missing")
                 cols = {row[0]: row[1] for row in rows}
                 missing = expected_cols - cols.keys()
                 extra = cols.keys() - expected_cols
                 if missing or extra:
-                    raise RuntimeError(
-                        f"{table} schema mismatch: missing={sorted(missing)} extra={sorted(extra)}"
-                    )
+                    raise RuntimeError(f"{table} schema mismatch: missing={sorted(missing)} extra={sorted(extra)}")
                 if expected_types:
-                    bad = {
-                        col: cols.get(col)
-                        for col, dtype in expected_types.items()
-                        if cols.get(col) != dtype
-                    }
+                    bad = {col: cols.get(col) for col, dtype in expected_types.items() if cols.get(col) != dtype}
                     if bad:
                         raise RuntimeError(f"{table} schema mismatch: types={bad}")
+
             # ── Invite codes ─────────────────────────────────────────────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS invite_codes (
                     code VARCHAR(9) PRIMARY KEY,
                     owner VARCHAR(64) NOT NULL,
@@ -81,22 +78,26 @@ def init_backend_schema() -> None:
                     created_at BIGINT NOT NULL,
                     used_at BIGINT
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_owner ON invite_codes(LOWER(owner))")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_used_by ON invite_codes(LOWER(used_by))")
 
             # ── Referral system ──────────────────────────────────────────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS referral_links (
                     user_address VARCHAR(64) PRIMARY KEY,
                     referrer_address VARCHAR(64) NOT NULL,
                     referred_at BIGINT NOT NULL,
                     created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_links_referrer ON referral_links(referrer_address)")
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS referral_pending_rewards (
                     id SERIAL PRIMARY KEY,
                     user_address VARCHAR(64) NOT NULL,
@@ -114,9 +115,11 @@ def init_backend_schema() -> None:
                     paid_txhash VARCHAR(64),
                     UNIQUE(user_address, period_start)
                 )
-            """)
+            """
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS referral_trust_scores (
                     referrer_address VARCHAR(64) PRIMARY KEY,
                     trust_score DECIMAL(5,2) DEFAULT 1.0,
@@ -125,9 +128,11 @@ def init_backend_schema() -> None:
                     rejected_referrals INT DEFAULT 0,
                     last_updated BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
                 )
-            """)
+            """
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS referral_analysis (
                     id SERIAL PRIMARY KEY,
                     referee_address VARCHAR(64) NOT NULL,
@@ -142,10 +147,14 @@ def init_backend_schema() -> None:
                     decided_at BIGINT,
                     UNIQUE(referee_address, analysis_date)
                 )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_analysis_referrer ON referral_analysis(referrer_address)")
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_referral_analysis_referrer ON referral_analysis(referrer_address)"
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS referral_user_accruals (
                     beneficiary_address VARCHAR(64) NOT NULL,
                     referee_address VARCHAR(64) NOT NULL,
@@ -156,19 +165,25 @@ def init_backend_schema() -> None:
                     last_updated BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
                     PRIMARY KEY (beneficiary_address, referee_address)
                 )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_user_accruals_beneficiary ON referral_user_accruals(beneficiary_address)")
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_referral_user_accruals_beneficiary ON referral_user_accruals(beneficiary_address)"
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS referral_state (
                     key VARCHAR(64) PRIMARY KEY,
                     value BIGINT NOT NULL,
                     updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
                 )
-            """)
+            """
+            )
 
             # ── Reports ──────────────────────────────────────────────────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS reports (
                     id SERIAL PRIMARY KEY,
                     owner TEXT NOT NULL,
@@ -176,61 +191,51 @@ def init_backend_schema() -> None:
                     reason TEXT NOT NULL,
                     created_at BIGINT NOT NULL
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_reports_target_lower ON reports(LOWER(target))")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC)")
 
-            # ── Stats (page/visit tracking — will be replaced by stats_actions in referral plan) ──
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS stats_events (
-                    id SERIAL PRIMARY KEY,
-                    event_type TEXT NOT NULL,
-                    user_address TEXT,
-                    session_id TEXT NOT NULL,
-                    created_at BIGINT NOT NULL,
-                    page_path TEXT,
-                    browser_family TEXT,
-                    os_family TEXT,
-                    device_type TEXT
-                )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_created_at ON stats_events(created_at DESC)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_session_id ON stats_events(session_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_user_address ON stats_events(user_address)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_event_type ON stats_events(event_type)")
-
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_last_seen (
                     owner TEXT PRIMARY KEY,
                     last_seen_at BIGINT NOT NULL,
                     CONSTRAINT user_last_seen_owner_lower CHECK (owner = LOWER(owner))
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_last_seen_seen_at ON user_last_seen(last_seen_at DESC)")
             _assert_table_schema("user_last_seen", {"owner", "last_seen_at"})
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_event_seen (
                     event_key TEXT PRIMARY KEY,
                     event_type TEXT NOT NULL,
                     created_at BIGINT NOT NULL
                 )
-            """)
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_push_event_seen_type ON push_event_seen(event_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_push_event_seen_created_at ON push_event_seen(created_at DESC)")
             _assert_table_schema("push_event_seen", {"event_key", "event_type", "created_at"})
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_event_cursor (
                     event_type TEXT PRIMARY KEY,
                     last_created_at BIGINT NOT NULL,
                     last_id TEXT NOT NULL,
                     updated_at BIGINT NOT NULL
                 )
-            """)
+            """
+            )
             _assert_table_schema("push_event_cursor", {"event_type", "last_created_at", "last_id", "updated_at"})
 
             # ── User similarity cache ────────────────────────────────────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_similarity_cache (
                     owner TEXT NOT NULL,
                     similar_user TEXT NOT NULL,
@@ -240,11 +245,15 @@ def init_backend_schema() -> None:
                     expires_at BIGINT NOT NULL,
                     PRIMARY KEY (owner, similar_user)
                 )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_similarity_owner_expires ON user_similarity_cache(LOWER(owner), expires_at)")
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_similarity_owner_expires ON user_similarity_cache(LOWER(owner), expires_at)"
+            )
 
             # ── Push notifications ───────────────────────────────────────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_tokens (
                     id SERIAL PRIMARY KEY,
                     owner TEXT NOT NULL,
@@ -253,19 +262,23 @@ def init_backend_schema() -> None:
                     created_at BIGINT NOT NULL,
                     last_used_at BIGINT NOT NULL
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_push_tokens_owner_lower ON push_tokens(LOWER(owner))")
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_budget (
                     owner TEXT PRIMARY KEY,
                     remaining INT NOT NULL DEFAULT 3,
                     last_reset_at BIGINT NOT NULL DEFAULT 0,
                     CONSTRAINT push_budget_owner_lower CHECK (owner = LOWER(owner))
                 )
-            """)
+            """
+            )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_throttle (
                     owner TEXT PRIMARY KEY,
                     window_start BIGINT NOT NULL DEFAULT 0,
@@ -274,7 +287,8 @@ def init_backend_schema() -> None:
                     cooldown_until BIGINT NOT NULL DEFAULT 0,
                     CONSTRAINT push_throttle_owner_lower CHECK (owner = LOWER(owner))
                 )
-            """)
+            """
+            )
             _assert_table_schema(
                 "push_throttle",
                 {"owner", "window_start", "sent_count", "suppressed_count", "cooldown_until"},
@@ -284,18 +298,21 @@ def init_backend_schema() -> None:
                 "ON push_throttle (cooldown_until, window_start) WHERE suppressed_count > 0"
             )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_receipts (
                     id SERIAL PRIMARY KEY,
                     ticket_id TEXT NOT NULL UNIQUE,
                     token TEXT NOT NULL,
                     created_at BIGINT NOT NULL
                 )
-            """)
+            """
+            )
             _assert_table_schema("push_receipts", {"id", "ticket_id", "token", "created_at"})
             cur.execute("CREATE INDEX IF NOT EXISTS idx_push_receipts_created_at ON push_receipts(created_at)")
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS push_nonces (
                     id SERIAL PRIMARY KEY,
                     owner TEXT NOT NULL,
@@ -305,7 +322,8 @@ def init_backend_schema() -> None:
                     CONSTRAINT push_nonces_owner_lower CHECK (owner = LOWER(owner)),
                     UNIQUE(owner, action, nonce)
                 )
-            """)
+            """
+            )
             _assert_table_schema(
                 "push_nonces",
                 {"id", "owner", "action", "nonce", "created_at"},
@@ -315,7 +333,8 @@ def init_backend_schema() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_push_nonces_created_at ON push_nonces(created_at)")
 
             # ── Quest / reward system ────────────────────────────────────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_daily_quests (
                     owner TEXT NOT NULL,
                     day_utc INTEGER NOT NULL,
@@ -326,7 +345,8 @@ def init_backend_schema() -> None:
                     completed_at BIGINT,
                     PRIMARY KEY (owner, day_utc, quest_id)
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_daily_quests_owner ON user_daily_quests(LOWER(owner))")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_daily_quests_day ON user_daily_quests(day_utc DESC)")
             _assert_table_schema(
@@ -343,7 +363,8 @@ def init_backend_schema() -> None:
                 {"progress_meta": "jsonb"},
             )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_flash_quests (
                     owner TEXT NOT NULL,
                     template_id TEXT NOT NULL,
@@ -355,7 +376,8 @@ def init_backend_schema() -> None:
                     completed_at BIGINT,
                     PRIMARY KEY (owner, starts_at)
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_flash_quests_owner ON user_flash_quests(LOWER(owner))")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_flash_quests_ends ON user_flash_quests(ends_at)")
             cur.execute(
@@ -376,15 +398,18 @@ def init_backend_schema() -> None:
                 {"progress_meta": "jsonb"},
             )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_quest_state (
                     owner TEXT PRIMARY KEY,
                     next_flash_at BIGINT NOT NULL DEFAULT 0
                 )
-            """)
+            """
+            )
             _assert_table_schema("user_quest_state", {"owner", "next_flash_at"})
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_achievements (
                     owner TEXT NOT NULL,
                     achievement_id TEXT NOT NULL,
@@ -393,7 +418,8 @@ def init_backend_schema() -> None:
                     progress_meta JSONB NOT NULL DEFAULT '{}',
                     PRIMARY KEY (owner, achievement_id)
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_achievements_owner ON user_achievements(LOWER(owner))")
             _assert_table_schema(
                 "user_achievements",
@@ -401,7 +427,8 @@ def init_backend_schema() -> None:
                 {"progress_meta": "jsonb"},
             )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS pending_rewards (
                     id SERIAL PRIMARY KEY,
                     owner TEXT NOT NULL,
@@ -412,7 +439,8 @@ def init_backend_schema() -> None:
                     claimed_at BIGINT,
                     payout_amount BIGINT
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_pending_rewards_owner ON pending_rewards(LOWER(owner))")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_pending_rewards_unclaimed "
@@ -433,7 +461,8 @@ def init_backend_schema() -> None:
                 {"reward_data": "jsonb"},
             )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_unlocks (
                     owner TEXT NOT NULL,
                     unlock_type TEXT NOT NULL,
@@ -442,14 +471,16 @@ def init_backend_schema() -> None:
                     source TEXT NOT NULL,
                     PRIMARY KEY (owner, unlock_type, unlock_id)
                 )
-            """)
+            """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_user_unlocks_owner ON user_unlocks(LOWER(owner))")
             _assert_table_schema(
                 "user_unlocks",
                 {"owner", "unlock_type", "unlock_id", "unlocked_at", "source"},
             )
 
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS reward_suspensions (
                     owner TEXT PRIMARY KEY,
                     suspended_until BIGINT NOT NULL,
@@ -457,19 +488,22 @@ def init_backend_schema() -> None:
                     reason TEXT NOT NULL,
                     updated_at BIGINT NOT NULL
                 )
-            """)
+            """
+            )
             _assert_table_schema(
                 "reward_suspensions",
                 {"owner", "suspended_until", "suspended_by", "reason", "updated_at"},
             )
 
             # ── Inbox state (replaces profiles.inbox_last_viewed_at) ─────
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_inbox_state (
                     owner TEXT PRIMARY KEY,
                     inbox_last_viewed_at BIGINT NOT NULL DEFAULT 0
                 )
-            """)
+            """
+            )
 
         logger.debug("backend.schema.init.ok")
         logger.info("Backend schema initialized successfully")
