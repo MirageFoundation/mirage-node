@@ -34,6 +34,7 @@ export PYTHONPATH="/opt/mirage"
 
 # Load persistent env files if present
 ENV_DIR="${HOME}/.mirage/env"
+export ENV_DIR
 load_env_files() {
   for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env" "${ENV_DIR}/orchestrator.env"; do
     if [ -f "$envfile" ]; then
@@ -43,10 +44,25 @@ load_env_files() {
     fi
   done
 }
-load_env_files
-
 # Ensure config directory exists
 mkdir -p "$ENV_DIR"
+
+# Sync env files with templates before requiring any values
+echo "==> Syncing env files with templates (pre-migrations)..."
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+from deploy.migrations._helpers import sync_all
+
+config_dir = Path(os.environ["ENV_DIR"])
+templates_root = Path("/opt/mirage/deploy/templates")
+templates_dir = templates_root / "env" if (templates_root / "env").exists() else templates_root
+sync_all(templates_dir, config_dir)
+PY
+
+# Load persistent env files after sync
+load_env_files
 
 # DB URLs must be set BEFORE migrations run (no fallbacks).
 for var in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL; do
