@@ -38,6 +38,16 @@
 ## Short-term cleanup (remove after March)
 - Remove legacy handling of embedding image/media when the first line is a link. The `media` field already covers this.
 
+## NEXT RELEASE: Drop migrated tables from indexer DB
+After confirming `scripts/migrate_backend_db.py` has run on production, DROP these tables from the **indexer** database (`mirage`). They now live in `mirage_backend` and the indexer no longer reads or writes them:
+```
+push_tokens, push_budget, push_throttle, push_receipts, push_nonces,
+user_daily_quests, user_flash_quests, user_quest_state,
+user_achievements, pending_rewards, user_unlocks, reward_suspensions,
+user_similarity_cache
+```
+Run `scripts/verify_upgrade.py` after dropping — warnings in section 7 should disappear.
+
 ## Performance
 - Generally optimize website. Find bottlenecks. Use Firefox profiler.
 

@@ -1,55 +1,207 @@
 #!/usr/bin/env python3
 """
-Verify a software upgrade was applied correctly on a Mirage chain.
+Post-upgrade verification for the indexer/backend database split.
 
-Runs locally on the node (inside the container / on the server).
-Queries localhost REST (1317) and RPC (26657) + local miraged binary.
+Checks:
+  1. Both databases exist and are reachable
+  2. Backend DB has all expected tables with correct schemas
+  3. Indexer DB has all expected tables (chain-indexed state)
+  4. Backend DB does NOT contain indexer tables (clean split)
+  5. Indexer DB does NOT contain backend-owned tables
+  6. Read-only role cannot write to indexer DB
+  7. Backend can read from indexer via RO connection
+  8. Push listener tables are functional
+  9. user_last_seen table works
+ 10. stats_events table is gone
+ 11. API endpoints respond correctly
+ 12. /signup route exists (renamed from /create_account)
 
 Usage:
-    python3 verify_upgrade.py [--upgrade-name NAME] [--debug]
+  python scripts/verify_upgrade.py                     # inside container
+  docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
 """
-import json
-import shutil
-import subprocess
+from __future__ import annotations
+
+import os
 import sys
-import urllib.request
-import urllib.parse
+import time
+import json
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
-RPC = "http://127.0.0.1:26657"
-REST = "http://127.0.0.1:1317"
+sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "web" / "backend"))
 
-_passed = 0
-_failed = 0
-_warned = 0
-_debug = False
+try:
+    import psycopg
+except ImportError:
+    print("FATAL: psycopg not installed")
+    sys.exit(1)
 
-ORCHESTRATOR_DISABLE_TOKEN = "ORCHESTRATOR_HARD_DISABLED"
-MIGRATION_TX_INDEX_CLEANUP = "v1.20.0-tx-index-cleanup"
+try:
+    import requests
+except ImportError:
+    requests = None
+
+
+BACKEND_API = os.environ.get("BACKEND_API", "http://127.0.0.1")
+
+BACKEND_TABLES = {
+    "invite_codes",
+    "referral_links",
+    "referral_pending_rewards",
+    "referral_trust_scores",
+    "referral_analysis",
+    "referral_user_accruals",
+    "referral_state",
+    "reports",
+    "user_last_seen",
+    "push_event_seen",
+    "push_event_cursor",
+    "user_similarity_cache",
+    "push_tokens",
+    "push_budget",
+    "push_throttle",
+    "push_receipts",
+    "push_nonces",
+    "user_daily_quests",
+    "user_flash_quests",
+    "user_quest_state",
+    "user_achievements",
+    "pending_rewards",
+    "user_unlocks",
+    "reward_suspensions",
+    "user_inbox_state",
+}
+
+INDEXER_TABLES = {
+    "meta",
+    "posts",
+    "votes",
+    "tx_index",
+    "awards",
+    "preferences",
+    "profiles",
+    "enabled_agents",
+    "followed_users",
+    "followed_topics",
+    "blocked_posts",
+    "blocked_users",
+    "blocked_topics",
+    "difficulty_history",
+    "supply_history",
+    "topic_content_stats",
+    "balances",
+    "chain_stats",
+    "recent_blocks",
+    "pending_txs",
+    "indexer_state",
+    "user_topic_stats",
+    "mentions",
+    "agent_edits",
+}
+
+DEAD_TABLES = {"stats_events"}
+
+BACKEND_SCHEMA_CHECKS = {
+    "push_throttle": {"owner", "window_start", "sent_count", "suppressed_count", "cooldown_until"},
+    "push_receipts": {"id", "ticket_id", "token", "created_at"},
+    "push_nonces": {"id", "owner", "action", "nonce", "created_at"},
+    "user_last_seen": {"owner", "last_seen_at"},
+    "push_event_seen": {"event_key", "event_type", "created_at"},
+    "push_event_cursor": {"event_type", "last_created_at", "last_id", "updated_at"},
+    "user_daily_quests": {
+        "owner",
+        "day_utc",
+        "quest_id",
+        "progress",
+        "progress_meta",
+        "last_action_at",
+        "completed_at",
+    },
+    "pending_rewards": {
+        "id",
+        "owner",
+        "reward_type",
+        "reward_data",
+        "reason",
+        "created_at",
+        "claimed_at",
+        "payout_amount",
+    },
+    "user_inbox_state": {"owner", "inbox_last_viewed_at"},
+}
+
+MIGRATED_TABLES = {
+    "push_tokens",
+    "push_budget",
+    "push_throttle",
+    "push_receipts",
+    "push_nonces",
+    "user_daily_quests",
+    "user_flash_quests",
+    "user_quest_state",
+    "user_achievements",
+    "pending_rewards",
+    "user_unlocks",
+    "reward_suspensions",
+    "user_similarity_cache",
+    "invite_codes",
+    "reports",
+    "user_inbox_state",
+}
+
+passed = 0
+failed = 0
+warnings = 0
 
 
 def ok(msg: str) -> None:
-    global _passed
-    _passed += 1
-    print(f"  \033[32m✓\033[0m {msg}")
+    global passed
+    passed += 1
+    print(f"  ✓ {msg}")
 
 
 def fail(msg: str) -> None:
-    global _failed
-    _failed += 1
-    print(f"  \033[31m✗\033[0m {msg}")
+    global failed
+    failed += 1
+    print(f"  ✗ {msg}")
 
 
 def warn(msg: str) -> None:
-    global _warned
-    _warned += 1
-    print(f"  \033[33m!\033[0m {msg}")
+    global warnings
+    warnings += 1
+    print(f"  ⚠ {msg}")
 
 
-def debug(msg: str) -> None:
-    if _debug:
-        print(f"  [debug] {msg}")
+def get_row_count(conn: psycopg.Connection, table: str) -> int:
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM {table}")
+            return cur.fetchone()[0]
+    except Exception:
+        return -1
+
+
+def get_tables(conn: psycopg.Connection) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+        return {row[0] for row in cur.fetchall()}
+
+
+def get_columns(conn: psycopg.Connection, table: str) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s",
+            (table,),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
+def get_env(key: str) -> str:
+    val = os.environ.get(key, "").strip()
+    if not val:
+        raise RuntimeError(f"{key} not set")
+    return val
 
 
 def section(title: str) -> None:
@@ -58,716 +210,388 @@ def section(title: str) -> None:
     print(f"{'─' * 60}")
 
 
-def http_get(url: str) -> dict | None:
+def main() -> None:
+    global passed, failed, warnings
+
+    print("=" * 60)
+    print("  Mirage Post-Upgrade Verification")
+    print("=" * 60)
+
+    # ── 1. Environment variables ──────────────────────────────
+    section("1. Environment Variables")
+    backend_url = indexer_url = indexer_ro_url = None
+    for key in ("BACKEND_DB_URL", "INDEXER_DB_URL", "INDEXER_DB_RO_URL"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            ok(f"{key} is set")
+            if key == "BACKEND_DB_URL":
+                backend_url = val
+            elif key == "INDEXER_DB_URL":
+                indexer_url = val
+            elif key == "INDEXER_DB_RO_URL":
+                indexer_ro_url = val
+        else:
+            if key == "INDEXER_DB_URL":
+                warn(f"{key} not set (only needed by indexer process)")
+            else:
+                fail(f"{key} not set")
+
+    if not backend_url or not indexer_ro_url:
+        print("\nFATAL: Cannot proceed without BACKEND_DB_URL and INDEXER_DB_RO_URL")
+        sys.exit(1)
+
+    # ── 2. Database connectivity ──────────────────────────────
+    section("2. Database Connectivity")
+    backend_conn = None
+    indexer_conn = None
     try:
-        debug(f"GET {url}")
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
+        backend_conn = psycopg.connect(backend_url, autocommit=True)
+        ok("Backend DB reachable")
     except Exception as e:
-        fail(f"HTTP GET {url} failed: {e}")
-        return None
+        fail(f"Backend DB unreachable: {e}")
 
+    try:
+        indexer_conn = psycopg.connect(indexer_ro_url, autocommit=True)
+        ok("Indexer DB (RO) reachable")
+    except Exception as e:
+        fail(f"Indexer DB (RO) unreachable: {e}")
 
-def find_miraged() -> str:
-    for p in ["/opt/mirage/blockchain/bin/miraged", "/opt/mirage/blockchain/miraged"]:
-        if Path(p).is_file():
-            debug(f"Found miraged at {p}")
-            return p
-    found = shutil.which("miraged") or "miraged"
-    debug(f"Using miraged from PATH: {found}")
-    return found
+    if not backend_conn or not indexer_conn:
+        print("\nFATAL: Cannot proceed without database connections")
+        sys.exit(1)
 
+    # ── 3. Backend DB has all expected tables ─────────────────
+    section("3. Backend DB Tables")
+    backend_tables = get_tables(backend_conn)
+    for t in sorted(BACKEND_TABLES):
+        if t in backend_tables:
+            ok(f"backend.{t} exists")
+        else:
+            fail(f"backend.{t} MISSING")
 
-def detect_upgrade_name() -> str | None:
-    proposal_file = SCRIPTS_DIR / "proposals" / "proposal_upgrade.json"
-    if proposal_file.exists():
+    # ── 4. Backend DB does NOT have indexer tables ────────────
+    section("4. Backend DB Clean (no indexer tables)")
+    leaked = INDEXER_TABLES & backend_tables
+    if leaked:
+        for t in sorted(leaked):
+            fail(f"backend.{t} should NOT exist (indexer table leaked)")
+    else:
+        ok("No indexer tables found in backend DB")
+
+    # ── 5. Dead tables removed ────────────────────────────────
+    section("5. Dead Tables Removed")
+    for t in sorted(DEAD_TABLES):
+        if t in backend_tables:
+            fail(f"backend.{t} still exists (should be removed)")
+        else:
+            ok(f"backend.{t} correctly absent")
+
+    # ── 6. Indexer DB has expected tables ─────────────────────
+    section("6. Indexer DB Tables")
+    indexer_tables = get_tables(indexer_conn)
+    for t in sorted(INDEXER_TABLES):
+        if t in indexer_tables:
+            ok(f"indexer.{t} exists")
+        else:
+            warn(f"indexer.{t} missing (may not be created yet)")
+
+    # ── 7. Indexer DB does NOT have backend-only tables ───────
+    section("7. Indexer DB Clean (no backend-only tables)")
+    backend_only = {"user_last_seen", "push_event_seen", "push_event_cursor", "user_inbox_state"}
+    leaked_to_indexer = backend_only & indexer_tables
+    if leaked_to_indexer:
+        for t in sorted(leaked_to_indexer):
+            fail(f"indexer.{t} should NOT exist (backend table leaked)")
+    else:
+        ok("No backend-only tables found in indexer DB")
+
+    # Tables that migrated from indexer may still exist there during transition
+    migrated = {
+        "push_tokens",
+        "push_budget",
+        "push_throttle",
+        "push_receipts",
+        "push_nonces",
+        "user_daily_quests",
+        "user_flash_quests",
+        "user_quest_state",
+        "user_achievements",
+        "pending_rewards",
+        "user_unlocks",
+        "reward_suspensions",
+        "user_similarity_cache",
+    }
+    still_in_indexer = migrated & indexer_tables
+    if still_in_indexer:
+        for t in sorted(still_in_indexer):
+            warn(f"indexer.{t} still exists (migrated table, safe to drop after migration)")
+    else:
+        ok("Migrated tables already cleaned from indexer DB")
+
+    # ── 8. Backend table schemas ──────────────────────────────
+    section("8. Backend Table Schema Validation")
+    for table, expected_cols in sorted(BACKEND_SCHEMA_CHECKS.items()):
+        if table not in backend_tables:
+            fail(f"backend.{table} missing, cannot check schema")
+            continue
+        actual_cols = get_columns(backend_conn, table)
+        missing = expected_cols - actual_cols
+        extra = actual_cols - expected_cols
+        if missing:
+            fail(f"backend.{table} missing columns: {sorted(missing)}")
+        elif extra:
+            warn(f"backend.{table} has extra columns: {sorted(extra)} (may be intentional)")
+        else:
+            ok(f"backend.{table} schema matches")
+
+    # ── 9. Data migration verification ─────────────────────────
+    section("9. Data Migration Verification")
+    indexer_rw_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    indexer_for_counts = None
+    if indexer_rw_url and indexer_rw_url != indexer_ro_url:
         try:
-            data = json.loads(proposal_file.read_text())
-            for msg in data.get("messages", []):
-                plan = msg.get("plan", {})
-                if plan.get("name"):
-                    debug(f"Detected upgrade name from proposal: {plan['name']}")
-                    return plan["name"]
+            indexer_for_counts = psycopg.connect(indexer_rw_url, autocommit=True)
         except Exception:
             pass
-    return None
+    if not indexer_for_counts:
+        indexer_for_counts = indexer_conn
 
+    data_issues = 0
+    for t in sorted(MIGRATED_TABLES):
+        src_count = get_row_count(indexer_for_counts, t)
+        dst_count = get_row_count(backend_conn, t)
 
-def _read_env_value(path: Path, key: str) -> str | None:
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if stripped.startswith(f"{key}="):
-                    return stripped.split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception as e:
-        debug(f"Failed to read env file {path}: {e}")
-    return None
-
-
-def _read_tx_indexer(config_path: Path) -> str | None:
-    if not config_path.exists():
-        return None
-    try:
-        in_tx_index = False
-        with open(config_path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("[") and line.endswith("]"):
-                    in_tx_index = line == "[tx_index]"
-                    continue
-                if in_tx_index and line.startswith("indexer"):
-                    _, _, val = line.partition("=")
-                    return val.strip().strip('"').strip("'")
-    except Exception as e:
-        debug(f"Failed to parse config.toml {config_path}: {e}")
-    return None
-
-
-EXPECTED_TIERS = [
-    {
-        "level": 0,
-        "name": "Free",
-        "period_fee": 0,
-        "max_enabled_agents": 5,
-        "max_followed_users": 25,
-        "max_followed_topics": 25,
-        "max_blocked_users": 25,
-        "max_blocked_posts": 25,
-        "max_blocked_topics": 25,
-        "max_title_length": 150,
-        "max_content_length": 1000,
-        "editing_time_mins": 10,
-        "vote_weight": 1.0,
-        "can_be_agent": False,
-        "can_remove_anon": False,
-        "can_have_biography": False,
-        "can_have_avatar": False,
-        "can_have_banner": False,
-        "can_have_flair": False,
-        "max_biography_length": 0,
-    },
-    {
-        "level": 1,
-        "name": "Subscriber",
-        "period_fee": 100_000_000_000,
-        "max_enabled_agents": 50,
-        "max_followed_users": 500,
-        "max_followed_topics": 500,
-        "max_blocked_users": 500,
-        "max_blocked_posts": 500,
-        "max_blocked_topics": 500,
-        "max_title_length": 300,
-        "max_content_length": 20_000,
-        "editing_time_mins": 360,
-        "vote_weight": 1.33,
-        "can_be_agent": False,
-        "can_remove_anon": True,
-        "can_have_biography": True,
-        "can_have_avatar": True,
-        "can_have_banner": True,
-        "can_have_flair": True,
-        "max_biography_length": 512,
-    },
-    {
-        "level": 10,
-        "name": "Agent",
-        "period_fee": 500_000_000_000,
-        "max_enabled_agents": 50,
-        "max_followed_users": 500,
-        "max_followed_topics": 500,
-        "max_blocked_users": 500,
-        "max_blocked_posts": 500,
-        "max_blocked_topics": 500,
-        "max_title_length": 300,
-        "max_content_length": 20_000,
-        "editing_time_mins": 360,
-        "vote_weight": 1.33,
-        "can_be_agent": True,
-        "can_remove_anon": True,
-        "can_have_biography": True,
-        "can_have_avatar": True,
-        "can_have_banner": True,
-        "can_have_flair": True,
-        "max_biography_length": 512,
-    },
-]
-
-EXPECTED_AWARD_CONFIGS = [
-    {"name": "quality_post", "cost": 10_000_000_000},
-    {"name": "original_content", "cost": 5_000_000_000},
-    {"name": "based", "cost": 5_000_000_000},
-    {"name": "receipts", "cost": 5_000_000_000},
-]
-
-EXPECTED_PARAMS = {
-    "min_difficulty": 10,
-    "pow_message_window": 20,
-    "pow_message_limit": 15,
-    "pow_calm_period_definition": 10,
-    "pow_calm_sequence_threshold": 100,
-    "mint_interval": 200,
-    "mint_quantity": 5_800_000_000,
-    "mint_dynamic_credit_cap": 100,
-    "subscription_period": 43200,
-    "relay_min_gas_price": 1000,
-    "relay_max_gas_fee": 500_000_000,
-    "max_envelope_age": 60,
-    "min_username_size": 3,
-    "max_username_size": 30,
-    "min_topic_size": 2,
-    "max_topic_size": 35,
-    "block_hash_window": 10,
-    "pow_difficulty_allowance": 2,
-}
-
-
-# ── Checks ─────────────────────────────────────────────────
-
-
-def check_node_reachable() -> bool:
-    section("Node Connectivity")
-    data = http_get(f"{RPC}/status")
-    if not data:
-        fail("Node not reachable")
-        return False
-    r = data.get("result", {})
-    ni = r.get("node_info", {})
-    si = r.get("sync_info", {})
-    network = ni.get("network", "?")
-    cometbft = ni.get("version", "?")
-    height = si.get("latest_block_height", "?")
-    catching_up = si.get("catching_up", False)
-
-    ok(f"Node reachable (network={network}, cometbft={cometbft}, height={height})")
-    if catching_up:
-        warn("Node is still catching up")
-    else:
-        ok("Node is synced")
-    return True
-
-
-def _extract_semver(s: str) -> str:
-    """Extract the semver portion, stripping leading 'v' and any suffix after patch."""
-    import re
-
-    m = re.search(r"v?(\d+\.\d+\.\d+)", s)
-    return m.group(1) if m else s
-
-
-def _version_matches(actual: str, upgrade_name: str) -> bool:
-    if not actual or not upgrade_name:
-        return False
-    return _extract_semver(actual) == _extract_semver(upgrade_name)
-
-
-def check_software_version(upgrade_name: str) -> None:
-    section("Software Version")
-    miraged = find_miraged()
-    r = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
-    if r.returncode == 0:
-        bin_ver = r.stdout.strip()
-        ok(f"Binary on disk: {bin_ver}")
-        if _version_matches(bin_ver, upgrade_name):
-            ok(f"Binary version matches upgrade: {upgrade_name}")
-        else:
-            fail(f"Binary version mismatch: {bin_ver} (want {upgrade_name})")
-    else:
-        fail(f"Could not run '{miraged} version': {r.stderr.strip()[:120]}")
-
-    data = http_get(f"{REST}/cosmos/base/tendermint/v1beta1/node_info")
-    if data:
-        ver = data.get("application_version", {}).get("version", "?")
-        ok(f"Running node (ABCI): {ver}")
-        if _version_matches(str(ver), upgrade_name):
-            ok(f"ABCI version matches upgrade: {upgrade_name}")
-        else:
-            fail(f"ABCI version mismatch: {ver} (want {upgrade_name})")
-
-
-def check_upgrade_plan(upgrade_name: str) -> None:
-    section("Upgrade Status")
-
-    data = http_get(f"{REST}/cosmos/upgrade/v1beta1/current_plan")
-    if data is not None:
-        plan = data.get("plan")
-        if plan is None or plan == {}:
-            ok("No active upgrade plan (cleared after upgrade)")
-        else:
-            fail(f"Upgrade plan still active: {plan.get('name', '?')} at height {plan.get('height', '?')}")
-
-    data = http_get(f"{REST}/cosmos/upgrade/v1beta1/applied_plan/{upgrade_name}")
-    if data is not None:
-        h = data.get("height", "0")
-        if h and h != "0":
-            ok(f"Upgrade '{upgrade_name}' applied at height {h}")
-        else:
-            fail(f"Upgrade '{upgrade_name}' not found in applied upgrades")
-
-
-def check_core_params() -> None:
-    section("Core Module Parameters")
-    data = http_get(f"{REST}/mirage/core/v1/params")
-    if data is None:
-        return
-
-    params = data.get("params", {})
-
-    # ── Global params ──
-    for key, expected_val in EXPECTED_PARAMS.items():
-        actual_raw = params.get(key, "0")
-        actual_val = int(actual_raw)
-        if actual_val != expected_val:
-            fail(f"params.{key} = {actual_val} (want {expected_val})")
-        else:
-            ok(f"params.{key} = {actual_val}")
-
-    mint_split = float(params.get("mint_dynamic_split", "0"))
-    if abs(mint_split - 0.75) >= 0.01:
-        fail(f"params.mint_dynamic_split = {mint_split} (want 0.75)")
-    else:
-        ok(f"params.mint_dynamic_split = {mint_split}")
-
-    pow_step = float(params.get("pow_difficulty_step", "0"))
-    if abs(pow_step - 0.25) >= 0.01:
-        fail(f"params.pow_difficulty_step = {pow_step} (want 0.25)")
-    else:
-        ok(f"params.pow_difficulty_step = {pow_step}")
-
-    reserve_pct = float(params.get("subscription_reserve_percent", "0"))
-    if abs(reserve_pct - 0.95) >= 0.01:
-        fail(f"params.subscription_reserve_percent = {reserve_pct} (want 0.95)")
-    else:
-        ok(f"params.subscription_reserve_percent = {reserve_pct}")
-
-    bridge_threshold = float(params.get("bridge_attestation_threshold", "0"))
-    if abs(bridge_threshold - 0.6667) >= 0.01:
-        fail(f"params.bridge_attestation_threshold = {bridge_threshold} (want 0.6667)")
-    else:
-        ok(f"params.bridge_attestation_threshold = {bridge_threshold}")
-
-    bridge_chains = params.get("bridge_chains", [])
-    if not isinstance(bridge_chains, list):
-        fail(f"params.bridge_chains invalid type: {type(bridge_chains).__name__}")
-    else:
-        ok(f"bridge_chains count: {len(bridge_chains)}")
-        for i, chain in enumerate(bridge_chains):
-            cid = str(chain.get("chain_id", "")).strip()
-            if not cid:
-                fail(f"bridge_chains[{i}].chain_id missing")
-            enabled = chain.get("enabled")
-            if not isinstance(enabled, bool):
-                fail(f"bridge_chains[{i}].enabled not bool: {enabled}")
-            fee = int(chain.get("fee", 0) or 0)
-            if fee < 0:
-                fail(f"bridge_chains[{i}].fee negative: {fee}")
-
-    # ── Award configs ──
-    award_configs = params.get("award_configs", [])
-    if len(award_configs) != len(EXPECTED_AWARD_CONFIGS):
-        fail(f"Expected {len(EXPECTED_AWARD_CONFIGS)} award configs, got {len(award_configs)}")
-    else:
-        ok(f"Award config count: {len(award_configs)}")
-        award_errors = []
-        for expected_ac in EXPECTED_AWARD_CONFIGS:
-            match = next((a for a in award_configs if a.get("name") == expected_ac["name"]), None)
-            if match is None:
-                award_errors.append(f"missing award '{expected_ac['name']}'")
-            else:
-                actual_cost = int(match.get("cost", "0"))
-                if actual_cost != expected_ac["cost"]:
-                    award_errors.append(
-                        f"award '{expected_ac['name']}' cost={actual_cost} (want {expected_ac['cost']})"
-                    )
-        if award_errors:
-            for e in award_errors:
-                fail(e)
-        else:
-            ok("All award configs match (names + costs)")
-
-    # ── Tier configs ──
-    tiers = params.get("tiers", [])
-    if len(tiers) != 3:
-        fail(f"Expected 3 tiers, got {len(tiers)}")
-        return
-    ok(f"Tier count: {len(tiers)}")
-
-    int_fields = [
-        "max_enabled_agents",
-        "max_followed_users",
-        "max_followed_topics",
-        "max_blocked_users",
-        "max_blocked_posts",
-        "max_blocked_topics",
-        "max_title_length",
-        "max_content_length",
-        "editing_time_mins",
-    ]
-    bool_fields = [
-        "can_be_agent",
-        "can_remove_anon",
-        "can_have_biography",
-        "can_have_avatar",
-        "can_have_banner",
-        "can_have_flair",
-    ]
-
-    for i, expected in enumerate(EXPECTED_TIERS):
-        actual = tiers[i]
-        label = f"Tier {expected['level']} ({expected['name']})"
-        errors = []
-
-        actual_fee = int(actual.get("period_fee", "0"))
-        if actual_fee != expected["period_fee"]:
-            errors.append(f"period_fee={actual_fee} (want {expected['period_fee']})")
-
-        for f in int_fields:
-            av = int(actual.get(f, "0"))
-            if av != expected[f]:
-                errors.append(f"{f}={av} (want {expected[f]})")
-
-        for f in bool_fields:
-            av = actual.get(f, False)
-            if isinstance(av, str):
-                av = av.lower() == "true"
-            if av != expected[f]:
-                errors.append(f"{f}={av} (want {expected[f]})")
-
-        av_vw = float(actual.get("vote_weight", "0"))
-        if abs(av_vw - expected["vote_weight"]) >= 0.01:
-            errors.append(f"vote_weight={av_vw} (want {expected['vote_weight']})")
-
-        if errors:
-            for e in errors:
-                fail(f"{label}: {e}")
-        else:
-            ok(f"{label}: all fields match")
-
-
-def fetch_all_profiles() -> tuple[list[dict], int | None]:
-    """Fetch all profiles with pagination."""
-    profiles: list[dict] = []
-    next_key: str | None = None
-    total: int | None = None
-    page = 0
-    while True:
-        page += 1
-        debug(f"Fetching profiles page {page} (next_key={'set' if next_key else 'none'})")
-        url = f"{REST}/mirage/core/v1/profiles?pagination.limit=500&pagination.count_total=true"
-        if next_key:
-            url += f"&pagination.key={urllib.parse.quote(next_key)}"
-        data = http_get(url)
-        if data is None:
-            break
-        batch = data.get("profiles", [])
-        profiles.extend(batch)
-        debug(f"Fetched {len(batch)} profiles (total so far: {len(profiles)})")
-        pagination = data.get("pagination", {}) or {}
-        if total is None:
-            try:
-                total = int(pagination.get("total", "0"))
-            except Exception:
-                total = None
-        nk = pagination.get("next_key")
-        if not nk or not batch:
-            break
-        next_key = nk
-        if page > 200:
-            fail("Pagination safety limit reached (100k+ profiles)")
-            break
-    return profiles, total
-
-
-def check_subscription_index_consistency() -> None:
-    """v1.17.0: verify no ghost reserves and subscription index is consistent."""
-    section("Subscription Index Consistency (v1.17.0)")
-
-    profiles, _ = fetch_all_profiles()
-    if not profiles:
-        warn("No profiles — skipping subscription consistency check")
-        return
-
-    import time as _time
-
-    now_unix = int(_time.time())
-    ghost_reserves = []
-    expired_paid = []
-
-    for p in profiles:
-        lvl = p.get("level", 0)
-        if isinstance(lvl, str):
-            lvl = int(lvl)
-        reserve = int(p.get("reserve_funds", 0) or 0)
-        sub_expiry = int(p.get("subscription_expiry", 0) or 0)
-        owner = str(p.get("owner", ""))[:20]
-
-        if reserve > 0 and sub_expiry > 0 and sub_expiry <= now_unix:
-            ghost_reserves.append(f"{owner} reserve={reserve}")
-
-        if lvl > 0 and lvl < 100 and sub_expiry > 0 and sub_expiry <= now_unix:
-            expired_paid.append(f"{owner} lvl={lvl} exp={sub_expiry}")
-
-    if ghost_reserves:
-        fail(f"{len(ghost_reserves)} profiles have ghost reserves: {ghost_reserves[:5]}")
-    else:
-        ok("No ghost reserves found")
-
-    if expired_paid:
-        fail(f"{len(expired_paid)} paid profiles have expired subscriptions: {expired_paid[:5]}")
-    else:
-        ok("No paid profiles with expired subscriptions")
-
-
-def check_biography_limits() -> None:
-    """v1.18.0+: verify max_biography_length is set correctly on tier configs."""
-    section("Biography Length Limits (since v1.18.0)")
-    data = http_get(f"{REST}/mirage/core/v1/params")
-    if not data:
-        fail("Could not fetch params for biography check")
-        return
-    params = data.get("params", {})
-    tiers = params.get("tiers", [])
-    expected = {0: 0, 1: 512, 2: 512}
-    for idx, exp_val in expected.items():
-        if idx >= len(tiers):
-            fail(f"Tier {idx} missing from params")
+        if src_count < 0 and dst_count < 0:
             continue
-        got = int(tiers[idx].get("max_biography_length", -1))
-        if got == exp_val:
-            ok(f"Tier {idx} max_biography_length = {got}")
+        if dst_count < 0 and src_count > 0:
+            fail(f"{t}: {src_count} rows in indexer but table MISSING in backend — DATA NOT MIGRATED")
+            data_issues += 1
+            continue
+        if dst_count < 0 and src_count == 0:
+            warn(f"{t}: table missing in backend (source empty, may be ok)")
+            continue
+        if src_count <= 0 and dst_count <= 0:
+            ok(f"{t}: empty in both DBs")
+            continue
+        if src_count <= 0 and dst_count > 0:
+            ok(f"{t}: {dst_count} rows in backend (source already cleaned)")
+            continue
+        if src_count > 0 and dst_count == 0:
+            fail(f"{t}: {src_count} rows in indexer but 0 in backend — DATA NOT MIGRATED")
+            data_issues += 1
+            continue
+        if dst_count < src_count:
+            pct = (dst_count / src_count) * 100
+            if pct < 90:
+                fail(f"{t}: only {dst_count}/{src_count} rows migrated ({pct:.0f}%) — INCOMPLETE")
+                data_issues += 1
+            else:
+                warn(f"{t}: {dst_count}/{src_count} rows ({pct:.0f}%) — minor difference")
         else:
-            fail(f"Tier {idx} max_biography_length = {got}, expected {exp_val}")
+            ok(f"{t}: {dst_count} rows in backend (source has {src_count})")
 
+    if data_issues > 0:
+        print(f"\n  ** {data_issues} table(s) have missing data. Run the migration: **")
+        print(f"  ** python3 -m deploy.migrations --config-dir /root/.mirage/env **\n")
 
-def _semver_tuple(ver: str) -> tuple[int, ...]:
-    """Convert '1.20.0' to (1, 20, 0) for numeric comparison."""
+    if indexer_for_counts is not None and indexer_for_counts is not indexer_conn:
+        indexer_for_counts.close()
+
+    # ── 10. Read-only enforcement ──────────────────────────────
+    section("10. Read-Only Enforcement (indexer via RO role)")
     try:
-        return tuple(int(x) for x in ver.split("."))
-    except (ValueError, AttributeError):
-        return (0,)
+        with indexer_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM profiles LIMIT 1")
+            count = cur.fetchone()[0]
+            ok(f"RO read from indexer.profiles works ({count} rows)")
+    except Exception as e:
+        fail(f"Cannot read indexer.profiles via RO: {e}")
 
-
-def check_nonce_enforcement(upgrade_name: str) -> None:
-    section("Envelope Nonce Enforcement")
-    ver = _extract_semver(upgrade_name)
-    vt = _semver_tuple(ver)
-    if vt == (1, 19, 0):
-        warn(
-            "v1.19.0 uses legacy nonce fallback; cannot verify via queries. Submit a legacy-signed tx or inspect logs."
-        )
-    elif vt >= (1, 21, 0):
-        ok("v1.21.0+: envelope_nonce mandatory. Legacy compat branches fully removed from binary.")
-        ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
-    elif vt >= (1, 20, 0):
-        ok("v1.20.0+: envelope_nonce is mandatory. Legacy fallback removed.")
-        ok("Nonce rejection covered by test_backend.py (9.11b/c/d)")
-    else:
-        ok(f"Nonce enforcement not applicable for {upgrade_name}")
-
-
-def check_gov_authority_protection(upgrade_name: str) -> None:
-    """v1.21.0+: GovAuthorityDecorator blocks broadcast txs claiming governance authority."""
-    section("Gov Authority Spoofing Protection (since v1.21.0)")
-    ver = _extract_semver(upgrade_name)
-    vt = _semver_tuple(ver)
-    if vt >= (1, 21, 0):
-        ok("GovAuthorityDecorator active in both standard and relay ante chains")
-        ok("Broadcast txs with governance module authority are rejected before execution")
-    else:
-        ok(f"Gov authority protection not applicable for {upgrade_name}")
-
-
-def check_tx_index_and_orchestrator() -> None:
-    section("Tx Index + Orchestrator Config")
-    node_home = Path.home() / ".mirage" / "node"
-    env_dir = Path.home() / ".mirage" / "env"
-    config_path = node_home / "config" / "config.toml"
-    tx_index_path = node_home / "data" / "tx_index.db"
-    orchestrator_env = env_dir / "orchestrator.env"
-
-    debug(f"config.toml path: {config_path}")
-    debug(f"tx_index.db path: {tx_index_path}")
-    debug(f"orchestrator.env path: {orchestrator_env}")
-
-    indexer = _read_tx_indexer(config_path)
-    if indexer is None:
-        fail(f"config.toml missing or tx_index.indexer not found: {config_path}")
-    elif indexer == "null":
-        ok("config.toml tx_index.indexer = null")
-    else:
-        fail(f"config.toml tx_index.indexer = {indexer} (want null)")
-
-    status = http_get(f"{RPC}/status")
-    if status:
-        tx_index_rpc = status.get("result", {}).get("node_info", {}).get("other", {}).get("tx_index", "")
-        if str(tx_index_rpc).lower() == "off":
-            ok("RPC /status tx_index = off (runtime confirmed)")
+    try:
+        with indexer_conn.cursor() as cur:
+            cur.execute("INSERT INTO profiles (owner, username) VALUES ('__verify_test__', '__verify_test__')")
+            fail("RO role CAN WRITE to indexer DB (should be denied)")
+            with indexer_conn.cursor() as cur2:
+                cur2.execute("DELETE FROM profiles WHERE owner = '__verify_test__'")
+    except psycopg.errors.InsufficientPrivilege:
+        ok("RO role correctly denied write to indexer DB")
+    except Exception as e:
+        if "permission denied" in str(e).lower() or "read-only" in str(e).lower():
+            ok(f"RO role correctly denied write to indexer DB ({type(e).__name__})")
         else:
-            fail(f"RPC /status tx_index = {tx_index_rpc} (want off)")
-
-        # Verify /tx endpoint rejects queries (tx_index=null)
-        fake_hash = "0x" + "00" * 32
-        tx_url = f"{RPC}/tx?hash={fake_hash}"
+            warn(f"Unexpected error testing RO write: {e}")
+    finally:
         try:
-            debug(f"GET {tx_url}")
-            req = urllib.request.Request(tx_url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                body = json.loads(resp.read())
-            if body and body.get("error"):
-                err_msg = str(body["error"].get("data", "")).lower()
-                if "indexing is disabled" in err_msg or "not available" in err_msg:
-                    ok("/tx endpoint correctly returns indexing-disabled error")
-                else:
-                    warn(f"/tx endpoint returned unexpected error: {err_msg[:100]}")
-            else:
-                fail("/tx endpoint did not return an error (tx_index should be disabled)")
-        except urllib.error.HTTPError as e:
-            body_str = ""
+            indexer_conn.rollback()
+        except Exception:
+            pass
+        try:
+            indexer_conn = psycopg.connect(indexer_ro_url, autocommit=True)
+        except Exception:
+            pass
+
+    # ── 10. Backend DB write test ─────────────────────────────
+    section("11. Backend DB Write Test")
+    test_addr = "__verify_test__"
+    try:
+        with backend_conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_last_seen (owner, last_seen_at)
+                VALUES (%s, %s)
+                ON CONFLICT (owner) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+                """,
+                (test_addr, int(time.time())),
+            )
+            ok("Write to backend.user_last_seen succeeded")
+            cur.execute("DELETE FROM user_last_seen WHERE owner = %s", (test_addr,))
+            ok("Cleanup of test row succeeded")
+    except Exception as e:
+        fail(f"Backend write test failed: {e}")
+
+    # ── 11. Push event tables functional ──────────────────────
+    section("12. Push Event Tables")
+    try:
+        with backend_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM push_event_cursor")
+            count = cur.fetchone()[0]
+            ok(f"push_event_cursor readable ({count} rows)")
+            cur.execute("SELECT COUNT(*) FROM push_event_seen")
+            count = cur.fetchone()[0]
+            ok(f"push_event_seen readable ({count} rows)")
+    except Exception as e:
+        fail(f"Push event tables error: {e}")
+
+    # ── 12. API Endpoint Checks ───────────────────────────────
+    section("13. API Endpoints")
+    if requests is None:
+        warn("requests library not available, skipping API checks")
+    else:
+        api_checks = [
+            ("GET", "/api/get_node_config", 200),
+            ("GET", "/api/get_parameters", 200),
+            ("GET", "/api/get_welcome_stats", 200),
+        ]
+        for method, path, expected_status in api_checks:
             try:
-                body_str = e.read().decode("utf-8", errors="replace").lower()
-            except Exception:
-                pass
-            if "indexing is disabled" in body_str or e.code == 500:
-                ok(f"/tx endpoint rejected request (HTTP {e.code}, tx_index disabled)")
+                resp = requests.request(method, f"{BACKEND_API}{path}", timeout=10)
+                if resp.status_code == expected_status:
+                    ok(f"{method} {path} -> {resp.status_code}")
+                else:
+                    fail(f"{method} {path} -> {resp.status_code} (expected {expected_status})")
+            except Exception as e:
+                fail(f"{method} {path} -> error: {e}")
+
+        # stats_event endpoint should be disabled (410)
+        try:
+            resp = requests.post(
+                f"{BACKEND_API}/api/stats/event",
+                json={"event_type": "test"},
+                timeout=10,
+            )
+            if resp.status_code == 410:
+                ok("/api/stats/event correctly returns 410 (disabled)")
             else:
-                fail(f"/tx endpoint returned HTTP {e.code} with unexpected body")
+                fail(f"/api/stats/event returned {resp.status_code} (expected 410)")
         except Exception as e:
-            ok(f"/tx endpoint unreachable: {e} (expected with indexer=null)")
+            fail(f"/api/stats/event error: {e}")
 
-    if tx_index_path.exists():
-        fail(f"tx_index.db still present: {tx_index_path}")
-    else:
-        ok("tx_index.db removed")
+        # get_stats overview should return DAU data
+        try:
+            resp = requests.get(f"{BACKEND_API}/api/get_stats?tab=overview", timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "dau_any_today" in data or "dau_today" in data:
+                    ok("/api/get_stats?tab=overview returns DAU metrics")
+                else:
+                    warn(f"/api/get_stats?tab=overview missing DAU fields (keys: {list(data.keys())[:10]})")
+            else:
+                fail(f"/api/get_stats?tab=overview -> {resp.status_code}")
+        except Exception as e:
+            fail(f"/api/get_stats?tab=overview error: {e}")
 
-    enabled = _read_env_value(orchestrator_env, "ORCHESTRATOR_ENABLED")
-    if enabled is None:
-        fail(f"ORCHESTRATOR_ENABLED missing in {orchestrator_env}")
-    elif enabled.lower() == "false":
-        ok("ORCHESTRATOR_ENABLED=false")
+    # ── 13. Frontend route check ──────────────────────────────
+    section("14. Frontend Route Check (/signup)")
+    if requests is None:
+        warn("requests library not available, skipping route check")
     else:
-        fail(f"ORCHESTRATOR_ENABLED={enabled} (want false)")
+        try:
+            resp = requests.get(f"{BACKEND_API}/signup", timeout=10, allow_redirects=False)
+            if resp.status_code == 200:
+                body = resp.text[:2000]
+                if "create_account" in body.lower():
+                    fail("/signup page still references create_account")
+                else:
+                    ok("/signup serves frontend (200)")
+            elif resp.status_code in (301, 302, 304):
+                ok(f"/signup redirects ({resp.status_code})")
+            else:
+                warn(f"/signup returned {resp.status_code}")
+        except Exception as e:
+            warn(f"/signup check error: {e}")
+
+        try:
+            resp = requests.get(f"{BACKEND_API}/create_account", timeout=10, allow_redirects=False)
+            if resp.status_code == 404:
+                ok("/create_account correctly returns 404")
+            elif resp.status_code == 200:
+                warn("/create_account still serves content (SPA catch-all may route it)")
+            else:
+                ok(f"/create_account returns {resp.status_code} (not served)")
+        except Exception as e:
+            warn(f"/create_account check error: {e}")
+
+    # ── 14. Cross-DB isolation sanity ─────────────────────────
+    section("15. Cross-DB Isolation")
+    try:
+        with backend_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM user_last_seen")
+            ok("Backend can query its own user_last_seen")
+    except Exception as e:
+        fail(f"Backend cannot query user_last_seen: {e}")
 
     try:
-        result = subprocess.run(["pgrep", "-f", "blockchain/bin/orchestrator"], capture_output=True, text=True)
-        debug(f"pgrep orchestrator returncode={result.returncode}")
-        if result.returncode == 0:
-            fail("Orchestrator process is running")
+        with indexer_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM posts")
+            count = cur.fetchone()[0]
+            ok(f"Indexer has {count} posts (chain data intact)")
+    except Exception as e:
+        fail(f"Cannot read indexer.posts: {e}")
+
+    try:
+        with backend_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM posts")
+            fail("Backend DB has a 'posts' table (should only be in indexer)")
+    except psycopg.errors.UndefinedTable:
+        ok("Backend DB correctly has no 'posts' table")
+    except Exception as e:
+        if "does not exist" in str(e).lower() or "undefined" in str(e).lower():
+            ok("Backend DB correctly has no 'posts' table")
         else:
-            ok("Orchestrator process not running")
-    except Exception as e:
-        fail(f"Orchestrator process check failed: {e}")
+            warn(f"Unexpected error checking posts in backend: {e}")
+    finally:
+        try:
+            backend_conn = psycopg.connect(backend_url, autocommit=True)
+        except Exception:
+            pass
 
+    # ── Cleanup ───────────────────────────────────────────────
+    if backend_conn:
+        backend_conn.close()
+    if indexer_conn:
+        indexer_conn.close()
 
-def check_orchestrator_hard_disable() -> None:
-    section("Orchestrator Hard Disable")
-    orchestrator_bin = Path("/opt/mirage/blockchain/bin/orchestrator")
-    debug(f"orchestrator bin path: {orchestrator_bin}")
-    if not orchestrator_bin.exists():
-        fail(f"Orchestrator binary missing: {orchestrator_bin}")
-        return
-
-    try:
-        r = subprocess.run([str(orchestrator_bin)], capture_output=True, text=True, timeout=5)
-    except Exception as e:
-        fail(f"Failed to run orchestrator binary: {e}")
-        return
-
-    output = (r.stdout or "") + (r.stderr or "")
-    debug(f"orchestrator exit={r.returncode}, output_len={len(output)}")
-
-    if r.returncode == 0:
-        fail("Orchestrator exited 0 (expected hard-disable panic)")
+    # ── Summary ───────────────────────────────────────────────
+    print(f"\n{'=' * 60}")
+    total = passed + failed + warnings
+    print(f"  Results: {passed} passed, {failed} failed, {warnings} warnings ({total} total)")
+    if failed == 0:
+        print("  STATUS: ALL CHECKS PASSED")
     else:
-        ok("Orchestrator exits non-zero (hard-disabled)")
-
-    if ORCHESTRATOR_DISABLE_TOKEN in output:
-        ok("Orchestrator hard-disable message present")
-    else:
-        fail(f"Orchestrator hard-disable message missing: {ORCHESTRATOR_DISABLE_TOKEN}")
-
-
-def check_deploy_migration() -> None:
-    section("Deploy Migrations")
-    migrations_file = Path.home() / ".mirage" / "env" / ".migrations"
-    debug(f"migrations file: {migrations_file}")
-    if not migrations_file.exists():
-        warn(f"Migrations file not found: {migrations_file}")
-        return
-
-    try:
-        content = migrations_file.read_text(encoding="utf-8")
-    except Exception as e:
-        fail(f"Failed to read migrations file: {e}")
-        return
-
-    if MIGRATION_TX_INDEX_CLEANUP in content:
-        ok(f"Migration applied: {MIGRATION_TX_INDEX_CLEANUP}")
-    else:
-        fail(f"Migration missing: {MIGRATION_TX_INDEX_CLEANUP}")
-
-
-# ── Main ───────────────────────────────────────────────────
-
-
-def main() -> int:
-    args = sys.argv[1:]
-    upgrade_name = None
-    global _debug
-
-    if "--debug" in args:
-        args.remove("--debug")
-        _debug = True
-
-    if "--upgrade-name" in args:
-        idx = args.index("--upgrade-name")
-        if idx + 1 < len(args):
-            upgrade_name = args[idx + 1]
-            args = args[:idx] + args[idx + 2 :]
-
-    if not upgrade_name:
-        upgrade_name = detect_upgrade_name()
-    if not upgrade_name:
-        fail("Upgrade name not found (pass --upgrade-name or check proposal file)")
-        section("Summary")
-        total = _passed + _failed + _warned
-        print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")
-        return 1
-
-    print(f"==> Verifying upgrade '{upgrade_name}'")
-
-    if not check_node_reachable():
-        print(f"\n\033[31mFATAL: Cannot reach node at {RPC}\033[0m")
-        return 1
-
-    check_software_version(upgrade_name)
-    check_upgrade_plan(upgrade_name)
-    check_core_params()
-    check_subscription_index_consistency()
-    check_biography_limits()
-    check_nonce_enforcement(upgrade_name)
-    check_gov_authority_protection(upgrade_name)
-    check_tx_index_and_orchestrator()
-    check_orchestrator_hard_disable()
-    check_deploy_migration()
-    section("Summary")
-    total = _passed + _failed + _warned
-    print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")
-    if _failed:
-        print(f"\n\033[31mUPGRADE VERIFICATION FAILED ({_failed} failures)\033[0m")
-        return 1
-    if _warned:
-        print(f"\n\033[33mUPGRADE VERIFICATION PASSED with {_warned} warnings\033[0m")
-        return 0
-    print(f"\n\033[32mUPGRADE VERIFICATION PASSED\033[0m")
-    return 0
+        print(f"  STATUS: {failed} FAILURE(S) — review above")
+    print(f"{'=' * 60}\n")
+    sys.exit(1 if failed > 0 else 0)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
