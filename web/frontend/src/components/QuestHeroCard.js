@@ -922,56 +922,78 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
                 {!collapsed && (
                     <QuestList>
-                        {dailyQuests.map(quest => (
-                            <QuestItem key={quest.id} $completed={quest.completed}>
-                                <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
-                                <QuestDetails>
-                                    <QuestName $completed={quest.completed}>
-                                        {quest.title}
-                                        <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
-                                            {getQuestRewardDisplay(quest.rewards, rewardMultiplier)}
-                                        </QuestReward>
-                                    </QuestName>
-                                    <QuestDescription>{quest.description}</QuestDescription>
-                                    {getQuestRequirements(quest).length > 0 && (
-                                        <QuestRequirements>
-                                            {getQuestRequirements(quest).map((req, i) => (
-                                                <li key={i}>{req}</li>
-                                            ))}
-                                        </QuestRequirements>
+                        {dailyQuests.map(quest => {
+                            const upvotes = quest.upvotes || 0;
+                            const downvotes = quest.downvotes || 0;
+                            const targetUpvotes = quest.target_upvotes || 0;
+                            const targetDownvotes = quest.target_downvotes || 0;
+                            const clampedUpvotes = Math.min(upvotes, targetUpvotes);
+                            const clampedDownvotes = Math.min(downvotes, targetDownvotes);
+                            if (
+                                quest.action_type === 'balanced_vote' &&
+                                (upvotes > targetUpvotes || downvotes > targetDownvotes)
+                            ) {
+                                console.debug('quest.progress.clamped', {
+                                    id: quest.id,
+                                    upvotes,
+                                    downvotes,
+                                    targetUpvotes,
+                                    targetDownvotes,
+                                });
+                            }
+                            return (
+                                <QuestItem key={quest.id} $completed={quest.completed}>
+                                    <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
+                                    <QuestDetails>
+                                        <QuestName $completed={quest.completed}>
+                                            {quest.title}
+                                            <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
+                                                {getQuestRewardDisplay(quest.rewards, rewardMultiplier)}
+                                            </QuestReward>
+                                        </QuestName>
+                                        <QuestDescription>{quest.description}</QuestDescription>
+                                        {getQuestRequirements(quest).length > 0 && (
+                                            <QuestRequirements>
+                                                {getQuestRequirements(quest).map((req, i) => (
+                                                    <li key={i}>{req}</li>
+                                                ))}
+                                            </QuestRequirements>
+                                        )}
+                                    </QuestDetails>
+                                    {quest.completed ? (
+                                        <CheckMark aria-label="Completed">✓</CheckMark>
+                                    ) : (
+                                        <>
+                                            <ProgressContainer>
+                                                <ProgressBar>
+                                                    <ProgressFill
+                                                        $progress={quest.progress}
+                                                        $target={quest.target}
+                                                        $completed={quest.completed}
+                                                    />
+                                                </ProgressBar>
+                                                {quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined ? (
+                                                    <BalancedProgressText
+                                                        title={`Need ${quest.target_upvotes} upvotes and ${quest.target_downvotes} downvotes`}
+                                                    >
+                                                        <BalancedProgressRow $met={upvotes >= targetUpvotes}>
+                                                            ↑{clampedUpvotes}/{quest.target_upvotes}
+                                                        </BalancedProgressRow>
+                                                        <BalancedProgressRow $met={downvotes >= targetDownvotes}>
+                                                            ↓{clampedDownvotes}/{quest.target_downvotes}
+                                                        </BalancedProgressRow>
+                                                    </BalancedProgressText>
+                                                ) : (
+                                                    <ProgressText>
+                                                        {quest.progress}/{quest.target}
+                                                    </ProgressText>
+                                                )}
+                                            </ProgressContainer>
+                                        </>
                                     )}
-                                </QuestDetails>
-                                {quest.completed ? (
-                                    <CheckMark aria-label="Completed">✓</CheckMark>
-                                ) : (
-                                    <>
-                                        <ProgressContainer>
-                                            <ProgressBar>
-                                                <ProgressFill
-                                                    $progress={quest.progress}
-                                                    $target={quest.target}
-                                                    $completed={quest.completed}
-                                                />
-                                            </ProgressBar>
-                                            {quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined ? (
-                                                <BalancedProgressText title={`Need ${quest.target_upvotes} upvotes and ${quest.target_downvotes} downvotes`}>
-                                                    <BalancedProgressRow $met={(quest.upvotes || 0) >= quest.target_upvotes}>
-                                                        ↑{quest.upvotes || 0}/{quest.target_upvotes}
-                                                    </BalancedProgressRow>
-                                                    <BalancedProgressRow $met={(quest.downvotes || 0) >= quest.target_downvotes}>
-                                                        ↓{quest.downvotes || 0}/{quest.target_downvotes}
-                                                    </BalancedProgressRow>
-                                                </BalancedProgressText>
-                                            ) : (
-                                                <ProgressText>
-                                                    {quest.progress}/{quest.target}
-                                                </ProgressText>
-                                            )}
-                                        </ProgressContainer>
-                                    </>
-                                )}
-                            </QuestItem>
-                        ))}
+                                </QuestItem>
+                            );
+                        })}
 
                         {/* Flash quest if active */}
                         {flashQuest && flashQuest.seconds_remaining > 0 && (

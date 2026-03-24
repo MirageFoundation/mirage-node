@@ -71,9 +71,15 @@ else
   fi
 fi
 
-# Safety fallback for DB URL (should already be set in indexer.env template)
+# Safety fallback for DB URLs (should already be set in indexer.env template)
 if [ -z "${INDEXER_DB_URL:-}" ]; then
   export INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
+fi
+if [ -z "${INDEXER_DB_RO_URL:-}" ]; then
+  export INDEXER_DB_RO_URL="postgresql://mirage_ro:mirage_ro@127.0.0.1:5432/mirage"
+fi
+if [ -z "${BACKEND_DB_URL:-}" ]; then
+  export BACKEND_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend"
 fi
 
 # Defaults if not provided
@@ -257,28 +263,19 @@ if [ "$PG_READY" -eq 0 ]; then
   exit 1
 fi
 
-# Ensure local database and role exist if URL points to localhost
-ensure_local_postgres_db() {
-  local url="${INDEXER_DB_URL:-}"
-  # Extract components: user, pass, host, port, db
-  # shellcheck disable=SC2001
-  local user pass host port db
-  user="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\1#')"
-  pass="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\3#')"
-  host="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\4#')"
-  port="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\6#')"
-  db="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\7#')"
-  port="${port:-5432}"
-  if [ "$host" != "127.0.0.1" ] && [ "$host" != "localhost" ]; then
-    echo "PostgreSQL URL points to non-local host ($host); skipping local DB provisioning."
-    return 0
-  fi
-  if [ -z "$user" ] || [ -z "$db" ]; then
-    echo "Invalid INDEXER_DB_URL, missing user or db: $url" >&2
-    exit 1
-  fi
-  echo "==> Ensuring Postgres role '$user' and database '$db' exist..."
-  # Create role if missing
+# Parse a PostgreSQL URL into components
+_parse_pg_url() {
+  local url="$1"
+  PG_USER="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\1#')"
+  PG_PASS="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\3#')"
+  PG_HOST="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\4#')"
+  PG_PORT="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\6#')"
+  PG_DB="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\7#')"
+  PG_PORT="${PG_PORT:-5432}"
+}
+
+_ensure_role_and_db() {
+  local user="$1" pass="$2" db="$3"
   if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${user}'\"" | grep -q 1; then
     if [ -n "$pass" ]; then
       su - postgres -c "psql -c \"CREATE ROLE ${user} WITH LOGIN PASSWORD '${pass//\'/''}';\""
@@ -286,13 +283,48 @@ ensure_local_postgres_db() {
       su - postgres -c "psql -c \"CREATE ROLE ${user} WITH LOGIN;\""
     fi
   fi
-  # Create database if missing
   if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='${db}'\"" | grep -q 1; then
     su - postgres -c "psql -c \"CREATE DATABASE ${db} OWNER ${user};\""
   fi
-  echo "✓ Postgres role and database ensured."
 }
-ensure_local_postgres_db
+
+ensure_local_postgres_dbs() {
+  _parse_pg_url "${INDEXER_DB_URL}"
+  if [ "$PG_HOST" != "127.0.0.1" ] && [ "$PG_HOST" != "localhost" ]; then
+    echo "PostgreSQL URL points to non-local host ($PG_HOST); skipping local DB provisioning."
+    return 0
+  fi
+  if [ -z "$PG_USER" ] || [ -z "$PG_DB" ]; then
+    echo "Invalid INDEXER_DB_URL, missing user or db" >&2
+    exit 1
+  fi
+
+  echo "==> Provisioning indexer DB (${PG_DB})..."
+  _ensure_role_and_db "$PG_USER" "$PG_PASS" "$PG_DB"
+
+  _parse_pg_url "${BACKEND_DB_URL}"
+  echo "==> Provisioning backend DB (${PG_DB})..."
+  _ensure_role_and_db "$PG_USER" "$PG_PASS" "$PG_DB"
+
+  _parse_pg_url "${INDEXER_DB_RO_URL}"
+  PG_RO_USER="$PG_USER"
+  echo "==> Provisioning read-only role (${PG_USER})..."
+  if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'\"" | grep -q 1; then
+    if [ -n "$PG_PASS" ]; then
+      su - postgres -c "psql -c \"CREATE ROLE ${PG_USER} WITH LOGIN PASSWORD '${PG_PASS//\'/''}';\""
+    else
+      su - postgres -c "psql -c \"CREATE ROLE ${PG_USER} WITH LOGIN;\""
+    fi
+  fi
+  _parse_pg_url "${INDEXER_DB_URL}"
+  su - postgres -c "psql -d ${PG_DB} -c \"GRANT CONNECT ON DATABASE ${PG_DB} TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"GRANT USAGE ON SCHEMA public TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_RO_USER};\""
+
+  echo "✓ All Postgres databases and roles ensured."
+}
+ensure_local_postgres_dbs
 
 # Auto-configure HTTPS if domain is set (from node.env)
 # Skip if Caddyfile already has HTTPS configured (www redirect indicates full HTTPS setup)

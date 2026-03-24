@@ -38,13 +38,14 @@ def _get_balance(address) -> int:
         return int(row[0]) if row and row[0] is not None else 0
 
 
-from db import connect_db
+from db import connect_backend_db, connect_db
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
 from routes.core import get_user_level
 from settings import QUESTS_ENABLED, require_bool_env
+from user_last_seen import update_user_last_seen
 
 
 def _inject_balance(resp: dict, addr: str) -> dict:
@@ -84,20 +85,19 @@ def _get_seconds_until_reset(ts: int) -> int:
 
 def _load_quest_definitions() -> Dict[str, Any]:
     """Load quest definitions from YAML file."""
-    import os
     import yaml
+    from pathlib import Path
 
-    yaml_path = os.path.join(os.path.dirname(__file__), "../../..", "indexer/quests.yaml")
-    yaml_path = os.path.abspath(yaml_path)
+    yaml_path = Path(__file__).resolve().parents[1] / "quests.yaml"
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"quests.yaml not found at {yaml_path}")
 
-    if not os.path.exists(yaml_path):
-        return {"daily_quests": [], "flash_quest_templates": [], "achievements": []}
+    with yaml_path.open("r", encoding="utf-8") as f:
+        defs = yaml.safe_load(f)
 
-    try:
-        with open(yaml_path, "r") as f:
-            return yaml.safe_load(f) or {}
-    except Exception:
-        return {"daily_quests": [], "flash_quest_templates": [], "achievements": []}
+    if not isinstance(defs, dict):
+        raise ValueError("quests.yaml must define a top-level mapping")
+    return defs
 
 
 def _get_user_reward_multiplier(owner: str) -> float:
@@ -108,7 +108,7 @@ def _get_user_reward_multiplier(owner: str) -> float:
 
 def _is_user_suspended(owner: str, ts: int) -> bool:
     """Check if user's rewards are suspended."""
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT suspended_until FROM reward_suspensions WHERE LOWER(owner) = LOWER(%s)", (owner,))
             row = cur.fetchone()
@@ -119,7 +119,7 @@ def _is_user_suspended(owner: str, ts: int) -> bool:
 
 def _get_next_flash_time(owner: str) -> int:
     """Get the timestamp when user can receive their next flash quest."""
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT next_flash_at FROM user_quest_state WHERE LOWER(owner) = LOWER(%s)", (owner,))
             row = cur.fetchone()
@@ -128,7 +128,7 @@ def _get_next_flash_time(owner: str) -> int:
 
 def _set_next_flash_time(owner: str, next_ts: int) -> None:
     """Set when the user can receive their next flash quest."""
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -148,7 +148,7 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
         return None
 
     # Check if user already has the max number of active flash quests
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -184,7 +184,7 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
     ends_at = ts + duration_seconds
 
     # Insert the flash quest
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -212,7 +212,7 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
 
 def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
     """Get suspension info for a user."""
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -235,7 +235,7 @@ def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
 
 def _has_unused_invite_codes(owner: str) -> bool:
     """Check if user has at least one unused invite code."""
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -250,7 +250,7 @@ def _has_unused_invite_codes(owner: str) -> bool:
 
 def _get_completed_quest_count(owner: str) -> int:
     """Get total number of completed quests/achievements for a user (daily + flash + achievements)."""
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -271,7 +271,7 @@ def _get_invite_earner_completed_count(owner: str) -> int:
     Counts claimed invite_code rewards from invite_earner quests, which is more
     reliable than counting quest completions (which can be reset via debug panel).
     """
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -341,9 +341,8 @@ def _assign_daily_quests_if_needed(
             return random.random()
         return _deterministic_roll(owner, day_utc, roll_type)
 
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
-            # Check if user already has quests for today
             cur.execute(
                 """
                 SELECT DISTINCT quest_id FROM user_daily_quests
@@ -353,61 +352,57 @@ def _assign_daily_quests_if_needed(
             )
             existing = [row[0] for row in cur.fetchall()]
 
-            if existing:
-                return existing
+    if existing:
+        return existing
 
-            # No quests assigned yet - check special quests first
-            quest_ids = []
-            special_quest_assigned = False
+    quest_ids = []
+    special_quest_assigned = False
 
-            # Check for invite_recruit eligibility (30% roll if user has unused codes)
-            if not special_quest_assigned and "invite_recruit" in special_defs:
-                if _has_unused_invite_codes(owner):
-                    roll = get_roll("invite_recruit")
-                    log_event(
-                        None,
-                        "quest.invite_recruit.roll",
-                        owner=owner,
-                        roll=round(roll, 3),
-                        threshold=QUESTS_INVITE_RECRUIT_CHANCE,
-                    )
-                    if roll < QUESTS_INVITE_RECRUIT_CHANCE:
-                        quest_ids.append("invite_recruit")
-                        special_quest_assigned = True
-                        log_event(None, "quest.invite_recruit.assigned", owner=owner)
+    if not special_quest_assigned and "invite_recruit" in special_defs:
+        if _has_unused_invite_codes(owner):
+            roll = get_roll("invite_recruit")
+            log_event(
+                None,
+                "quest.invite_recruit.roll",
+                owner=owner,
+                roll=round(roll, 3),
+                threshold=QUESTS_INVITE_RECRUIT_CHANCE,
+            )
+            if roll < QUESTS_INVITE_RECRUIT_CHANCE:
+                quest_ids.append("invite_recruit")
+                special_quest_assigned = True
+                log_event(None, "quest.invite_recruit.assigned", owner=owner)
 
-            # Check for invite_earner eligibility (every N completed quests + 30% roll)
-            if not special_quest_assigned and "invite_earner" in special_defs:
-                # Check milestone first
-                completed_count = _get_completed_quest_count(owner)
-                invite_earner_completed = _get_invite_earner_completed_count(owner)
-                next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
-                if completed_count >= next_milestone:
-                    roll = get_roll("invite_earner")
-                    log_event(
-                        None,
-                        "quest.invite_earner.roll",
-                        owner=owner,
-                        roll=round(roll, 3),
-                        threshold=QUESTS_INVITE_EARNER_CHANCE,
-                    )
-                    if roll < QUESTS_INVITE_EARNER_CHANCE:
-                        quest_ids.append("invite_earner")
-                        special_quest_assigned = True
-                        log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
+    if not special_quest_assigned and "invite_earner" in special_defs:
+        completed_count = _get_completed_quest_count(owner)
+        invite_earner_completed = _get_invite_earner_completed_count(owner)
+        next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
+        if completed_count >= next_milestone:
+            roll = get_roll("invite_earner")
+            log_event(
+                None,
+                "quest.invite_earner.roll",
+                owner=owner,
+                roll=round(roll, 3),
+                threshold=QUESTS_INVITE_EARNER_CHANCE,
+            )
+            if roll < QUESTS_INVITE_EARNER_CHANCE:
+                quest_ids.append("invite_earner")
+                special_quest_assigned = True
+                log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
 
-            # Fill remaining slots with random daily quests
-            if not daily_defs:
-                return quest_ids
+    if not daily_defs:
+        return quest_ids
 
-            remaining_slots = QUESTS_DAILY_COUNT - len(quest_ids)
-            if remaining_slots > 0:
-                available_ids = list(daily_defs.keys())
-                count = min(remaining_slots, len(available_ids))
-                selected_ids = random.sample(available_ids, count)
-                quest_ids.extend(selected_ids)
+    remaining_slots = QUESTS_DAILY_COUNT - len(quest_ids)
+    if remaining_slots > 0:
+        available_ids = list(daily_defs.keys())
+        count = min(remaining_slots, len(available_ids))
+        selected_ids = random.sample(available_ids, count)
+        quest_ids.extend(selected_ids)
 
-            # Insert initial progress records
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
             for quest_id in quest_ids:
                 cur.execute(
                     """
@@ -418,14 +413,13 @@ def _assign_daily_quests_if_needed(
                     (owner, day_utc, quest_id),
                 )
 
-            # Delay flash quest by at least 1h after daily quests are first assigned
-            min_flash_at = ts + 3600
-            next_flash = _get_next_flash_time(owner)
-            if next_flash < min_flash_at:
-                _set_next_flash_time(owner, min_flash_at)
-                log_event(None, "quest.flash_delayed", owner=owner, min_flash_at=min_flash_at)
+    min_flash_at = ts + 3600
+    next_flash = _get_next_flash_time(owner)
+    if next_flash < min_flash_at:
+        _set_next_flash_time(owner, min_flash_at)
+        log_event(None, "quest.flash_delayed", owner=owner, min_flash_at=min_flash_at)
 
-            return quest_ids
+    return quest_ids
 
 
 @quests_bp.route("/api/rewards/summary", methods=["GET"])
@@ -460,6 +454,9 @@ def get_rewards_summary():
         owner = (request.args.get("owner") or "").strip().lower()
         if not owner:
             return jsonify({"error": "owner required"}), 400
+        update_user_last_seen(owner, source=request.path)
+        update_user_last_seen(owner, source=request.path)
+        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
@@ -494,7 +491,7 @@ def get_rewards_summary():
         # ===== DAILY QUESTS =====
         _assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -545,7 +542,7 @@ def get_rewards_summary():
 
         # ===== FLASH QUEST =====
         flash_quest_data = None
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -562,7 +559,7 @@ def get_rewards_summary():
         if not flash_row:
             assigned = _maybe_assign_flash_quest(owner, ts, flash_defs)
             if assigned:
-                with connect_db() as conn:
+                with connect_backend_db() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
@@ -601,7 +598,7 @@ def get_rewards_summary():
                 }
 
         # ===== PENDING REWARDS =====
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -695,7 +692,7 @@ def get_achievements():
         achievement_defs = defs.get("achievements", [])
 
         # Get user's unlocked achievements
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -756,6 +753,7 @@ def claim_rewards():
 
         if not owner:
             return jsonify({"error": "owner required"}), 400
+        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
 
@@ -911,6 +909,7 @@ def admin_suspend_rewards():
             duration_days = int(duration_days)
         except (TypeError, ValueError):
             return jsonify({"error": "invalid duration_days"}), 400
+        update_user_last_seen(admin, source=request.path)
 
         # Check admin level
         admin_level = get_user_level(admin)
@@ -927,7 +926,7 @@ def admin_suspend_rewards():
             suspended_until = ts + (duration_days * 86400)
 
         # Upsert suspension
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -983,6 +982,7 @@ def admin_unsuspend_rewards():
 
         if not admin or not target:
             return jsonify({"error": "admin and target required"}), 400
+        update_user_last_seen(admin, source=request.path)
 
         # Check admin level
         admin_level = get_user_level(admin)
@@ -992,7 +992,7 @@ def admin_unsuspend_rewards():
         ts = int(time.time())
 
         # Remove suspension (set suspended_until to 0)
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -1047,6 +1047,7 @@ def admin_list_suspensions():
 
         if not admin:
             return jsonify({"error": "admin required"}), 400
+        update_user_last_seen(admin, source=request.path)
 
         # Check admin level
         admin_level = get_user_level(admin)
@@ -1056,7 +1057,7 @@ def admin_list_suspensions():
         ts = int(time.time())
 
         # Get all active suspensions
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -1137,7 +1138,7 @@ def debug_quests_info():
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
 
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 # Get total completed quests count
                 cur.execute(
@@ -1240,6 +1241,7 @@ def debug_complete_quest():
             return jsonify({"error": "owner required"}), 400
         if not quest_id:
             return jsonify({"error": "quest_id required"}), 400
+        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
@@ -1254,9 +1256,8 @@ def debug_complete_quest():
         if not quest_def:
             return jsonify({"error": f"unknown quest_id: {quest_id}"}), 400
 
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
-                # Check if quest exists for today
                 cur.execute(
                     """
                     SELECT completed_at FROM user_daily_quests
@@ -1272,8 +1273,10 @@ def debug_complete_quest():
                 if row[0] is not None:
                     return jsonify({"error": f"quest {quest_id} already completed"}), 400
 
-                # Mark quest as completed
-                target = quest_def.get("target_count", 1)
+        target = quest_def.get("target_count", 1)
+        rewards = quest_def.get("rewards", [])
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     """
                     UPDATE user_daily_quests
@@ -1283,8 +1286,6 @@ def debug_complete_quest():
                     (target, ts, owner, day_utc, quest_id),
                 )
 
-                # Add rewards
-                rewards = quest_def.get("rewards", [])
                 for reward in rewards:
                     reward_type = reward.get("type", "mirage")
                     if reward_type == "mirage":
@@ -1330,13 +1331,13 @@ def debug_reset_quests():
 
         if not owner:
             return jsonify({"error": "owner required"}), 400
+        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
 
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
-                # Delete today's quests
                 cur.execute(
                     """
                     DELETE FROM user_daily_quests
@@ -1376,12 +1377,12 @@ def debug_set_completed_count():
             return jsonify({"error": "owner required"}), 400
         if target_count < 0:
             return jsonify({"error": "count must be >= 0"}), 400
+        update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
 
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
-                # Get current completed count
                 cur.execute(
                     """
                     SELECT COUNT(*) FROM user_daily_quests
@@ -1391,11 +1392,11 @@ def debug_set_completed_count():
                 )
                 current_count = cur.fetchone()[0] or 0
 
-                if target_count > current_count:
-                    # Add fake completed quests to reach target
-                    to_add = target_count - current_count
+        if target_count > current_count:
+            to_add = target_count - current_count
+            with connect_backend_db() as conn:
+                with conn.cursor() as cur:
                     for i in range(to_add):
-                        # Use negative day_utc values to avoid conflicts
                         fake_day = -(i + 1 + current_count)
                         cur.execute(
                             """
@@ -1405,8 +1406,9 @@ def debug_set_completed_count():
                             """,
                             (owner, fake_day, "debug_fake_quest", ts),
                         )
-                elif target_count < current_count:
-                    # Delete fake quests first, then real ones if needed
+        elif target_count < current_count:
+            with connect_backend_db() as conn:
+                with conn.cursor() as cur:
                     cur.execute(
                         """
                         DELETE FROM user_daily_quests
@@ -1416,7 +1418,7 @@ def debug_set_completed_count():
                     )
 
         # Get new count
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """

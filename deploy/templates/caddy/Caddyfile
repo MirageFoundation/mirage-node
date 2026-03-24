@@ -92,6 +92,9 @@ ${DOMAIN:-:80} {
 	handle {
 		root * /opt/mirage/web/frontend/build
 
+		@aasa path /.well-known/apple-app-site-association
+		header @aasa Content-Type "application/json"
+
 		@immutable path /static/*
 		header @immutable Cache-Control "public, max-age=31536000, immutable"
 

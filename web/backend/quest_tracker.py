@@ -17,14 +17,11 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import yaml
 
-from indexer import settings
-
-if TYPE_CHECKING:
-    from indexer.database import DatabaseManager
+import quest_settings as settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +69,8 @@ class QuestProgress:
 class QuestTracker:
     """Tracks quest and achievement progress for users."""
 
-    def __init__(self, db: "DatabaseManager"):
-        self.db = db
+    def __init__(self, connect_fn):
+        self._connect = connect_fn
         self.daily_quests: list[QuestDefinition] = []
         self.flash_templates: list[QuestDefinition] = []
         self.achievements: list[QuestDefinition] = []
@@ -125,7 +122,7 @@ class QuestTracker:
 
     def _is_user_suspended(self, owner: str, ts: int) -> bool:
         """Check if user's rewards are suspended."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT suspended_until FROM reward_suspensions WHERE LOWER(owner) = LOWER(%s)", (owner,))
                 row = cur.fetchone()
@@ -137,7 +134,7 @@ class QuestTracker:
 
     def _get_daily_quest_progress(self, owner: str, quest_id: str, day_utc: int) -> QuestProgress:
         """Get user's progress on a daily quest."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -168,7 +165,7 @@ class QuestTracker:
         completed_at: Optional[int],
     ) -> None:
         """Update user's daily quest progress."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -185,7 +182,7 @@ class QuestTracker:
 
     def _get_user_assigned_quests(self, owner: str, day_utc: int) -> list[str]:
         """Get the quest IDs assigned to a user for a given day."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -198,7 +195,7 @@ class QuestTracker:
 
     def _has_unused_invite_codes(self, owner: str) -> bool:
         """Check if user has at least one unused invite code."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -212,7 +209,7 @@ class QuestTracker:
 
     def _get_completed_quest_count(self, owner: str) -> int:
         """Get total number of completed quests for a user."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -230,7 +227,7 @@ class QuestTracker:
         Counts claimed invite_code rewards from invite_earner quests, which is more
         reliable than counting quest completions (which can be reset via debug panel).
         """
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -309,7 +306,7 @@ class QuestTracker:
             quest_ids.extend([q.id for q in selected])
 
         # Insert initial progress records
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 for quest_id in quest_ids:
                     cur.execute(
@@ -351,7 +348,7 @@ class QuestTracker:
 
     def _get_active_flash_quest(self, owner: str, ts: int) -> Optional[dict]:
         """Get the user's currently active (non-expired, non-completed) flash quest."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -380,7 +377,7 @@ class QuestTracker:
 
     def _get_next_flash_time(self, owner: str) -> int:
         """Get the timestamp when user can receive their next flash quest."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT next_flash_at FROM user_quest_state WHERE LOWER(owner) = LOWER(%s)", (owner,))
                 row = cur.fetchone()
@@ -388,7 +385,7 @@ class QuestTracker:
 
     def _set_next_flash_time(self, owner: str, next_ts: int) -> None:
         """Set when the user can receive their next flash quest."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -434,7 +431,7 @@ class QuestTracker:
         ends_at = ts + duration_seconds
 
         # Insert the flash quest
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -464,7 +461,7 @@ class QuestTracker:
 
     def _get_flash_quest_progress(self, owner: str, starts_at: int) -> QuestProgress:
         """Get progress for a specific flash quest."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -494,7 +491,7 @@ class QuestTracker:
         completed_at: Optional[int],
     ) -> None:
         """Update flash quest progress."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -687,7 +684,7 @@ class QuestTracker:
 
     def _add_pending_reward(self, owner: str, reward_type: str, reward_data: dict, reason: str, ts: int) -> None:
         """Add a pending reward for a user."""
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -864,7 +861,7 @@ class QuestTracker:
     def _check_achievement_progress(self, owner: str, achievement: QuestDefinition, ts: int, **kwargs) -> None:
         """Check and update achievement progress."""
         # Get current progress
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -913,7 +910,7 @@ class QuestTracker:
             meta["targets"] = targets
 
         # Update achievement
-        with self.db._connect() as conn:
+        with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -1039,7 +1036,7 @@ class QuestTracker:
         # Get achievement status
         achievements = []
         for achievement in self.achievements:
-            with self.db._connect() as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """

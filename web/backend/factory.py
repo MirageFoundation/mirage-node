@@ -61,6 +61,17 @@ def create_app(init_runtime: bool = True) -> Flask:
 
         return safe_error(e, context="unhandled")
 
+    @app.before_request
+    def _track_last_seen_from_query():
+        if not request.path.startswith("/api/"):
+            return
+        addr = request.args.get("address") or request.args.get("admin_address") or ""
+        if not addr:
+            return
+        from user_last_seen import update_user_last_seen
+
+        update_user_last_seen(addr, source=request.path)
+
     # Middleware: inject new_inbox_items into every JSON response for logged-in users
     @app.after_request
     def _inject_inbox_count(response):
@@ -112,6 +123,14 @@ def create_app(init_runtime: bool = True) -> Flask:
 
     if init_runtime:
         initialize_runtime()
+        # Initialize backend-owned DB schema (quests, invites, referrals, etc.)
+        from db import init_backend_schema
+        logger().info("Initializing backend DB schema...")
+        init_backend_schema()
+        logger().info("Backend DB schema initialized")
+        from push_listener import start_push_listener
+
+        start_push_listener()
         # Load chain params from indexer DB, waiting for indexer to populate them
         logger().info("Loading chain params from indexer DB (waiting for indexer if needed)...")
         load_params()

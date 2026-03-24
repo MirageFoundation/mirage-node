@@ -29,7 +29,7 @@ import subprocess
 import time
 from typing import List, Optional, Tuple
 
-from db import connect_db
+from db import connect_backend_db, connect_db
 
 
 def get_balance(address) -> int:
@@ -63,14 +63,14 @@ def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
     codes = []
     now_ts = int(time.time())
 
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
-            # Get existing codes to avoid duplicates
             cur.execute("SELECT code FROM invite_codes")
             existing = {row[0] for row in cur.fetchall()}
 
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
             for _ in range(count):
-                # Generate unique code
                 for attempt in range(100):
                     code = _generate_invite_code()
                     if code not in existing:
@@ -82,7 +82,6 @@ def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
                 existing.add(code)
                 codes.append(code)
 
-                # Insert the code
                 cur.execute(
                     """
                     INSERT INTO invite_codes (code, owner, created_at)
@@ -352,7 +351,7 @@ class RewardDistributor:
             - error: str or None
         """
         # Get pending rewards
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -456,7 +455,7 @@ class RewardDistributor:
             unlock_id = cosmetic["data"].get("id")
 
             if unlock_id:
-                with connect_db() as conn:
+                with connect_backend_db() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
@@ -493,12 +492,10 @@ class RewardDistributor:
         cosmetic_ids = [r["id"] for r in cosmetic_rewards]
         invite_code_ids = [r["id"] for r in invite_code_rewards]
 
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
-                # For MIRAGE rewards, calculate and store per-reward payout amounts
                 if mirage_ids:
                     for reward in mirage_rewards:
-                        # Each reward gets its share of the multiplier based on apply_multiplier flag
                         if reward.get("apply_multiplier", True):
                             reward_payout = int(reward["amount"] * multiplier)
                         else:
@@ -512,7 +509,6 @@ class RewardDistributor:
                             (ts, reward_payout, reward["id"]),
                         )
 
-                # Cosmetic rewards don't have payout amounts
                 if cosmetic_ids:
                     cur.execute(
                         """
@@ -523,7 +519,6 @@ class RewardDistributor:
                         (ts, cosmetic_ids),
                     )
 
-                # Invite code rewards
                 if invite_code_ids:
                     cur.execute(
                         """
@@ -538,7 +533,7 @@ class RewardDistributor:
 
     def _get_multiplier(self, owner: str, ts: int) -> float:
         """Calculate reward multiplier based on completed quest count (0x at 0, 5x at 50)."""
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -560,7 +555,7 @@ class RewardDistributor:
 
         Returns number of rewards voided.
         """
-        with connect_db() as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """

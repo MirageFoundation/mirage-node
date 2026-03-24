@@ -1,14 +1,13 @@
 """
 Expo push notification sender with sliding-window throttle and receipt processing.
 
-Used by backend and indexer; no cron or background workers.
+Used by backend only; no cron or background workers.
 Throttle: max 5 pushes per user per 30 minutes.  When throttled, suppressed
 events are counted and a single summary push ("You have N unread messages")
 is sent once the window expires. After a summary, pushes pause for 3 hours
 or until the inbox is viewed.
 
-Self-contained: reads DB URL from shared.config and env vars directly,
-so it can be imported from both the backend and the indexer.
+Self-contained: reads backend + indexer DB URLs from shared.config.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ import psycopg
 import requests as http_requests
 
 from shared.config import get_config
-from shared.inbox import compute_unread_count
+from shared.inbox import compute_unread_count, fetch_inbox_last_viewed_at
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +31,15 @@ PUSH_NOTIFICATIONS_ENABLED: bool = os.environ.get("PUSH_NOTIFICATIONS_ENABLED", 
 EXPO_ACCESS_TOKEN: str = os.environ.get("EXPO_ACCESS_TOKEN", "")
 
 
-def _connect_db() -> psycopg.Connection:
+def _connect_backend_db() -> psycopg.Connection:
     cfg = get_config()
-    url = cfg.get_indexer_config().get("database_url")
-    if not url:
-        raise RuntimeError("INDEXER_DB_URL is required")
+    url = cfg.get_backend_db_url()
+    return psycopg.connect(url, autocommit=True)
+
+
+def _connect_indexer_ro() -> psycopg.Connection:
+    cfg = get_config()
+    url = cfg.get_indexer_ro_url()
     return psycopg.connect(url, autocommit=True)
 
 
@@ -53,6 +56,8 @@ RECEIPT_CHECK_AGE_SECONDS = 15 * 60
 RECEIPT_CHECK_MIN_INTERVAL_SECONDS = 5 * 60
 _last_receipt_check_ts = 0.0
 _receipt_check_lock = threading.Lock()
+_last_summary_flush_ts = 0.0
+_summary_flush_lock = threading.Lock()
 
 
 def _expo_headers() -> dict:
@@ -109,7 +114,7 @@ def _send_expo_push_batch(messages: list[dict]) -> list[tuple[str, Optional[str]
 
 def _remove_token(token: str) -> None:
     try:
-        with _connect_db() as conn:
+        with _connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM push_tokens WHERE token = %s", (token,))
         logger.info("[Push] Removed invalid token: %s…", token[:20])
@@ -128,7 +133,7 @@ def _try_throttle_send(owner: str) -> bool:
     """
     owner_lower = owner.lower()
     now = int(time.time())
-    with _connect_db() as conn:
+    with _connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT window_start, sent_count, suppressed_count, cooldown_until FROM push_throttle WHERE owner = %s",
@@ -200,7 +205,7 @@ def _try_throttle_send(owner: str) -> bool:
 
 def _store_receipt(ticket_id: str, token: str) -> None:
     try:
-        with _connect_db() as conn:
+        with _connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO push_receipts (ticket_id, token, created_at) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
@@ -222,7 +227,7 @@ def _check_old_receipts() -> None:
                 return
             _last_receipt_check_ts = now
         cutoff = int(time.time()) - RECEIPT_CHECK_AGE_SECONDS
-        with _connect_db() as conn:
+        with _connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, ticket_id, token FROM push_receipts WHERE created_at < %s LIMIT 100",
@@ -266,7 +271,7 @@ def _check_old_receipts() -> None:
 def _get_tokens_for_owner(owner: str) -> list[tuple[str, str]]:
     """Returns list of (token, platform) for an owner."""
     try:
-        with _connect_db() as conn:
+        with _connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT token, platform FROM push_tokens WHERE LOWER(owner) = LOWER(%s)",
@@ -282,7 +287,7 @@ def _resolve_usernames_to_owners(usernames: list[str]) -> dict[str, str]:
     if not usernames:
         return {}
     try:
-        with _connect_db() as conn:
+        with _connect_indexer_ro() as conn:
             with conn.cursor() as cur:
                 placeholders = ",".join(["%s"] * len(usernames))
                 cur.execute(
@@ -305,7 +310,7 @@ def _get_post_owner(txhash: str) -> str | None:
     if not txhash:
         return None
     try:
-        with _connect_db() as conn:
+        with _connect_indexer_ro() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (txhash,))
                 row = cur.fetchone()
@@ -318,7 +323,7 @@ def _get_root_post_id(target_txhash: str) -> str | None:
     if not target_txhash:
         return None
     try:
-        with _connect_db() as conn:
+        with _connect_indexer_ro() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COALESCE(root_post_id, ''), COALESCE(target, '') FROM posts "
@@ -372,6 +377,21 @@ def _fire_and_forget(fn, *args):
     t.start()
 
 
+def _maybe_flush_pending_summaries() -> None:
+    """Opportunistically flush pending summaries (at most once per 60s)."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        return
+    global _last_summary_flush_ts
+    now = time.time()
+    if now - _last_summary_flush_ts < 60:
+        return
+    with _summary_flush_lock:
+        if now - _last_summary_flush_ts < 60:
+            return
+        _last_summary_flush_ts = now
+    _fire_and_forget(flush_pending_summaries)
+
+
 def send_push_for_reply(
     poster_addr: str,
     poster_username: str,
@@ -388,6 +408,7 @@ def send_push_for_reply(
         "[Push] Firing reply push: poster=%s target=%s tx=%s", poster_addr[:16], target_txhash[:16], tx_hash[:16]
     )
     _fire_and_forget(_do_reply_push, poster_addr, poster_username, target_txhash, content, tx_hash)
+    _maybe_flush_pending_summaries()
 
 
 def _do_reply_push(
@@ -430,6 +451,7 @@ def send_push_for_mentions(
         logger.debug("[Push] Disabled, skipping mention push for %s", tx_hash[:16])
         return
     _fire_and_forget(_do_mentions_push, poster_addr, poster_username, content, tx_hash, target_txhash)
+    _maybe_flush_pending_summaries()
 
 
 def _do_mentions_push(
@@ -504,6 +526,7 @@ def send_push_for_award(
         target_txhash[:16],
     )
     _fire_and_forget(_do_award_push, awarder_addr, awarder_username, post_owner, target_txhash, award_type)
+    _maybe_flush_pending_summaries()
 
 
 def _do_award_push(
@@ -526,7 +549,7 @@ def clear_push_throttle(owner: str) -> None:
     """Clear throttle state after the user views their inbox."""
     owner_lower = owner.lower()
     now = int(time.time())
-    with _connect_db() as conn:
+    with _connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -548,9 +571,12 @@ def get_unread_count(owner: str) -> int:
     Mirrors the logic in backend _get_new_inbox_count but runs against a fresh
     connection so it can be called from the indexer or push module.
     """
-    with _connect_db() as conn:
-        with conn.cursor() as cur:
-            count, _last_seen = compute_unread_count(cur, owner)
+    with _connect_backend_db() as bconn:
+        with bconn.cursor() as bcur:
+            last_seen = fetch_inbox_last_viewed_at(owner, cur=bcur)
+    with _connect_indexer_ro() as iconn:
+        with iconn.cursor() as icur:
+            count, _last_seen = compute_unread_count(icur, owner, last_seen)
             return count
 
 
@@ -579,7 +605,7 @@ def flush_pending_summaries() -> int:
     """Find owners whose throttle window expired with suppressed events and
     send them a summary push.  Resets their window afterwards.
 
-    Called periodically by the indexer (not by individual push paths).
+    Called opportunistically by backend push paths.
     Returns the number of summaries sent.
     """
     if not PUSH_NOTIFICATIONS_ENABLED:
@@ -587,43 +613,48 @@ def flush_pending_summaries() -> int:
     now = int(time.time())
     cutoff = now - THROTTLE_WINDOW_SECONDS
     sent = 0
-    with _connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
+    with _connect_backend_db() as bconn:
+        with bconn.cursor() as bcur:
+            bcur.execute(
                 "SELECT owner FROM push_throttle "
                 "WHERE suppressed_count > 0 AND window_start <= %s AND cooldown_until <= %s "
                 "LIMIT 50",
                 (cutoff, now),
             )
-            owners = [r[0] for r in cur.fetchall()]
+            owners = [r[0] for r in bcur.fetchall()]
 
-        for owner in owners:
-            with conn.cursor() as cur:
-                unread, _last_seen = compute_unread_count(cur, owner)
-                if unread > 0:
-                    _send_summary_to_user(owner, unread)
-                    sent += 1
-                    cooldown_until = now + SUMMARY_COOLDOWN_SECONDS
-                    cur.execute(
-                        "UPDATE push_throttle "
-                        "SET window_start = %s, sent_count = 0, suppressed_count = 0, cooldown_until = %s "
-                        "WHERE owner = %s",
-                        (now, cooldown_until, owner),
-                    )
-                    logger.debug(
-                        "[Push][Summary] Summary sent to %s (unread=%d), cooldown=%ds",
-                        owner[:16],
-                        unread,
-                        SUMMARY_COOLDOWN_SECONDS,
-                    )
-                else:
-                    cur.execute(
-                        "UPDATE push_throttle "
-                        "SET window_start = %s, sent_count = 0, suppressed_count = 0, cooldown_until = 0 "
-                        "WHERE owner = %s",
-                        (now, owner),
-                    )
-                    logger.debug("[Push][Summary] No unread for %s, cleared suppressed", owner[:16])
+            if not owners:
+                return 0
+
+            with _connect_indexer_ro() as iconn:
+                with iconn.cursor() as icur:
+                    for owner in owners:
+                        last_seen = fetch_inbox_last_viewed_at(owner, cur=bcur)
+                        unread, _last_seen = compute_unread_count(icur, owner, last_seen)
+                        if unread > 0:
+                            _send_summary_to_user(owner, unread)
+                            sent += 1
+                            cooldown_until = now + SUMMARY_COOLDOWN_SECONDS
+                            bcur.execute(
+                                "UPDATE push_throttle "
+                                "SET window_start = %s, sent_count = 0, suppressed_count = 0, cooldown_until = %s "
+                                "WHERE owner = %s",
+                                (now, cooldown_until, owner),
+                            )
+                            logger.debug(
+                                "[Push][Summary] Summary sent to %s (unread=%d), cooldown=%ds",
+                                owner[:16],
+                                unread,
+                                SUMMARY_COOLDOWN_SECONDS,
+                            )
+                        else:
+                            bcur.execute(
+                                "UPDATE push_throttle "
+                                "SET window_start = %s, sent_count = 0, suppressed_count = 0, cooldown_until = 0 "
+                                "WHERE owner = %s",
+                                (now, owner),
+                            )
+                            logger.debug("[Push][Summary] No unread for %s, cleared suppressed", owner[:16])
 
     if sent > 0:
         logger.info("[Push][Summary] Flushed %d summaries (checked %d owners)", sent, len(owners))

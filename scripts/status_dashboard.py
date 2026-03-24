@@ -1342,35 +1342,14 @@ def check_rewards() -> ServiceStatus:
         if pool_balance is not None:
             details["pool_balance"] = pool_balance
 
-    try:
-        from indexer import settings as indexer_settings
+    details["indexer_quests_enabled"] = None
 
-        indexer_quests = bool(indexer_settings.QUESTS_ENABLED)
-        details["indexer_quests_enabled"] = indexer_quests
-    except Exception as e:
-        debug_log(f"rewards: failed to read indexer settings: {e}")
-        return ServiceStatus(
-            name="Rewards",
-            status=Status.ERROR,
-            message="Indexer settings error",
-            details={"backend_env": str(env_path), "error": str(e)[:20]},
-        )
-
-    both_on = backend_quests and indexer_quests
-    details["both_enabled"] = both_on
-
-    if both_on:
+    if backend_quests:
         status = Status.OK
         message = "Enabled"
-    elif backend_quests and not indexer_quests:
-        status = Status.ERROR
-        message = "Indexing OFF"
     else:
         status = Status.OK
-        if not backend_quests and not indexer_quests:
-            message = "Quests OFF"
-        else:
-            message = "Indexing active"
+        message = "Quests OFF"
 
     # Payouts check: payouts OFF is only OK if backend quests are also OFF
     if payouts_enabled is False and backend_quests:
@@ -1382,10 +1361,8 @@ def check_rewards() -> ServiceStatus:
 
     debug_log(
         "rewards: "
-        f"backend_quests={backend_quests} indexer_quests={indexer_quests} "
-        f"payouts_enabled={payouts_enabled} pool_address={bool(pool_address)} "
-        f"pool_balance={pool_balance} "
-        f"backend_debug={backend_debug} status={status.value} message={message}"
+        f"backend_quests={backend_quests} payouts_enabled={payouts_enabled} pool_address={bool(pool_address)} "
+        f"pool_balance={pool_balance} backend_debug={backend_debug} status={status.value} message={message}"
     )
 
     return ServiceStatus(name="Rewards", status=status, message=message, details=details)

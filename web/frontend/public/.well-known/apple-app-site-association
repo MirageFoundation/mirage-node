@@ -1,0 +1,28 @@
+{
+    "applinks": {
+        "apps": [],
+        "details": [
+            {
+                "appID": "894NKZ3VV3.talk.mirage.mobile",
+                "paths": [
+                    "/p/*",
+                    "/u/*",
+                    "/t/*",
+                    "/home",
+                    "/following",
+                    "/inbox",
+                    "/profile",
+                    "/signup",
+                    "/signup*",
+                    "/search",
+                    "/search*",
+                    "/topics",
+                    "/settings",
+                    "/subscription",
+                    "/agents",
+                    "/create_account*"
+                ]
+            }
+        ]
+    }
+}
