@@ -167,7 +167,7 @@ def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
-        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:
                 delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
@@ -198,7 +198,7 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
-        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:
                 delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
