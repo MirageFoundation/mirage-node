@@ -4,7 +4,7 @@ import json
 import re
 import time
 
-import requests
+
 
 from tests.common import (
     _pass,
@@ -334,30 +334,30 @@ def test_indexer(backend: str):
     # 5.1 total_supply (plain-text endpoint, not JSON)
     total_supply = None
     try:
-        r_ts = requests.get(f"{backend}/api/get_total_supply", timeout=10)
-        if r_ts.status_code == 200:
-            total_supply = float(r_ts.text.strip())
+        code_ts, body_ts = _get(f"{backend}/api/get_total_supply")
+        if code_ts == 200:
+            total_supply = float(body_ts) if isinstance(body_ts, (int, float)) else float(str(body_ts).strip())
             if total_supply > 0:
                 _pass("indexer.total_supply_positive", total_supply=total_supply)
             else:
                 _fail("indexer.total_supply_positive", f"total_supply={total_supply}")
         else:
-            _fail("indexer.total_supply_positive", f"code={r_ts.status_code}")
+            _fail("indexer.total_supply_positive", f"code={code_ts}")
     except Exception as e:
         _fail("indexer.total_supply_positive", str(e))
 
     # 5.2 circulating_supply (plain-text endpoint, not JSON)
     circ_supply = None
     try:
-        r_cs = requests.get(f"{backend}/api/get_circulating_supply", timeout=10)
-        if r_cs.status_code == 200:
-            circ_supply = float(r_cs.text.strip())
+        code_cs, body_cs = _get(f"{backend}/api/get_circulating_supply")
+        if code_cs == 200:
+            circ_supply = float(body_cs) if isinstance(body_cs, (int, float)) else float(str(body_cs).strip())
             if circ_supply > 0:
                 _pass("indexer.circulating_supply_positive", circulating_supply=circ_supply)
             else:
                 _fail("indexer.circulating_supply_positive", f"circulating_supply={circ_supply}")
         else:
-            _fail("indexer.circulating_supply_positive", f"code={r_cs.status_code}")
+            _fail("indexer.circulating_supply_positive", f"code={code_cs}")
     except Exception as e:
         _fail("indexer.circulating_supply_positive", str(e))
 

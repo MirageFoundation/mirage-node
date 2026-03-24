@@ -10,7 +10,7 @@ import string
 import time
 from typing import Optional
 
-import requests
+
 from cosmpy.aerial.wallet import LocalWallet
 from cosmpy.crypto.keypairs import PrivateKey
 
@@ -522,8 +522,8 @@ def test_security(backend: str) -> None:
     # 1. Verify LevelToTierIndex correctness via chain config endpoint
     #    Agent (level 10) must have a valid tier config (not be skipped)
     try:
-        resp = requests.get(f"{backend}/api/get_chain_config", timeout=10)
-        params = resp.json()
+        _, params = _get(f"{backend}/api/get_chain_config")
+        params = params or {}
         tiers = params.get("tiers", [])
         if len(tiers) != 3:
             _fail("security.tier_count", f"expected 3 tiers, got {len(tiers)}")

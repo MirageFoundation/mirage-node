@@ -1061,7 +1061,8 @@ def test_frontend_bypass(backend: str):
         user_level = 1
 
     try:
-        params = requests.get(f"{backend}/api/get_chain_config", timeout=10).json()
+        _, params = _get(f"{backend}/api/get_chain_config")
+        params = params or {}
         tiers = params.get("tiers") or []
         idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
         if 0 <= idx < len(tiers):
