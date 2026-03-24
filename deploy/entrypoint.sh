@@ -48,6 +48,18 @@ load_env_files
 # Ensure config directory exists
 mkdir -p "$ENV_DIR"
 
+# Safety fallback for DB URLs — must be set BEFORE migrations run
+# (migrations read these from os.environ to decide whether to skip)
+if [ -z "${INDEXER_DB_URL:-}" ]; then
+  export INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
+fi
+if [ -z "${INDEXER_DB_RO_URL:-}" ]; then
+  export INDEXER_DB_RO_URL="postgresql://mirage_ro:mirage_ro@127.0.0.1:5432/mirage"
+fi
+if [ -z "${BACKEND_DB_URL:-}" ]; then
+  export BACKEND_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend"
+fi
+
 # Run deploy migrations (one-time migrations + env sync with templates)
 echo "==> Running deploy migrations..."
 python3 -m deploy.migrations --config-dir "$ENV_DIR" || true
@@ -69,17 +81,6 @@ else
   if [ -n "$EXTERNAL_IP" ]; then
     hostname "${EXTERNAL_IP//./-}" 2>/dev/null || true
   fi
-fi
-
-# Safety fallback for DB URLs (should already be set in indexer.env template)
-if [ -z "${INDEXER_DB_URL:-}" ]; then
-  export INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
-fi
-if [ -z "${INDEXER_DB_RO_URL:-}" ]; then
-  export INDEXER_DB_RO_URL="postgresql://mirage_ro:mirage_ro@127.0.0.1:5432/mirage"
-fi
-if [ -z "${BACKEND_DB_URL:-}" ]; then
-  export BACKEND_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend"
 fi
 
 # Defaults if not provided
