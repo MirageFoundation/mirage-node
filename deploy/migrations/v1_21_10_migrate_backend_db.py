@@ -43,13 +43,14 @@ BACKEND_TABLES = [
 def run(config_dir, logger):
     import psycopg
 
-    indexer_url = os.environ.get("INDEXER_DB_URL", "").strip()
-    backend_url = os.environ.get("BACKEND_DB_URL", "").strip()
-
-    if not indexer_url:
-        return "skipped: INDEXER_DB_URL not set"
-    if not backend_url:
-        return "skipped: BACKEND_DB_URL not set"
+    indexer_url = (
+        os.environ.get("INDEXER_DB_URL", "").strip()
+        or "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
+    )
+    backend_url = (
+        os.environ.get("BACKEND_DB_URL", "").strip()
+        or "postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend"
+    )
     if indexer_url == backend_url:
         return "skipped: INDEXER_DB_URL == BACKEND_DB_URL (same DB, no split)"
 
