@@ -5,6 +5,7 @@ to the new separate backend DB (indexer/backend DB split).
 Runs automatically on container startup. Idempotent (ON CONFLICT DO NOTHING).
 Skips gracefully if source tables don't exist or DBs are already separate.
 """
+
 from __future__ import annotations
 
 import os
@@ -43,14 +44,10 @@ BACKEND_TABLES = [
 def run(config_dir, logger):
     import psycopg
 
-    indexer_url = (
-        os.environ.get("INDEXER_DB_URL", "").strip()
-        or "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
-    )
-    backend_url = (
-        os.environ.get("BACKEND_DB_URL", "").strip()
-        or "postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend"
-    )
+    indexer_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    backend_url = os.environ.get("BACKEND_DB_URL", "").strip()
+    if not indexer_url or not backend_url:
+        raise RuntimeError("INDEXER_DB_URL and BACKEND_DB_URL must be set")
     if indexer_url == backend_url:
         return "skipped: INDEXER_DB_URL == BACKEND_DB_URL (same DB, no split)"
 
@@ -112,6 +109,7 @@ def _get_column_types(cur, table: str) -> dict[str, str]:
 
 def _adapt_row(row: tuple, common: list[str], col_types: dict[str, str]) -> tuple:
     from psycopg.types.json import Json
+
     adapted = []
     for val, col in zip(row, common):
         if isinstance(val, (dict, list)) and col_types.get(col) == "jsonb":

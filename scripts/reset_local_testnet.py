@@ -444,6 +444,9 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
     # These provide RETENTION_BLOCKS, INDEXER_DB_URL, etc. for the entrypoint
     env_dir = backup_root / "env"
     if env_dir.exists() and env_dir.is_dir():
+        migrations_file = env_dir / ".migrations"
+        if not migrations_file.exists():
+            status("Backup env missing .migrations (migrations will be re-evaluated on startup)")
         status("Copying env files from backup (clearing old env first)...")
         run(["bash", "-lc", "docker exec mirage rm -rf /root/.mirage/env"])
         run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/env"])

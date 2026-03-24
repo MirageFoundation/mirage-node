@@ -48,21 +48,25 @@ load_env_files
 # Ensure config directory exists
 mkdir -p "$ENV_DIR"
 
-# Safety fallback for DB URLs — must be set BEFORE migrations run
-# (migrations read these from os.environ to decide whether to skip)
-if [ -z "${INDEXER_DB_URL:-}" ]; then
-  export INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
-fi
-if [ -z "${INDEXER_DB_RO_URL:-}" ]; then
-  export INDEXER_DB_RO_URL="postgresql://mirage_ro:mirage_ro@127.0.0.1:5432/mirage"
-fi
-if [ -z "${BACKEND_DB_URL:-}" ]; then
-  export BACKEND_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend"
-fi
+# DB URLs must be set BEFORE migrations run (no fallbacks).
+for var in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL; do
+  if [ -z "${!var:-}" ]; then
+    echo "ERROR: $var is required but missing (check env files in $ENV_DIR)" >&2
+    exit 1
+  fi
+done
+
+# Ensure backend schema exists before data migrations run
+echo "==> Initializing backend schema (pre-migrations)..."
+python3 - <<'PY'
+from web.backend.db import init_backend_schema
+
+init_backend_schema()
+PY
 
 # Run deploy migrations (one-time migrations + env sync with templates)
 echo "==> Running deploy migrations..."
-python3 -m deploy.migrations --config-dir "$ENV_DIR" || true
+python3 -m deploy.migrations --config-dir "$ENV_DIR"
 
 # Reload env files after migrations
 load_env_files
