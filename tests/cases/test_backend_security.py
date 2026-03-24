@@ -767,13 +767,14 @@ def test_security(backend: str):
             owner_lc = str(free_wallet.address()).lower()
             now = int(time.time())
             cooldown_until = now + 7200
+            sql = (
+                f"INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) "
+                f"VALUES (:'owner', {now}, 5, 3, {cooldown_until}) "
+                f"ON CONFLICT (owner) DO UPDATE SET "
+                f"window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"
+            )
             rc, out = _docker_exec(
-                f"""su - postgres -c "psql -d {db_name} -tAc \\""""
-                f"""INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) """
-                f"""VALUES (:'owner', {now}, 5, 3, {cooldown_until}) """
-                f"""ON CONFLICT (owner) DO UPDATE SET """
-                f"""window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"""
-                f"""\\" -v owner='{owner_lc}' 2>&1" """,
+                f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql}\\\" -v owner='{owner_lc}' 2>&1\"",
                 timeout=10,
             )
             if rc != 0:
@@ -796,10 +797,9 @@ def test_security(backend: str):
                 if code != 200:
                     _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"code={code} resp={resp}")
                 else:
+                    sql2 = "SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner=:'owner' LIMIT 1;"
                     rc2, out2 = _docker_exec(
-                        f"""su - postgres -c "psql -d {db_name} -tAc \\""""
-                        f"""SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner=:'owner' LIMIT 1;"""
-                        f"""\\" -v owner='{owner_lc}' 2>&1" """,
+                        f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql2}\\\" -v owner='{owner_lc}' 2>&1\"",
                         timeout=10,
                     )
                     if rc2 != 0:
@@ -812,10 +812,9 @@ def test_security(backend: str):
                         else:
                             _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"got={raw}")
 
+                    sql3 = "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE owner=:'owner' LIMIT 1;"
                     rc3, out3 = _docker_exec(
-                        f"""su - postgres -c "psql -d {db_name} -tAc \\""""
-                        f"""SELECT inbox_last_viewed_at FROM user_inbox_state WHERE owner=:'owner' LIMIT 1;"""
-                        f"""\\" -v owner='{owner_lc}' 2>&1" """,
+                        f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql3}\\\" -v owner='{owner_lc}' 2>&1\"",
                         timeout=10,
                     )
                     if rc3 != 0:
