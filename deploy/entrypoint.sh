@@ -72,21 +72,6 @@ for var in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL; do
   fi
 done
 
-# Ensure backend schema exists before data migrations run
-echo "==> Initializing backend schema (pre-migrations)..."
-python3 - <<'PY'
-from web.backend.db import init_backend_schema
-
-init_backend_schema()
-PY
-
-# Run deploy migrations (one-time migrations + env sync with templates)
-echo "==> Running deploy migrations..."
-python3 -m deploy.migrations --config-dir "$ENV_DIR"
-
-# Reload env files after migrations
-load_env_files
-
 # Set container hostname (instead of random container ID)
 # Priority: DOMAIN > MONIKER > external IP
 # Note: Replace dots/colons/slashes with dashes (invalid in hostnames). Fails silently if no permissions.
@@ -346,6 +331,21 @@ ensure_local_postgres_dbs() {
   echo "✓ All Postgres databases and roles ensured."
 }
 ensure_local_postgres_dbs
+
+# Ensure backend schema exists before data migrations run
+echo "==> Initializing backend schema (pre-migrations)..."
+python3 - <<'PY'
+from web.backend.db import init_backend_schema
+
+init_backend_schema()
+PY
+
+# Run deploy migrations (one-time migrations + env sync with templates)
+echo "==> Running deploy migrations..."
+python3 -m deploy.migrations --config-dir "$ENV_DIR"
+
+# Reload env files after migrations
+load_env_files
 
 # Auto-configure HTTPS if domain is set (from node.env)
 # Skip if Caddyfile already has HTTPS configured (www redirect indicates full HTTPS setup)
