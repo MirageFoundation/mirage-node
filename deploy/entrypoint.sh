@@ -395,8 +395,16 @@ migrate_local_postgres_names() {
     changed=1
   fi
 
-  # 6. Re-grant RO privileges and update env files
+  # 6. Grant schema privileges to renamed roles, re-grant RO, update env files
   if [ "$changed" = "1" ]; then
+    # Ensure RW roles can create/own objects in their respective DBs
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT ALL ON SCHEMA public TO mirage_indexer;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT ALL ON ALL TABLES IN SCHEMA public TO mirage_indexer;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO mirage_indexer;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_backend -c \"GRANT ALL ON SCHEMA public TO mirage_backend;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_backend -c \"GRANT ALL ON ALL TABLES IN SCHEMA public TO mirage_backend;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_backend -c \"GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO mirage_backend;\"" 2>/dev/null || true
+    # RO role for indexer
     su - postgres -c "psql -d mirage_indexer -c \"GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro;\"" 2>/dev/null || true
     su - postgres -c "psql -d mirage_indexer -c \"GRANT USAGE ON SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
     su - postgres -c "psql -d mirage_indexer -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
