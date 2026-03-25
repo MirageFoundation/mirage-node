@@ -54,7 +54,7 @@ Use these rules to avoid hanging sessions and enforce fail-fast behavior.
 
 - **NEVER trust `X-Forwarded-For`** — trivially spoofable by the client.
 - Use `CF-Connecting-IP` (set by Cloudflare, not spoofable) with fallback to `request.remote_addr` (TCP peer, not spoofable).
-- See `_get_trusted_client_ip()` in `web/backend/routes/core.py`.
+- See `get_trusted_client_ip()` in `web/backend/client_ip.py`.
 
 ### Database Schema Changes
 

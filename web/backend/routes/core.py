@@ -22,6 +22,7 @@ import threading
 from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request, has_request_context
+from client_ip import get_trusted_client_ip as _get_trusted_client_ip, hash_client_ip as _hash_client_ip
 from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED, PUSH_NOTIFICATIONS_ENABLED
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
@@ -192,35 +193,6 @@ def _db_list_contains(table: str, owner: str, target_col: str, target_val: str) 
 def _get_utc_julian_day(ts: int) -> int:
     """Convert Unix timestamp to UTC Julian day number."""
     return 2440588 + (ts // 86400)
-
-
-def _get_trusted_client_ip() -> str | None:
-    """CF-Connecting-IP (Cloudflare, not spoofable) or raw TCP peer."""
-    raw_ip = str(request.headers.get("CF-Connecting-IP", "") or "").strip()
-    if not raw_ip:
-        raw_ip = str(request.remote_addr or "").strip()
-    if not raw_ip:
-        return None
-    try:
-        ip_obj = ipaddress.ip_address(raw_ip)
-    except ValueError:
-        return None
-    if ip_obj.version == 6 and ip_obj.ipv4_mapped:
-        return str(ip_obj.ipv4_mapped)
-    if ip_obj.version == 6:
-        net = ipaddress.ip_network(f"{ip_obj}/64", strict=False)
-        return f"{net.network_address}/{net.prefixlen}"
-    return str(ip_obj)
-
-
-_CLIENT_HASH_SALT = bytes.fromhex(os.environ["CLIENT_HASH_SALT"].strip())
-
-
-def _hash_client_ip(ip: str | None) -> str | None:
-    """One-way salted hash of client IP. Salt is stable across workers."""
-    if not ip:
-        return None
-    return hashlib.sha256(_CLIENT_HASH_SALT + ip.encode()).hexdigest()[:32]
 
 
 def _get_username_for_owner(owner: str) -> str:
@@ -864,9 +836,7 @@ def core_set_username():
                                             user=user_addr,
                                         )
                                         return (
-                                            jsonify(
-                                                {"error": "this referral link has already been used from your device"}
-                                            ),
+                                            jsonify({"error": "you already used your code"}),
                                             400,
                                         )
                     except Exception as ref_err:

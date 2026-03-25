@@ -23,6 +23,8 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
+ALWAYS_RUN_KEYS = {"v1.21.11-client-hash-salt"}
+
 
 def discover_migrations() -> list[tuple[str, str, any]]:
     """
@@ -142,10 +144,27 @@ def run_one_time_migrations(config_dir: Path) -> int:
         if _has_existing_data(config_dir):
             logger.warning("No .migrations file but existing data detected — running all migrations")
         else:
-            logger.info("Fresh deployment detected (no .migrations file) — skipping all existing migrations")
+            logger.info("Fresh deployment detected (no .migrations file) — running required migrations")
+            run_count = 0
+            for filename, key, module in migrations:
+                if key not in ALWAYS_RUN_KEYS:
+                    continue
+                description = getattr(module, "DESCRIPTION", "")
+                logger.info(f"Running migration: {key} - {description}")
+                try:
+                    result = module.run(config_dir, logger)
+                    result_str = str(result) if result is not None else "completed"
+                    mark_migration_complete(config_dir, key, result_str)
+                    logger.info(f"Migration {key} completed: {result_str}")
+                    run_count += 1
+                except Exception as e:
+                    logger.error(f"Migration {key} failed: {e}", exc_info=True)
+                    raise
             for _, key, module in migrations:
+                if key in ALWAYS_RUN_KEYS:
+                    continue
                 mark_migration_complete(config_dir, key, "skipped (fresh deploy)")
-            return 0
+            return run_count
 
     completed = get_completed_migrations(config_dir)
     pending = [(name, key, mod) for name, key, mod in migrations if key not in completed]

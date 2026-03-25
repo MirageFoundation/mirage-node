@@ -50,6 +50,7 @@ import calendar
 from datetime import datetime as dt
 import hashlib
 import math
+from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urljoin, urlparse
 from chain import (
     classify_reject as _classify_reject,
@@ -7945,6 +7946,18 @@ def referrals_precheck():
             log_event(rid, "referrals.precheck.no_codes", username=username, address=address)
             return jsonify({"valid": False, "error": "referrer has no available invite codes"})
 
+        client_hash = hash_client_ip(get_trusted_client_ip())
+        if client_hash:
+            with connect_backend_db() as bconn2:
+                with bconn2.cursor() as bcur2:
+                    bcur2.execute(
+                        "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
+                        (client_hash, address),
+                    )
+                    if bcur2.fetchone():
+                        log_event(rid, "referrals.precheck.client_gate", username=username, address=address)
+                        return jsonify({"valid": False, "error": "you already used your code"})
+
         log_event(rid, "referrals.precheck.ok", username=username, available=available)
         return jsonify({"valid": True, "available": available})
     except Exception as e:
@@ -8084,15 +8097,17 @@ def referrals_summary():
 
         if not referrals:
             log_event(rid, "referrals.summary.empty", address=address)
-            return jsonify({
-                "referrals": [],
-                "total": total,
-                "period_start": period_start,
-                "period_end": period_end,
-                "limit": limit,
-                "offset": offset,
-                "has_more": False,
-            })
+            return jsonify(
+                {
+                    "referrals": [],
+                    "total": total,
+                    "period_start": period_start,
+                    "period_end": period_end,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": False,
+                }
+            )
 
         referred_addrs = [r[0] for r in referrals]
         referred_at_map = {r[0]: r[1] for r in referrals}
@@ -8134,26 +8149,30 @@ def referrals_summary():
             posts = post_counts.get(addr, 0)
             votes = vote_counts.get(addr, 0)
             total_actions = posts + votes
-            results.append({
-                "address": addr,
-                "username": usernames.get(addr, ""),
-                "referred_at": referred_at_map.get(addr, 0),
-                "posts": posts,
-                "votes": votes,
-                "total_actions": total_actions,
-            })
+            results.append(
+                {
+                    "address": addr,
+                    "username": usernames.get(addr, ""),
+                    "referred_at": referred_at_map.get(addr, 0),
+                    "posts": posts,
+                    "votes": votes,
+                    "total_actions": total_actions,
+                }
+            )
 
         has_more = (offset + len(results)) < total
         log_event(rid, "referrals.summary.ok", address=address, total=len(results), has_more=has_more)
-        return jsonify({
-            "referrals": results,
-            "total": total,
-            "period_start": period_start,
-            "period_end": period_end,
-            "limit": limit,
-            "offset": offset,
-            "has_more": has_more,
-        })
+        return jsonify(
+            {
+                "referrals": results,
+                "total": total,
+                "period_start": period_start,
+                "period_end": period_end,
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+            }
+        )
     except Exception as e:
         log_event(rid, "referrals.summary.err", error=str(e))
         return safe_error(e)

@@ -598,6 +598,17 @@ function CreateAccountView({ state, setCredentials }) {
                                                 tabIndex={-1}
                                             />
                                         </>
+                                    ) : (referrerStatus === "invalid" && refFromUrl) ? (
+                                        <>
+                                            <UsernameLabel>Invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                value={submitError || "Referral not available"}
+                                                readOnly
+                                                disabled
+                                                style={{ opacity: 0.7, cursor: 'default', color: '#f66', pointerEvents: 'none' }}
+                                                tabIndex={-1}
+                                            />
+                                        </>
                                     ) : (
                                         <>
                                             <UsernameLabel>Enter your invite code:</UsernameLabel>
