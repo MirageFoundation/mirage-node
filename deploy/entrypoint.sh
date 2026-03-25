@@ -464,6 +464,14 @@ python3 -m deploy.migrations --config-dir "$ENV_DIR"
 # Reload env files after migrations
 load_env_files
 
+# Sync critical env vars to the tmux session (the session was created before
+# migrations may have updated env files, so new windows need the latest values)
+for _evar in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL CLIENT_HASH_SALT; do
+  if [ -n "${!_evar:-}" ]; then
+    tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
+  fi
+done
+
 # Auto-configure HTTPS if domain is set (from node.env)
 # Skip if Caddyfile already has HTTPS configured (www redirect indicates full HTTPS setup)
 if [ -n "${DOMAIN:-}" ]; then
