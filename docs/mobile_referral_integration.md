@@ -70,22 +70,22 @@ Priority: if both `ref` and `invite` are present, prefer `invite` (direct code).
 **Failure responses (200 with `valid: false`):**
 
 ```json
-{ "valid": false, "error": "referrer_not_found" }
-{ "valid": false, "error": "referrer_not_opted_in" }
-{ "valid": false, "error": "no_codes_available" }
-{ "valid": false, "error": "client_already_used" }
-{ "valid": false, "error": "invite_codes_not_required" }
+{ "valid": false, "error": "referrer not found" }
+{ "valid": false, "error": "referrer has not enabled referral links" }
+{ "valid": false, "error": "referrer has no available codes" }
+{ "valid": false, "error": "already used this referrer" }
+{ "valid": false, "error": "invite codes not required on this node" }
 ```
 
-Error codes are machine-readable keys. Map them to user-facing copy on the client:
+Error strings are lowercase human-readable (consistent with the rest of the API). Map them to proper user-facing copy on the client:
 
-| Error Code | Suggested User Message |
-|------------|----------------------|
-| `client_already_used` | "You already used this referrer." |
-| `no_codes_available` | "This referrer has no invite codes left." |
-| `referrer_not_found` | "Referrer not found." |
-| `referrer_not_opted_in` | "This referrer has not enabled referral links." |
-| `invite_codes_not_required` | "Invite codes are not required on this node." |
+| Backend Error | Suggested User Message |
+|---------------|----------------------|
+| `already used this referrer` | "You already used this referrer." |
+| `referrer has no available codes` | "This referrer has no invite codes left." |
+| `referrer not found` | "Referrer not found." |
+| `referrer has not enabled referral links` | "This referrer has not enabled referral links." |
+| `invite codes not required on this node` | "Invite codes are not required on this node." |
 
 **UI behavior by precheck result:**
 
@@ -137,7 +137,7 @@ This is the existing signup endpoint. To use the referral path, include `referre
 { "error": "invalid referrer username format" }
 { "error": "referrer not found" }
 { "error": "self-referral is not allowed" }
-{ "error": "client_already_used" }
+{ "error": "already used this referrer" }
 ```
 
 If the referrer runs out of codes between precheck and submit, the account is still created (PoW was already done and tx broadcast), but no referral link is recorded. This is a rare edge case.

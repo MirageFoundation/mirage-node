@@ -18,16 +18,17 @@ import { ContentGrid, ModernPostFeed } from "../styled/Layout";
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
 
 const REFERRAL_ERRORS = {
-    client_already_used: "You already used this referrer.",
-    no_codes_available: "This referrer has no invite codes left.",
-    referrer_not_found: "Referrer not found.",
-    referrer_not_opted_in: "This referrer has not enabled referral links.",
-    invite_codes_not_required: "Invite codes are not required on this node.",
+    "already used this referrer": "You already used this referrer.",
+    "referrer has no available codes": "This referrer has no invite codes left.",
+    "referrer not found": "Referrer not found.",
+    "referrer has not enabled referral links": "This referrer has not enabled referral links.",
+    "invite codes not required on this node": "Invite codes are not required on this node.",
 };
 
 function formatReferralError(raw) {
     if (!raw) return "Referral not available.";
-    return REFERRAL_ERRORS[raw] || (raw.charAt(0).toUpperCase() + raw.slice(1));
+    if (REFERRAL_ERRORS[raw]) return REFERRAL_ERRORS[raw];
+    return raw.charAt(0).toUpperCase() + raw.slice(1).replace(/\.$/, '') + '.';
 }
 
 const Centered = styled.div`
