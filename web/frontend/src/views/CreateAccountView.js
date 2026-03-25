@@ -600,14 +600,21 @@ function CreateAccountView({ state, setCredentials }) {
                                             />
                                         </>
                                     ) : (referrerStatus === "invalid" && refFromUrl) ? (
-                                        <>
-                                            <div style={{ color: '#f66', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                        <div style={{
+                                            marginTop: '1.5rem',
+                                            padding: '1rem 1.25rem',
+                                            borderRadius: '8px',
+                                            border: '1px solid #f6666640',
+                                            background: '#f6666610',
+                                            textAlign: 'center',
+                                        }}>
+                                            <div style={{ color: '#f66', fontSize: '0.85rem', fontWeight: 600 }}>
                                                 {referrerError || "Referral not available"}
                                             </div>
-                                            <IntroP style={{ marginTop: '1rem', opacity: 0.7 }}>
+                                            <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', opacity: 0.7 }}>
                                                 Have an invite code? <a href="/signup" style={{ color: 'inherit', textDecoration: 'underline' }}>Enter it manually</a>
-                                            </IntroP>
-                                        </>
+                                            </div>
+                                        </div>
                                     ) : (
                                         <>
                                             <UsernameLabel>Enter your invite code:</UsernameLabel>
