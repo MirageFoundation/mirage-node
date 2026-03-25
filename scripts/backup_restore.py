@@ -310,18 +310,25 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         docker exec mirage bash -c '
             pg_ctlcluster 16 main start 2>/dev/null || true
             sleep 2
-            # Try new DB name first, fall back to legacy name
-            INDEXER_DB=$(PGPASSWORD=mirage psql -h 127.0.0.1 -U mirage -tAc "SELECT datname FROM pg_database WHERE datname IN ('"'"'mirage_indexer'"'"','"'"'mirage'"'"') ORDER BY datname DESC LIMIT 1" postgres 2>/dev/null)
+            # Detect DB and role names using postgres superuser (always exists)
+            INDEXER_DB=$(su - postgres -c "psql -tAc \\"SELECT datname FROM pg_database WHERE datname IN ('"'"'mirage_indexer'"'"','"'"'mirage'"'"') ORDER BY datname DESC LIMIT 1\\"" 2>/dev/null | tr -d " ")
             INDEXER_DB=${INDEXER_DB:-mirage_indexer}
-            # Detect indexer role (mirage_indexer or legacy mirage)
-            DUMP_USER=$(PGPASSWORD=mirage psql -h 127.0.0.1 -U mirage -tAc "SELECT 1 FROM pg_roles WHERE rolname='"'"'mirage_indexer'"'"'" postgres 2>/dev/null | tr -d " ")
-            if [ "$DUMP_USER" = "1" ]; then
+            HAS_NEW_ROLE=$(su - postgres -c "psql -tAc \\"SELECT 1 FROM pg_roles WHERE rolname='"'"'mirage_indexer'"'"'\\"" 2>/dev/null | tr -d " ")
+            if [ "$HAS_NEW_ROLE" = "1" ]; then
                 DUMP_ROLE=mirage_indexer; DUMP_PASS=mirage_indexer
             else
                 DUMP_ROLE=mirage; DUMP_PASS=mirage
             fi
+            echo "pg_dump: db=$INDEXER_DB role=$DUMP_ROLE"
             PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U $DUMP_ROLE -d $INDEXER_DB > /root/.mirage/backup_indexer.sql
-            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U $DUMP_ROLE -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
+            # Verify dump is not empty
+            DUMP_SIZE=$(stat -c%s /root/.mirage/backup_indexer.sql 2>/dev/null || echo 0)
+            if [ "$DUMP_SIZE" -lt 1000 ]; then
+                echo "ERROR: indexer SQL dump is only ${DUMP_SIZE} bytes — dump likely failed" >&2
+                exit 1
+            fi
+            # Backend DB (may not exist on older nodes)
+            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U mirage_backend -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
         '
     """,
     )

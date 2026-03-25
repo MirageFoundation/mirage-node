@@ -1005,7 +1005,7 @@ export default function SettingsView({ state }) {
                             </Row>
 
                             <Row>
-                                <Label style={{ whiteSpace: 'normal' }}>Referral lookup:</Label>
+                                <Label style={{ whiteSpace: 'normal' }}>Referral links:</Label>
                                 <ValueBox>
                                     <CheckboxLabel>
                                         <CheckboxInput
@@ -1013,10 +1013,10 @@ export default function SettingsView({ state }) {
                                             disabled={referralPrecheckBusy}
                                             onChange={(e) => handleReferralPrecheckToggle(!!e.target.checked)}
                                         />
-                                        Allow others to verify you have available invite codes
+                                        Enable referral links for my account
                                     </CheckboxLabel>
                                     <ExplanationText>
-                                        Required for /signup?ref= links. Disable to prevent public availability checks.
+                                        Lets people sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
                                     </ExplanationText>
                                     {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
                                     {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
