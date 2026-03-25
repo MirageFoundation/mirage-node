@@ -328,7 +328,7 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
                 exit 1
             fi
             # Backend DB (may not exist on older nodes)
-            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U mirage_backend -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
+            PGPASSWORD=mirage_backend pg_dump -h 127.0.0.1 -U mirage_backend -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
         '
     """,
     )

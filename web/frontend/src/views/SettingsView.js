@@ -514,6 +514,14 @@ export default function SettingsView({ state }) {
     const [referralPrecheckBusy, setReferralPrecheckBusy] = useState(false);
     const [referralPrecheckError, setReferralPrecheckError] = useState('');
     const [referralPrecheckSuccess, setReferralPrecheckSuccess] = useState('');
+    const [inviteCodesRequired, setInviteCodesRequired] = useState(() => {
+        try {
+            const nc = JSON.parse(localStorage.getItem('nodeConfig') || '{}');
+            return !!nc.registration_invite_code_required;
+        } catch (_) {
+            return false;
+        }
+    });
 
     // ── Security: seed storage mode ────────────────────────────────────────
     const [seedMode, setSeedMode] = useState(() => seedVault.getMode());
@@ -630,6 +638,19 @@ export default function SettingsView({ state }) {
             root.style.setProperty('--feed-max-width', '1000px');
         }
     }, [fullWidthMode]);
+
+    useEffect(() => {
+        const readConfig = () => {
+            try {
+                const nc = JSON.parse(localStorage.getItem('nodeConfig') || '{}');
+                setInviteCodesRequired(!!nc.registration_invite_code_required);
+            } catch (_) {
+                setInviteCodesRequired(false);
+            }
+        };
+        window.addEventListener('nodeConfigUpdated', readConfig);
+        return () => window.removeEventListener('nodeConfigUpdated', readConfig);
+    }, []);
 
     useEffect(() => {
         if (!state.publicKey) return;
@@ -1004,6 +1025,7 @@ export default function SettingsView({ state }) {
                                 </ValueBox>
                             </Row>
 
+                            {inviteCodesRequired && (
                             <Row>
                                 <Label style={{ whiteSpace: 'normal' }}>Referral links:</Label>
                                 <ValueBox>
@@ -1022,6 +1044,7 @@ export default function SettingsView({ state }) {
                                     {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
                                 </ValueBox>
                             </Row>
+                            )}
 
                             <Row>
                                 <Label style={{ whiteSpace: 'normal' }}>Show content with tags:</Label>
