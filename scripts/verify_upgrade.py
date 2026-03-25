@@ -151,6 +151,10 @@ MIGRATED_TABLES = {
     "user_inbox_state",
 }
 
+# Tables that diverge after split (both DBs write independently).
+# Count mismatches are expected — warn instead of fail.
+DIVERGE_POST_SPLIT = {"push_nonces", "push_throttle", "user_daily_quests", "user_quest_state"}
+
 passed = 0
 failed = 0
 warnings = 0
@@ -378,16 +382,22 @@ def main() -> None:
             ok(f"{t}: {dst_count} rows in backend (source already cleaned)")
             continue
         if src_count > 0 and dst_count == 0:
-            fail(f"{t}: {src_count} rows in indexer but 0 in backend — DATA NOT MIGRATED")
-            data_issues += 1
+            if t in DIVERGE_POST_SPLIT:
+                warn(f"{t}: {src_count} in indexer, 0 in backend (expected divergence post-split)")
+            else:
+                fail(f"{t}: {src_count} rows in indexer but 0 in backend — DATA NOT MIGRATED")
+                data_issues += 1
             continue
         if dst_count < src_count:
-            pct = (dst_count / src_count) * 100
-            if pct < 90:
-                fail(f"{t}: only {dst_count}/{src_count} rows migrated ({pct:.0f}%) — INCOMPLETE")
-                data_issues += 1
+            if t in DIVERGE_POST_SPLIT:
+                warn(f"{t}: {dst_count}/{src_count} rows — expected divergence post-split")
             else:
-                warn(f"{t}: {dst_count}/{src_count} rows ({pct:.0f}%) — minor difference")
+                pct = (dst_count / src_count) * 100
+                if pct < 90:
+                    fail(f"{t}: only {dst_count}/{src_count} rows migrated ({pct:.0f}%) — INCOMPLETE")
+                    data_issues += 1
+                else:
+                    warn(f"{t}: {dst_count}/{src_count} rows ({pct:.0f}%) — minor difference")
         else:
             ok(f"{t}: {dst_count} rows in backend (source has {src_count})")
 
