@@ -204,6 +204,7 @@ function CreateAccountView({ state, setCredentials }) {
     const [referrerUsername, setReferrerUsername] = useState(refFromUrl);
     const [referrerStatus, setReferrerStatus] = useState(refFromUrl ? "checking" : "none");
     const [referrerAvailable, setReferrerAvailable] = useState(0);
+    const [referrerError, setReferrerError] = useState("");
 
     // Pre-check referrer availability on mount when ?ref= is present
     React.useEffect(() => {
@@ -222,13 +223,13 @@ function CreateAccountView({ state, setCredentials }) {
                     if (typeof data.available === 'number') setReferrerAvailable(data.available);
                 } else {
                     setReferrerStatus("invalid");
-                    setSubmitError(data?.error || "Referrer not available");
+                    setReferrerError(data?.error || "Referral not available");
                 }
             })
             .catch(() => {
                 if (cancelled) return;
                 setReferrerStatus("error");
-                setSubmitError("Could not validate referrer");
+                setReferrerError("Could not validate referrer");
             });
         return () => { cancelled = true; };
     }, [refFromUrl, inviteCodeRequired]);
@@ -379,7 +380,7 @@ function CreateAccountView({ state, setCredentials }) {
             try {
                 const precheck = await Api.get('referrals/precheck', { username: referrerUsername });
                 if (!precheck || !precheck.valid) {
-                    setSubmitError(precheck?.error || "Referrer has no available codes");
+                    setReferrerError(precheck?.error || "Referrer has no available codes");
                     setReferrerStatus("invalid");
                     const until = Date.now() + 1000;
                     setCooldownUntil(until);
@@ -387,7 +388,7 @@ function CreateAccountView({ state, setCredentials }) {
                     return;
                 }
             } catch (_) {
-                setSubmitError("Could not validate referrer");
+                setReferrerError("Could not validate referrer");
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
                 setTimeout(() => setCooldownUntil(0), 1000);
@@ -602,12 +603,15 @@ function CreateAccountView({ state, setCredentials }) {
                                         <>
                                             <UsernameLabel>Invite code:</UsernameLabel>
                                             <StyledInputBox
-                                                value={submitError || "Referral not available"}
+                                                value={referrerError || "Referral not available"}
                                                 readOnly
                                                 disabled
                                                 style={{ opacity: 0.7, cursor: 'default', color: '#f66', pointerEvents: 'none' }}
                                                 tabIndex={-1}
                                             />
+                                            <IntroP style={{ marginTop: '1rem', opacity: 0.7 }}>
+                                                Have an invite code? <InlineLink to="/signup">Enter it manually</InlineLink>
+                                            </IntroP>
                                         </>
                                     ) : (
                                         <>
@@ -640,56 +644,58 @@ function CreateAccountView({ state, setCredentials }) {
                                         </>
                                     )
                                 )}
-                                <UsernameLabel>Choose your username:</UsernameLabel>
-                                <StyledInputBox
-                                    placeholder=""
-                                    value={usernameInput}
-                                    onChange={(e) => {
-                                        const raw = e.target.value;
-                                        const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
-                                        const maxLen = getMaxInputLength(true);
-                                        // If params not loaded yet, allow up to 100 chars temporarily
-                                        setUsernameInput(cleaned.slice(0, maxLen ?? 100));
-                                        setSubmitError("");
-                                    }}
-                                    onKeyDown={async (e) => {
-                                        if (e.key === 'Enter') {
-                                            e.preventDefault();
-                                            await handleContinue(e);
-                                        }
-                                    }}
-                                    onPaste={(e) => {
-                                        // Block paste to prevent accidental seed phrase entry
-                                        e.preventDefault();
-                                    }}
-                                    maxLength={getMaxInputLength(true) || 100}
-                                    name="display-name-entry"
-                                    id="display-name-entry"
-                                    autoComplete="one-time-code"
-                                    autoCorrect="off"
-                                    autoCapitalize="off"
-                                    spellCheck="false"
-                                    data-lpignore="true"
-                                    data-1p-ignore="true"
-                                    data-bwignore="true"
-                                    data-form-type="other"
-                                />
-                                <ButtonWrapper>
-                                    <Button
-                                        onClick={handleContinue}
-                                        disabled={submitting || (Date.now() < cooldownUntil) || (usernameFinal.trim() === '') || referrerStatus === "checking"}
-                                        fullWidth
-                                        size="sm"
-                                        loading={submitting}
-                                    >
-                                        {buttonStatus === "preparing" ? 'Preparing...' :
-                                            buttonStatus === "submitting" ? 'Submitting...' :
-                                                buttonStatus === "verifying" ? 'Verifying...' :
-                                                    'Continue'}
-                                    </Button>
-                                </ButtonWrapper>
-                                {submitError && (
-                                    <div style={{ color: '#f66', marginTop: '0.5rem', fontSize: '0.8rem' }}>{submitError}</div>
+                                {!(referrerStatus === "invalid" && refFromUrl) && (
+                                    <>
+                                        <UsernameLabel>Choose your username:</UsernameLabel>
+                                        <StyledInputBox
+                                            placeholder=""
+                                            value={usernameInput}
+                                            onChange={(e) => {
+                                                const raw = e.target.value;
+                                                const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                                                const maxLen = getMaxInputLength(true);
+                                                setUsernameInput(cleaned.slice(0, maxLen ?? 100));
+                                                setSubmitError("");
+                                            }}
+                                            onKeyDown={async (e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    await handleContinue(e);
+                                                }
+                                            }}
+                                            onPaste={(e) => {
+                                                e.preventDefault();
+                                            }}
+                                            maxLength={getMaxInputLength(true) || 100}
+                                            name="display-name-entry"
+                                            id="display-name-entry"
+                                            autoComplete="one-time-code"
+                                            autoCorrect="off"
+                                            autoCapitalize="off"
+                                            spellCheck="false"
+                                            data-lpignore="true"
+                                            data-1p-ignore="true"
+                                            data-bwignore="true"
+                                            data-form-type="other"
+                                        />
+                                        <ButtonWrapper>
+                                            <Button
+                                                onClick={handleContinue}
+                                                disabled={submitting || (Date.now() < cooldownUntil) || (usernameFinal.trim() === '') || referrerStatus === "checking"}
+                                                fullWidth
+                                                size="sm"
+                                                loading={submitting}
+                                            >
+                                                {buttonStatus === "preparing" ? 'Preparing...' :
+                                                    buttonStatus === "submitting" ? 'Submitting...' :
+                                                        buttonStatus === "verifying" ? 'Verifying...' :
+                                                            'Continue'}
+                                            </Button>
+                                        </ButtonWrapper>
+                                        {submitError && (
+                                            <div style={{ color: '#f66', marginTop: '0.5rem', fontSize: '0.8rem' }}>{submitError}</div>
+                                        )}
+                                    </>
                                 )}
                             </StyledInfo>
                         </Centered>
