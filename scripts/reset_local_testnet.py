@@ -453,6 +453,15 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
         for item in sorted(env_dir.iterdir()):
             if item.is_file():
                 run(["bash", "-lc", f"docker cp '{item}' mirage:/root/.mirage/env/"])
+        # Force backend-db-split migration to re-run (production backup has the
+        # marker but the local backend DB is restored separately and may be empty)
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage sed -i '/v1\\.21\\.10-migrate-backend-db-split/d' /root/.mirage/env/.migrations 2>/dev/null || true",
+            ]
+        )
         # Clear DOMAIN to prevent entrypoint from attempting HTTPS/LetsEncrypt setup locally
         run(
             [
