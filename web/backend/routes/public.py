@@ -2458,6 +2458,8 @@ def _row_to_post(
     topic_lower = (topic or "").strip().lower()
     if not is_own and _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
         return None
+    if not is_own and not _is_tag_allowed(tag, allowed_tags):
+        return None
 
     # Parse media JSON array
     try:
@@ -4898,8 +4900,6 @@ def get_posts():
                     context=f"get_posts.feed.{feed or 'unknown'}",
                     viewer=address,
                 )
-                if len(resp["posts"]) < limit:
-                    resp["has_more"] = False
             conn.close()
             return jsonify(resp)
 
