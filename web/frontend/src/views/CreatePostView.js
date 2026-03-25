@@ -16,6 +16,7 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBo
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from '../components/MediaAttachmentLayout';
 import StickerPicker from '../components/StickerPicker';
 import GifPicker from '../components/GifPicker';
+import { formatError } from '../utils/errorMessages';
 
 const Row = styled.div`
     display: grid;
@@ -639,7 +640,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                         navigate(`/p/${overrideId}`);
                     }
                 } else {
-                    setSubmitError(res && res.error ? String(res.error) : 'Edit failed');
+                    setSubmitError(formatError(res));
                     setIsSubmitting(false);
                     setSubmitStatus('idle');
                     setSubmitStartTime(null);
@@ -724,7 +725,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                     return;
                 }
             } else {
-                setSubmitError(res && res.error ? String(res.error) : 'Post failed');
+                setSubmitError(formatError(res));
                 setIsSubmitting(false);
                 setSubmitStatus('idle');
                 setSubmitStartTime(null);

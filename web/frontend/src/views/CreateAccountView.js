@@ -16,20 +16,7 @@ import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed } from "../styled/Layout";
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
-
-const REFERRAL_ERRORS = {
-    "already used this referrer": "You already used this referrer.",
-    "referrer has no available codes": "This referrer has no invite codes left.",
-    "referrer not found": "Referrer not found.",
-    "referrer has not enabled referral links": "This referrer has not enabled referral links.",
-    "invite codes not required on this node": "Invite codes are not required on this node.",
-};
-
-function formatReferralError(raw) {
-    if (!raw) return "Referral not available.";
-    if (REFERRAL_ERRORS[raw]) return REFERRAL_ERRORS[raw];
-    return raw.charAt(0).toUpperCase() + raw.slice(1).replace(/\.$/, '') + '.';
-}
+import { formatError } from "../utils/errorMessages";
 
 const Centered = styled.div`
     text-align: center;
@@ -237,13 +224,13 @@ function CreateAccountView({ state, setCredentials }) {
                     if (typeof data.available === 'number') setReferrerAvailable(data.available);
                 } else {
                     setReferrerStatus("invalid");
-                    setReferrerError(data?.error || "Referral not available");
+                    setReferrerError(data || "referrer_check_failed");
                 }
             })
             .catch(() => {
                 if (cancelled) return;
                 setReferrerStatus("error");
-                setReferrerError("Could not validate referrer");
+                setReferrerError("referrer_check_failed");
             });
         return () => { cancelled = true; };
     }, [refFromUrl, inviteCodeRequired]);
@@ -301,9 +288,9 @@ function CreateAccountView({ state, setCredentials }) {
             if (resp && resp.valid) {
                 return { valid: true, owner: resp.owner };
             }
-            return { valid: false, error: resp?.error || 'Invalid invite code' };
+            return resp || { valid: false, error_code: "invite_code_invalid", error: "invalid invite code" };
         } catch (e) {
-            return { valid: false, error: 'Could not validate invite code' };
+            return { valid: false, error_code: "invite_code_check_failed", error: "failed to validate invite code" };
         }
     };
 
@@ -383,7 +370,7 @@ function CreateAccountView({ state, setCredentials }) {
             setSubmitError("");
             const inviteRes = await validateInviteCode(codeClean);
             if (!inviteRes || !inviteRes.valid) {
-                setSubmitError(inviteRes?.error || "Invalid invite code");
+                setSubmitError(formatError(inviteRes));
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
                 setTimeout(() => setCooldownUntil(0), 1000);
@@ -394,7 +381,7 @@ function CreateAccountView({ state, setCredentials }) {
             try {
                 const precheck = await Api.get('referrals/precheck', { username: referrerUsername });
                 if (!precheck || !precheck.valid) {
-                    setReferrerError(precheck?.error || "Referrer has no available codes");
+                    setReferrerError(precheck || "referrer_check_failed");
                     setReferrerStatus("invalid");
                     const until = Date.now() + 1000;
                     setCooldownUntil(until);
@@ -402,7 +389,7 @@ function CreateAccountView({ state, setCredentials }) {
                     return;
                 }
             } catch (_) {
-                setReferrerError("Could not validate referrer");
+                setReferrerError("referrer_check_failed");
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
                 setTimeout(() => setCooldownUntil(0), 1000);
@@ -450,7 +437,7 @@ function CreateAccountView({ state, setCredentials }) {
                 } else if (/insufficient funds/i.test(msg)) {
                     setSubmitError("Unfortunately the node does not have enough gas available to complete this transaction.");
                 } else {
-                    setSubmitError(msg);
+                    setSubmitError(formatError(result));
                 }
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
@@ -623,7 +610,7 @@ function CreateAccountView({ state, setCredentials }) {
                                             textAlign: 'center',
                                         }}>
                                             <div style={{ color: '#f66', fontSize: '0.85rem', fontWeight: 600 }}>
-                                                {formatReferralError(referrerError)}
+                                                {formatError(referrerError)}
                                             </div>
                                             <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', opacity: 0.7 }}>
                                                 Have an invite code? <a href="/signup" style={{ color: 'inherit', textDecoration: 'underline' }}>Enter it manually</a>

@@ -12,6 +12,7 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, Co
 import { tooltipStyles } from '../components/Tooltip';
 import { bridgeBurn, pollTxStatus } from '../utils/tx';
 import transactionHandler from '../utils/TransactionHandler';
+import { formatError } from '../utils/errorMessages';
 
 // Lazy import for Solana bridge - only loads when needed
 const loadSolanaBridge = () => import('../utils/solanaBridge');
@@ -2384,7 +2385,7 @@ export default function BridgeView({ state }) {
             const result = await bridgeBurn(selectedNetwork.id, effectiveDestination, amountUmirage);
 
             if (!result || !result.success) {
-                throw new Error(result?.error || 'Bridge transaction failed');
+                throw new Error(formatError(result));
             }
 
             const txHash = String(result.tx_hash || '').toLowerCase();

@@ -12,6 +12,7 @@ import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
 import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from '../styled/Layout';
+import { formatError } from '../utils/errorMessages';
 
 const Row = styled.div`
     display: grid;
@@ -782,7 +783,7 @@ export default function SettingsView({ state }) {
                 window.location.replace('/');
                 return;
             } else {
-                setDeleteError(result?.error || 'Delete account failed.');
+                setDeleteError(formatError(result));
             }
         } catch (err) {
             setDeleteError(String(err?.message || err || 'Delete account failed.'));

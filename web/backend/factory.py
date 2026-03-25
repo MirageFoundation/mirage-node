@@ -61,6 +61,26 @@ def create_app(init_runtime: bool = True) -> Flask:
 
         return safe_error(e, context="unhandled")
 
+    @app.after_request
+    def _inject_error_code(response):
+        try:
+            ct = response.content_type or ""
+            if "application/json" not in ct:
+                return response
+            data = response.get_json(silent=True)
+            if not isinstance(data, dict):
+                return response
+            if "error" not in data or data.get("error_code"):
+                return response
+            from error_utils import get_error_code
+
+            data["error_code"] = get_error_code(data.get("error"))
+            response.set_data(json.dumps(data, separators=(",", ":")))
+        except Exception as err:
+            logger().error(f"[error_code] failed to inject error_code: {err}")
+            raise
+        return response
+
     @app.before_request
     def _track_last_seen_from_query():
         if not request.path.startswith("/api/"):
@@ -125,6 +145,7 @@ def create_app(init_runtime: bool = True) -> Flask:
         initialize_runtime()
         # Initialize backend-owned DB schema (quests, invites, referrals, etc.)
         from db import init_backend_schema
+
         logger().info("Initializing backend DB schema...")
         init_backend_schema()
         logger().info("Backend DB schema initialized")

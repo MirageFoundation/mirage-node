@@ -59,6 +59,7 @@ from shared.datatypes import (
 )
 
 from logging_utils import log_event, next_request_id, logger
+from error_utils import api_error_code
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
 from db import connect_db, connect_backend_db
@@ -489,8 +490,8 @@ def _classify_exception(err_str: str):
     """
     low = err_str.lower()
     if "admin insufficient balance" in low:
-        return "admin insufficient balance: your account balance is too low to cover the transaction fee", 400
-    return "Internal server error", 500
+        return "admin insufficient balance", 400
+    return "internal server error", 500
 
 
 def get_nonce_for_subscriber(last_block_hash: str) -> str:
@@ -610,7 +611,7 @@ def core_set_username():
     log_event(rid, "set_username.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "set_username.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
@@ -682,19 +683,19 @@ def core_set_username():
             # Fail hard if params unavailable
             return jsonify({"error": "backend not initialized"}), 503
         if len(username) < min_u:
-            return jsonify({"error": "username too short"}), 400
+            return api_error_code("username_too_short")
         if len(username) > max_u:
-            return jsonify({"error": "username too long"}), 400
+            return api_error_code("username_too_long")
         if not re.fullmatch(r"[A-Za-z0-9-]+", username):
-            return jsonify({"error": "invalid username format"}), 400
+            return api_error_code("username_invalid_format")
 
         raw_referrer = str(data.get("referrer_username", "")).strip()
         if raw_referrer and not REGISTRATION_INVITE_CODE_REQUIRED:
-            return jsonify({"error": "referral links require invite codes"}), 400
+            return api_error_code("referral_requires_invite_codes")
         if raw_referrer and len(raw_referrer) > max_u:
-            return jsonify({"error": "referrer username too long"}), 400
+            return api_error_code("referrer_username_too_long")
         if raw_referrer and not re.fullmatch(r"[A-Za-z0-9-]+", raw_referrer):
-            return jsonify({"error": "invalid referrer username format"}), 400
+            return api_error_code("referrer_username_invalid_format")
 
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
@@ -761,7 +762,7 @@ def core_set_username():
             # ENFORCE REGISTRATION GATE
             if not REGISTRATION_ENABLED and is_new_user:
                 log_event(rid, "set_username.registration_disabled", user=user_addr, username=username)
-                return jsonify({"error": "registration is disabled on this node"}), 403
+                return api_error_code("registration_disabled", 403)
 
             # ENFORCE INVITE CODE REQUIREMENT FOR NEW USERS
             if REGISTRATION_INVITE_CODE_REQUIRED and is_new_user:
@@ -779,7 +780,7 @@ def core_set_username():
                             row = cur.fetchone()
                             if not row:
                                 log_event(rid, "set_username.invite_code_invalid", code=invite_code, user=user_addr)
-                                return jsonify({"error": "invalid invite code"}), 400
+                                return api_error_code("invite_code_invalid")
                             owner, used_by = row
                             if used_by:
                                 log_event(
@@ -789,11 +790,11 @@ def core_set_username():
                                     user=user_addr,
                                     used_by=used_by,
                                 )
-                                return jsonify({"error": "this invite code has already been used"}), 400
+                                return api_error_code("invite_code_used")
                             log_event(rid, "set_username.invite_code_validated", code=invite_code, user=user_addr)
                     except Exception as invite_check_err:
                         log_event(rid, "set_username.invite_code_check_error", error=str(invite_check_err))
-                        return jsonify({"error": "failed to validate invite code"}), 500
+                        return api_error_code("invite_code_check_failed", 500)
 
                 elif referrer_username:
                     # Referral link path — resolve username to address, verify they exist
@@ -809,10 +810,10 @@ def core_set_username():
                                 log_event(
                                     rid, "set_username.referrer_not_found", referrer=referrer_username, user=user_addr
                                 )
-                                return jsonify({"error": "referrer not found"}), 400
+                                return api_error_code("referrer_not_found")
                             referrer_address = row[0].lower()
                             if referrer_address == user_addr.lower():
-                                return jsonify({"error": "self-referral is not allowed"}), 400
+                                return api_error_code("self_referral")
                             log_event(
                                 rid,
                                 "set_username.referrer_resolved",
@@ -835,16 +836,13 @@ def core_set_username():
                                             referrer=referrer_address,
                                             user=user_addr,
                                         )
-                                        return (
-                                            jsonify({"error": "already used this referrer"}),
-                                            400,
-                                        )
+                                        return api_error_code("referrer_already_used")
                     except Exception as ref_err:
                         log_event(rid, "set_username.referrer_resolve_error", error=str(ref_err))
-                        return jsonify({"error": "failed to validate referrer"}), 500
+                        return api_error_code("referrer_check_failed", 500)
                 else:
                     log_event(rid, "set_username.invite_code_required", user=user_addr, username=username)
-                    return jsonify({"error": "invite code required for new account registration"}), 400
+                    return api_error_code("invite_code_required")
 
         msg = MsgSetUsername()
         # authority is the validator/node address relaying this transaction, NOT the user's address
@@ -1011,7 +1009,7 @@ def core_set_biography():
     log_event(rid, "set_biography.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "set_biography.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
@@ -1050,7 +1048,7 @@ def core_set_biography():
             return jsonify({"error": "missing required fields"}), 400
 
         if len(biography) > 512:
-            return jsonify({"error": "biography too long"}), 400
+            return api_error_code("biography_too_long")
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -1157,7 +1155,7 @@ def core_enable_agent():
     log_event(rid, "enable_agent.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "enable_agent.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
@@ -1181,7 +1179,7 @@ def core_enable_agent():
         if not (pub_b64 and sig_b64 and agent):
             return jsonify({"error": "missing required fields"}), 400
         if not _is_valid_mirage_addr(agent):
-            return jsonify({"error": "invalid agent address"}), 400
+            return api_error_code("invalid_agent_address")
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -1195,13 +1193,13 @@ def core_enable_agent():
             return jsonify({"error": "invalid pubkey"}), 400
         if user_addr.lower() == agent.lower():
             log_event(rid, "enable_agent.self_not_allowed", agent=agent, user_addr=user_addr)
-            return jsonify({"error": "cannot enable yourself as an agent"}), 400
+            return api_error_code("cannot_enable_self_as_agent")
 
         # Check if agent is already enabled (indexer DB)
         try:
             if _db_list_contains("enabled_agents", user_addr, "agent", agent):
                 log_event(rid, "enable_agent.already_enabled", agent=agent, user_addr=user_addr)
-                return jsonify({"error": "agent is already enabled"}), 400
+                return api_error_code("agent_already_enabled")
         except Exception as db_err:
             log_event(rid, "enable_agent.db_error", error=str(db_err))
             return jsonify({"error": "indexer DB unavailable"}), 503
@@ -1277,7 +1275,7 @@ def core_disable_agent():
     log_event(rid, "disable_agent.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -1380,14 +1378,14 @@ def core_set_agents():
     log_event(rid, "set_agents.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "set_agents.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
         agents_raw = data.get("agents")
         if not isinstance(agents_raw, list):
-            return jsonify({"error": "agents must be an array"}), 400
+            return api_error_code("agents_must_be_array")
         agents = [str(a).strip().lower() for a in agents_raw]
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
@@ -1407,12 +1405,12 @@ def core_set_agents():
 
         for a in agents:
             if not _is_valid_mirage_addr(a):
-                return jsonify({"error": f"invalid agent address: {a}"}), 400
+                return jsonify({"error": "invalid agent address", "agent": a}), 400
 
         seen = set()
         for a in agents:
             if a in seen:
-                return jsonify({"error": f"duplicate agent: {a}"}), 400
+                return jsonify({"error": "duplicate agent", "agent": a}), 400
             seen.add(a)
 
         pub_dec = base64.b64decode(pub_b64)
@@ -1427,13 +1425,13 @@ def core_set_agents():
             return jsonify({"error": "invalid pubkey"}), 400
 
         if user_addr.lower() in agents:
-            return jsonify({"error": "cannot set yourself as an agent"}), 400
+            return api_error_code("cannot_set_self_as_agent")
 
         # Enforce max_enabled_agents from chain params (fail hard if missing)
         params = expect_params()
         tiers = params.get("tiers")
         if not isinstance(tiers, list) or not tiers:
-            return jsonify({"error": "missing tier config"}), 500
+            return api_error_code("missing_tier_config", 500)
 
         try:
             user_level = _db_get_profile_level(user_addr)
@@ -1441,18 +1439,18 @@ def core_set_agents():
             log_event(rid, "set_agents.db_error", error=str(db_err))
             return jsonify({"error": "indexer DB unavailable"}), 503
         if user_level is None:
-            return jsonify({"error": "missing profile level"}), 500
+            return api_error_code("missing_profile_level", 500)
 
         idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
         if idx < 0 or idx >= len(tiers):
-            return jsonify({"error": f"invalid user level {user_level}"}), 500
+            return jsonify({"error": "invalid user level", "user_level": user_level}), 500
         tier_cfg = tiers[idx] or {}
         if "max_enabled_agents" not in tier_cfg:
-            return jsonify({"error": "missing max_enabled_agents"}), 500
+            return api_error_code("missing_max_agents", 500)
         max_agents = int(tier_cfg.get("max_enabled_agents"))
         if len(agents) > max_agents:
             log_event(rid, "set_agents.limit_exceeded", count=len(agents), max=max_agents)
-            return jsonify({"error": f"too many agents: {len(agents)} > {max_agents}"}), 400
+            return jsonify({"error": "too many agents", "count": len(agents), "max": max_agents}), 400
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -1528,7 +1526,7 @@ def core_block_post():
     log_event(rid, "block_post.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "block_post.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
@@ -1650,7 +1648,7 @@ def core_block_user():
     log_event(rid, "block_user.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "block_user.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
@@ -1772,7 +1770,7 @@ def core_unblock_post():
     log_event(rid, "unblock_post.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -1866,7 +1864,7 @@ def core_unblock_user():
     log_event(rid, "unblock_user.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -1960,7 +1958,7 @@ def core_block_topic():
     log_event(rid, "block_topic.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "block_topic.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
@@ -2086,7 +2084,7 @@ def core_unblock_topic():
     log_event(rid, "unblock_topic.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -2181,7 +2179,7 @@ def core_follow_user():
     log_event(rid, "follow_user.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -2283,7 +2281,7 @@ def core_unfollow_user():
     log_event(rid, "unfollow_user.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -2376,7 +2374,7 @@ def core_follow_topic():
     log_event(rid, "follow_topic.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -2475,7 +2473,7 @@ def core_unfollow_topic():
     log_event(rid, "unfollow_topic.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
@@ -2565,7 +2563,7 @@ def core_delete_post():
     log_event(rid, "delete_post.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -2645,7 +2643,7 @@ def core_delete_post():
             return jsonify({"error": "target not found"}), 404
         user_level = get_user_level(user_addr)
         if owner != user_addr.strip().lower() and user_level < 100:
-            return jsonify({"error": "forbidden"}), 403
+            return api_error_code("forbidden", 403)
 
         # No fee precheck
 
@@ -2704,7 +2702,7 @@ def core_delete_user():
     log_event(rid, "delete_user.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -2759,7 +2757,7 @@ def core_delete_user():
             return jsonify({"error": "invalid pubkey"}), 400
         user_addr = user_addr.strip().lower()
         if user_addr != target:
-            return jsonify({"error": "unauthorized"}), 403
+            return api_error_code("unauthorized", 403)
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -2827,7 +2825,7 @@ def core_report():
     log_event(rid, "report.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         import time
 
         data = request.get_json(force=True) or {}
@@ -2956,7 +2954,7 @@ def core_resolve_report():
             row = cur.fetchone()
             level = int(row[0]) if row and row[0] is not None else 0
         if level < 100:
-            return jsonify({"error": "forbidden"}), 403
+            return api_error_code("forbidden", 403)
         with connect_backend_db() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM reports WHERE id = %s", (int(report_id),))
@@ -2973,7 +2971,7 @@ def core_edit():
     log_event(rid, "edit.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -3002,7 +3000,7 @@ def core_edit():
             return jsonify({"error": "fields contain invalid control characters"}), 400
 
         if tag not in ALLOWED_TAGS:
-            return jsonify({"error": f"invalid tag: {tag}"}), 400
+            return jsonify({"error": "invalid tag", "tag": tag}), 400
         if len(tag) > 50:
             return jsonify({"error": "tag too long"}), 400
 
@@ -3012,14 +3010,19 @@ def core_edit():
             return jsonify({"error": "media must be a list"}), 400
         media = [str(m) for m in media_raw]
         if len(media) > 10:
-            return jsonify({"error": f"media exceeds limit: {len(media)} > 10"}), 400
+            return jsonify({"error": "media exceeds limit", "count": len(media), "max": 10}), 400
         for i, media_item in enumerate(media):
             if len(media_item) > 2048:
-                return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
+                return (
+                    jsonify(
+                        {"error": "media item exceeds length limit", "index": i, "length": len(media_item), "max": 2048}
+                    ),
+                    400,
+                )
             if not media_item.startswith("https://"):
-                return jsonify({"error": f"media[{i}] must use https://"}), 400
+                return jsonify({"error": "media must use https", "index": i}), 400
             if _has_unsafe_chars(media_item):
-                return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
+                return jsonify({"error": "media contains invalid control characters", "index": i}), 400
 
         # Require basics: editing requires an override hash and auth fields
         if not (pub_b64 and sig_b64 and override):
@@ -3076,7 +3079,7 @@ def core_edit():
             else:
                 owner_of_override = (row[0] or "").lower()
                 if owner_of_override != user_addr.lower():
-                    return jsonify({"error": "forbidden"}), 403
+                    return api_error_code("forbidden", 403)
                 stored_target = (row[1] or "").lower()
                 if target.lower() != stored_target:
                     log_event(rid, "edit.target_mismatch", supplied=target, stored=stored_target, override=override)
@@ -3219,7 +3222,7 @@ def core_annotate():
     log_event(rid, "annotate.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -3255,20 +3258,30 @@ def core_annotate():
 
         # Validate tag if not sentinel
         if tag != ANNOTATE_SENTINEL and tag not in ALLOWED_TAGS:
-            return jsonify({"error": f"invalid tag: {tag}"}), 400
+            return jsonify({"error": "invalid tag", "tag": tag}), 400
 
         # Validate media if not sentinel ["."]
         is_sentinel_media = len(media) == 1 and media[0] == ANNOTATE_SENTINEL
         if not is_sentinel_media:
             if len(media) > 10:
-                return jsonify({"error": f"media exceeds limit: {len(media)} > 10"}), 400
+                return jsonify({"error": "media exceeds limit", "count": len(media), "max": 10}), 400
             for i, media_item in enumerate(media):
                 if len(media_item) > 2048:
-                    return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
+                    return (
+                        jsonify(
+                            {
+                                "error": "media item exceeds length limit",
+                                "index": i,
+                                "length": len(media_item),
+                                "max": 2048,
+                            }
+                        ),
+                        400,
+                    )
                 if media_item and not media_item.startswith("https://"):
-                    return jsonify({"error": f"media[{i}] must use https://"}), 400
+                    return jsonify({"error": "media must use https", "index": i}), 400
                 if _has_unsafe_chars(media_item):
-                    return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
+                    return jsonify({"error": "media contains invalid control characters", "index": i}), 400
 
         if not (pub_b64 and sig_b64 and override):
             return jsonify({"error": "missing required fields"}), 400
@@ -3410,7 +3423,7 @@ def core_post():
     log_event(rid, "post.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -3440,7 +3453,7 @@ def core_post():
 
         # Validate tag
         if tag not in ALLOWED_TAGS:
-            return jsonify({"error": f"invalid tag: {tag}"}), 400
+            return jsonify({"error": "invalid tag", "tag": tag}), 400
         if len(tag) > 50:
             return jsonify({"error": "tag too long"}), 400
 
@@ -3450,14 +3463,19 @@ def core_post():
             return jsonify({"error": "media must be a list"}), 400
         media = [str(m) for m in media_raw]
         if len(media) > 10:
-            return jsonify({"error": f"media exceeds limit: {len(media)} > 10"}), 400
+            return jsonify({"error": "media exceeds limit", "count": len(media), "max": 10}), 400
         for i, media_item in enumerate(media):
             if len(media_item) > 2048:
-                return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
+                return (
+                    jsonify(
+                        {"error": "media item exceeds length limit", "index": i, "length": len(media_item), "max": 2048}
+                    ),
+                    400,
+                )
             if not media_item.startswith("https://"):
-                return jsonify({"error": f"media[{i}] must use https://"}), 400
+                return jsonify({"error": "media must use https", "index": i}), 400
             if _has_unsafe_chars(media_item):
-                return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
+                return jsonify({"error": "media contains invalid control characters", "index": i}), 400
 
         # Basic fields must be present; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64):
@@ -3511,7 +3529,7 @@ def core_post():
             # Map user level to tier array index: 0->0, 1->1, 10->2, 100+->2
             idx = {0: 0, 1: 1, 10: 2}.get(level, 2 if level >= 100 else -1)
             if idx < 0 or idx >= len(tiers):
-                return jsonify({"error": "invalid user level"}), 400
+                return api_error_code("invalid_user_level")
             tier_cfg = tiers[idx] or {}
             max_title = int(tier_cfg.get("max_title_length", 0))
             max_content = int(tier_cfg.get("max_content_length", 0))
@@ -3522,18 +3540,34 @@ def core_post():
         if is_comment:
             if len(content) > max_content:
                 return (
-                    jsonify({"error": f"content exceeds limit: {len(content)} > {max_content} (tier level={level})"}),
+                    jsonify(
+                        {
+                            "error": "content exceeds limit",
+                            "length": len(content),
+                            "max": max_content,
+                            "tier_level": level,
+                        }
+                    ),
                     400,
                 )
         else:
             if len(title) > max_title:
                 return (
-                    jsonify({"error": f"title exceeds limit: {len(title)} > {max_title} (tier level={level})"}),
+                    jsonify(
+                        {"error": "title exceeds limit", "length": len(title), "max": max_title, "tier_level": level}
+                    ),
                     400,
                 )
             if len(content) > max_content:
                 return (
-                    jsonify({"error": f"content exceeds limit: {len(content)} > {max_content} (tier level={level})"}),
+                    jsonify(
+                        {
+                            "error": "content exceeds limit",
+                            "length": len(content),
+                            "max": max_content,
+                            "tier_level": level,
+                        }
+                    ),
                     400,
                 )
 
@@ -3700,7 +3734,7 @@ def core_vote():
     log_event(rid, "vote.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -3919,7 +3953,7 @@ def core_send_tokens():
     log_event(rid, "send_tokens.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "send_tokens.data", data=data)
 
@@ -3975,7 +4009,7 @@ def core_send_tokens():
             log_event(rid, "send_tokens.db_error", error=str(db_err))
             return jsonify({"error": "indexer DB unavailable"}), 503
         if int(amount) > have:
-            return jsonify({"error": f"insufficient balance: have {have}, need {int(amount)}"}), 400
+            return jsonify({"error": "insufficient balance", "balance": have, "needed": int(amount)}), 400
 
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
@@ -4086,7 +4120,7 @@ def core_upgrade_level():
     log_event(rid, "upgrade_level.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "upgrade_level.data", data=data)
         pub_b64 = str(data.get("pubkey", "")).strip()
@@ -4149,9 +4183,9 @@ def core_upgrade_level():
                 have = int(bal)
             except Exception as db_err:
                 log_event(rid, "upgrade_level.db_error", error=str(db_err))
-                return jsonify({"error": "indexer DB unavailable"}), 503
+                return api_error_code("indexer_unavailable", 503)
             if have < period_fee:
-                return jsonify({"error": "insufficient balance", "balance": have, "needed": int(period_fee)}), 400
+                return api_error_code("insufficient_balance", balance=have, needed=int(period_fee))
 
         # Verify relay signature matches shared canonical bytes (with timestamp)
         try:
@@ -4228,7 +4262,7 @@ def core_set_auto_renewal():
     log_event(rid, "set_auto_renewal.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         log_event(rid, "set_auto_renewal.data", data=data)
 
@@ -4272,7 +4306,7 @@ def core_set_auto_renewal():
 
         # Only subscribers can toggle auto-renewal; free users must upgrade first.
         if not is_subscriber(user_addr):
-            return jsonify({"error": "not_subscriber"}), 400
+            return api_error_code("not_subscriber")
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -4338,7 +4372,7 @@ def core_award():
     log_event(rid, "award.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -4381,14 +4415,14 @@ def core_award():
         p = expect_params()
         valid_types = {ac["name"] for ac in p.get("award_configs", [])}
         if award_type not in valid_types:
-            return jsonify({"error": f"unknown award_type: {award_type}"}), 400
+            return jsonify({"error": "unknown award type", "award_type": award_type}), 400
 
         post_owner = _get_post_owner(target)
         if not post_owner:
             return jsonify({"error": "target not found"}), 404
 
         if post_owner == user_addr.lower():
-            return jsonify({"error": "cannot award your own post"}), 400
+            return api_error_code("cannot_award_own_post")
 
         try:
             with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
@@ -4398,10 +4432,10 @@ def core_award():
                     (user_addr, target),
                 )
                 if cur.fetchone():
-                    return jsonify({"error": "already awarded this post"}), 409
+                    return api_error_code("already_awarded", 409)
         except Exception as e:
             log_event(rid, "award.dup_check_failed", error=str(e))
-            return jsonify({"error": "unable to verify award eligibility"}), 503
+            return api_error_code("award_eligibility_failed", 503)
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -4497,7 +4531,7 @@ def core_register_push_token():
         if not PUSH_NOTIFICATIONS_ENABLED:
             return jsonify({"error": "push notifications not enabled on this node"}), 404
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()
@@ -4580,7 +4614,7 @@ def core_unregister_push_token():
         if not PUSH_NOTIFICATIONS_ENABLED:
             return jsonify({"error": "push notifications not enabled on this node"}), 404
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "")).strip()

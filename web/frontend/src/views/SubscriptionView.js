@@ -13,6 +13,7 @@ import Button from '../components/Button';
 import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
+import { formatError } from '../utils/errorMessages';
 
 const TIER_NAMES = {
     0: 'Free',
@@ -728,7 +729,7 @@ export default function SubscriptionView({ state }) {
                 setError('');
                 await refreshSubscriptionFromBackend({ expectedAutoRenew: nextValue });
             } else {
-                setError(result.error || (nextValue ? 'Failed to re-enable auto-renewal' : 'Failed to cancel auto-renewal'));
+                setError(formatError(result));
             }
         } catch (e) {
             setError(String(e?.message || e || 'Unknown error'));
@@ -894,7 +895,7 @@ export default function SubscriptionView({ state }) {
                 if (result.success || result.tx_hash) {
                     setError('');
                 } else {
-                    setError(result.error || 'Failed to cancel auto-renewal');
+                    setError(formatError(result));
                 }
             } else {
                 const result = await txUpgradeLevel(tier.level, tier.periodFeeUmirage);
@@ -902,7 +903,7 @@ export default function SubscriptionView({ state }) {
                 if (result.success || result.tx_hash) {
                     setError('');
                 } else {
-                    setError(result.error || 'Failed to upgrade subscription');
+                    setError(formatError(result));
                 }
             }
 
