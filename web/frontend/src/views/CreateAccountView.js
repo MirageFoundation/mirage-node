@@ -610,7 +610,7 @@ function CreateAccountView({ state, setCredentials }) {
                                                 tabIndex={-1}
                                             />
                                             <IntroP style={{ marginTop: '1rem', opacity: 0.7 }}>
-                                                Have an invite code? <InlineLink to="/signup">Enter it manually</InlineLink>
+                                                Have an invite code? <a href="/signup" style={{ color: 'inherit', textDecoration: 'underline' }}>Enter it manually</a>
                                             </IntroP>
                                         </>
                                     ) : (
