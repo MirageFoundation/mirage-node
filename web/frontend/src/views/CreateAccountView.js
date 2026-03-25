@@ -17,6 +17,19 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed } from "../styled/Layout";
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
 
+const REFERRAL_ERRORS = {
+    client_already_used: "You already used this referrer.",
+    no_codes_available: "This referrer has no invite codes left.",
+    referrer_not_found: "Referrer not found.",
+    referrer_not_opted_in: "This referrer has not enabled referral links.",
+    invite_codes_not_required: "Invite codes are not required on this node.",
+};
+
+function formatReferralError(raw) {
+    if (!raw) return "Referral not available.";
+    return REFERRAL_ERRORS[raw] || (raw.charAt(0).toUpperCase() + raw.slice(1));
+}
+
 const Centered = styled.div`
     text-align: center;
     max-width: 800px;
@@ -609,7 +622,7 @@ function CreateAccountView({ state, setCredentials }) {
                                             textAlign: 'center',
                                         }}>
                                             <div style={{ color: '#f66', fontSize: '0.85rem', fontWeight: 600 }}>
-                                                {(referrerError || "Referral not available").replace(/^./, c => c.toUpperCase())}
+                                                {formatReferralError(referrerError)}
                                             </div>
                                             <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', opacity: 0.7 }}>
                                                 Have an invite code? <a href="/signup" style={{ color: 'inherit', textDecoration: 'underline' }}>Enter it manually</a>

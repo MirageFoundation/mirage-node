@@ -7904,7 +7904,7 @@ def referrals_precheck():
     """Check if a referrer username is valid and has available invite codes."""
     rid = next_request_id()
     if not REGISTRATION_INVITE_CODE_REQUIRED:
-        return jsonify({"valid": False, "error": "invite codes not required on this node"})
+        return jsonify({"valid": False, "error": "invite_codes_not_required"})
 
     username = request.args.get("username", "").strip()
     if not username:
@@ -7921,7 +7921,7 @@ def referrals_precheck():
             row = cur.fetchone()
             if not row:
                 log_event(rid, "referrals.precheck.not_found", username=username)
-                return jsonify({"valid": False, "error": "user not found"})
+                return jsonify({"valid": False, "error": "referrer_not_found"})
 
             address = row[0].lower()
 
@@ -7934,7 +7934,7 @@ def referrals_precheck():
             row = bcur.fetchone()
             if not row or row[0] is not True:
                 log_event(rid, "referrals.precheck.not_opted_in", username=username, address=address)
-                return jsonify({"valid": False, "error": "referrer has not enabled referral checks"})
+                return jsonify({"valid": False, "error": "referrer_not_opted_in"})
 
             bcur.execute(
                 "SELECT COUNT(*) FROM invite_codes WHERE LOWER(owner) = %s AND used_by IS NULL",
@@ -7944,7 +7944,7 @@ def referrals_precheck():
 
         if available == 0:
             log_event(rid, "referrals.precheck.no_codes", username=username, address=address)
-            return jsonify({"valid": False, "error": "referrer has no available invite codes"})
+            return jsonify({"valid": False, "error": "no_codes_available"})
 
         client_hash = hash_client_ip(get_trusted_client_ip())
         if client_hash:
@@ -7956,7 +7956,7 @@ def referrals_precheck():
                     )
                     if bcur2.fetchone():
                         log_event(rid, "referrals.precheck.client_gate", username=username, address=address)
-                        return jsonify({"valid": False, "error": "you already used your code"})
+                        return jsonify({"valid": False, "error": "client_already_used"})
 
         log_event(rid, "referrals.precheck.ok", username=username, available=available)
         return jsonify({"valid": True, "available": available})

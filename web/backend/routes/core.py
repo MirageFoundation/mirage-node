@@ -836,7 +836,7 @@ def core_set_username():
                                             user=user_addr,
                                         )
                                         return (
-                                            jsonify({"error": "you already used your code"}),
+                                            jsonify({"error": "client_already_used"}),
                                             400,
                                         )
                     except Exception as ref_err:
