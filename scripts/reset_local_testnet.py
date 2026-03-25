@@ -508,19 +508,23 @@ done
 
     # Drop and recreate databases + roles, then restore dumps
 su - postgres <<EOF
-psql -c "DROP DATABASE IF EXISTS mirage"
+psql -c "DROP DATABASE IF EXISTS mirage_indexer"
 psql -c "DROP DATABASE IF EXISTS mirage_backend"
+psql -c "DROP ROLE IF EXISTS mirage_indexer_ro"
+psql -c "DROP ROLE IF EXISTS mirage_indexer"
+psql -c "DROP ROLE IF EXISTS mirage_backend"
 psql -c "DROP ROLE IF EXISTS mirage_ro"
 psql -c "DROP ROLE IF EXISTS mirage"
-psql -c "CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage'"
-psql -c "CREATE ROLE mirage_ro WITH LOGIN PASSWORD 'mirage_ro'"
-psql -c "CREATE DATABASE mirage OWNER mirage"
-psql -c "CREATE DATABASE mirage_backend OWNER mirage"
-psql -d mirage -f "$DUMP_FILE"
-psql -d mirage -c "GRANT CONNECT ON DATABASE mirage TO mirage_ro"
-psql -d mirage -c "GRANT USAGE ON SCHEMA public TO mirage_ro"
-psql -d mirage -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_ro"
-psql -d mirage -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_ro"
+psql -c "CREATE ROLE mirage_indexer WITH LOGIN PASSWORD 'mirage_indexer'"
+psql -c "CREATE ROLE mirage_indexer_ro WITH LOGIN PASSWORD 'mirage_indexer_ro'"
+psql -c "CREATE ROLE mirage_backend WITH LOGIN PASSWORD 'mirage_backend'"
+psql -c "CREATE DATABASE mirage_indexer OWNER mirage_indexer"
+psql -c "CREATE DATABASE mirage_backend OWNER mirage_backend"
+psql -d mirage_indexer -f "$DUMP_FILE"
+psql -d mirage_indexer -c "GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro"
+psql -d mirage_indexer -c "GRANT USAGE ON SCHEMA public TO mirage_indexer_ro"
+psql -d mirage_indexer -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro"
+psql -d mirage_indexer -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro"
 EOF
 
 BACKEND_DUMP="/root/.mirage/node.clone/backend.sql"
@@ -579,10 +583,12 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-su - postgres -c "psql -c \\"DROP DATABASE IF EXISTS mirage;\\""
+su - postgres -c "psql -c \\"DROP DATABASE IF EXISTS mirage_indexer;\\""
+su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage_indexer_ro;\\""
+su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage_indexer;\\""
 su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage;\\""
-su - postgres -c "psql -c \\"CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage';\\""
-su - postgres -c "psql -c \\"CREATE DATABASE mirage OWNER mirage;\\""
+su - postgres -c "psql -c \\"CREATE ROLE mirage_indexer WITH LOGIN PASSWORD 'mirage_indexer';\\""
+su - postgres -c "psql -c \\"CREATE DATABASE mirage_indexer OWNER mirage_indexer;\\""
 """
     ensure_mirage_tmp()
     tmp = Path(tempfile.mkdtemp(prefix="pg-init-", dir=str(MIRAGE_TMP)))

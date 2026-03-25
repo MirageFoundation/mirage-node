@@ -52,12 +52,12 @@ Use these rules to avoid hanging sessions and enforce fail-fast behavior.
 
 ### Query Sources - Dual-Database Backend Architecture
 
-- **Two PostgreSQL databases**: `mirage` (indexer-owned, chain data) and `mirage_backend` (backend-owned, operational data).
-- **Backend reads chain state from the indexer DB via read-only role** (`mirage_ro`): profiles, balances, params, difficulty, block hashes, supply, validators. No gRPC.
+- **Two PostgreSQL databases**: `mirage_indexer` (indexer-owned, chain data) and `mirage_backend` (backend-owned, operational data).
+- **Backend reads chain state from the indexer DB via read-only role** (`mirage_indexer_ro`): profiles, balances, params, difficulty, block hashes, supply, validators. No gRPC.
 - **Backend writes operational data to `mirage_backend`**: quests, rewards, push notifications, invite codes, reports, similarity cache, user activity, inbox state.
 - **Backend simulates and broadcasts via Cosmos tx REST** (`/cosmos/tx/v1beta1/simulate` + `/cosmos/tx/v1beta1/txs` with `BROADCAST_MODE_SYNC`). No gRPC, no DB tx queue.
 - **Local node files are read ONCE at backend startup only** (keyring/config for validator keys and gas price). No re-reads at runtime.
-- **Indexer handles chain indexing only** — gRPC for queries, CometBFT WebSocket for live blocks, writes indexed state to `mirage` DB. Does NOT broadcast transactions. Does NOT touch `mirage_backend`.
+- **Indexer handles chain indexing only** — gRPC for queries, CometBFT WebSocket for live blocks, writes indexed state to `mirage_indexer` DB. Does NOT broadcast transactions. Does NOT touch `mirage_backend`.
 - NO FALLBACKS. If either DB is unavailable, the backend returns 503. Hard fail only.
 
 ### Chain Parameters - EVERYTHING MUST BE QUERYABLE

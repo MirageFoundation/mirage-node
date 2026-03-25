@@ -35,7 +35,7 @@ The indexer is a Python service that transforms raw blockchain data into a denor
 
 **Key Design Principle:** The indexer is the single source of truth for chain-derived data. It enforces authorization rules that the blockchain intentionally delegates (e.g., who can delete which posts), applies complex vote weighting algorithms, and maintains derived data structures (preferences, topic stats) that enable personalized feeds.
 
-**Database Ownership:** The indexer writes exclusively to the `mirage` database. All backend-owned operational data (quests, rewards, push notifications, invite codes, reports, similarity cache, user activity tracking) lives in a separate `mirage_backend` database that the indexer never touches. The backend reads from the indexer DB via a read-only PostgreSQL role (`mirage_ro`).
+**Database Ownership:** The indexer writes exclusively to the `mirage_indexer` database. All backend-owned operational data (quests, rewards, push notifications, invite codes, reports, similarity cache, user activity tracking) lives in a separate `mirage_backend` database that the indexer never touches. The backend reads from the indexer DB via a read-only PostgreSQL role (`mirage_indexer_ro`).
 
 ---
 

@@ -330,6 +330,115 @@ ensure_local_postgres_dbs() {
 
   echo "✓ All Postgres databases and roles ensured."
 }
+
+# ── One-time: migrate DB & role names (mirage → mirage_indexer, etc.) ────────
+# Requires superuser (su - postgres), so this lives in entrypoint, not Python.
+migrate_local_postgres_names() {
+  _parse_pg_url "${INDEXER_DB_URL:-}"
+  if [ "$PG_HOST" != "127.0.0.1" ] && [ "$PG_HOST" != "localhost" ]; then
+    return 0
+  fi
+
+  local changed=0
+
+  # 1. Rename DB: mirage → mirage_indexer
+  local old_db new_db
+  old_db=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='mirage'\"" 2>/dev/null | tr -d ' ')
+  new_db=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='mirage_indexer'\"" 2>/dev/null | tr -d ' ')
+  if [ "$old_db" = "1" ] && [ "$new_db" != "1" ]; then
+    echo "==> Renaming database: mirage → mirage_indexer..."
+    su - postgres -c "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='mirage' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
+    su - postgres -c "psql -c \"ALTER DATABASE mirage RENAME TO mirage_indexer;\""
+    echo "  ✓ DB renamed"
+    changed=1
+  fi
+
+  # 2. Rename role: mirage → mirage_indexer
+  local old_role new_role
+  old_role=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage'\"" 2>/dev/null | tr -d ' ')
+  new_role=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_indexer'\"" 2>/dev/null | tr -d ' ')
+  if [ "$old_role" = "1" ] && [ "$new_role" != "1" ]; then
+    su - postgres -c "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='mirage' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
+    su - postgres -c "psql -c \"ALTER ROLE mirage RENAME TO mirage_indexer;\""
+    su - postgres -c "psql -c \"ALTER ROLE mirage_indexer WITH PASSWORD 'mirage_indexer';\""
+    echo "  ✓ Role renamed: mirage → mirage_indexer"
+    changed=1
+  fi
+
+  # 3. Rename role: mirage_ro → mirage_indexer_ro
+  local old_ro new_ro
+  old_ro=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_ro'\"" 2>/dev/null | tr -d ' ')
+  new_ro=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_indexer_ro'\"" 2>/dev/null | tr -d ' ')
+  if [ "$old_ro" = "1" ] && [ "$new_ro" != "1" ]; then
+    su - postgres -c "psql -c \"ALTER ROLE mirage_ro RENAME TO mirage_indexer_ro;\""
+    su - postgres -c "psql -c \"ALTER ROLE mirage_indexer_ro WITH PASSWORD 'mirage_indexer_ro';\""
+    echo "  ✓ Role renamed: mirage_ro → mirage_indexer_ro"
+    changed=1
+  fi
+
+  # 4. Create mirage_backend role if needed
+  local backend_role
+  backend_role=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_backend'\"" 2>/dev/null | tr -d ' ')
+  if [ "$backend_role" != "1" ]; then
+    su - postgres -c "psql -c \"CREATE ROLE mirage_backend WITH LOGIN PASSWORD 'mirage_backend';\""
+    echo "  ✓ Created role: mirage_backend"
+    changed=1
+  fi
+
+  # 5. Transfer mirage_backend DB ownership
+  local backend_db_owner
+  backend_db_owner=$(su - postgres -c "psql -tAc \"SELECT pg_catalog.pg_get_userbyid(datdba) FROM pg_database WHERE datname='mirage_backend'\"" 2>/dev/null | tr -d ' ')
+  if [ -n "$backend_db_owner" ] && [ "$backend_db_owner" != "mirage_backend" ]; then
+    su - postgres -c "psql -c \"ALTER DATABASE mirage_backend OWNER TO mirage_backend;\""
+    su - postgres -c "psql -d mirage_backend -c \"REASSIGN OWNED BY ${backend_db_owner} TO mirage_backend;\"" 2>/dev/null || true
+    echo "  ✓ mirage_backend DB ownership transferred"
+    changed=1
+  fi
+
+  # 6. Re-grant RO privileges and update env files
+  if [ "$changed" = "1" ]; then
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT USAGE ON SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro;\"" 2>/dev/null || true
+
+    python3 - <<'PYUPDATE'
+import os
+env_dir = os.environ.get("ENV_DIR", "")
+for fname in ("backend.env", "indexer.env"):
+    path = os.path.join(env_dir, fname)
+    if not os.path.isfile(path):
+        continue
+    lines = []
+    with open(path) as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                lines.append(line)
+                continue
+            key, _, val = s.partition("=")
+            key, val = key.strip(), val.strip()
+            if key == "INDEXER_DB_URL":
+                val = val.replace("mirage:mirage@", "mirage_indexer:mirage_indexer@")
+                if val.rstrip("/").endswith("/mirage"):
+                    val = val.rstrip("/").rsplit("/mirage", 1)[0] + "/mirage_indexer"
+            elif key == "INDEXER_DB_RO_URL":
+                val = val.replace("mirage_ro:mirage_ro@", "mirage_indexer_ro:mirage_indexer_ro@")
+                if val.rstrip("/").endswith("/mirage"):
+                    val = val.rstrip("/").rsplit("/mirage", 1)[0] + "/mirage_indexer"
+            elif key == "BACKEND_DB_URL":
+                val = val.replace("mirage:mirage@", "mirage_backend:mirage_backend@")
+                val = val.replace("mirage_indexer:mirage_indexer@", "mirage_backend:mirage_backend@")
+            lines.append(f"{key}={val}\n")
+    with open(path, "w") as f:
+        f.writelines(lines)
+PYUPDATE
+
+    load_env_files
+    echo "  ✓ Env files updated with new DB/role names"
+  fi
+}
+migrate_local_postgres_names
 ensure_local_postgres_dbs
 
 # Ensure backend schema exists before data migrations run

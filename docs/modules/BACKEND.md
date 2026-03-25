@@ -617,7 +617,7 @@ The backend uses two separate PostgreSQL databases with strict ownership boundar
 │                         DATABASE ARCHITECTURE                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  Indexer DB (mirage)              Backend DB (mirage_backend)                │
+│  Indexer DB (mirage_indexer)      Backend DB (mirage_backend)                │
 │  ┌──────────────────────┐         ┌──────────────────────────────┐          │
 │  │ posts, votes, awards │         │ invite_codes, referral_*     │          │
 │  │ profiles, balances   │         │ user_daily_quests, pending_  │          │
@@ -630,7 +630,7 @@ The backend uses two separate PostgreSQL databases with strict ownership boundar
 │  └──────────┬───────────┘         └──────────────┬───────────────┘          │
 │             │                                    │                          │
 │     READ-ONLY access                    READ-WRITE access                   │
-│     (mirage_ro role)                    (mirage role)                        │
+│     (mirage_indexer_ro role)            (mirage_backend role)                │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -639,7 +639,7 @@ The backend uses two separate PostgreSQL databases with strict ownership boundar
 
 ```python
 def connect_db() -> psycopg.Connection:
-    """READ-ONLY connection to the indexer DB (via mirage_ro role)."""
+    """READ-ONLY connection to the indexer DB (via mirage_indexer_ro role)."""
     url = cfg.get_indexer_ro_url()  # INDEXER_DB_RO_URL env var
     return psycopg.connect(url, autocommit=True)
 
@@ -653,11 +653,11 @@ def connect_backend_db() -> psycopg.Connection:
 
 | Variable | Example | Purpose |
 |----------|---------|---------|
-| `INDEXER_DB_URL` | `postgresql://mirage:mirage@127.0.0.1:5432/mirage` | Indexer read-write (used by indexer process) |
-| `INDEXER_DB_RO_URL` | `postgresql://mirage_ro:mirage_ro@127.0.0.1:5432/mirage` | Backend read-only access to indexer |
-| `BACKEND_DB_URL` | `postgresql://mirage:mirage@127.0.0.1:5432/mirage_backend` | Backend-owned tables |
+| `INDEXER_DB_URL` | `postgresql://mirage_indexer:mirage_indexer@127.0.0.1:5432/mirage_indexer` | Indexer read-write (used by indexer process) |
+| `INDEXER_DB_RO_URL` | `postgresql://mirage_indexer_ro:mirage_indexer_ro@127.0.0.1:5432/mirage_indexer` | Backend read-only access to indexer |
+| `BACKEND_DB_URL` | `postgresql://mirage_backend:mirage_backend@127.0.0.1:5432/mirage_backend` | Backend-owned tables |
 
-The backend **never writes** to the indexer DB. The `mirage_ro` PostgreSQL role enforces this at the database level — any accidental write attempt results in `permission denied`.
+The backend **never writes** to the indexer DB. The `mirage_indexer_ro` PostgreSQL role enforces this at the database level — any accidental write attempt results in `permission denied`.
 
 ### Schema Initialization
 
@@ -835,8 +835,8 @@ gunicorn --bind 0.0.0.0:5000 --workers 4 app:app
 ### Dependencies
 
 Required at runtime:
-- PostgreSQL — two databases: `mirage` (indexer) and `mirage_backend` (backend)
-- `mirage_ro` PostgreSQL role with read-only access to the indexer DB
+- PostgreSQL — two databases: `mirage_indexer` (indexer) and `mirage_backend` (backend)
+- `mirage_indexer_ro` PostgreSQL role with read-only access to the indexer DB
 - Mirage node (RPC, gRPC)
 - Validator keyring with "validator" key
 

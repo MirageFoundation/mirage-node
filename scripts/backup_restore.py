@@ -310,7 +310,7 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         docker exec mirage bash -c '
             pg_ctlcluster 16 main start 2>/dev/null || true
             sleep 2
-            PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/backup_indexer.sql
+            PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage_indexer > /root/.mirage/backup_indexer.sql
             PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
         '
     """,
@@ -645,23 +645,27 @@ if [ ! -f /root/.mirage/backup_indexer.sql ]; then
 fi
 
 echo "Dropping and recreating databases..."
-su - postgres -c "psql -c 'DROP DATABASE IF EXISTS mirage'"
+su - postgres -c "psql -c 'DROP DATABASE IF EXISTS mirage_indexer'"
 su - postgres -c "psql -c 'DROP DATABASE IF EXISTS mirage_backend'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_indexer_ro'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_indexer'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_backend'"
 su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_ro'"
 su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage'"
-su - postgres -c "psql -c \"CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage'\""
-su - postgres -c "psql -c \"CREATE ROLE mirage_ro WITH LOGIN PASSWORD 'mirage_ro'\""
-su - postgres -c "psql -c 'CREATE DATABASE mirage OWNER mirage'"
-su - postgres -c "psql -c 'CREATE DATABASE mirage_backend OWNER mirage'"
+su - postgres -c "psql -c \"CREATE ROLE mirage_indexer WITH LOGIN PASSWORD 'mirage_indexer'\""
+su - postgres -c "psql -c \"CREATE ROLE mirage_indexer_ro WITH LOGIN PASSWORD 'mirage_indexer_ro'\""
+su - postgres -c "psql -c \"CREATE ROLE mirage_backend WITH LOGIN PASSWORD 'mirage_backend'\""
+su - postgres -c "psql -c 'CREATE DATABASE mirage_indexer OWNER mirage_indexer'"
+su - postgres -c "psql -c 'CREATE DATABASE mirage_backend OWNER mirage_backend'"
 
 echo "Restoring indexer SQL dump..."
-su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage -f /root/.mirage/backup_indexer.sql"
+su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage_indexer -f /root/.mirage/backup_indexer.sql"
 
 echo "Granting read-only access on indexer DB..."
-su - postgres -c "psql -d mirage -c 'GRANT CONNECT ON DATABASE mirage TO mirage_ro'"
-su - postgres -c "psql -d mirage -c 'GRANT USAGE ON SCHEMA public TO mirage_ro'"
-su - postgres -c "psql -d mirage -c 'GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_ro'"
-su - postgres -c "psql -d mirage -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_ro\""
+su - postgres -c "psql -d mirage_indexer -c 'GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro'"
+su - postgres -c "psql -d mirage_indexer -c 'GRANT USAGE ON SCHEMA public TO mirage_indexer_ro'"
+su - postgres -c "psql -d mirage_indexer -c 'GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro'"
+su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro\""
 
 if [ -f /root/.mirage/backup_backend.sql ]; then
     echo "Restoring backend SQL dump..."

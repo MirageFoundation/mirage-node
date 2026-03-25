@@ -28,7 +28,7 @@ The Mirage deployment system packages all components into a single Docker contai
 - **Blockchain Node** (miraged) - CometBFT consensus + Cosmos SDK app
 - **Web Backend** (Flask/Gunicorn) - API relay layer
 - **Indexer** (Python) - PostgreSQL-backed chain indexer
-- **PostgreSQL** - Two databases: `mirage` (indexer) and `mirage_backend` (backend-owned data)
+- **PostgreSQL** - Two databases: `mirage_indexer` (indexer) and `mirage_backend` (backend-owned data)
 - **Caddy** - Reverse proxy with automatic HTTPS
 - **Optional Services**: Bridge Orchestrator
 
@@ -60,12 +60,12 @@ Traditional microservices would split each component into separate containers. M
 │  │  │  :80/443 │  │ :26656/7 │  │  :5000   │  │       :5432          ││    │
 │  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┬───────────┘│    │
 │  │       │             │             │                   │            │    │
-│  │       │         ┌───┴───┐         │       ┌───────────┴─────┐      │    │
-│  │       │         │Indexer│────────RW──────►│  mirage DB      │      │    │
+│  │       │         ┌───┴───┐         │       ┌───────────┴──────────┐  │    │
+│  │       │         │Indexer│────────RW──────►│  mirage_indexer DB   │  │    │
 │  │       │         └───────┘         │       └─────────────────┘      │    │
 │  │       │                           │       ┌─────────────────┐      │    │
 │  │       │                        ───RW─────►│ mirage_backend  │      │    │
-│  │       │                        ───RO─────►│  mirage DB      │      │    │
+│  │       │                        ───RO─────►│ mirage_indexer  │      │    │
 │  │       └───────────────────────────┘       └─────────────────┘      │    │
 │  │                   │                                                │    │
 │  │           reverse_proxy /api/*                                     │    │
@@ -320,7 +320,8 @@ tmux new-session -d -s mirage
 
 # 8. Start services in order:
 #    Caddy → PostgreSQL → (wait for pg_isready)
-#    → Ensure both DBs exist (mirage + mirage_backend) + mirage_ro role
+#    → Migrate DB/role names if needed (mirage → mirage_indexer, etc.)
+#    → Ensure both DBs exist (mirage_indexer + mirage_backend) + mirage_indexer_ro role
 #    → Initialize backend schema (init_backend_schema)
 #    → Run deploy migrations
 #    → Node → Indexer → Backend → (optional: Orchestrator)
@@ -337,7 +338,9 @@ tmux new-session -d -s mirage
 │    ↓                                                                         │
 │  PostgreSQL (immediate, wait for pg_isready)                                 │
 │    ↓                                                                         │
-│  Ensure DBs + roles (mirage, mirage_backend, mirage_ro)                      │
+│  Migrate DB/role names (one-time: mirage → mirage_indexer, etc.)             │
+│    ↓                                                                         │
+│  Ensure DBs + roles (mirage_indexer, mirage_backend, mirage_indexer_ro)      │
 │    ↓                                                                         │
 │  init_backend_schema + deploy migrations                                     │
 │    ↓                                                                         │
@@ -449,20 +452,20 @@ Configuration is stored in `~/.mirage/env/`:
 | File | Purpose |
 |------|---------|
 | `node.env` | MONIKER, DOMAIN, PERSISTENT_PEERS, PEX_ENABLED |
-| `backend.env` | INDEXER_DB_URL, INDEXER_DB_RO_URL, BACKEND_DB_URL, BACKEND_PORT, CLIENT_HASH_SALT, REFERRALS_ENABLED, PUSH_NOTIFICATIONS_ENABLED |
-| `indexer.env` | INDEXER_DB_URL, INDEXER_ENABLED |
+| `backend.env` | Backend settings + DB URLs (INDEXER_DB_RO_URL, BACKEND_DB_URL) |
+| `indexer.env` | Indexer settings + DB URLs (INDEXER_DB_URL, INDEXER_DB_RO_URL, BACKEND_DB_URL) |
 | `secrets.env` | Sensitive values (excluded from git) |
 | `orchestrator.env` | ORCHESTRATOR_ENABLED, Solana RPC URL |
 
 **Critical DB variables (must be set):**
 
-| Variable | Set In | Used By |
-|----------|--------|---------|
-| `INDEXER_DB_URL` | `backend.env` | Indexer (read-write), migration scripts |
-| `INDEXER_DB_RO_URL` | `backend.env` | Backend (read-only access to indexer data via `mirage_ro` role) |
-| `BACKEND_DB_URL` | `backend.env` | Backend (read-write to `mirage_backend` DB) |
+| Variable | Canonical Location | Used By |
+|----------|-------------------|---------|
+| `INDEXER_DB_URL` | `indexer.env` | Indexer (read-write to `mirage_indexer`), migration scripts |
+| `INDEXER_DB_RO_URL` | `indexer.env` + `backend.env` | Backend (read-only access to `mirage_indexer` via `mirage_indexer_ro` role) |
+| `BACKEND_DB_URL` | `backend.env` + `indexer.env` | Backend (read-write to `mirage_backend` DB) |
 
-The entrypoint enforces that all three are present — the container will fail to start if any are missing.
+All env files are loaded in order (`backend.env`, `indexer.env`, `secrets.env`, …) via `set -a; . file; set +a`. If a variable appears in multiple files, the **last file loaded wins**. The env sync mechanism (`_helpers.sync_all`) ensures template defaults are applied for any missing keys, but **never overwrites** user-set values. The entrypoint enforces that all three DB URLs are present — the container will fail to start if any are missing.
 
 ### Template Rendering
 

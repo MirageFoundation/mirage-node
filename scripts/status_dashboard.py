@@ -1057,9 +1057,7 @@ def check_validator() -> ServiceStatus:
                 return ServiceStatus(
                     name="Validator", status=Status.WARN, message="Balance low", details=active_details
                 )
-            return ServiceStatus(
-                name="Validator", status=Status.OK, message="Active", details=active_details
-            )
+            return ServiceStatus(name="Validator", status=Status.OK, message="Active", details=active_details)
         else:
             return ServiceStatus(
                 name="Validator",
@@ -1074,7 +1072,9 @@ def check_validator() -> ServiceStatus:
 
 def check_postgres() -> ServiceStatus:
     """Check PostgreSQL database status."""
-    db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+    db_url = os.environ.get(
+        "INDEXER_DB_URL", "postgresql://mirage_indexer:mirage_indexer@127.0.0.1:5432/mirage_indexer"
+    )
 
     if psycopg is None:
         return ServiceStatus(
@@ -1199,7 +1199,9 @@ def check_grpc() -> ServiceStatus:
 
 def check_indexer() -> ServiceStatus:
     """Check indexer status by comparing heights."""
-    db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+    db_url = os.environ.get(
+        "INDEXER_DB_URL", "postgresql://mirage_indexer:mirage_indexer@127.0.0.1:5432/mirage_indexer"
+    )
 
     # Check if indexer process is running
     # The indexer runs as "python3 main.py" or "python3 indexer/main.py"
@@ -1659,7 +1661,9 @@ def check_referrals() -> ServiceStatus:
         return ServiceStatus(name="Referrals", status=Status.ERROR, message="Not running", details={"running": False})
 
     # Get additional info from database
-    db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+    db_url = os.environ.get(
+        "INDEXER_DB_URL", "postgresql://mirage_indexer:mirage_indexer@127.0.0.1:5432/mirage_indexer"
+    )
 
     pending_count = 0
     total_links = 0
@@ -2326,9 +2330,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         retained = details.get("retained_blocks")
         expected = details.get("expected_blocks")
         if retained is not None and expected is not None:
-            lines.append(
-                f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} / {expected:,} blocks"
-            )
+            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} / {expected:,} blocks")
         elif retained is not None:
             lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
         pruning = details.get("pruning_strategy")
@@ -2392,7 +2394,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
         pg_st = details.get("pg_status")
         if pg_st:
-            pg_color = Colors.BRIGHT_GREEN if pg_st == "ok" else Colors.BRIGHT_RED if pg_st == "error" else Colors.BRIGHT_YELLOW
+            pg_color = (
+                Colors.BRIGHT_GREEN
+                if pg_st == "ok"
+                else Colors.BRIGHT_RED if pg_st == "error" else Colors.BRIGHT_YELLOW
+            )
             pg_label = details.get("pg_message", pg_st)
             pg_extra = f" ({details['pg_size']})" if details.get("pg_size") else ""
             lines.append(f"{bullet}{Colors.DIM}DB:{Colors.RESET} {pg_color}{pg_label}{pg_extra}{Colors.RESET}")
