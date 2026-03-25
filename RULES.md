@@ -50,6 +50,12 @@ Use these rules to avoid hanging sessions and enforce fail-fast behavior.
   - NEVER set `authority` to the user's address
   - User's address is derived from `envelope_pubkey`
 
+### Database Schema Changes
+
+- **Do NOT create new tables when an existing table can be extended.** Add a column to an existing table instead.
+- Only create a new table when the data has a genuinely different primary key or lifecycle.
+- Always check existing schema in `web/backend/db.py` and `indexer/database.py` before proposing new tables.
+
 ### Query Sources - Dual-Database Backend Architecture
 
 - **Two PostgreSQL databases**: `mirage_indexer` (indexer-owned, chain data) and `mirage_backend` (backend-owned, operational data).

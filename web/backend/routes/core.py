@@ -11,11 +11,13 @@ Endpoints:
 """
 
 import base64
+import hashlib
 import ipaddress
 import logging
 import os
 import random
 import re
+import secrets
 import time
 import threading
 from typing import Any, Dict
@@ -207,6 +209,16 @@ def _get_trusted_client_ip() -> str | None:
         net = ipaddress.ip_network(f"{ip_obj}/64", strict=False)
         return f"{net.network_address}/{net.prefixlen}"
     return str(ip_obj)
+
+
+_CLIENT_HASH_SALT = secrets.token_bytes(32)
+
+
+def _hash_client_ip(ip: str | None) -> str | None:
+    """One-way salted hash of client IP. Salt rotates on process restart."""
+    if not ip:
+        return None
+    return hashlib.sha256(_CLIENT_HASH_SALT + ip.encode()).hexdigest()[:32]
 
 
 def _get_username_for_owner(owner: str) -> str:
@@ -702,11 +714,12 @@ def core_set_username():
         if not re.fullmatch(r"[A-Za-z0-9-]+", username):
             return jsonify({"error": "invalid username format"}), 400
 
-        if referrer_username and not REGISTRATION_INVITE_CODE_REQUIRED:
+        raw_referrer = str(data.get("referrer_username", "")).strip()
+        if raw_referrer and not REGISTRATION_INVITE_CODE_REQUIRED:
             return jsonify({"error": "referral links require invite codes"}), 400
-        if referrer_username and len(referrer_username) > max_u:
+        if raw_referrer and len(raw_referrer) > max_u:
             return jsonify({"error": "referrer username too long"}), 400
-        if referrer_username and not re.fullmatch(r"[A-Za-z0-9-]+", referrer_username):
+        if raw_referrer and not re.fullmatch(r"[A-Za-z0-9-]+", raw_referrer):
             return jsonify({"error": "invalid referrer username format"}), 400
 
         # Free users require PoW; subscribers must NOT use PoW
@@ -752,7 +765,7 @@ def core_set_username():
 
         # Extract invite code and referrer username
         invite_code = str(data.get("invite_code", "")).strip().upper()
-        referrer_username = str(data.get("referrer_username", "")).strip()
+        referrer_username = raw_referrer
         referrer_address = ""
 
         # Check if this is a new user (no existing profile/username)
@@ -795,7 +808,13 @@ def core_set_username():
                                 return jsonify({"error": "invalid invite code"}), 400
                             owner, used_by = row
                             if used_by:
-                                log_event(rid, "set_username.invite_code_already_used", code=invite_code, user=user_addr, used_by=used_by)
+                                log_event(
+                                    rid,
+                                    "set_username.invite_code_already_used",
+                                    code=invite_code,
+                                    user=user_addr,
+                                    used_by=used_by,
+                                )
                                 return jsonify({"error": "this invite code has already been used"}), 400
                             log_event(rid, "set_username.invite_code_validated", code=invite_code, user=user_addr)
                     except Exception as invite_check_err:
@@ -813,12 +832,41 @@ def core_set_username():
                             )
                             row = cur.fetchone()
                             if not row:
-                                log_event(rid, "set_username.referrer_not_found", referrer=referrer_username, user=user_addr)
+                                log_event(
+                                    rid, "set_username.referrer_not_found", referrer=referrer_username, user=user_addr
+                                )
                                 return jsonify({"error": "referrer not found"}), 400
                             referrer_address = row[0].lower()
                             if referrer_address == user_addr.lower():
                                 return jsonify({"error": "self-referral is not allowed"}), 400
-                            log_event(rid, "set_username.referrer_resolved", referrer=referrer_username, address=referrer_address, user=user_addr)
+                            log_event(
+                                rid,
+                                "set_username.referrer_resolved",
+                                referrer=referrer_username,
+                                address=referrer_address,
+                                user=user_addr,
+                            )
+                        client_hash = _hash_client_ip(_get_trusted_client_ip())
+                        if client_hash:
+                            with connect_backend_db() as bconn:
+                                with bconn.cursor() as bcur:
+                                    bcur.execute(
+                                        "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
+                                        (client_hash, referrer_address),
+                                    )
+                                    if bcur.fetchone():
+                                        log_event(
+                                            rid,
+                                            "set_username.referral_client_gate",
+                                            referrer=referrer_address,
+                                            user=user_addr,
+                                        )
+                                        return (
+                                            jsonify(
+                                                {"error": "this referral link has already been used from your device"}
+                                            ),
+                                            400,
+                                        )
                     except Exception as ref_err:
                         log_event(rid, "set_username.referrer_resolve_error", error=str(ref_err))
                         return jsonify({"error": "failed to validate referrer"}), 500
@@ -884,17 +932,26 @@ def core_set_username():
                         )
                         row = cur.fetchone()
                         if row:
-                            log_event(rid, "set_username.referral_code_applied", code=row[0], referrer=referrer_address, user=user_addr)
+                            log_event(
+                                rid,
+                                "set_username.referral_code_applied",
+                                code=row[0],
+                                referrer=referrer_address,
+                                user=user_addr,
+                            )
+                            client_hash = _hash_client_ip(_get_trusted_client_ip())
                             cur.execute(
                                 """
-                                INSERT INTO referral_links (user_address, referrer_address, referred_at)
-                                VALUES (%s, %s, %s)
+                                INSERT INTO referral_links (user_address, referrer_address, referred_at, client_hash)
+                                VALUES (%s, %s, %s, %s)
                                 ON CONFLICT (user_address) DO NOTHING
                                 """,
-                                (user_addr.lower(), referrer_address, now_ts),
+                                (user_addr.lower(), referrer_address, now_ts, client_hash),
                             )
                         else:
-                            log_event(rid, "set_username.referral_no_codes_left", referrer=referrer_address, user=user_addr)
+                            log_event(
+                                rid, "set_username.referral_no_codes_left", referrer=referrer_address, user=user_addr
+                            )
                     conn.commit()
                 except Exception:
                     conn.rollback()

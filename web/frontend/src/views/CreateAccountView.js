@@ -577,12 +577,13 @@ function CreateAccountView({ state, setCredentials }) {
                                             <StyledInputBox
                                                 value="Code applied"
                                                 readOnly
-                                                style={{ opacity: 0.7, cursor: 'default', color: '#7ecf7e' }}
+                                                disabled
+                                                style={{ opacity: 0.7, cursor: 'default', color: '#7ecf7e', pointerEvents: 'none' }}
                                                 tabIndex={-1}
                                             />
                                             {referrerAvailable > 0 && (
                                                 <div style={{ color: '#f5a623', fontSize: '0.7rem', marginTop: '0.25rem' }}>
-                                                    {referrerAvailable} {referrerAvailable === 1 ? 'spot' : 'spots'} left
+                                                    Only {referrerAvailable} {referrerAvailable === 1 ? 'code' : 'codes'} left
                                                 </div>
                                             )}
                                         </>
@@ -592,7 +593,8 @@ function CreateAccountView({ state, setCredentials }) {
                                             <StyledInputBox
                                                 value="Checking referral..."
                                                 readOnly
-                                                style={{ opacity: 0.5, cursor: 'default' }}
+                                                disabled
+                                                style={{ opacity: 0.5, cursor: 'default', pointerEvents: 'none' }}
                                                 tabIndex={-1}
                                             />
                                         </>
