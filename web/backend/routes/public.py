@@ -8129,10 +8129,10 @@ def referrals_summary():
 
             cur.execute(
                 """
-                SELECT voter, COUNT(*) FROM votes
-                WHERE voter = ANY(%s)
+                SELECT owner, COUNT(*) FROM votes
+                WHERE owner = ANY(%s)
                   AND created_at >= %s AND created_at <= %s
-                GROUP BY voter
+                GROUP BY owner
                 """,
                 (referred_addrs, period_start, period_end),
             )
