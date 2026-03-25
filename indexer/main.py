@@ -908,39 +908,34 @@ class Indexer:
         Only profiles (not list tables like enabled_agents/blocked_*).
         """
         logger.info("KV Sync: Fetching profiles subspace from chain...")
+        t0 = time.time()
         profiles = self.chain.list_profiles_subspace()
+        t_fetch = time.time()
+        logger.info("KV Sync: Fetched %d profiles in %.1fs", len(profiles), t_fetch - t0)
+
         now = int(time.time())
-        num = 0
+        batch = []
         for p in profiles:
             owner = str(p.get("owner", "")).strip().lower()
             if not owner:
                 continue
-            username = p.get("username") or None
-            level = int(p.get("level", 0) or 0)
-            created_at = int(p.get("created_at", 0) or 0)
-            subscription_expiry = int(p.get("subscription_expiry", 0) or 0)
-            auto_renew = bool(p.get("auto_renew", False))
-            biography = str(p.get("biography", "") or "")
-            avatar = str(p.get("avatar", "") or "")
-            banner = str(p.get("banner", "") or "")
-            flair = str(p.get("flair", "") or "")
-            reserve_funds = int(p.get("reserve_funds", 0) or 0)
-            self.db.upsert_profile_full(
+            batch.append((
                 owner,
-                username,
-                level,
-                created_at,
-                subscription_expiry,
-                auto_renew,
-                biography,
-                avatar,
-                banner,
-                flair,
-                now,
-                reserve_funds=reserve_funds,
-            )
-            num += 1
-        logger.info("KV Sync: Upserted %d profiles from chain KV", num)
+                p.get("username") or None,
+                int(p.get("level", 0) or 0),
+                int(p.get("created_at", 0) or 0),
+                int(p.get("subscription_expiry", 0) or 0),
+                bool(p.get("auto_renew", False)),
+                str(p.get("biography", "") or ""),
+                str(p.get("avatar", "") or ""),
+                str(p.get("banner", "") or ""),
+                str(p.get("flair", "") or ""),
+                int(p.get("reserve_funds", 0) or 0),
+            ))
+
+        self.db.upsert_profiles_batch(batch, now)
+        t_upsert = time.time()
+        logger.info("KV Sync: Upserted %d profiles in %.1fs (total %.1fs)", len(batch), t_upsert - t_fetch, t_upsert - t0)
 
 
 if __name__ == "__main__":

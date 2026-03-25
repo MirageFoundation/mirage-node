@@ -1769,6 +1769,59 @@ class DatabaseManager:
                     ),
                 )
 
+    def upsert_profiles_batch(self, profiles: list[tuple], updated_at: int) -> None:
+        """Batch upsert profiles in a single connection.
+
+        Each tuple: (owner, username, level, created_at, subscription_expiry,
+                      auto_renew, biography, avatar, banner, flair, reserve_funds)
+        """
+        if not profiles:
+            return
+        rows = []
+        for p in profiles:
+            owner, username, level, created_at, sub_exp, auto_renew, bio, avatar, banner, flair, reserve_funds = p
+            rows.append((
+                owner,
+                self._strip_nul(username),
+                int(level),
+                int(created_at),
+                int(sub_exp),
+                bool(auto_renew),
+                self._strip_nul(bio) or "",
+                self._strip_nul(avatar) or "",
+                self._strip_nul(banner) or "",
+                self._strip_nul(flair) or "",
+                int(updated_at),
+                int(reserve_funds),
+            ))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO profiles(owner, username, level, created_at, subscription_expiry,
+                                         auto_renew, biography, avatar, banner, flair, updated_at, reserve_funds)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(owner) DO UPDATE SET
+                      username=EXCLUDED.username,
+                      level=EXCLUDED.level,
+                      created_at=CASE
+                          WHEN profiles.created_at > 0 THEN profiles.created_at
+                          WHEN EXCLUDED.created_at > 0 THEN EXCLUDED.created_at
+                          ELSE profiles.created_at
+                      END,
+                      subscription_expiry=EXCLUDED.subscription_expiry,
+                      auto_renew=EXCLUDED.auto_renew,
+                      biography=EXCLUDED.biography,
+                      avatar=EXCLUDED.avatar,
+                      banner=EXCLUDED.banner,
+                      flair=EXCLUDED.flair,
+                      updated_at=EXCLUDED.updated_at,
+                      reserve_funds=EXCLUDED.reserve_funds,
+                      deleted_at=NULL
+                    """,
+                    rows,
+                )
+
     def update_profile_timestamp(self, owner: str, updated_at: int) -> None:
         """Update profile timestamp."""
         with self._connect() as conn:
