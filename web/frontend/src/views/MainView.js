@@ -993,6 +993,22 @@ const LoadingMoreIndicator = styled.div`
     font-style: italic;
 `;
 
+const LoadMoreButton = styled.button`
+    display: block;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    margin-top: 0.25rem;
+    border: none;
+    background: transparent;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-align: center;
+    &:hover {
+        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    }
+`;
+
 /**
  * LoadingCard - Full-width loading/empty state card
  * 
@@ -2275,12 +2291,34 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const bottomSentinelRef = useRef(null);
     const loadMoreLockRef = useRef(false);
     const loadMore = useCallback(() => {
-        if (!hasMorePosts || isLoadingMore || isLoading) return;
-        if (loadMoreLockRef.current) return;
+        if (!hasMorePosts || isLoadingMore || isLoading) {
+            console.debug('[Feed] loadMore blocked:', { hasMorePosts, isLoadingMore, isLoading });
+            return;
+        }
+        if (loadMoreLockRef.current) {
+            console.debug('[Feed] loadMore blocked: lock held');
+            return;
+        }
         loadMoreLockRef.current = true;
         setIsLoadingMore(true);
-        setCurrentPage((prev) => prev + 1);
+        setCurrentPage((prev) => {
+            console.debug('[Feed] loadMore: page', prev, '->', prev + 1);
+            return prev + 1;
+        });
     }, [hasMorePosts, isLoadingMore, isLoading]);
+
+    // Safety: release stuck loadMore lock after 10s
+    useEffect(() => {
+        if (!isLoadingMore) return;
+        const timer = setTimeout(() => {
+            if (loadMoreLockRef.current) {
+                console.warn('[Feed] loadMore lock stuck for 10s, releasing');
+                loadMoreLockRef.current = false;
+                setIsLoadingMore(false);
+            }
+        }, 10000);
+        return () => clearTimeout(timer);
+    }, [isLoadingMore]);
 
     // IntersectionObserver for infinite scroll
     useEffect(() => {
@@ -2292,6 +2330,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         const rect = el.getBoundingClientRect();
         const isAlreadyVisible = rect.top < window.innerHeight;
         if (isAlreadyVisible) {
+            console.debug('[Feed] sentinel already visible, triggering loadMore');
             loadMore();
             return;
         }
@@ -2301,6 +2340,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             (entries) => {
                 const entry = entries[0];
                 if (entry && entry.isIntersecting) {
+                    console.debug('[Feed] IntersectionObserver triggered');
                     loadMore();
                 }
             },
@@ -3204,29 +3244,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
-                            <LoadingMoreIndicator>Loading more content...</LoadingMoreIndicator>
+                            <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>
                         )}
                         {isLoggedIn && (
-                            <button
-                                ref={bottomSentinelRef}
-                                type="button"
-                                onClick={loadMore}
-                                aria-label="Load more"
-                                tabIndex={-1}
-                                style={{
-                                    width: '100%',
-                                    height: '32px',
-                                    minHeight: '32px',
-                                    border: 'none',
-                                    padding: 0,
-                                    margin: 0,
-                                    background: 'transparent',
-                                    opacity: 0,
-                                    cursor: 'default',
-                                }}
-                            >
-                                Load more
-                            </button>
+                            <div ref={bottomSentinelRef} style={{ width: '100%', minHeight: '1px' }}>
+                                {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && (
+                                    <LoadMoreButton type="button" onClick={loadMore}>
+                                        Load more
+                                    </LoadMoreButton>
+                                )}
+                            </div>
                         )}
                     </ModernPostFeed>
                 </div>

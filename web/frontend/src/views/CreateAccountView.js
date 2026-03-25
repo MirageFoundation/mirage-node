@@ -604,12 +604,12 @@ function CreateAccountView({ state, setCredentials }) {
                                             marginTop: '1.5rem',
                                             padding: '1rem 1.25rem',
                                             borderRadius: '8px',
-                                            border: '1px solid #f6666640',
-                                            background: '#f6666610',
+                                            border: '1px solid var(--border-color, #444)',
+                                            background: 'var(--panel-alt, #2A2E33)',
                                             textAlign: 'center',
                                         }}>
                                             <div style={{ color: '#f66', fontSize: '0.85rem', fontWeight: 600 }}>
-                                                {referrerError || "Referral not available"}
+                                                {(referrerError || "Referral not available").replace(/^./, c => c.toUpperCase())}
                                             </div>
                                             <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', opacity: 0.7 }}>
                                                 Have an invite code? <a href="/signup" style={{ color: 'inherit', textDecoration: 'underline' }}>Enter it manually</a>
