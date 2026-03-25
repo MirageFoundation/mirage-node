@@ -966,8 +966,8 @@ Examples:
 
                     # Wait 2 minutes between servers to ensure stability
                     if i < len(ALL_SERVERS):
-                        status(f"Waiting 2 minutes before next backup...")
-                        time.sleep(120)
+                        status(f"Waiting 60 seconds before next backup...")
+                        time.sleep(60)
                 except Exception as e:
                     print(f"ERROR: Backup failed for {server}: {e}", file=sys.stderr)
                     results.append((server, "FAILED", str(e)))
