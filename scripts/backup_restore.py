@@ -310,8 +310,18 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         docker exec mirage bash -c '
             pg_ctlcluster 16 main start 2>/dev/null || true
             sleep 2
-            PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage_indexer > /root/.mirage/backup_indexer.sql
-            PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
+            # Try new DB name first, fall back to legacy name
+            INDEXER_DB=$(PGPASSWORD=mirage psql -h 127.0.0.1 -U mirage -tAc "SELECT datname FROM pg_database WHERE datname IN ('"'"'mirage_indexer'"'"','"'"'mirage'"'"') ORDER BY datname DESC LIMIT 1" postgres 2>/dev/null)
+            INDEXER_DB=${INDEXER_DB:-mirage_indexer}
+            # Detect indexer role (mirage_indexer or legacy mirage)
+            DUMP_USER=$(PGPASSWORD=mirage psql -h 127.0.0.1 -U mirage -tAc "SELECT 1 FROM pg_roles WHERE rolname='"'"'mirage_indexer'"'"'" postgres 2>/dev/null | tr -d " ")
+            if [ "$DUMP_USER" = "1" ]; then
+                DUMP_ROLE=mirage_indexer; DUMP_PASS=mirage_indexer
+            else
+                DUMP_ROLE=mirage; DUMP_PASS=mirage
+            fi
+            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U $DUMP_ROLE -d $INDEXER_DB > /root/.mirage/backup_indexer.sql
+            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U $DUMP_ROLE -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
         '
     """,
     )
