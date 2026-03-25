@@ -43,7 +43,8 @@ except ImportError:
     requests = None
 
 
-BACKEND_API = os.environ.get("BACKEND_API", "http://127.0.0.1")
+BACKEND_API = os.environ.get("BACKEND_API", "http://127.0.0.1:5000")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://127.0.0.1")
 
 BACKEND_TABLES = {
     "invite_codes",
@@ -516,7 +517,7 @@ def main() -> None:
         warn("requests library not available, skipping route check")
     else:
         try:
-            resp = requests.get(f"{BACKEND_API}/signup", timeout=10, allow_redirects=False)
+            resp = requests.get(f"{FRONTEND_URL}/signup", timeout=10, allow_redirects=False)
             if resp.status_code == 200:
                 body = resp.text[:2000]
                 if "create_account" in body.lower():
@@ -531,7 +532,7 @@ def main() -> None:
             warn(f"/signup check error: {e}")
 
         try:
-            resp = requests.get(f"{BACKEND_API}/create_account", timeout=10, allow_redirects=False)
+            resp = requests.get(f"{FRONTEND_URL}/create_account", timeout=10, allow_redirects=False)
             if resp.status_code == 404:
                 ok("/create_account correctly returns 404")
             elif resp.status_code == 200:
