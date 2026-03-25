@@ -1701,11 +1701,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         setInviteCodeCopied(false);
     };
 
-    // Handle copying invite code
     const handleCopyInviteCode = () => {
         if (!nextAvailableCode) return;
-        const shareUrl = `${window.location.origin}/signup?invite=${nextAvailableCode.code}`;
-        navigator.clipboard.writeText(shareUrl);
+        navigator.clipboard.writeText(getShareUrl());
         setInviteCodeCopied(true);
         setTimeout(() => setInviteCodeCopied(false), 2000);
     };
@@ -1727,9 +1725,13 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Check if native share is available (typically mobile)
     const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
 
-    // Generate share URLs
     const getShareUrl = () => {
         if (!nextAvailableCode) return '';
+        const viewerName = Storage.load('username', '');
+        const precheckEnabled = Storage.load('referral_precheck_enabled', false) === true;
+        if (inviteCodesEnabled && precheckEnabled && viewerName) {
+            return `${window.location.origin}/signup?ref=${encodeURIComponent(viewerName)}`;
+        }
         return `${window.location.origin}/signup?invite=${nextAvailableCode.code}`;
     };
 

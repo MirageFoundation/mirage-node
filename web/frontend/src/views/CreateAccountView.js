@@ -170,9 +170,10 @@ function CreateAccountView({ state, setCredentials }) {
     const importedSeed = location.state?.importedSeed || null;
     const fromRecovery = location.state?.fromRecovery || false;
 
-    // Get invite code from URL parameter if present
+    // Get invite code and referrer from URL parameters
     const urlParams = new URLSearchParams(location.search);
     const inviteFromUrl = urlParams.get('invite') || '';
+    const refFromUrl = urlParams.get('ref') || '';
 
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
@@ -185,7 +186,6 @@ function CreateAccountView({ state, setCredentials }) {
     const [seedPhrase, setSeedPhrase] = useState("");
     const [publicKey, setPublicKey] = useState("");
     const [inviteCode, setInviteCode] = useState(() => {
-        // Pre-populate from URL if present, format it properly
         if (inviteFromUrl) {
             const clean = inviteFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
             return clean.length > 4 ? clean.slice(0, 4) + '-' + clean.slice(4) : clean;
@@ -199,6 +199,39 @@ function CreateAccountView({ state, setCredentials }) {
     const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
+
+    // Referral link state (component-only, no persistence)
+    const [referrerUsername, setReferrerUsername] = useState(refFromUrl);
+    const [referrerStatus, setReferrerStatus] = useState(refFromUrl ? "checking" : "none");
+    const [referrerAvailable, setReferrerAvailable] = useState(0);
+
+    // Pre-check referrer availability on mount when ?ref= is present
+    React.useEffect(() => {
+        if (!refFromUrl || !inviteCodeRequired) {
+            if (refFromUrl) setReferrerStatus("disabled");
+            return;
+        }
+        let cancelled = false;
+        setReferrerStatus("checking");
+        Api.get('referrals/precheck', { username: refFromUrl })
+            .then((data) => {
+                if (cancelled) return;
+                if (data && data.valid) {
+                    setReferrerUsername(refFromUrl);
+                    setReferrerStatus("valid");
+                    if (typeof data.available === 'number') setReferrerAvailable(data.available);
+                } else {
+                    setReferrerStatus("invalid");
+                    setSubmitError(data?.error || "Referrer not available");
+                }
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setReferrerStatus("error");
+                setSubmitError("Could not validate referrer");
+            });
+        return () => { cancelled = true; };
+    }, [refFromUrl, inviteCodeRequired]);
 
     // While submitting/confirming, block all clicks and key navigation globally
     React.useEffect(() => {
@@ -259,17 +292,8 @@ function CreateAccountView({ state, setCredentials }) {
         }
     };
 
-    // Function to initialize account (use imported seed or generate new)
     const initializeAccount = (existingSeed = null) => {
-        // Preserve referrer before clearing storage
-        const referrer = localStorage.getItem('referrer_address');
         Storage.clear();
-        // Restore referrer after clearing
-        if (referrer) {
-            localStorage.setItem('referrer_address', referrer);
-        }
-
-        // Use provided seed or generate new one
         const newSeedPhrase = existingSeed || generateMnemonic();
         setSeedPhrase(newSeedPhrase);
 
@@ -328,9 +352,10 @@ function CreateAccountView({ state, setCredentials }) {
             return;
         }
 
-        // Validate invite code only when required by node config
+        // Validate invite code or referrer
         let codeClean = null;
-        if (inviteCodeRequired) {
+        const usingReferrer = inviteCodeRequired && referrerStatus === "valid" && referrerUsername;
+        if (inviteCodeRequired && !usingReferrer) {
             codeClean = (inviteCode || "").trim().toUpperCase();
             if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
                 setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
@@ -344,6 +369,25 @@ function CreateAccountView({ state, setCredentials }) {
             const inviteRes = await validateInviteCode(codeClean);
             if (!inviteRes || !inviteRes.valid) {
                 setSubmitError(inviteRes?.error || "Invalid invite code");
+                const until = Date.now() + 1000;
+                setCooldownUntil(until);
+                setTimeout(() => setCooldownUntil(0), 1000);
+                return;
+            }
+        } else if (inviteCodeRequired && usingReferrer) {
+            // Re-check referrer availability before submit
+            try {
+                const precheck = await Api.get('referrals/precheck', { username: referrerUsername });
+                if (!precheck || !precheck.valid) {
+                    setSubmitError(precheck?.error || "Referrer has no available codes");
+                    setReferrerStatus("invalid");
+                    const until = Date.now() + 1000;
+                    setCooldownUntil(until);
+                    setTimeout(() => setCooldownUntil(0), 1000);
+                    return;
+                }
+            } catch (_) {
+                setSubmitError("Could not validate referrer");
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
                 setTimeout(() => setCooldownUntil(0), 1000);
@@ -383,7 +427,7 @@ function CreateAccountView({ state, setCredentials }) {
             } catch (_) { }
             // Defer to tx facade for PoW + relay
             // Pass invite code so backend marks it as used atomically with account creation
-            const result = await tx.createUser(usernameFinal, codeClean);
+            const result = await tx.createUser(usernameFinal, codeClean, usingReferrer ? referrerUsername : "");
             if (!result || !result.success) {
                 const msg = String((result && result.error) || "Submit failed");
                 if (/admin insufficient balance/i.test(msg)) {
@@ -527,37 +571,61 @@ function CreateAccountView({ state, setCredentials }) {
                                     )}
                                 </div>
                                 {inviteCodeRequired && (
-                                    <>
-                                        <UsernameLabel>Enter your invite code:</UsernameLabel>
-                                        <StyledInputBox
-                                            placeholder="XXXX-XXXX"
-                                            value={inviteCode}
-                                            onChange={(e) => {
-                                                const raw = e.target.value.toUpperCase();
-                                                // Only allow uppercase alphanumeric
-                                                const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
-                                                // Limit to 8 alphanumeric chars
-                                                const limited = alphanumOnly.slice(0, 8);
-                                                // Auto-insert dash after 4 chars
-                                                const formatted = limited.length > 4
-                                                    ? limited.slice(0, 4) + '-' + limited.slice(4)
-                                                    : limited;
-                                                setInviteCode(formatted);
-                                                setSubmitError("");
-                                            }}
-                                            maxLength={9}
-                                            name="invite-code-entry"
-                                            id="invite-code-entry"
-                                            autoComplete="one-time-code"
-                                            autoCorrect="off"
-                                            autoCapitalize="characters"
-                                            spellCheck="false"
-                                            data-lpignore="true"
-                                            data-1p-ignore="true"
-                                            data-bwignore="true"
-                                            data-form-type="other"
-                                        />
-                                    </>
+                                    referrerStatus === "valid" ? (
+                                        <>
+                                            <UsernameLabel>Invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                value="Code applied"
+                                                readOnly
+                                                style={{ opacity: 0.7, cursor: 'default', color: '#7ecf7e' }}
+                                                tabIndex={-1}
+                                            />
+                                            {referrerAvailable > 0 && referrerAvailable <= 5 && (
+                                                <div style={{ color: '#f5a623', fontSize: '0.7rem', marginTop: '0.25rem' }}>
+                                                    Only {referrerAvailable} {referrerAvailable === 1 ? 'spot' : 'spots'} left
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : referrerStatus === "checking" ? (
+                                        <>
+                                            <UsernameLabel>Invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                value="Checking referral..."
+                                                readOnly
+                                                style={{ opacity: 0.5, cursor: 'default' }}
+                                                tabIndex={-1}
+                                            />
+                                        </>
+                                    ) : (
+                                        <>
+                                            <UsernameLabel>Enter your invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                placeholder="XXXX-XXXX"
+                                                value={inviteCode}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value.toUpperCase();
+                                                    const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
+                                                    const limited = alphanumOnly.slice(0, 8);
+                                                    const formatted = limited.length > 4
+                                                        ? limited.slice(0, 4) + '-' + limited.slice(4)
+                                                        : limited;
+                                                    setInviteCode(formatted);
+                                                    setSubmitError("");
+                                                }}
+                                                maxLength={9}
+                                                name="invite-code-entry"
+                                                id="invite-code-entry"
+                                                autoComplete="one-time-code"
+                                                autoCorrect="off"
+                                                autoCapitalize="characters"
+                                                spellCheck="false"
+                                                data-lpignore="true"
+                                                data-1p-ignore="true"
+                                                data-bwignore="true"
+                                                data-form-type="other"
+                                            />
+                                        </>
+                                    )
                                 )}
                                 <UsernameLabel>Choose your username:</UsernameLabel>
                                 <StyledInputBox
@@ -596,7 +664,7 @@ function CreateAccountView({ state, setCredentials }) {
                                 <ButtonWrapper>
                                     <Button
                                         onClick={handleContinue}
-                                        disabled={submitting || (Date.now() < cooldownUntil) || (usernameFinal.trim() === '')}
+                                        disabled={submitting || (Date.now() < cooldownUntil) || (usernameFinal.trim() === '') || referrerStatus === "checking"}
                                         fullWidth
                                         size="sm"
                                         loading={submitting}

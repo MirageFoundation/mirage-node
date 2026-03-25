@@ -185,9 +185,9 @@ export async function cacheUserStatus(data) {
 }
 
 // Transactional actions
-export async function createUser(username, inviteCode = "") {
+export async function createUser(username, inviteCode = "", referrerUsername = "") {
     const h = await getHandler();
-    return h.createUser(username, inviteCode);
+    return h.createUser(username, inviteCode, referrerUsername);
 }
 
 export async function setUsername(username) {

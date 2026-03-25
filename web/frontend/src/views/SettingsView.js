@@ -5,6 +5,8 @@ import { useLocation, Navigate } from 'react-router-dom';
 import Storage from "../utils/Storage";
 import seedVault from "../utils/SeedVault";
 import { deleteUser } from "../utils/tx";
+import Api from "../lib/api";
+import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "../utils/usePendingDeletes";
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
@@ -502,6 +504,16 @@ export default function SettingsView({ state }) {
             return false;
         }
     });
+    const [referralPrecheckEnabled, setReferralPrecheckEnabled] = useState(() => {
+        try {
+            return Storage.load('referral_precheck_enabled', false) === true;
+        } catch (_) {
+            return false;
+        }
+    });
+    const [referralPrecheckBusy, setReferralPrecheckBusy] = useState(false);
+    const [referralPrecheckError, setReferralPrecheckError] = useState('');
+    const [referralPrecheckSuccess, setReferralPrecheckSuccess] = useState('');
 
     // ── Security: seed storage mode ────────────────────────────────────────
     const [seedMode, setSeedMode] = useState(() => seedVault.getMode());
@@ -619,12 +631,54 @@ export default function SettingsView({ state }) {
         }
     }, [fullWidthMode]);
 
+    useEffect(() => {
+        if (!state.publicKey) return;
+        let cancelled = false;
+        Api.get('get_user_status', { address: state.publicKey, _cb: Date.now() })
+            .then((data) => {
+                if (cancelled || !data) return;
+                if (typeof data.referral_precheck_enabled === 'boolean') {
+                    setReferralPrecheckEnabled(data.referral_precheck_enabled);
+                    Storage.save('referral_precheck_enabled', data.referral_precheck_enabled);
+                }
+            })
+            .catch(() => { });
+        return () => { cancelled = true; };
+    }, [state.publicKey]);
+
     const handleThemeModeChange = (e) => {
         const newMode = e.target.value;
         setThemeMode(newMode);
         Storage.save('theme_mode', newMode);
         // Trigger a custom event that App.js can listen to
         window.dispatchEvent(new CustomEvent('themeModeChanged', { detail: { mode: newMode } }));
+    };
+
+    const handleReferralPrecheckToggle = async (nextVal) => {
+        if (!state.publicKey || referralPrecheckBusy) return;
+        setReferralPrecheckBusy(true);
+        setReferralPrecheckError('');
+        setReferralPrecheckSuccess('');
+        try {
+            const addr = state.publicKey.toLowerCase();
+            const sig = await signPlainPayload((ts, n) => `referrals_precheck_opt_in:${addr}:${nextVal ? 1 : 0}:${ts}:${n}`);
+            const res = await Api.post('referrals/precheck_opt_in', {
+                address: state.publicKey,
+                enabled: !!nextVal,
+                ...sig,
+            });
+            if (!res || res.precheck_enabled !== !!nextVal) {
+                throw new Error('Unexpected response');
+            }
+            setReferralPrecheckEnabled(!!nextVal);
+            Storage.save('referral_precheck_enabled', !!nextVal);
+            setReferralPrecheckSuccess('Saved.');
+            setTimeout(() => setReferralPrecheckSuccess(''), 3000);
+        } catch (e) {
+            setReferralPrecheckError(String(e?.message || e || 'Failed to update'));
+        } finally {
+            setReferralPrecheckBusy(false);
+        }
     };
 
 
@@ -947,6 +1001,25 @@ export default function SettingsView({ state }) {
                                         />
                                         Expand cards to full screen width
                                     </CheckboxLabel>
+                                </ValueBox>
+                            </Row>
+
+                            <Row>
+                                <Label style={{ whiteSpace: 'normal' }}>Referral lookup:</Label>
+                                <ValueBox>
+                                    <CheckboxLabel>
+                                        <CheckboxInput
+                                            checked={referralPrecheckEnabled}
+                                            disabled={referralPrecheckBusy}
+                                            onChange={(e) => handleReferralPrecheckToggle(!!e.target.checked)}
+                                        />
+                                        Allow others to verify you have available invite codes
+                                    </CheckboxLabel>
+                                    <ExplanationText>
+                                        Required for /signup?ref= links. Disable to prevent public availability checks.
+                                    </ExplanationText>
+                                    {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
+                                    {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
                                 </ValueBox>
                             </Row>
 

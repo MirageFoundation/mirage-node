@@ -702,6 +702,13 @@ def core_set_username():
         if not re.fullmatch(r"[A-Za-z0-9-]+", username):
             return jsonify({"error": "invalid username format"}), 400
 
+        if referrer_username and not REGISTRATION_INVITE_CODE_REQUIRED:
+            return jsonify({"error": "referral links require invite codes"}), 400
+        if referrer_username and len(referrer_username) > max_u:
+            return jsonify({"error": "referrer username too long"}), 400
+        if referrer_username and not re.fullmatch(r"[A-Za-z0-9-]+", referrer_username):
+            return jsonify({"error": "invalid referrer username format"}), 400
+
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
@@ -743,8 +750,10 @@ def core_set_username():
         except Exception:
             return jsonify({"error": "invalid signature"}), 400
 
-        # Extract invite code (always extract, but only enforce if enabled)
+        # Extract invite code and referrer username
         invite_code = str(data.get("invite_code", "")).strip().upper()
+        referrer_username = str(data.get("referrer_username", "")).strip()
+        referrer_address = ""
 
         # Check if this is a new user (no existing profile/username)
         if not REGISTRATION_ENABLED or REGISTRATION_INVITE_CODE_REQUIRED:
@@ -757,7 +766,6 @@ def core_set_username():
                         (user_addr,),
                     )
                     row = cur.fetchone()
-                    # User is new if no profile exists OR profile exists but has no username
                     is_new_user = not row or not row[0] or row[0].strip() == ""
             except Exception as db_err:
                 log_event(rid, "set_username.profile_check_error", error=str(db_err))
@@ -768,40 +776,55 @@ def core_set_username():
                 log_event(rid, "set_username.registration_disabled", user=user_addr, username=username)
                 return jsonify({"error": "registration is disabled on this node"}), 403
 
-            # ENFORCE INVITE CODE REQUIREMENT FOR NEW USERS (if enabled via env var)
+            # ENFORCE INVITE CODE REQUIREMENT FOR NEW USERS
             if REGISTRATION_INVITE_CODE_REQUIRED and is_new_user:
-                if not invite_code or len(invite_code) != 9 or invite_code[4] != "-":
+                has_direct_code = invite_code and len(invite_code) == 9 and invite_code[4] == "-"
+
+                if has_direct_code:
+                    # Direct invite code path — validate it exists and is unused
+                    try:
+                        with connect_backend_db() as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
+                                (invite_code,),
+                            )
+                            row = cur.fetchone()
+                            if not row:
+                                log_event(rid, "set_username.invite_code_invalid", code=invite_code, user=user_addr)
+                                return jsonify({"error": "invalid invite code"}), 400
+                            owner, used_by = row
+                            if used_by:
+                                log_event(rid, "set_username.invite_code_already_used", code=invite_code, user=user_addr, used_by=used_by)
+                                return jsonify({"error": "this invite code has already been used"}), 400
+                            log_event(rid, "set_username.invite_code_validated", code=invite_code, user=user_addr)
+                    except Exception as invite_check_err:
+                        log_event(rid, "set_username.invite_code_check_error", error=str(invite_check_err))
+                        return jsonify({"error": "failed to validate invite code"}), 500
+
+                elif referrer_username:
+                    # Referral link path — resolve username to address, verify they exist
+                    try:
+                        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "SELECT owner FROM profiles WHERE LOWER(username) = LOWER(%s) LIMIT 1",
+                                (referrer_username,),
+                            )
+                            row = cur.fetchone()
+                            if not row:
+                                log_event(rid, "set_username.referrer_not_found", referrer=referrer_username, user=user_addr)
+                                return jsonify({"error": "referrer not found"}), 400
+                            referrer_address = row[0].lower()
+                            if referrer_address == user_addr.lower():
+                                return jsonify({"error": "self-referral is not allowed"}), 400
+                            log_event(rid, "set_username.referrer_resolved", referrer=referrer_username, address=referrer_address, user=user_addr)
+                    except Exception as ref_err:
+                        log_event(rid, "set_username.referrer_resolve_error", error=str(ref_err))
+                        return jsonify({"error": "failed to validate referrer"}), 500
+                else:
                     log_event(rid, "set_username.invite_code_required", user=user_addr, username=username)
                     return jsonify({"error": "invite code required for new account registration"}), 400
-
-                # Validate that the invite code exists and is unused
-                try:
-                    with connect_backend_db() as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
-                            (invite_code,),
-                        )
-                        row = cur.fetchone()
-                        if not row:
-                            log_event(rid, "set_username.invite_code_invalid", code=invite_code, user=user_addr)
-                            return jsonify({"error": "invalid invite code"}), 400
-
-                        owner, used_by = row
-                        if used_by:
-                            log_event(
-                                rid,
-                                "set_username.invite_code_already_used",
-                                code=invite_code,
-                                user=user_addr,
-                                used_by=used_by,
-                            )
-                            return jsonify({"error": "this invite code has already been used"}), 400
-
-                        log_event(rid, "set_username.invite_code_validated", code=invite_code, user=user_addr)
-                except Exception as invite_check_err:
-                    log_event(rid, "set_username.invite_code_check_error", error=str(invite_check_err))
-                    return jsonify({"error": "failed to validate invite code"}), 500
 
         msg = MsgSetUsername()
         # authority is the validator/node address relaying this transaction, NOT the user's address
@@ -839,35 +862,75 @@ def core_set_username():
             }
             return _tx_error(rid, "core/set_username", "MsgSetUsername", code, tx_hash, raw_log, extra)
 
-        # Record referral if provided and valid (referral system)
-        referrer = str(data.get("referrer", "")).strip().lower()
-        if referrer and referrer.startswith("mirage1") and len(referrer) >= 39:
-            # Don't allow self-referral
-            if referrer != user_addr.lower():
+        # ── Post-tx: referral link via referrer_username (atomic code allocation) ──
+        if referrer_address and code == 0:
+            try:
+                now_ts = int(time.time())
+                conn = connect_backend_db()
+                conn.autocommit = False
                 try:
-                    now_ts = int(time.time())
-                    with connect_backend_db() as conn:
-                        with conn.cursor() as cur:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE invite_codes SET used_by = %s, used_at = %s
+                            WHERE code = (
+                                SELECT code FROM invite_codes
+                                WHERE LOWER(owner) = %s AND used_by IS NULL
+                                LIMIT 1
+                            )
+                            RETURNING code
+                            """,
+                            (user_addr.lower(), now_ts, referrer_address),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            log_event(rid, "set_username.referral_code_applied", code=row[0], referrer=referrer_address, user=user_addr)
                             cur.execute(
                                 """
                                 INSERT INTO referral_links (user_address, referrer_address, referred_at)
                                 VALUES (%s, %s, %s)
                                 ON CONFLICT (user_address) DO NOTHING
                                 """,
-                                (user_addr.lower(), referrer, now_ts),
+                                (user_addr.lower(), referrer_address, now_ts),
                             )
-                    log_event(rid, "set_username.referral_recorded", user=user_addr, referrer=referrer)
-                except Exception as ref_err:
-                    log_event(rid, "set_username.referral_error", error=str(ref_err))
+                        else:
+                            log_event(rid, "set_username.referral_no_codes_left", referrer=referrer_address, user=user_addr)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.close()
+            except Exception as ref_err:
+                log_event(rid, "set_username.referral_code_error", error=str(ref_err))
 
-        # Mark invite code as used (if provided and transaction succeeded) - this must happen BEFORE quest completion check
-        if invite_code and len(invite_code) == 9 and invite_code[4] == "-" and code == 0:
-            # Only mark as used if transaction succeeded (code == 0)
+        # ── Post-tx: record referral from direct address (legacy path) ──
+        elif not referrer_address:
+            referrer = str(data.get("referrer", "")).strip().lower()
+            if referrer and referrer.startswith("mirage1") and len(referrer) >= 39:
+                if referrer != user_addr.lower():
+                    try:
+                        now_ts = int(time.time())
+                        with connect_backend_db() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(
+                                    """
+                                    INSERT INTO referral_links (user_address, referrer_address, referred_at)
+                                    VALUES (%s, %s, %s)
+                                    ON CONFLICT (user_address) DO NOTHING
+                                    """,
+                                    (user_addr.lower(), referrer, now_ts),
+                                )
+                        log_event(rid, "set_username.referral_recorded", user=user_addr, referrer=referrer)
+                    except Exception as ref_err:
+                        log_event(rid, "set_username.referral_error", error=str(ref_err))
+
+        # Mark direct invite code as used (must happen BEFORE quest completion check)
+        if invite_code and len(invite_code) == 9 and invite_code[4] == "-" and code == 0 and not referrer_address:
             try:
                 now_ts = int(time.time())
                 with connect_backend_db() as conn:
                     with conn.cursor() as cur:
-                        # Only mark as used if it exists and is not already used (double-check)
                         cur.execute(
                             """
                             UPDATE invite_codes 
@@ -882,6 +945,22 @@ def core_set_username():
                             log_event(rid, "set_username.invite_code_already_used_or_invalid", code=invite_code)
             except Exception as ic_err:
                 log_event(rid, "set_username.invite_code_error", error=str(ic_err))
+
+        # Ensure referral settings row exists for this user (default: disabled)
+        try:
+            now_ts = int(time.time())
+            with connect_backend_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO referral_user_settings (owner, precheck_enabled, updated_at)
+                        VALUES (%s, FALSE, %s)
+                        ON CONFLICT (owner) DO NOTHING
+                        """,
+                        (user_addr.lower(), now_ts),
+                    )
+        except Exception as settings_err:
+            log_event(rid, "set_username.referral_settings_init_error", error=str(settings_err))
 
         # Check for invite quest completion (referrer has invite_recruit, new user used their code)
         try:

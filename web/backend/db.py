@@ -181,6 +181,21 @@ def init_backend_schema() -> None:
             """
             )
 
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS referral_user_settings (
+                    owner TEXT PRIMARY KEY,
+                    precheck_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    updated_at BIGINT NOT NULL,
+                    CONSTRAINT referral_user_settings_owner_lower CHECK (owner = LOWER(owner))
+                )
+            """
+            )
+            _assert_table_schema(
+                "referral_user_settings",
+                {"owner", "precheck_enabled", "updated_at"},
+            )
+
             # ── Reports ──────────────────────────────────────────────────
             cur.execute(
                 """
