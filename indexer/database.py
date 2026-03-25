@@ -457,12 +457,18 @@ class DatabaseManager:
                     CREATE TABLE IF NOT EXISTS supply_history (
                         height BIGINT PRIMARY KEY,
                         total_supply BIGINT NOT NULL,
-                        created_at BIGINT NOT NULL
+                        created_at BIGINT NOT NULL,
+                        node_balance BIGINT
                     )
                     """
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_supply_history_created_at ON supply_history(created_at DESC)"
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE supply_history ADD COLUMN IF NOT EXISTS node_balance BIGINT
+                    """
                 )
 
                 # topic_content_stats: per-topic content labels derived from post tags
@@ -1780,20 +1786,22 @@ class DatabaseManager:
         rows = []
         for p in profiles:
             owner, username, level, created_at, sub_exp, auto_renew, bio, avatar, banner, flair, reserve_funds = p
-            rows.append((
-                owner,
-                self._strip_nul(username),
-                int(level),
-                int(created_at),
-                int(sub_exp),
-                bool(auto_renew),
-                self._strip_nul(bio) or "",
-                self._strip_nul(avatar) or "",
-                self._strip_nul(banner) or "",
-                self._strip_nul(flair) or "",
-                int(updated_at),
-                int(reserve_funds),
-            ))
+            rows.append(
+                (
+                    owner,
+                    self._strip_nul(username),
+                    int(level),
+                    int(created_at),
+                    int(sub_exp),
+                    bool(auto_renew),
+                    self._strip_nul(bio) or "",
+                    self._strip_nul(avatar) or "",
+                    self._strip_nul(banner) or "",
+                    self._strip_nul(flair) or "",
+                    int(updated_at),
+                    int(reserve_funds),
+                )
+            )
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.executemany(

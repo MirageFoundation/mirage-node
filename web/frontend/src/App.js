@@ -70,6 +70,7 @@ const FollowsView = lazyWithRetry(() => import('./views/FollowsView'));
 const BlocksView = lazyWithRetry(() => import('./views/BlocksView'));
 const AgentsView = lazyWithRetry(() => import('./views/AgentsView'));
 const BridgeView = lazyWithRetry(() => import('./views/BridgeView'));
+const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
@@ -168,76 +169,10 @@ function RouteTracker({ children }) {
     const location = useLocation();
     const navigate = useNavigate();
     const isInitialMountRef = React.useRef(true);
-    const lastTrackedPathRef = React.useRef(null);
 
-    // Track page views for stats (debounced, skip root redirect)
     React.useEffect(() => {
-        // Record activity for inactivity auto-logout
         try { Storage.touchLastSeen(); } catch (_) { }
-
-        // REFERRALS DISABLED FOR NOW
-        // Capture referrer parameter from URL (for referral system)
-        // try {
-        //     const params = new URLSearchParams(location.search);
-        //     const referrerAddr = params.get('referrer');
-        //     console.log('[Referral] URL search:', location.search, 'referrer param:', referrerAddr);
-        //     if (referrerAddr && referrerAddr.startsWith('mirage1') && referrerAddr.length >= 39) {
-        //         localStorage.setItem('referrer_address', referrerAddr);
-        //         console.log('[Referral] Saved referrer to localStorage:', referrerAddr);
-        //     }
-        // } catch (e) { console.error('[Referral] Error capturing referrer:', e); }
-
-        // Skip tracking root path since it redirects to the last route
-        if (location.pathname === '/') return;
-        // Skip if we already tracked this path
-        if (lastTrackedPathRef.current === location.pathname) return;
-
-        const trackPageView = async () => {
-            try {
-                let sessionId = Storage.load('stats_session_id', null);
-                const storedTime = Storage.load('stats_session_time', 0);
-                const now = Date.now();
-                const isNewSession = !sessionId || !storedTime || (now - storedTime) > 30 * 60 * 1000;
-
-                if (isNewSession) {
-                    sessionId = 'sess_' + now + '_' + Math.random().toString(36).substr(2, 9);
-                    Storage.save('stats_session_id', sessionId);
-                    Storage.save('stats_session_time', now);
-                }
-
-                const userAddress = Storage.load('publicKey', null);
-                const pagePath = location.pathname;
-
-                // Track visit and session_start only on first page load of new session
-                if (isInitialMountRef.current && isNewSession) {
-                    // Combine visit and session_start into a single "visit" event
-                    await Api.post('stats/event', {
-                        event_type: 'visit',
-                        session_id: sessionId,
-                        user_address: userAddress,
-                        page_path: pagePath
-                    }, { timeoutMs: 5000 });
-                }
-
-                // Track page_view only for subsequent navigations (not initial load)
-                if (!isInitialMountRef.current) {
-                    await Api.post('stats/event', {
-                        event_type: 'page_view',
-                        session_id: sessionId,
-                        user_address: userAddress,
-                        page_path: pagePath
-                    }, { timeoutMs: 5000 });
-                }
-
-                Storage.save('stats_session_time', now);
-                lastTrackedPathRef.current = location.pathname;
-            } catch (_) {
-                // Silently fail
-            }
-        };
-
-        trackPageView();
-    }, [location.pathname, location.search]);
+    }, [location.pathname]);
 
     // Restore last route on mount if at root
     React.useEffect(() => {
@@ -334,30 +269,6 @@ class App extends Component {
         this.setWarnOnLeave = this.setWarnOnLeave.bind(this);
         this.state.themeMode = Storage.load('theme_mode', 'time');
         this.state.theme = this.calculateTheme(this.state.themeMode);
-    }
-
-    // Session end tracking via sendBeacon on page unload
-    setupSessionEndTracking() {
-        window.addEventListener('beforeunload', () => {
-            try {
-                const sessionId = Storage.load('stats_session_id', null);
-                if (!sessionId) return;
-
-                const userAddress = this.state.publicKey || null;
-                const pagePath = window.location.pathname;
-
-                const data = JSON.stringify({
-                    event_type: 'session_end',
-                    session_id: sessionId,
-                    user_address: userAddress,
-                    page_path: pagePath
-                });
-
-                navigator.sendBeacon('/api/stats/event', data);
-            } catch (_) {
-                // Ignore errors
-            }
-        });
     }
 
     // Approximate light/dark switch times based on day of year (no location needed)
@@ -501,10 +412,6 @@ class App extends Component {
                 root.style.setProperty('--feed-max-width', '1000px');
             }
         } catch (_) { }
-
-        // Stats tracking is handled by RouteTracker to avoid duplicate requests
-        // Only set up session end tracking via sendBeacon
-        this.setupSessionEndTracking();
 
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
@@ -982,6 +889,7 @@ class App extends Component {
                                             <Route path="/topics" element={<DiscoverView state={this.state} />} />
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
+                                            <Route path="/referrals" element={<ReferralsView state={this.state} />} />
                                             <Route path="/bridge" element={<BridgeView state={this.state} />} />
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>

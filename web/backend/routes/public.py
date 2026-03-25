@@ -46,8 +46,11 @@ from settings import (
     IOS_BANNER_ENABLED,
 )
 import time
+import calendar
+from datetime import datetime as dt
 import hashlib
 import math
+from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urljoin, urlparse
 from chain import (
     classify_reject as _classify_reject,
@@ -2886,6 +2889,7 @@ def get_user_status():
         auto_renew = False
         reserve_funds = 0
         inbox_last_viewed_at = 0
+        referral_precheck_enabled = False
 
         # Query DB for profile
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
@@ -2901,15 +2905,23 @@ def get_user_status():
                 profile_registered_at = int(row[2]) if row[2] is not None else None
                 subscription_expiry = int(row[3]) if row[3] is not None else 0
 
+        addr_lower = addr.lower()
         with connect_backend_db() as conn_ib:
             cur_ib = conn_ib.cursor()
             cur_ib.execute(
                 "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
-                (addr,),
+                (addr_lower,),
             )
             row_ib = cur_ib.fetchone()
             if row_ib and row_ib[0] is not None:
                 inbox_last_viewed_at = int(row_ib[0])
+            cur_ib.execute(
+                "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
+                (addr_lower,),
+            )
+            row_ref = cur_ib.fetchone()
+            if row_ref and row_ref[0] is not None:
+                referral_precheck_enabled = bool(row_ref[0])
 
         # Read subscription data from indexer DB (auto_renew, reserve_funds)
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn2:
@@ -2965,6 +2977,7 @@ def get_user_status():
             "profile_registered_at": profile_registered_at,
             "recent_votes": recent_votes,
             "inbox_last_viewed_at": inbox_last_viewed_at,
+            "referral_precheck_enabled": referral_precheck_enabled,
         }
         log_event(rid, "get_user_status.ok", user_level=user_level)
         return jsonify(resp)
@@ -7881,6 +7894,288 @@ def _require_admin():
     if not address or not _is_admin(address):
         return None
     return address
+
+
+# ── Referral link endpoints ──────────────────────────────────────────────────
+
+
+@public_bp.route("/api/referrals/precheck", methods=["GET"])
+def referrals_precheck():
+    """Check if a referrer username is valid and has available invite codes."""
+    rid = next_request_id()
+    if not REGISTRATION_INVITE_CODE_REQUIRED:
+        return jsonify({"valid": False, "error": "invite codes not required on this node"})
+
+    username = request.args.get("username", "").strip()
+    if not username:
+        return jsonify({"valid": False, "error": "username required"}), 400
+
+    log_event(rid, "referrals.precheck.begin", username=username)
+    try:
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT owner FROM profiles WHERE LOWER(username) = LOWER(%s) LIMIT 1",
+                (username,),
+            )
+            row = cur.fetchone()
+            if not row:
+                log_event(rid, "referrals.precheck.not_found", username=username)
+                return jsonify({"valid": False, "error": "referrer not found"})
+
+            address = row[0].lower()
+
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
+            bcur.execute(
+                "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
+                (address,),
+            )
+            row = bcur.fetchone()
+            if not row or row[0] is not True:
+                log_event(rid, "referrals.precheck.not_opted_in", username=username, address=address)
+                return jsonify({"valid": False, "error": "referrer has not enabled referral links"})
+
+            bcur.execute(
+                "SELECT COUNT(*) FROM invite_codes WHERE LOWER(owner) = %s AND used_by IS NULL",
+                (address,),
+            )
+            available = bcur.fetchone()[0] or 0
+
+        if available == 0:
+            log_event(rid, "referrals.precheck.no_codes", username=username, address=address)
+            return jsonify({"valid": False, "error": "referrer has no available codes"})
+
+        client_hash = hash_client_ip(get_trusted_client_ip())
+        if client_hash:
+            with connect_backend_db() as bconn2:
+                with bconn2.cursor() as bcur2:
+                    bcur2.execute(
+                        "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
+                        (client_hash, address),
+                    )
+                    if bcur2.fetchone():
+                        log_event(rid, "referrals.precheck.client_gate", username=username, address=address)
+                        return jsonify({"valid": False, "error": "already used this referrer"})
+
+        log_event(rid, "referrals.precheck.ok", username=username, available=available)
+        return jsonify({"valid": True, "available": available})
+    except Exception as e:
+        log_event(rid, "referrals.precheck.err", error=str(e))
+        return safe_error(e)
+
+
+@public_bp.route("/api/referrals/precheck_opt_in", methods=["POST"])
+def referrals_precheck_opt_in():
+    """Allow a user to opt in/out of referral precheck availability."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
+    address = (data.get("address") or "").strip()
+    enabled = data.get("enabled", None)
+    if "timestamp" not in data:
+        return jsonify({"error": "timestamp required"}), 400
+    try:
+        timestamp = int(data.get("timestamp"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid timestamp"}), 400
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "enabled must be boolean"}), 400
+
+    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
+
+    nonce, err = _parse_envelope_nonce(data)
+    if err is not None:
+        return err[0], err[1]
+    if not (pub_b64 and sig_b64):
+        return jsonify({"error": "missing required fields"}), 400
+
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return jsonify({"error": "invalid relay fields"}), 400
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return jsonify({"error": "invalid relay fields"}), 400
+
+    user_addr = derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return jsonify({"error": "invalid pubkey"}), 400
+    if address and address.lower() != user_addr.lower():
+        return jsonify({"error": "address does not match pubkey"}), 400
+
+    enabled_flag = "1" if enabled else "0"
+    signed_payload = f"referrals_precheck_opt_in:{user_addr.lower()}:{enabled_flag}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return jsonify({"error": "invalid signature"}), 400
+    ok, err = _guard_push_request(user_addr, "referrals_precheck_opt_in", timestamp, nonce)
+    if not ok:
+        return err[0], err[1]
+
+    now_ts = int(time.time())
+    try:
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO referral_user_settings (owner, precheck_enabled, updated_at)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (owner) DO UPDATE
+                    SET precheck_enabled = EXCLUDED.precheck_enabled,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (user_addr.lower(), enabled, now_ts),
+                )
+        log_event(rid, "referrals.precheck_opt_in.ok", user=user_addr, enabled=enabled)
+        return jsonify({"ok": True, "precheck_enabled": enabled, "updated_at": now_ts})
+    except Exception as e:
+        log_event(rid, "referrals.precheck_opt_in.err", error=str(e))
+        return safe_error(e)
+
+
+@public_bp.route("/api/referrals/summary", methods=["GET"])
+def referrals_summary():
+    """Return referred users with action counts for the authenticated referrer."""
+    rid = next_request_id()
+    address = request.args.get("address", "").strip().lower()
+    if not address:
+        return jsonify({"error": "address required"}), 400
+
+    period = request.args.get("period", "7d").strip()
+    month = request.args.get("month", "").strip()
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    if limit is None:
+        limit = 50
+    if offset is None:
+        offset = 0
+    limit = min(max(1, limit), 200)
+    offset = max(0, offset)
+
+    log_event(rid, "referrals.summary.begin", address=address, period=period, month=month, limit=limit, offset=offset)
+    try:
+        now_ts = int(time.time())
+        if period == "month" and month:
+            try:
+                start_dt = dt.strptime(month, "%Y-%m")
+                _, last_day = calendar.monthrange(start_dt.year, start_dt.month)
+                period_start = int(start_dt.timestamp())
+                period_end = int(start_dt.replace(day=last_day, hour=23, minute=59, second=59).timestamp())
+            except ValueError:
+                return jsonify({"error": "invalid month format, use YYYY-MM"}), 400
+        else:
+            days = 7
+            if period.endswith("d"):
+                try:
+                    days = int(period[:-1])
+                except ValueError:
+                    days = 7
+            period_start = now_ts - (days * 86400)
+            period_end = now_ts
+
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
+            bcur.execute(
+                "SELECT COUNT(*) FROM referral_links WHERE LOWER(referrer_address) = %s",
+                (address,),
+            )
+            total = int(bcur.fetchone()[0] or 0)
+            bcur.execute(
+                """
+                SELECT user_address, referred_at
+                FROM referral_links
+                WHERE LOWER(referrer_address) = %s
+                ORDER BY referred_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (address, limit, offset),
+            )
+            referrals = bcur.fetchall()
+
+        if not referrals:
+            log_event(rid, "referrals.summary.empty", address=address)
+            return jsonify(
+                {
+                    "referrals": [],
+                    "total": total,
+                    "period_start": period_start,
+                    "period_end": period_end,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": False,
+                }
+            )
+
+        referred_addrs = [r[0] for r in referrals]
+        referred_at_map = {r[0]: r[1] for r in referrals}
+
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                SELECT owner, COUNT(*) FROM posts
+                WHERE owner = ANY(%s)
+                  AND deleted = FALSE
+                  AND created_at >= %s AND created_at <= %s
+                GROUP BY owner
+                """,
+                (referred_addrs, period_start, period_end),
+            )
+            post_counts = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute(
+                """
+                SELECT owner, COUNT(*) FROM votes
+                WHERE owner = ANY(%s)
+                  AND created_at >= %s AND created_at <= %s
+                GROUP BY owner
+                """,
+                (referred_addrs, period_start, period_end),
+            )
+            vote_counts = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute(
+                "SELECT owner, username FROM profiles WHERE owner = ANY(%s)",
+                (referred_addrs,),
+            )
+            usernames = {r[0]: r[1] for r in cur.fetchall()}
+
+        results = []
+        for addr in referred_addrs:
+            posts = post_counts.get(addr, 0)
+            votes = vote_counts.get(addr, 0)
+            total_actions = posts + votes
+            results.append(
+                {
+                    "address": addr,
+                    "username": usernames.get(addr, ""),
+                    "referred_at": referred_at_map.get(addr, 0),
+                    "posts": posts,
+                    "votes": votes,
+                    "total_actions": total_actions,
+                }
+            )
+
+        has_more = (offset + len(results)) < total
+        log_event(rid, "referrals.summary.ok", address=address, total=len(results), has_more=has_more)
+        return jsonify(
+            {
+                "referrals": results,
+                "total": total,
+                "period_start": period_start,
+                "period_end": period_end,
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+            }
+        )
+    except Exception as e:
+        log_event(rid, "referrals.summary.err", error=str(e))
+        return safe_error(e)
 
 
 @public_bp.route("/api/referral/stats", methods=["GET"])

@@ -17,6 +17,20 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed } from "../styled/Layout";
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
 
+const REFERRAL_ERRORS = {
+    "already used this referrer": "You already used this referrer.",
+    "referrer has no available codes": "This referrer has no invite codes left.",
+    "referrer not found": "Referrer not found.",
+    "referrer has not enabled referral links": "This referrer has not enabled referral links.",
+    "invite codes not required on this node": "Invite codes are not required on this node.",
+};
+
+function formatReferralError(raw) {
+    if (!raw) return "Referral not available.";
+    if (REFERRAL_ERRORS[raw]) return REFERRAL_ERRORS[raw];
+    return raw.charAt(0).toUpperCase() + raw.slice(1).replace(/\.$/, '') + '.';
+}
+
 const Centered = styled.div`
     text-align: center;
     max-width: 800px;
@@ -170,9 +184,10 @@ function CreateAccountView({ state, setCredentials }) {
     const importedSeed = location.state?.importedSeed || null;
     const fromRecovery = location.state?.fromRecovery || false;
 
-    // Get invite code from URL parameter if present
+    // Get invite code and referrer from URL parameters
     const urlParams = new URLSearchParams(location.search);
     const inviteFromUrl = urlParams.get('invite') || '';
+    const refFromUrl = urlParams.get('ref') || '';
 
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
@@ -185,7 +200,6 @@ function CreateAccountView({ state, setCredentials }) {
     const [seedPhrase, setSeedPhrase] = useState("");
     const [publicKey, setPublicKey] = useState("");
     const [inviteCode, setInviteCode] = useState(() => {
-        // Pre-populate from URL if present, format it properly
         if (inviteFromUrl) {
             const clean = inviteFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
             return clean.length > 4 ? clean.slice(0, 4) + '-' + clean.slice(4) : clean;
@@ -199,6 +213,40 @@ function CreateAccountView({ state, setCredentials }) {
     const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
+
+    // Referral link state (component-only, no persistence)
+    const [referrerUsername, setReferrerUsername] = useState(refFromUrl);
+    const [referrerStatus, setReferrerStatus] = useState(refFromUrl ? "checking" : "none");
+    const [referrerAvailable, setReferrerAvailable] = useState(0);
+    const [referrerError, setReferrerError] = useState("");
+
+    // Pre-check referrer availability on mount when ?ref= is present
+    React.useEffect(() => {
+        if (!refFromUrl || !inviteCodeRequired) {
+            if (refFromUrl) setReferrerStatus("disabled");
+            return;
+        }
+        let cancelled = false;
+        setReferrerStatus("checking");
+        Api.get('referrals/precheck', { username: refFromUrl })
+            .then((data) => {
+                if (cancelled) return;
+                if (data && data.valid) {
+                    setReferrerUsername(refFromUrl);
+                    setReferrerStatus("valid");
+                    if (typeof data.available === 'number') setReferrerAvailable(data.available);
+                } else {
+                    setReferrerStatus("invalid");
+                    setReferrerError(data?.error || "Referral not available");
+                }
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setReferrerStatus("error");
+                setReferrerError("Could not validate referrer");
+            });
+        return () => { cancelled = true; };
+    }, [refFromUrl, inviteCodeRequired]);
 
     // While submitting/confirming, block all clicks and key navigation globally
     React.useEffect(() => {
@@ -259,17 +307,8 @@ function CreateAccountView({ state, setCredentials }) {
         }
     };
 
-    // Function to initialize account (use imported seed or generate new)
     const initializeAccount = (existingSeed = null) => {
-        // Preserve referrer before clearing storage
-        const referrer = localStorage.getItem('referrer_address');
         Storage.clear();
-        // Restore referrer after clearing
-        if (referrer) {
-            localStorage.setItem('referrer_address', referrer);
-        }
-
-        // Use provided seed or generate new one
         const newSeedPhrase = existingSeed || generateMnemonic();
         setSeedPhrase(newSeedPhrase);
 
@@ -328,9 +367,10 @@ function CreateAccountView({ state, setCredentials }) {
             return;
         }
 
-        // Validate invite code only when required by node config
+        // Validate invite code or referrer
         let codeClean = null;
-        if (inviteCodeRequired) {
+        const usingReferrer = inviteCodeRequired && referrerStatus === "valid" && referrerUsername;
+        if (inviteCodeRequired && !usingReferrer) {
             codeClean = (inviteCode || "").trim().toUpperCase();
             if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
                 setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
@@ -344,6 +384,25 @@ function CreateAccountView({ state, setCredentials }) {
             const inviteRes = await validateInviteCode(codeClean);
             if (!inviteRes || !inviteRes.valid) {
                 setSubmitError(inviteRes?.error || "Invalid invite code");
+                const until = Date.now() + 1000;
+                setCooldownUntil(until);
+                setTimeout(() => setCooldownUntil(0), 1000);
+                return;
+            }
+        } else if (inviteCodeRequired && usingReferrer) {
+            // Re-check referrer availability before submit
+            try {
+                const precheck = await Api.get('referrals/precheck', { username: referrerUsername });
+                if (!precheck || !precheck.valid) {
+                    setReferrerError(precheck?.error || "Referrer has no available codes");
+                    setReferrerStatus("invalid");
+                    const until = Date.now() + 1000;
+                    setCooldownUntil(until);
+                    setTimeout(() => setCooldownUntil(0), 1000);
+                    return;
+                }
+            } catch (_) {
+                setReferrerError("Could not validate referrer");
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
                 setTimeout(() => setCooldownUntil(0), 1000);
@@ -383,7 +442,7 @@ function CreateAccountView({ state, setCredentials }) {
             } catch (_) { }
             // Defer to tx facade for PoW + relay
             // Pass invite code so backend marks it as used atomically with account creation
-            const result = await tx.createUser(usernameFinal, codeClean);
+            const result = await tx.createUser(usernameFinal, codeClean, usingReferrer ? referrerUsername : "");
             if (!result || !result.success) {
                 const msg = String((result && result.error) || "Submit failed");
                 if (/admin insufficient balance/i.test(msg)) {
@@ -527,88 +586,132 @@ function CreateAccountView({ state, setCredentials }) {
                                     )}
                                 </div>
                                 {inviteCodeRequired && (
+                                    referrerStatus === "valid" ? (
+                                        <>
+                                            <UsernameLabel>Invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                value="Code applied"
+                                                readOnly
+                                                disabled
+                                                style={{ opacity: 0.7, cursor: 'default', color: '#7ecf7e', pointerEvents: 'none' }}
+                                                tabIndex={-1}
+                                            />
+                                            {referrerAvailable > 0 && (
+                                                <div style={{ color: '#f5a623', fontSize: '0.7rem', marginTop: '0.25rem' }}>
+                                                    Only {referrerAvailable} {referrerAvailable === 1 ? 'code' : 'codes'} left
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : referrerStatus === "checking" ? (
+                                        <>
+                                            <UsernameLabel>Invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                value="Checking referral..."
+                                                readOnly
+                                                disabled
+                                                style={{ opacity: 0.5, cursor: 'default', pointerEvents: 'none' }}
+                                                tabIndex={-1}
+                                            />
+                                        </>
+                                    ) : (referrerStatus === "invalid" && refFromUrl) ? (
+                                        <div style={{
+                                            marginTop: '1.5rem',
+                                            padding: '1rem 1.25rem',
+                                            borderRadius: '8px',
+                                            border: '1px solid var(--border-color, #444)',
+                                            background: 'var(--panel-alt, #2A2E33)',
+                                            textAlign: 'center',
+                                        }}>
+                                            <div style={{ color: '#f66', fontSize: '0.85rem', fontWeight: 600 }}>
+                                                {formatReferralError(referrerError)}
+                                            </div>
+                                            <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', opacity: 0.7 }}>
+                                                Have an invite code? <a href="/signup" style={{ color: 'inherit', textDecoration: 'underline' }}>Enter it manually</a>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <UsernameLabel>Enter your invite code:</UsernameLabel>
+                                            <StyledInputBox
+                                                placeholder="XXXX-XXXX"
+                                                value={inviteCode}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value.toUpperCase();
+                                                    const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
+                                                    const limited = alphanumOnly.slice(0, 8);
+                                                    const formatted = limited.length > 4
+                                                        ? limited.slice(0, 4) + '-' + limited.slice(4)
+                                                        : limited;
+                                                    setInviteCode(formatted);
+                                                    setSubmitError("");
+                                                }}
+                                                maxLength={9}
+                                                name="invite-code-entry"
+                                                id="invite-code-entry"
+                                                autoComplete="one-time-code"
+                                                autoCorrect="off"
+                                                autoCapitalize="characters"
+                                                spellCheck="false"
+                                                data-lpignore="true"
+                                                data-1p-ignore="true"
+                                                data-bwignore="true"
+                                                data-form-type="other"
+                                            />
+                                        </>
+                                    )
+                                )}
+                                {!(referrerStatus === "invalid" && refFromUrl) && (
                                     <>
-                                        <UsernameLabel>Enter your invite code:</UsernameLabel>
+                                        <UsernameLabel>Choose your username:</UsernameLabel>
                                         <StyledInputBox
-                                            placeholder="XXXX-XXXX"
-                                            value={inviteCode}
+                                            placeholder=""
+                                            value={usernameInput}
                                             onChange={(e) => {
-                                                const raw = e.target.value.toUpperCase();
-                                                // Only allow uppercase alphanumeric
-                                                const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
-                                                // Limit to 8 alphanumeric chars
-                                                const limited = alphanumOnly.slice(0, 8);
-                                                // Auto-insert dash after 4 chars
-                                                const formatted = limited.length > 4
-                                                    ? limited.slice(0, 4) + '-' + limited.slice(4)
-                                                    : limited;
-                                                setInviteCode(formatted);
+                                                const raw = e.target.value;
+                                                const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                                                const maxLen = getMaxInputLength(true);
+                                                setUsernameInput(cleaned.slice(0, maxLen ?? 100));
                                                 setSubmitError("");
                                             }}
-                                            maxLength={9}
-                                            name="invite-code-entry"
-                                            id="invite-code-entry"
+                                            onKeyDown={async (e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    await handleContinue(e);
+                                                }
+                                            }}
+                                            onPaste={(e) => {
+                                                e.preventDefault();
+                                            }}
+                                            maxLength={getMaxInputLength(true) || 100}
+                                            name="display-name-entry"
+                                            id="display-name-entry"
                                             autoComplete="one-time-code"
                                             autoCorrect="off"
-                                            autoCapitalize="characters"
+                                            autoCapitalize="off"
                                             spellCheck="false"
                                             data-lpignore="true"
                                             data-1p-ignore="true"
                                             data-bwignore="true"
                                             data-form-type="other"
                                         />
+                                        <ButtonWrapper>
+                                            <Button
+                                                onClick={handleContinue}
+                                                disabled={submitting || (Date.now() < cooldownUntil) || (usernameFinal.trim() === '') || referrerStatus === "checking"}
+                                                fullWidth
+                                                size="sm"
+                                                loading={submitting}
+                                            >
+                                                {buttonStatus === "preparing" ? 'Preparing...' :
+                                                    buttonStatus === "submitting" ? 'Submitting...' :
+                                                        buttonStatus === "verifying" ? 'Verifying...' :
+                                                            'Continue'}
+                                            </Button>
+                                        </ButtonWrapper>
+                                        {submitError && (
+                                            <div style={{ color: '#f66', marginTop: '0.5rem', fontSize: '0.8rem' }}>{submitError}</div>
+                                        )}
                                     </>
-                                )}
-                                <UsernameLabel>Choose your username:</UsernameLabel>
-                                <StyledInputBox
-                                    placeholder=""
-                                    value={usernameInput}
-                                    onChange={(e) => {
-                                        const raw = e.target.value;
-                                        const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
-                                        const maxLen = getMaxInputLength(true);
-                                        // If params not loaded yet, allow up to 100 chars temporarily
-                                        setUsernameInput(cleaned.slice(0, maxLen ?? 100));
-                                        setSubmitError("");
-                                    }}
-                                    onKeyDown={async (e) => {
-                                        if (e.key === 'Enter') {
-                                            e.preventDefault();
-                                            await handleContinue(e);
-                                        }
-                                    }}
-                                    onPaste={(e) => {
-                                        // Block paste to prevent accidental seed phrase entry
-                                        e.preventDefault();
-                                    }}
-                                    maxLength={getMaxInputLength(true) || 100}
-                                    name="display-name-entry"
-                                    id="display-name-entry"
-                                    autoComplete="one-time-code"
-                                    autoCorrect="off"
-                                    autoCapitalize="off"
-                                    spellCheck="false"
-                                    data-lpignore="true"
-                                    data-1p-ignore="true"
-                                    data-bwignore="true"
-                                    data-form-type="other"
-                                />
-                                <ButtonWrapper>
-                                    <Button
-                                        onClick={handleContinue}
-                                        disabled={submitting || (Date.now() < cooldownUntil) || (usernameFinal.trim() === '')}
-                                        fullWidth
-                                        size="sm"
-                                        loading={submitting}
-                                    >
-                                        {buttonStatus === "preparing" ? 'Preparing...' :
-                                            buttonStatus === "submitting" ? 'Submitting...' :
-                                                buttonStatus === "verifying" ? 'Verifying...' :
-                                                    'Continue'}
-                                    </Button>
-                                </ButtonWrapper>
-                                {submitError && (
-                                    <div style={{ color: '#f66', marginTop: '0.5rem', fontSize: '0.8rem' }}>{submitError}</div>
                                 )}
                             </StyledInfo>
                         </Centered>

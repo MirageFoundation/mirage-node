@@ -90,11 +90,16 @@ def init_backend_schema() -> None:
                     user_address VARCHAR(64) PRIMARY KEY,
                     referrer_address VARCHAR(64) NOT NULL,
                     referred_at BIGINT NOT NULL,
-                    created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+                    created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+                    client_hash TEXT
                 )
             """
             )
+            cur.execute("ALTER TABLE referral_links ADD COLUMN IF NOT EXISTS client_hash TEXT")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_links_referrer ON referral_links(referrer_address)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_referral_links_client_hash ON referral_links(client_hash) WHERE client_hash IS NOT NULL"
+            )
 
             cur.execute(
                 """
@@ -179,6 +184,21 @@ def init_backend_schema() -> None:
                     updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
                 )
             """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS referral_user_settings (
+                    owner TEXT PRIMARY KEY,
+                    precheck_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    updated_at BIGINT NOT NULL,
+                    CONSTRAINT referral_user_settings_owner_lower CHECK (owner = LOWER(owner))
+                )
+            """
+            )
+            _assert_table_schema(
+                "referral_user_settings",
+                {"owner", "precheck_enabled", "updated_at"},
             )
 
             # ── Reports ──────────────────────────────────────────────────

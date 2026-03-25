@@ -483,9 +483,10 @@ class TransactionHandler {
     /**
      * @param {string} usernameRaw
      * @param {string} [inviteCode] - Optional invite code used for account creation
+     * @param {string} [referrerUsername] - Optional referrer username (from /signup?ref=)
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
-    async createUser(usernameRaw, inviteCode = "") {
+    async createUser(usernameRaw, inviteCode = "", referrerUsername = "") {
         try {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
@@ -521,8 +522,8 @@ class TransactionHandler {
                 pow_factor,
                 // Use a slightly past timestamp to avoid envelope_timestamp-in-future due to clock skew
                 timestamp: Math.max(0, Date.now() - 15000),
-                // Include invite code if provided (backend marks it as used)
                 invite_code: inviteCode || "",
+                referrer_username: referrerUsername || "",
             };
 
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
@@ -1775,6 +1776,9 @@ class TransactionHandler {
         if (data.username !== undefined) Storage.save('username', data.username);
         if (data.user_level !== undefined && data.user_level !== null) Storage.save('user_level', String(data.user_level));
         if (data.server_balance !== undefined) Storage.save('server_balance', String(data.server_balance));
+        if (data.referral_precheck_enabled !== undefined) {
+            Storage.save('referral_precheck_enabled', data.referral_precheck_enabled === true);
+        }
         const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
         if (balanceVal !== undefined) {
             this._persistUserBalance(balanceVal);
@@ -3677,20 +3681,12 @@ class TransactionHandler {
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                // Include invite_code if present (for recruit quest completion)
                 if (transaction.invite_code) {
                     toRelay.invite_code = transaction.invite_code;
-                    console.log('[InviteCode] Added invite_code to set_username request:', transaction.invite_code);
                 }
-                // Include referrer if present (for referral system)
-                try {
-                    const referrer = localStorage.getItem('referrer_address');
-                    console.log('[Referral] Reading from localStorage:', referrer);
-                    if (referrer && referrer.startsWith('mirage1') && referrer.length >= 39) {
-                        toRelay.referrer = referrer;
-                        console.log('[Referral] Added referrer to set_username request:', referrer);
-                    }
-                } catch (e) { console.error('[Referral] Error reading referrer:', e); }
+                if (transaction.referrer_username) {
+                    toRelay.referrer_username = transaction.referrer_username;
+                }
                 endpoint = 'core/set_username';
             } else if (msgName === 'MsgSetBiography') {
                 const difficulty = resolveTxDifficulty(transaction);
