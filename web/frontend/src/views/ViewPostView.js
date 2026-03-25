@@ -3363,7 +3363,7 @@ function ViewPostView({ state, updatePost }) {
                 <MetaRow>
                     <VoteSection inline state={state} post={post} updatePost={updatePost} />
                     <MetaSeparatorAction>•</MetaSeparatorAction>
-                    <Link to="/create_account" style={{ fontSize: '0.7rem', color: 'inherit', textDecoration: 'underline' }}>Sign in to participate</Link>
+                    <Link to="/signup" style={{ fontSize: '0.7rem', color: 'inherit', textDecoration: 'underline' }}>Sign in to participate</Link>
                 </MetaRow>
             );
         }

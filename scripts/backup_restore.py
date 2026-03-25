@@ -302,15 +302,26 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     """,
     )
 
-    # Step 2: Dump PostgreSQL (services stopped, only postgres running)
-    status("Dumping PostgreSQL database...")
+    # Step 2: Dump PostgreSQL databases (services stopped, only postgres running)
+    status("Dumping PostgreSQL databases (indexer + backend)...")
     run_ssh(
         conn,
         """
         docker exec mirage bash -c '
             pg_ctlcluster 16 main start 2>/dev/null || true
             sleep 2
-            PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/backup_indexer.sql
+            # Try new DB name first, fall back to legacy name
+            INDEXER_DB=$(PGPASSWORD=mirage psql -h 127.0.0.1 -U mirage -tAc "SELECT datname FROM pg_database WHERE datname IN ('"'"'mirage_indexer'"'"','"'"'mirage'"'"') ORDER BY datname DESC LIMIT 1" postgres 2>/dev/null)
+            INDEXER_DB=${INDEXER_DB:-mirage_indexer}
+            # Detect indexer role (mirage_indexer or legacy mirage)
+            DUMP_USER=$(PGPASSWORD=mirage psql -h 127.0.0.1 -U mirage -tAc "SELECT 1 FROM pg_roles WHERE rolname='"'"'mirage_indexer'"'"'" postgres 2>/dev/null | tr -d " ")
+            if [ "$DUMP_USER" = "1" ]; then
+                DUMP_ROLE=mirage_indexer; DUMP_PASS=mirage_indexer
+            else
+                DUMP_ROLE=mirage; DUMP_PASS=mirage
+            fi
+            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U $DUMP_ROLE -d $INDEXER_DB > /root/.mirage/backup_indexer.sql
+            PGPASSWORD=$DUMP_PASS pg_dump -h 127.0.0.1 -U $DUMP_ROLE -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
         '
     """,
     )
@@ -371,9 +382,9 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     status("Starting container...")
     run(f"ssh {conn} 'docker start mirage'")
 
-    # Step 6: Cleanup remote (just the SQL dump, no tarball to clean)
+    # Step 6: Cleanup remote (SQL dumps, no tarball to clean)
     status("Cleaning up remote...")
-    run(f"ssh {conn} 'rm -f /root/.mirage/backup_indexer.sql'")
+    run(f"ssh {conn} 'rm -f /root/.mirage/backup_indexer.sql /root/.mirage/backup_backend.sql'")
 
     # Report size
     size_gb = local_path.stat().st_size / (1024**3)
@@ -643,17 +654,38 @@ if [ ! -f /root/.mirage/backup_indexer.sql ]; then
     exit 1
 fi
 
-echo "Dropping and recreating database..."
-su - postgres -c "psql -c 'DROP DATABASE IF EXISTS mirage'"
+echo "Dropping and recreating databases..."
+su - postgres -c "psql -c 'DROP DATABASE IF EXISTS mirage_indexer'"
+su - postgres -c "psql -c 'DROP DATABASE IF EXISTS mirage_backend'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_indexer_ro'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_indexer'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_backend'"
+su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage_ro'"
 su - postgres -c "psql -c 'DROP ROLE IF EXISTS mirage'"
-su - postgres -c "psql -c \"CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage'\""
-su - postgres -c "psql -c 'CREATE DATABASE mirage OWNER mirage'"
+su - postgres -c "psql -c \"CREATE ROLE mirage_indexer WITH LOGIN PASSWORD 'mirage_indexer'\""
+su - postgres -c "psql -c \"CREATE ROLE mirage_indexer_ro WITH LOGIN PASSWORD 'mirage_indexer_ro'\""
+su - postgres -c "psql -c \"CREATE ROLE mirage_backend WITH LOGIN PASSWORD 'mirage_backend'\""
+su - postgres -c "psql -c 'CREATE DATABASE mirage_indexer OWNER mirage_indexer'"
+su - postgres -c "psql -c 'CREATE DATABASE mirage_backend OWNER mirage_backend'"
 
-echo "Restoring SQL dump..."
-su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage -f /root/.mirage/backup_indexer.sql"
+echo "Restoring indexer SQL dump..."
+su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage_indexer -f /root/.mirage/backup_indexer.sql"
 
-echo "Cleaning up SQL dump..."
-rm -f /root/.mirage/backup_indexer.sql
+echo "Granting read-only access on indexer DB..."
+su - postgres -c "psql -d mirage_indexer -c 'GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro'"
+su - postgres -c "psql -d mirage_indexer -c 'GRANT USAGE ON SCHEMA public TO mirage_indexer_ro'"
+su - postgres -c "psql -d mirage_indexer -c 'GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro'"
+su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro\""
+
+if [ -f /root/.mirage/backup_backend.sql ]; then
+    echo "Restoring backend SQL dump..."
+    su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage_backend -f /root/.mirage/backup_backend.sql"
+else
+    echo "No backend SQL dump found, backend DB will be initialized by the application"
+fi
+
+echo "Cleaning up SQL dumps..."
+rm -f /root/.mirage/backup_indexer.sql /root/.mirage/backup_backend.sql
 
 echo "Stopping PostgreSQL..."
 pg_ctlcluster 16 main stop -m fast
@@ -934,8 +966,8 @@ Examples:
 
                     # Wait 2 minutes between servers to ensure stability
                     if i < len(ALL_SERVERS):
-                        status(f"Waiting 2 minutes before next backup...")
-                        time.sleep(120)
+                        status(f"Waiting 60 seconds before next backup...")
+                        time.sleep(60)
                 except Exception as e:
                     print(f"ERROR: Backup failed for {server}: {e}", file=sys.stderr)
                     results.append((server, "FAILED", str(e)))

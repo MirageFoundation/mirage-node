@@ -259,17 +259,22 @@ def test_agents(backend: str):
     except Exception as e:
         _fail("agents.set_agents_clear", str(e))
 
-    time.sleep(3)
-
-    code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
-    if code_followed == 200:
-        got_order = [str(a).lower() for a in (followed or {}).get("enabled_agents") or []]
-        if got_order:
-            _fail("agents.set_agents_clear_reflected", f"count={len(got_order)}")
-        else:
-            _pass("agents.set_agents_clear_reflected")
-    else:
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    cleared = False
+    while time.perf_counter() < deadline:
+        time.sleep(2)
+        code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
+        if code_followed == 200:
+            got_order = [str(a).lower() for a in (followed or {}).get("enabled_agents") or []]
+            if not got_order:
+                cleared = True
+                break
+    if cleared:
+        _pass("agents.set_agents_clear_reflected")
+    elif code_followed != 200:
         _fail("agents.set_agents_clear_reflected", f"code={code_followed}")
+    else:
+        _fail("agents.set_agents_clear_reflected", f"count={len(got_order)}")
 
     # 13.9 SetAgents: reject duplicate agent addresses
     try:

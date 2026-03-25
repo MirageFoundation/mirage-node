@@ -28,7 +28,7 @@ The Mirage deployment system packages all components into a single Docker contai
 - **Blockchain Node** (miraged) - CometBFT consensus + Cosmos SDK app
 - **Web Backend** (Flask/Gunicorn) - API relay layer
 - **Indexer** (Python) - PostgreSQL-backed chain indexer
-- **PostgreSQL** - Database for indexed data
+- **PostgreSQL** - Two databases: `mirage_indexer` (indexer) and `mirage_backend` (backend-owned data)
 - **Caddy** - Reverse proxy with automatic HTTPS
 - **Optional Services**: Bridge Orchestrator
 
@@ -60,11 +60,13 @@ Traditional microservices would split each component into separate containers. M
 │  │  │  :80/443 │  │ :26656/7 │  │  :5000   │  │       :5432          ││    │
 │  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┬───────────┘│    │
 │  │       │             │             │                   │            │    │
-│  │       │         ┌───┴───┐         │       ┌───────────┴─────┐      │    │
-│  │       │         │Indexer│─────────┼───────►   Indexed Data  │      │    │
+│  │       │         ┌───┴───┐         │       ┌───────────┴──────────┐  │    │
+│  │       │         │Indexer│────────RW──────►│  mirage_indexer DB   │  │    │
 │  │       │         └───────┘         │       └─────────────────┘      │    │
-│  │       │                           │                                │    │
-│  │       └───────────────────────────┘                                │    │
+│  │       │                           │       ┌─────────────────┐      │    │
+│  │       │                        ───RW─────►│ mirage_backend  │      │    │
+│  │       │                        ───RO─────►│ mirage_indexer  │      │    │
+│  │       └───────────────────────────┘       └─────────────────┘      │    │
 │  │                   │                                                │    │
 │  │           reverse_proxy /api/*                                     │    │
 │  │                                                                     │    │
@@ -296,26 +298,33 @@ The `entrypoint.sh` script orchestrates service startup:
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Load environment files
+# 1. Sync env files with templates (fills in defaults from deploy/templates/env/)
+python3 -c "from deploy.migrations._helpers import sync_all; ..."
+
+# 2. Load environment files
 load_env_files  # ~/.mirage/env/*.env
 
-# 2. Run deploy migrations
-python3 -m deploy.migrations --config-dir "$ENV_DIR"
+# 3. Validate required env vars (INDEXER_DB_URL, INDEXER_DB_RO_URL, BACKEND_DB_URL)
 
-# 3. Set container hostname
-hostname "${DOMAIN//./-}"  # From DOMAIN env var
+# 4. Set container hostname
+hostname "${DOMAIN//./-}"
 
-# 4. Run initialization (init.sh)
+# 5. Run initialization (init.sh)
 bash "$ROOT_DIR/deploy/init.sh"
 
-# 5. Render Caddyfile template
+# 6. Render Caddyfile template
 python3 render_template.py templates/caddy/Caddyfile /etc/caddy/Caddyfile
 
-# 6. Start tmux session
+# 7. Start tmux session
 tmux new-session -d -s mirage
 
-# 7. Start services in order:
-#    Caddy → PostgreSQL → Node → Indexer → Backend → (optional: Orchestrator)
+# 8. Start services in order:
+#    Caddy → PostgreSQL → (wait for pg_isready)
+#    → Migrate DB/role names if needed (mirage → mirage_indexer, etc.)
+#    → Ensure both DBs exist (mirage_indexer + mirage_backend) + mirage_indexer_ro role
+#    → Initialize backend schema (init_backend_schema)
+#    → Run deploy migrations
+#    → Node → Indexer → Backend → (optional: Orchestrator)
 ```
 
 ### Service Dependencies
@@ -328,6 +337,12 @@ tmux new-session -d -s mirage
 │  Caddy (immediate)                                                           │
 │    ↓                                                                         │
 │  PostgreSQL (immediate, wait for pg_isready)                                 │
+│    ↓                                                                         │
+│  Migrate DB/role names (one-time: mirage → mirage_indexer, etc.)             │
+│    ↓                                                                         │
+│  Ensure DBs + roles (mirage_indexer, mirage_backend, mirage_indexer_ro)      │
+│    ↓                                                                         │
+│  init_backend_schema + deploy migrations                                     │
 │    ↓                                                                         │
 │  Node (immediate, wait for RPC http://127.0.0.1:26657/status)               │
 │    ↓                                                                         │
@@ -437,10 +452,20 @@ Configuration is stored in `~/.mirage/env/`:
 | File | Purpose |
 |------|---------|
 | `node.env` | MONIKER, DOMAIN, PERSISTENT_PEERS, PEX_ENABLED |
-| `backend.env` | Backend-specific settings |
-| `indexer.env` | INDEXER_DB_URL, INDEXER_ENABLED |
+| `backend.env` | Backend settings + DB URLs (INDEXER_DB_RO_URL, BACKEND_DB_URL) |
+| `indexer.env` | Indexer settings + DB URLs (INDEXER_DB_URL, INDEXER_DB_RO_URL, BACKEND_DB_URL) |
 | `secrets.env` | Sensitive values (excluded from git) |
 | `orchestrator.env` | ORCHESTRATOR_ENABLED, Solana RPC URL |
+
+**Critical DB variables (must be set):**
+
+| Variable | Canonical Location | Used By |
+|----------|-------------------|---------|
+| `INDEXER_DB_URL` | `indexer.env` | Indexer (read-write to `mirage_indexer`), migration scripts |
+| `INDEXER_DB_RO_URL` | `indexer.env` + `backend.env` | Backend (read-only access to `mirage_indexer` via `mirage_indexer_ro` role) |
+| `BACKEND_DB_URL` | `backend.env` + `indexer.env` | Backend (read-write to `mirage_backend` DB) |
+
+All env files are loaded in order (`backend.env`, `indexer.env`, `secrets.env`, …) via `set -a; . file; set +a`. If a variable appears in multiple files, the **last file loaded wins**. The env sync mechanism (`_helpers.sync_all`) ensures template defaults are applied for any missing keys, but **never overwrites** user-set values. The entrypoint enforces that all three DB URLs are present — the container will fail to start if any are missing.
 
 ### Template Rendering
 
@@ -469,9 +494,10 @@ The `deploy/migrations/` module handles configuration evolution:
 # v1_8_0_economics.py - Add new economic parameters
 # v1_9_0_indexer_env_rename.py - Rename env vars
 # v1_9_0_p2p_rate_limiting.py - Enable P2P rate limits
+# v1_21_10_migrate_backend_db.py - One-time data migration from indexer → backend DB
 ```
 
-Migrations run automatically on startup and are idempotent.
+Migrations run automatically on startup. Each migration runs once and is tracked in `~/.mirage/env/.migrations`. On fresh deployments (no existing data), all existing migrations are skipped. If a migration fails, the entrypoint aborts immediately (fail-fast).
 
 ---
 

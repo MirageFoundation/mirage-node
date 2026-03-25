@@ -332,7 +332,7 @@ function TopBar({ state }) {
     const location = useLocation();
     const navigate = useNavigate();
     const pathname = location?.pathname || "";
-    const isAuthRoute = pathname === "/login" || pathname === "/create_account";
+    const isAuthRoute = pathname === "/login" || pathname === "/signup";
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load("publicKey", "");
     const username = (state && state.username) ? state.username : Storage.load("username", "");
     const hasPublicKey = !!publicKey;
@@ -474,7 +474,7 @@ function TopBar({ state }) {
                     </BalanceDisplay>
                 )}
                 {showAuthButton && (
-                    <Button to="/create_account" variant="secondary" size="pill">Sign in / Create account</Button>
+                    <Button to="/signup" variant="secondary" size="pill">Sign in / Sign up</Button>
                 )}
                 {hasPublicKey && (
                     <UserControls>

@@ -10,8 +10,4 @@ MIGRATION_KEY = "v1.16.0_similarity_overhaul"
 
 
 def run(db, chain, logger):
-    with db._connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM user_similarity_cache")
-            deleted = cur.rowcount
-    return f"cleared {deleted} stale cache rows"
+    return "skipped: table moved to backend DB"

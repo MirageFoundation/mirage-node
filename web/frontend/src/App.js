@@ -134,7 +134,7 @@ const SiteContainer = styled.div`
 // Routes that should not be saved/restored
 const excludedRoutes = [
     '/login',
-    '/create_account',
+    '/signup',
     '/welcome',
     '/sign_out',
     '/p/',
@@ -960,7 +960,7 @@ class App extends Component {
                                             />
 
                                             <Route path="/create_post" element={<CreatePostView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} />} />
-                                            <Route path="/create_account" element={<CreateAccountView state={this.state} setCredentials={this.setCredentials} />} />
+                                            <Route path="/signup" element={<CreateAccountView state={this.state} setCredentials={this.setCredentials} />} />
                                             <Route path="/login" element={<LoginView state={this.state} setCredentials={this.setCredentials} />} />
                                             <Route path="/welcome" element={<WelcomeView state={this.state} />} />
                                             <Route path="/change_username" element={<ChangeUsernameView state={this.state} />} />

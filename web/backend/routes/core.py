@@ -17,9 +17,10 @@ import os
 import random
 import re
 import time
+import threading
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, has_request_context
 from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED, PUSH_NOTIFICATIONS_ENABLED
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
@@ -56,9 +57,11 @@ from shared.datatypes import (
 )
 
 from logging_utils import log_event, next_request_id, logger
-from node import derive_address_from_pubkey, min_gas_price_umirage, require_runtime
+from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
-from db import connect_db
+from db import connect_db, connect_backend_db
+from user_last_seen import update_user_last_seen
+from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
 from pow import (
     argon2_digest,
     canon_base_post,
@@ -121,12 +124,48 @@ from psycopg.types.json import Jsonb
 
 core_bp = Blueprint("core", __name__)
 
+
+def derive_address_from_pubkey(pub_dec: bytes) -> str:
+    addr = _derive_address_from_pubkey(pub_dec)
+    if addr:
+        source = request.path if has_request_context() else ""
+        update_user_last_seen(addr, source=source)
+    return addr
+
+
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
 # state changes between simulation and execution, and storage write costs
 # (WriteFlat) that vary based on key/value sizes.
 GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
+
+
+# ── Quest tracker (lazy singleton, backend-owned DB) ────────────────────────
+_quest_tracker_instance = None
+_quest_tracker_lock = threading.Lock()
+
+
+def _get_quest_tracker():
+    """Lazy-init the backend quest tracker (uses connect_backend_db)."""
+    global _quest_tracker_instance
+    if _quest_tracker_instance is None:
+        with _quest_tracker_lock:
+            if _quest_tracker_instance is None:
+                from quest_tracker import QuestTracker
+
+                _quest_tracker_instance = QuestTracker(connect_backend_db)
+                logger().debug("Quest tracker initialized")
+    return _quest_tracker_instance
+
+
+def _track_quest_progress(user_addr: str, action_type: str, ts: int, **kwargs) -> None:
+    """Fire-and-forget quest progress update after a successful tx."""
+    try:
+        qt = _get_quest_tracker()
+        qt.update_progress(user_addr, action_type, ts, **kwargs)
+    except Exception as e:
+        logger().warning("Quest progress tracking failed for %s/%s: %s", user_addr[:12], action_type, e)
 
 
 def _db_get_profile_level(addr: str) -> int | None:
@@ -210,7 +249,7 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
     now_ts = int(time.time())
     day_utc = _get_utc_julian_day(now_ts)
 
-    with connect_db() as conn:
+    with connect_backend_db() as conn:
         with conn.cursor() as cur:
             # Step 1: Find the invite code used by this new user
             cur.execute(
@@ -340,7 +379,7 @@ def _guard_push_request(owner: str, action: str, timestamp_ms: int, nonce: int):
 
     try:
         cutoff = int(time.time()) - PUSH_NONCE_TTL_SECONDS
-        with connect_db(timeout=5.0, busy_timeout_ms=10000) as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM push_nonces WHERE created_at < %s", (cutoff,))
                 cur.execute(
@@ -737,7 +776,7 @@ def core_set_username():
 
                 # Validate that the invite code exists and is unused
                 try:
-                    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                    with connect_backend_db() as conn:
                         cur = conn.cursor()
                         cur.execute(
                             "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
@@ -807,7 +846,7 @@ def core_set_username():
             if referrer != user_addr.lower():
                 try:
                     now_ts = int(time.time())
-                    with connect_db() as conn:
+                    with connect_backend_db() as conn:
                         with conn.cursor() as cur:
                             cur.execute(
                                 """
@@ -826,7 +865,7 @@ def core_set_username():
             # Only mark as used if transaction succeeded (code == 0)
             try:
                 now_ts = int(time.time())
-                with connect_db() as conn:
+                with connect_backend_db() as conn:
                     with conn.cursor() as cur:
                         # Only mark as used if it exists and is not already used (double-check)
                         cur.execute(
@@ -2536,10 +2575,9 @@ def core_delete_post():
             return _tx_error(rid, "core/delete_post", "MsgDelete", code, tx_hash, raw_log, extra)
 
         try:
-            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            with connect_backend_db() as conn:
                 cur = conn.cursor()
                 cur.execute("DELETE FROM reports WHERE LOWER(target) = LOWER(%s)", (target,))
-                conn.commit()
                 deleted_count = cur.rowcount
                 log_event(rid, "delete_post.reports_removed", target=target[:16], count=deleted_count)
         except Exception as e:
@@ -2776,8 +2814,7 @@ def core_report():
         except Exception as ve:
             return jsonify({"error": "invalid signature", "detail": str(ve)[:120]}), 400
 
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
+        with connect_backend_db() as conn:
             cur = conn.cursor()
             ts = int(time.time())
             cur.execute(
@@ -2786,12 +2823,6 @@ def core_report():
             )
             row = cur.fetchone()
             report_id = row[0] if row else 0
-            conn.commit()
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
         return jsonify({"success": True, "id": int(report_id)})
     except Exception as e:
@@ -2811,21 +2842,16 @@ def core_resolve_report():
         if not address or report_id <= 0:
             return jsonify({"error": "missing required fields"}), 400
 
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
             cur.execute("SELECT level FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1", (address,))
             row = cur.fetchone()
             level = int(row[0]) if row and row[0] is not None else 0
-            if level < 100:
-                return jsonify({"error": "forbidden"}), 403
+        if level < 100:
+            return jsonify({"error": "forbidden"}), 403
+        with connect_backend_db() as conn:
+            cur = conn.cursor()
             cur.execute("DELETE FROM reports WHERE id = %s", (int(report_id),))
-            conn.commit()
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
         return jsonify({"success": True})
     except Exception as e:
         log_event(rid, "resolve_report.err", error=str(e))
@@ -3517,6 +3543,42 @@ def core_post():
         except Exception:
             pass
 
+        now_ts = int(time.time())
+        quest_action = "comment" if target else "post"
+        _track_quest_progress(
+            user_addr,
+            quest_action,
+            now_ts,
+            topic=topic,
+            target_topic=topic,
+            content_length=len(content),
+        )
+        if not target and topic:
+            _track_quest_progress(
+                user_addr,
+                "unique_topic_post",
+                now_ts,
+                topic=topic,
+                content_length=len(content),
+            )
+
+        try:
+            from shared.push import send_push_for_reply, send_push_for_mentions
+
+            if not poster_username:
+                poster_username = _get_username_for_owner(user_addr)
+
+            if is_comment and target:
+                reply_key = reply_event_key(tx_hash)
+                if mark_push_event_seen(reply_key, "reply", now_ts):
+                    send_push_for_reply(user_addr, poster_username, target, content, tx_hash)
+
+            mention_key = mention_event_key(tx_hash)
+            if mark_push_event_seen(mention_key, "mention", now_ts):
+                send_push_for_mentions(user_addr, poster_username, content, tx_hash, target or "")
+        except Exception as push_err:
+            log_event(rid, "post.push_err", error=str(push_err))
+
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
@@ -3717,6 +3779,25 @@ def core_vote():
                 _log_user_action(username, client_ip, "vote", target_log, str(tx_hash or "").lower())
         except Exception:
             pass
+
+        now_ts = int(time.time())
+        _track_quest_progress(
+            user_addr,
+            "vote",
+            now_ts,
+            target=target,
+            vote_direction=int(direction),
+            vote_is_change=False,
+        )
+        _track_quest_progress(
+            user_addr,
+            "balanced_vote",
+            now_ts,
+            target=target,
+            vote_direction=int(direction),
+            vote_is_change=False,
+        )
+
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "vote.err", error=str(e))
@@ -4280,6 +4361,16 @@ def core_award():
         except Exception:
             pass
 
+        try:
+            from shared.push import send_push_for_award
+
+            awarder_username = _get_username_for_owner(user_addr)
+            award_key = award_event_key(user_addr, target)
+            if mark_push_event_seen(award_key, "award", int(time.time())):
+                send_push_for_award(user_addr, awarder_username, post_owner, target, award_type)
+        except Exception as push_err:
+            log_event(rid, "award.push_err", error=str(push_err))
+
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "award.err", error=str(e))
@@ -4346,7 +4437,7 @@ def core_register_push_token():
             return err[0], err[1]
 
         now_ts = int(time.time())
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT owner FROM push_tokens WHERE token = %s LIMIT 1", (token,))
                 existing = cur.fetchone()
@@ -4365,8 +4456,7 @@ def core_register_push_token():
                 )
 
         is_new = not existing
-        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform,
-                  token=token[:30], new=is_new)
+        log_event(rid, "register_push_token.ok", user=user_addr, platform=platform, token=token[:30], new=is_new)
         return jsonify({"ok": True})
     except Exception as e:
         log_event(rid, "register_push_token.err", error=str(e))
@@ -4420,7 +4510,7 @@ def core_unregister_push_token():
         if not ok:
             return err[0], err[1]
 
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+        with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM push_tokens WHERE token = %s AND LOWER(owner) = LOWER(%s)",
@@ -4428,8 +4518,7 @@ def core_unregister_push_token():
                 )
                 deleted = cur.rowcount
 
-        log_event(rid, "unregister_push_token.ok", user=user_addr,
-                  token=token[:30], deleted=deleted)
+        log_event(rid, "unregister_push_token.ok", user=user_addr, token=token[:30], deleted=deleted)
         return jsonify({"ok": True})
     except Exception as e:
         log_event(rid, "unregister_push_token.err", error=str(e))

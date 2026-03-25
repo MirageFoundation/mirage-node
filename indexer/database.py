@@ -250,23 +250,7 @@ class DatabaseManager:
                     """
                 )
 
-                # User similarity cache for home feed (similar users recommendations)
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS user_similarity_cache (
-                        owner TEXT NOT NULL,
-                        similar_user TEXT NOT NULL,
-                        similarity DOUBLE PRECISION NOT NULL,
-                        shared_dims INT NOT NULL,
-                        computed_at BIGINT NOT NULL,
-                        expires_at BIGINT NOT NULL,
-                        PRIMARY KEY (owner, similar_user)
-                    )
-                    """
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_similarity_owner_expires ON user_similarity_cache(LOWER(owner), expires_at)"
-                )
+                # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
                 # profiles
                 cur.execute(
@@ -438,75 +422,7 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))"
                 )
 
-                # reports
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS reports (
-                        id SERIAL PRIMARY KEY,
-                        owner TEXT NOT NULL,
-                        target TEXT NOT NULL,
-                        reason TEXT NOT NULL,
-                        created_at BIGINT NOT NULL
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_reports_target_lower ON reports(LOWER(target))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC)")
-
-                # stats_events (bot requests are filtered at ingest, no raw user-agent/IP stored)
-                # browser_family, os_family, device_type are coarse categories only
-                # (e.g. "Chrome", "Windows", "desktop") -- not identifying
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS stats_events (
-                        id SERIAL PRIMARY KEY,
-                        event_type TEXT NOT NULL,
-                        user_address TEXT,
-                        session_id TEXT NOT NULL,
-                        created_at BIGINT NOT NULL,
-                        page_path TEXT,
-                        browser_family TEXT,
-                        os_family TEXT,
-                        device_type TEXT
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_created_at ON stats_events(created_at DESC)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_session_id ON stats_events(session_id)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_user_address ON stats_events(user_address)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_event_type ON stats_events(event_type)")
-                # Migration: add coarse UA category columns and drop invasive columns
-                for col in ("browser_family", "os_family", "device_type"):
-                    cur.execute(
-                        f"""
-                        DO $$
-                        BEGIN
-                            IF NOT EXISTS (
-                                SELECT 1 FROM information_schema.columns
-                                WHERE table_name = 'stats_events' AND column_name = '{col}'
-                            ) THEN
-                                ALTER TABLE stats_events ADD COLUMN {col} TEXT;
-                            END IF;
-                        END $$;
-                        """
-                    )
-                # Drop columns that stored raw user-agent, IP hashes, and referrers
-                for col in ("user_agent", "ip_hash", "referrer"):
-                    cur.execute(
-                        f"""
-                        DO $$
-                        BEGIN
-                            IF EXISTS (
-                                SELECT 1 FROM information_schema.columns
-                                WHERE table_name = 'stats_events' AND column_name = '{col}'
-                            ) THEN
-                                ALTER TABLE stats_events DROP COLUMN {col};
-                            END IF;
-                        END $$;
-                        """
-                    )
-                # Drop the entire fingerprints table if it exists
-                cur.execute("DROP TABLE IF EXISTS user_fingerprints")
+                # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
                 # difficulty_history - tracks PoW difficulty and message count over time
                 cur.execute(
@@ -629,114 +545,7 @@ class DatabaseManager:
                     """
                 )
 
-                # ========== Referral System Tables (prefixed for easy cleanup) ==========
-                # referral_links: who referred whom (immutable once set)
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS referral_links (
-                        user_address VARCHAR(64) PRIMARY KEY,
-                        referrer_address VARCHAR(64) NOT NULL,
-                        referred_at BIGINT NOT NULL,
-                        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-                    )
-                    """
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_referral_links_referrer ON referral_links(referrer_address)"
-                )
-
-                # referral_pending_rewards: pending rewards per period
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS referral_pending_rewards (
-                        id SERIAL PRIMARY KEY,
-                        user_address VARCHAR(64) NOT NULL,
-                        period_start BIGINT NOT NULL,
-                        period_end BIGINT NOT NULL,
-                        self_active_days INT DEFAULT 0,
-                        self_reward DECIMAL(20,6) DEFAULT 0,
-                        referral_reward DECIMAL(20,6) DEFAULT 0,
-                        total_pending DECIMAL(20,6) DEFAULT 0,
-                        status VARCHAR(20) DEFAULT 'pending',
-                        admin_notes TEXT,
-                        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-                        approved_at BIGINT,
-                        paid_at BIGINT,
-                        paid_txhash VARCHAR(64),
-                        UNIQUE(user_address, period_start)
-                    )
-                    """
-                )
-
-                # referral_trust_scores: referrer trust based on approval rate
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS referral_trust_scores (
-                        referrer_address VARCHAR(64) PRIMARY KEY,
-                        trust_score DECIMAL(5,2) DEFAULT 1.0,
-                        total_referrals INT DEFAULT 0,
-                        approved_referrals INT DEFAULT 0,
-                        rejected_referrals INT DEFAULT 0,
-                        last_updated BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-                    )
-                    """
-                )
-
-                # referral_analysis: per-referee analysis results
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS referral_analysis (
-                        id SERIAL PRIMARY KEY,
-                        referee_address VARCHAR(64) NOT NULL,
-                        referrer_address VARCHAR(64) NOT NULL,
-                        analysis_date BIGINT NOT NULL,
-                        classification VARCHAR(20),
-                        confidence DECIMAL(3,2),
-                        similarity_to_referrer DECIMAL(3,2),
-                        flags TEXT[],
-                        recommendation VARCHAR(20),
-                        admin_decision VARCHAR(20),
-                        decided_at BIGINT,
-                        UNIQUE(referee_address, analysis_date)
-                    )
-                    """
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_referral_analysis_referrer ON referral_analysis(referrer_address)"
-                )
-
-                # referral_user_accruals: tracks actual accrued amounts per referee
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS referral_user_accruals (
-                        beneficiary_address VARCHAR(64) NOT NULL,
-                        referee_address VARCHAR(64) NOT NULL,
-                        level INT NOT NULL,
-                        pending DECIMAL(20,6) DEFAULT 0,
-                        paid DECIMAL(20,6) DEFAULT 0,
-                        denied DECIMAL(20,6) DEFAULT 0,
-                        last_updated BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-                        PRIMARY KEY (beneficiary_address, referee_address)
-                    )
-                    """
-                )
-                # Add denied column if it doesn't exist (for existing databases)
-                cur.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'referral_user_accruals' AND column_name = 'denied'
-                        ) THEN
-                            ALTER TABLE referral_user_accruals ADD COLUMN denied DECIMAL(20,6) DEFAULT 0;
-                        END IF;
-                    END $$;
-                    """
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_referral_user_accruals_beneficiary ON referral_user_accruals(beneficiary_address)"
-                )
+                # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
                 # user_topic_stats: per-user per-topic voting stats for vote weighting
                 cur.execute(
@@ -813,20 +622,7 @@ class DatabaseManager:
                     """
                 )
 
-                # invite_codes: invite-only registration system
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS invite_codes (
-                        code VARCHAR(9) PRIMARY KEY,
-                        owner TEXT NOT NULL,
-                        used_by TEXT,
-                        created_at BIGINT NOT NULL,
-                        used_at BIGINT
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_owner ON invite_codes(LOWER(owner))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_used_by ON invite_codes(LOWER(used_by))")
+                # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
                 # ========== Bridge Transaction Tables ==========
                 # bridge_transactions: tracks all bridge-related messages for status queries
@@ -920,76 +716,7 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_edits_agent ON agent_edits(LOWER(agent_address))")
                 cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_edits_txhash ON agent_edits(edit_txhash)")
 
-                # ========== Push Notification Tables ==========
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS push_tokens (
-                        id SERIAL PRIMARY KEY,
-                        owner TEXT NOT NULL,
-                        token TEXT NOT NULL UNIQUE,
-                        platform TEXT NOT NULL,
-                        created_at BIGINT NOT NULL,
-                        last_used_at BIGINT NOT NULL
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_tokens_owner_lower ON push_tokens(LOWER(owner))")
-
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS push_budget (
-                        owner TEXT PRIMARY KEY,
-                        remaining INT NOT NULL DEFAULT 3,
-                        last_reset_at BIGINT NOT NULL DEFAULT 0,
-                        CONSTRAINT push_budget_owner_lower CHECK (owner = LOWER(owner))
-                    )
-                    """
-                )
-
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS push_throttle (
-                        owner TEXT PRIMARY KEY,
-                        window_start BIGINT NOT NULL DEFAULT 0,
-                        sent_count INT NOT NULL DEFAULT 0,
-                        suppressed_count INT NOT NULL DEFAULT 0,
-                        cooldown_until BIGINT NOT NULL DEFAULT 0,
-                        CONSTRAINT push_throttle_owner_lower CHECK (owner = LOWER(owner))
-                    )
-                    """
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_push_throttle_summary_due "
-                    "ON push_throttle (cooldown_until, window_start) WHERE suppressed_count > 0"
-                )
-
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS push_receipts (
-                        id SERIAL PRIMARY KEY,
-                        ticket_id TEXT NOT NULL UNIQUE,
-                        token TEXT NOT NULL,
-                        created_at BIGINT NOT NULL
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_receipts_created_at ON push_receipts(created_at)")
-
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS push_nonces (
-                        id SERIAL PRIMARY KEY,
-                        owner TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        nonce BIGINT NOT NULL,
-                        created_at BIGINT NOT NULL,
-                        CONSTRAINT push_nonces_owner_lower CHECK (owner = LOWER(owner)),
-                        UNIQUE(owner, action, nonce)
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_nonces_owner_lower ON push_nonces(LOWER(owner))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_push_nonces_created_at ON push_nonces(created_at)")
+                # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
@@ -2042,6 +1769,59 @@ class DatabaseManager:
                     ),
                 )
 
+    def upsert_profiles_batch(self, profiles: list[tuple], updated_at: int) -> None:
+        """Batch upsert profiles in a single connection.
+
+        Each tuple: (owner, username, level, created_at, subscription_expiry,
+                      auto_renew, biography, avatar, banner, flair, reserve_funds)
+        """
+        if not profiles:
+            return
+        rows = []
+        for p in profiles:
+            owner, username, level, created_at, sub_exp, auto_renew, bio, avatar, banner, flair, reserve_funds = p
+            rows.append((
+                owner,
+                self._strip_nul(username),
+                int(level),
+                int(created_at),
+                int(sub_exp),
+                bool(auto_renew),
+                self._strip_nul(bio) or "",
+                self._strip_nul(avatar) or "",
+                self._strip_nul(banner) or "",
+                self._strip_nul(flair) or "",
+                int(updated_at),
+                int(reserve_funds),
+            ))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO profiles(owner, username, level, created_at, subscription_expiry,
+                                         auto_renew, biography, avatar, banner, flair, updated_at, reserve_funds)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(owner) DO UPDATE SET
+                      username=EXCLUDED.username,
+                      level=EXCLUDED.level,
+                      created_at=CASE
+                          WHEN profiles.created_at > 0 THEN profiles.created_at
+                          WHEN EXCLUDED.created_at > 0 THEN EXCLUDED.created_at
+                          ELSE profiles.created_at
+                      END,
+                      subscription_expiry=EXCLUDED.subscription_expiry,
+                      auto_renew=EXCLUDED.auto_renew,
+                      biography=EXCLUDED.biography,
+                      avatar=EXCLUDED.avatar,
+                      banner=EXCLUDED.banner,
+                      flair=EXCLUDED.flair,
+                      updated_at=EXCLUDED.updated_at,
+                      reserve_funds=EXCLUDED.reserve_funds,
+                      deleted_at=NULL
+                    """,
+                    rows,
+                )
+
     def update_profile_timestamp(self, owner: str, updated_at: int) -> None:
         """Update profile timestamp."""
         with self._connect() as conn:
@@ -2404,36 +2184,7 @@ class DatabaseManager:
                 row = cur.fetchone()
                 return row[0] if row and row[0] else None
 
-    def insert_stats_event(
-        self,
-        event_type: str,
-        session_id: str,
-        created_at: int,
-        user_address: str | None = None,
-        page_path: str | None = None,
-        browser_family: str | None = None,
-        os_family: str | None = None,
-        device_type: str | None = None,
-    ) -> None:
-        """Insert a stats event."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO stats_events(event_type, user_address, session_id, created_at, page_path, browser_family, os_family, device_type)
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        event_type,
-                        user_address,
-                        session_id,
-                        int(created_at),
-                        page_path,
-                        browser_family,
-                        os_family,
-                        device_type,
-                    ),
-                )
+    # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
     def upsert_difficulty(self, height: int, difficulty: int, msg_count: int, created_at: int) -> None:
         """Record difficulty and message count at a given block height."""

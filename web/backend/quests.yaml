@@ -54,18 +54,6 @@ daily_quests:
       - type: mirage
         amount: 500
 
-  - id: engaged_commenter
-    title: "Engaged Commenter"
-    description: "Create a comment that gets 3+ upvotes"
-    action_type: comment_upvotes_received
-    target_count: 1
-    quality_threshold: 3
-    min_content_length: 5
-    unique_root_post: true
-    rewards:
-      - type: mirage
-        amount: 1500
-
   - id: topic_commenter
     title: "Topic Commenter"
     description: "Comment on posts in 3 different topics, at least 30 minutes apart"
@@ -89,17 +77,6 @@ daily_quests:
     rewards:
       - type: mirage
         amount: 250
-
-  - id: quality_creator
-    title: "Quality Creator"
-    description: "Create a post that gets 5+ upvotes"
-    action_type: upvotes_received
-    target_count: 1
-    quality_threshold: 5
-    min_content_length: 50
-    rewards:
-      - type: mirage
-        amount: 2500
 
   # --- Vote quests ---
   - id: quick_curator
@@ -142,16 +119,6 @@ daily_quests:
     rewards:
       - type: mirage
         amount: 1000
-
-  # --- Award quest ---
-  - id: award_winner
-    title: "Award Winner"
-    description: "Receive any award on one of your posts or comments"
-    action_type: award_received
-    target_count: 1
-    rewards:
-      - type: mirage
-        amount: 2500
 
 flash_quest_templates:
   - id: double_vote
@@ -255,46 +222,7 @@ flash_quest_templates:
       - type: mirage
         amount: 500
 
-achievements:
-  - id: first_viral
-    title: "First Viral Post"
-    description: "Have a post reach 50+ upvotes"
-    action_type: upvotes_received
-    target_count: 1
-    quality_threshold: 50
-    rewards:
-      - type: mirage
-        amount: 100000
-
-  - id: conversation_starter
-    title: "Conversation Starter"
-    description: "Have a post receive 20+ comments"
-    action_type: comments_received
-    target_count: 1
-    quality_threshold: 20
-    rewards:
-      - type: mirage
-        amount: 50000
-
-  - id: trusted_member
-    title: "Trusted Member"
-    description: "Have 10 comments reach 5+ upvotes"
-    action_type: quality_comments
-    target_count: 10
-    quality_threshold: 5
-    unique_target: true
-    rewards:
-      - type: mirage
-        amount: 75000
-
-  - id: topic_pioneer
-    title: "Topic Pioneer"
-    description: "Be the first to post in a new topic"
-    action_type: first_topic_post
-    target_count: 1
-    rewards:
-      - type: mirage
-        amount: 20000
+achievements: []
 
 # Special quests - NOT included in random daily pool, assigned via specific gating logic
 special_quests:
@@ -319,14 +247,3 @@ special_quests:
         amount: 10000
         apply_multiplier: false
 
-  # Invite earner quest: appears every N completed quests, reward is an invite code
-  - id: invite_earner
-    title: "Earn an Invite Code"
-    description: "Create a post that gets 5+ upvotes to earn a new invite code"
-    action_type: upvotes_received
-    target_count: 1
-    quality_threshold: 5
-    min_content_length: 50
-    rewards:
-      - type: invite_code
-        amount: 1

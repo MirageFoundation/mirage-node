@@ -186,6 +186,29 @@ class MirageConfig:
             "reconnect": {"initial_delay": 1, "max_delay": 60, "max_retries": -1},
         }
 
+    def get_indexer_ro_url(self) -> str:
+        """Get read-only indexer DB URL for backend use.
+
+        Backend must only read from the indexer DB, never write.
+        Requires INDEXER_DB_RO_URL env var; no fallbacks.
+        """
+        url = os.environ.get("INDEXER_DB_RO_URL", "").strip()
+        if not url:
+            raise RuntimeError("INDEXER_DB_RO_URL is required (no fallbacks)")
+        return url
+
+    def get_backend_db_url(self) -> str:
+        """Get backend-owned DB URL for read-write access.
+
+        Backend stores quests, invites, referrals, stats, reports, push,
+        similarity, and inbox state in its own database.
+        Requires BACKEND_DB_URL env var; no fallbacks.
+        """
+        url = os.environ.get("BACKEND_DB_URL", "").strip()
+        if not url:
+            raise RuntimeError("BACKEND_DB_URL is required (no fallbacks)")
+        return url
+
 
 # Global configuration instance
 _config_instance: Optional[MirageConfig] = None

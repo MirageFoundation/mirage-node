@@ -34,6 +34,7 @@ export PYTHONPATH="/opt/mirage"
 
 # Load persistent env files if present
 ENV_DIR="${HOME}/.mirage/env"
+export ENV_DIR
 load_env_files() {
   for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env" "${ENV_DIR}/orchestrator.env"; do
     if [ -f "$envfile" ]; then
@@ -43,17 +44,33 @@ load_env_files() {
     fi
   done
 }
-load_env_files
-
 # Ensure config directory exists
 mkdir -p "$ENV_DIR"
 
-# Run deploy migrations (one-time migrations + env sync with templates)
-echo "==> Running deploy migrations..."
-python3 -m deploy.migrations --config-dir "$ENV_DIR" || true
+# Sync env files with templates before requiring any values
+echo "==> Syncing env files with templates (pre-migrations)..."
+python3 - <<'PY'
+import os
+from pathlib import Path
 
-# Reload env files after migrations
+from deploy.migrations._helpers import sync_all
+
+config_dir = Path(os.environ["ENV_DIR"])
+templates_root = Path("/opt/mirage/deploy/templates")
+templates_dir = templates_root / "env" if (templates_root / "env").exists() else templates_root
+sync_all(templates_dir, config_dir)
+PY
+
+# Load persistent env files after sync
 load_env_files
+
+# DB URLs must be set BEFORE migrations run (no fallbacks).
+for var in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL; do
+  if [ -z "${!var:-}" ]; then
+    echo "ERROR: $var is required but missing (check env files in $ENV_DIR)" >&2
+    exit 1
+  fi
+done
 
 # Set container hostname (instead of random container ID)
 # Priority: DOMAIN > MONIKER > external IP
@@ -69,11 +86,6 @@ else
   if [ -n "$EXTERNAL_IP" ]; then
     hostname "${EXTERNAL_IP//./-}" 2>/dev/null || true
   fi
-fi
-
-# Safety fallback for DB URL (should already be set in indexer.env template)
-if [ -z "${INDEXER_DB_URL:-}" ]; then
-  export INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 fi
 
 # Defaults if not provided
@@ -257,28 +269,19 @@ if [ "$PG_READY" -eq 0 ]; then
   exit 1
 fi
 
-# Ensure local database and role exist if URL points to localhost
-ensure_local_postgres_db() {
-  local url="${INDEXER_DB_URL:-}"
-  # Extract components: user, pass, host, port, db
-  # shellcheck disable=SC2001
-  local user pass host port db
-  user="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\1#')"
-  pass="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\3#')"
-  host="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\4#')"
-  port="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\6#')"
-  db="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\7#')"
-  port="${port:-5432}"
-  if [ "$host" != "127.0.0.1" ] && [ "$host" != "localhost" ]; then
-    echo "PostgreSQL URL points to non-local host ($host); skipping local DB provisioning."
-    return 0
-  fi
-  if [ -z "$user" ] || [ -z "$db" ]; then
-    echo "Invalid INDEXER_DB_URL, missing user or db: $url" >&2
-    exit 1
-  fi
-  echo "==> Ensuring Postgres role '$user' and database '$db' exist..."
-  # Create role if missing
+# Parse a PostgreSQL URL into components
+_parse_pg_url() {
+  local url="$1"
+  PG_USER="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\1#')"
+  PG_PASS="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\3#')"
+  PG_HOST="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\4#')"
+  PG_PORT="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\6#')"
+  PG_DB="$(echo "$url" | sed -E 's#^postgresql://([^:@/]+)(:([^@/]*))?@([^:/]+)(:([0-9]+))?/([^?]+).*$#\7#')"
+  PG_PORT="${PG_PORT:-5432}"
+}
+
+_ensure_role_and_db() {
+  local user="$1" pass="$2" db="$3"
   if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${user}'\"" | grep -q 1; then
     if [ -n "$pass" ]; then
       su - postgres -c "psql -c \"CREATE ROLE ${user} WITH LOGIN PASSWORD '${pass//\'/''}';\""
@@ -286,13 +289,180 @@ ensure_local_postgres_db() {
       su - postgres -c "psql -c \"CREATE ROLE ${user} WITH LOGIN;\""
     fi
   fi
-  # Create database if missing
   if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='${db}'\"" | grep -q 1; then
     su - postgres -c "psql -c \"CREATE DATABASE ${db} OWNER ${user};\""
   fi
-  echo "✓ Postgres role and database ensured."
 }
-ensure_local_postgres_db
+
+ensure_local_postgres_dbs() {
+  _parse_pg_url "${INDEXER_DB_URL}"
+  if [ "$PG_HOST" != "127.0.0.1" ] && [ "$PG_HOST" != "localhost" ]; then
+    echo "PostgreSQL URL points to non-local host ($PG_HOST); skipping local DB provisioning."
+    return 0
+  fi
+  if [ -z "$PG_USER" ] || [ -z "$PG_DB" ]; then
+    echo "Invalid INDEXER_DB_URL, missing user or db" >&2
+    exit 1
+  fi
+
+  echo "==> Provisioning indexer DB (${PG_DB})..."
+  _ensure_role_and_db "$PG_USER" "$PG_PASS" "$PG_DB"
+
+  _parse_pg_url "${BACKEND_DB_URL}"
+  echo "==> Provisioning backend DB (${PG_DB})..."
+  _ensure_role_and_db "$PG_USER" "$PG_PASS" "$PG_DB"
+
+  _parse_pg_url "${INDEXER_DB_RO_URL}"
+  PG_RO_USER="$PG_USER"
+  echo "==> Provisioning read-only role (${PG_USER})..."
+  if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'\"" | grep -q 1; then
+    if [ -n "$PG_PASS" ]; then
+      su - postgres -c "psql -c \"CREATE ROLE ${PG_USER} WITH LOGIN PASSWORD '${PG_PASS//\'/''}';\""
+    else
+      su - postgres -c "psql -c \"CREATE ROLE ${PG_USER} WITH LOGIN;\""
+    fi
+  fi
+  _parse_pg_url "${INDEXER_DB_URL}"
+  su - postgres -c "psql -d ${PG_DB} -c \"GRANT CONNECT ON DATABASE ${PG_DB} TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"GRANT USAGE ON SCHEMA public TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_RO_USER};\""
+
+  echo "✓ All Postgres databases and roles ensured."
+}
+
+# ── One-time: migrate DB & role names (mirage → mirage_indexer, etc.) ────────
+# Requires superuser (su - postgres), so this lives in entrypoint, not Python.
+migrate_local_postgres_names() {
+  _parse_pg_url "${INDEXER_DB_URL:-}"
+  if [ "$PG_HOST" != "127.0.0.1" ] && [ "$PG_HOST" != "localhost" ]; then
+    return 0
+  fi
+
+  local changed=0
+
+  # 1. Rename DB: mirage → mirage_indexer
+  local old_db new_db
+  old_db=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='mirage'\"" 2>/dev/null | tr -d ' ')
+  new_db=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='mirage_indexer'\"" 2>/dev/null | tr -d ' ')
+  if [ "$old_db" = "1" ] && [ "$new_db" != "1" ]; then
+    echo "==> Renaming database: mirage → mirage_indexer..."
+    su - postgres -c "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='mirage' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
+    su - postgres -c "psql -c \"ALTER DATABASE mirage RENAME TO mirage_indexer;\""
+    echo "  ✓ DB renamed"
+    changed=1
+  fi
+
+  # 2. Rename role: mirage → mirage_indexer
+  local old_role new_role
+  old_role=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage'\"" 2>/dev/null | tr -d ' ')
+  new_role=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_indexer'\"" 2>/dev/null | tr -d ' ')
+  if [ "$old_role" = "1" ] && [ "$new_role" != "1" ]; then
+    su - postgres -c "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='mirage' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
+    su - postgres -c "psql -c \"ALTER ROLE mirage RENAME TO mirage_indexer;\""
+    su - postgres -c "psql -c \"ALTER ROLE mirage_indexer WITH PASSWORD 'mirage_indexer';\""
+    echo "  ✓ Role renamed: mirage → mirage_indexer"
+    changed=1
+  fi
+
+  # 3. Rename role: mirage_ro → mirage_indexer_ro
+  local old_ro new_ro
+  old_ro=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_ro'\"" 2>/dev/null | tr -d ' ')
+  new_ro=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_indexer_ro'\"" 2>/dev/null | tr -d ' ')
+  if [ "$old_ro" = "1" ] && [ "$new_ro" != "1" ]; then
+    su - postgres -c "psql -c \"ALTER ROLE mirage_ro RENAME TO mirage_indexer_ro;\""
+    su - postgres -c "psql -c \"ALTER ROLE mirage_indexer_ro WITH PASSWORD 'mirage_indexer_ro';\""
+    echo "  ✓ Role renamed: mirage_ro → mirage_indexer_ro"
+    changed=1
+  fi
+
+  # 4. Create mirage_backend role if needed
+  local backend_role
+  backend_role=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='mirage_backend'\"" 2>/dev/null | tr -d ' ')
+  if [ "$backend_role" != "1" ]; then
+    su - postgres -c "psql -c \"CREATE ROLE mirage_backend WITH LOGIN PASSWORD 'mirage_backend';\""
+    echo "  ✓ Created role: mirage_backend"
+    changed=1
+  fi
+
+  # 5. Transfer mirage_backend DB ownership
+  local backend_db_owner
+  backend_db_owner=$(su - postgres -c "psql -tAc \"SELECT pg_catalog.pg_get_userbyid(datdba) FROM pg_database WHERE datname='mirage_backend'\"" 2>/dev/null | tr -d ' ')
+  if [ -n "$backend_db_owner" ] && [ "$backend_db_owner" != "mirage_backend" ]; then
+    su - postgres -c "psql -c \"ALTER DATABASE mirage_backend OWNER TO mirage_backend;\""
+    su - postgres -c "psql -d mirage_backend -c \"REASSIGN OWNED BY ${backend_db_owner} TO mirage_backend;\"" 2>/dev/null || true
+    echo "  ✓ mirage_backend DB ownership transferred"
+    changed=1
+  fi
+
+  # 6. Grant schema privileges to renamed roles, re-grant RO, update env files
+  if [ "$changed" = "1" ]; then
+    # Ensure RW roles can create/own objects in their respective DBs
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT ALL ON SCHEMA public TO mirage_indexer;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT ALL ON ALL TABLES IN SCHEMA public TO mirage_indexer;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO mirage_indexer;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_backend -c \"GRANT ALL ON SCHEMA public TO mirage_backend;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_backend -c \"GRANT ALL ON ALL TABLES IN SCHEMA public TO mirage_backend;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_backend -c \"GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO mirage_backend;\"" 2>/dev/null || true
+    # RO role for indexer
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT USAGE ON SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro;\"" 2>/dev/null || true
+
+    python3 - <<'PYUPDATE'
+import os
+env_dir = os.environ.get("ENV_DIR", "")
+for fname in ("backend.env", "indexer.env"):
+    path = os.path.join(env_dir, fname)
+    if not os.path.isfile(path):
+        continue
+    lines = []
+    with open(path) as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                lines.append(line)
+                continue
+            key, _, val = s.partition("=")
+            key, val = key.strip(), val.strip()
+            if key == "INDEXER_DB_URL":
+                val = val.replace("mirage:mirage@", "mirage_indexer:mirage_indexer@")
+                if val.rstrip("/").endswith("/mirage"):
+                    val = val.rstrip("/").rsplit("/mirage", 1)[0] + "/mirage_indexer"
+            elif key == "INDEXER_DB_RO_URL":
+                val = val.replace("mirage_ro:mirage_ro@", "mirage_indexer_ro:mirage_indexer_ro@")
+                if val.rstrip("/").endswith("/mirage"):
+                    val = val.rstrip("/").rsplit("/mirage", 1)[0] + "/mirage_indexer"
+            elif key == "BACKEND_DB_URL":
+                val = val.replace("mirage:mirage@", "mirage_backend:mirage_backend@")
+                val = val.replace("mirage_indexer:mirage_indexer@", "mirage_backend:mirage_backend@")
+            lines.append(f"{key}={val}\n")
+    with open(path, "w") as f:
+        f.writelines(lines)
+PYUPDATE
+
+    load_env_files
+    echo "  ✓ Env files updated with new DB/role names"
+  fi
+}
+migrate_local_postgres_names
+ensure_local_postgres_dbs
+
+# Ensure backend schema exists before data migrations run
+echo "==> Initializing backend schema (pre-migrations)..."
+python3 - <<'PY'
+from web.backend.db import init_backend_schema
+
+init_backend_schema()
+PY
+
+# Run deploy migrations (one-time migrations + env sync with templates)
+echo "==> Running deploy migrations..."
+python3 -m deploy.migrations --config-dir "$ENV_DIR"
+
+# Reload env files after migrations
+load_env_files
 
 # Auto-configure HTTPS if domain is set (from node.env)
 # Skip if Caddyfile already has HTTPS configured (www redirect indicates full HTTPS setup)

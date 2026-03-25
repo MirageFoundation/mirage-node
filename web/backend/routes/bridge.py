@@ -14,7 +14,7 @@ import random
 import time
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, has_request_context
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 
@@ -23,7 +23,8 @@ from shared.canon import canon_signed_with_pow
 
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
-from node import derive_address_from_pubkey, require_runtime
+from node import derive_address_from_pubkey as _derive_address_from_pubkey, require_runtime
+from user_last_seen import update_user_last_seen
 from params import expect_params
 from pow import canon_base_bridge_burn
 from tx import estimate_total_gas_limit, build_tx_bytes, simulate_gas, broadcast_tx
@@ -42,6 +43,15 @@ from routes.core import (
 
 
 bridge_bp = Blueprint("bridge", __name__)
+
+
+def derive_address_from_pubkey(pub_dec: bytes) -> str:
+    addr = _derive_address_from_pubkey(pub_dec)
+    if addr:
+        source = request.path if has_request_context() else ""
+        update_user_last_seen(addr, source=source)
+    return addr
+
 
 _MAX_ADDR_LEN = 128
 _MAX_CHAIN_LEN = 64

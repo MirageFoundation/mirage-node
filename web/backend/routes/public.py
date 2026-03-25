@@ -18,18 +18,19 @@ import json
 import logging
 import os
 import re
-from db import connect_db
+from db import connect_backend_db, connect_db
 
 logger = logging.getLogger(__name__)
 
 from typing import Any, Dict, List, Optional
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, has_request_context
 
 from error_utils import safe_error
 from logging_utils import log_event, next_request_id
-from node import require_runtime, derive_address_from_pubkey
+from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
+from user_last_seen import update_user_last_seen
 from params import load_params, expect_params
 from settings import (
     IGNORE_DELETIONS,
@@ -134,7 +135,6 @@ def _get_validator(valoper) -> dict:
 
 
 import base64
-from user_agents import parse as parse_user_agent
 
 
 def _inject_balance(resp: dict, addr: str) -> dict:
@@ -173,6 +173,14 @@ def _db_get_profile_scalars(addr: str) -> dict | None:
 
 
 public_bp = Blueprint("public", __name__)
+
+
+def derive_address_from_pubkey(pub_dec: bytes) -> str:
+    addr = _derive_address_from_pubkey(pub_dec)
+    if addr:
+        source = request.path if has_request_context() else ""
+        update_user_last_seen(addr, source=source)
+    return addr
 
 
 def _is_new_user(profile_created_at: int) -> bool:
@@ -828,9 +836,10 @@ def _get_new_inbox_count(cur, address: str) -> int:
         return cached[0]
 
     try:
-        from shared.inbox import compute_unread_count
+        from shared.inbox import compute_unread_count, fetch_inbox_last_viewed_at
 
-        count, last_seen = compute_unread_count(cur, viewer)
+        last_seen = fetch_inbox_last_viewed_at(viewer)
+        count, last_seen = compute_unread_count(cur, viewer, last_seen)
     except Exception:
         count = 0
         last_seen = 0
@@ -1755,11 +1764,11 @@ def _prioritize_viewer_own_posts_in_interleaved(
     now_ts: int,
     max_pin: int = 15,
 ) -> list[dict]:
-    """Move the viewer's own root posts to the front so home magic page 1 surfaces recent ones.
+    """Interleave recent own posts into home magic without clustering.
 
-    Only posts created within the last 24 hours are pinned; older own posts keep normal order.
-    Interleaving can bury own posts past the first page; Source 0 caps can omit them if the user
-    has many submissions. This reorder only affects posts already present in ``interleaved``.
+    Pattern: own -> fresh(random) -> ranked(score) -> fresh -> ranked -> ...
+    Only posts created within the last 24 hours are inserted; older own posts keep normal order.
+    This reorder only affects posts already present in ``interleaved``.
     """
     if not viewer_lower or viewer_lower == "guest" or not interleaved:
         return interleaved
@@ -1774,17 +1783,43 @@ def _prioritize_viewer_own_posts_in_interleaved(
     pin_ids = [p["post_id"] for p in own_sorted[:max_pin]]
     pin_set = set(pin_ids)
     id_in_interleaved = {p["post_id"]: p for p in interleaved}
-    pins = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
-    if not pins:
+    own_posts = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
+    if not own_posts:
         return interleaved
+
     rest = [p for p in interleaved if p["post_id"] not in pin_set]
+    fresh_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") == "fresh"]
+    ranked_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") != "fresh"]
+
+    out: list[dict] = []
+    consumed: set[str] = set()
+    f_idx = 0
+    r_idx = 0
+    for own in own_posts:
+        out.append(own)
+        if f_idx < len(fresh_queue):
+            picked = fresh_queue[f_idx]
+            f_idx += 1
+            consumed.add(picked["post_id"])
+            out.append(picked)
+        if r_idx < len(ranked_queue):
+            picked = ranked_queue[r_idx]
+            r_idx += 1
+            consumed.add(picked["post_id"])
+            out.append(picked)
+
+    if consumed:
+        rest = [p for p in rest if p["post_id"] not in consumed]
+    out.extend(rest)
+
     logger.debug(
-        "home_magic.prioritize_own viewer=%s pinned=%d interleaved=%d max_age_h=24",
+        "home_magic.own_interleave viewer=%s own=%d consumed=%d interleaved=%d max_age_h=24",
         viewer_lower[:12],
-        len(pins),
+        len(own_posts),
+        len(consumed),
         len(interleaved),
     )
-    return pins + rest
+    return out
 
 
 def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -> list[dict]:
@@ -2856,7 +2891,7 @@ def get_user_status():
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT username, level, created_at, subscription_expiry, inbox_last_viewed_at FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+                "SELECT username, level, created_at, subscription_expiry FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
                 (addr,),
             )
             row = cur.fetchone()
@@ -2865,7 +2900,16 @@ def get_user_status():
                 user_level = int(row[1]) if row[1] is not None else 0
                 profile_registered_at = int(row[2]) if row[2] is not None else None
                 subscription_expiry = int(row[3]) if row[3] is not None else 0
-                inbox_last_viewed_at = int(row[4]) if len(row) > 4 and row[4] is not None else 0
+
+        with connect_backend_db() as conn_ib:
+            cur_ib = conn_ib.cursor()
+            cur_ib.execute(
+                "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+                (addr,),
+            )
+            row_ib = cur_ib.fetchone()
+            if row_ib and row_ib[0] is not None:
+                inbox_last_viewed_at = int(row_ib[0])
 
         # Read subscription data from indexer DB (auto_renew, reserve_funds)
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn2:
@@ -3332,6 +3376,38 @@ def _get_cached_supply_history() -> list:
     return history
 
 
+def _get_last_seen_rollups(now: int) -> dict[str, int]:
+    today_start = now - 86400
+    yesterday_start = now - (2 * 86400)
+    thirty_days_ago = now - (30 * 86400)
+
+    with connect_backend_db() as bconn:
+        bcur = bconn.cursor()
+        bcur.execute("SELECT COUNT(*) FROM user_last_seen WHERE last_seen_at >= %s", (today_start,))
+        dau_today = bcur.fetchone()[0] or 0
+        bcur.execute(
+            "SELECT COUNT(*) FROM user_last_seen WHERE last_seen_at >= %s AND last_seen_at < %s",
+            (yesterday_start, today_start),
+        )
+        dau_yesterday = bcur.fetchone()[0] or 0
+        bcur.execute("SELECT COUNT(*) FROM user_last_seen WHERE last_seen_at >= %s", (thirty_days_ago,))
+        maus = bcur.fetchone()[0] or 0
+
+    logger.debug(
+        "stats.last_seen dau_today=%d dau_yesterday=%d maus=%d",
+        dau_today,
+        dau_yesterday,
+        maus,
+    )
+    return {
+        "dau_any_today": int(dau_today),
+        "dau_today": int(dau_today),
+        "dau_registered_today": int(dau_today),
+        "dau_yesterday": int(dau_yesterday),
+        "maus": int(maus),
+    }
+
+
 @public_bp.route("/api/get_supply_history")
 def get_supply_history():
     """Get supply history for burn/mint chart (7 days)."""
@@ -3365,7 +3441,7 @@ _WELCOME_STATS_CACHE_TTL = 30  # 30 seconds
 _overview_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
 _OVERVIEW_STATS_CACHE_TTL = 30  # 30 seconds
 
-# Cache for analytics stats (very expensive - stats_events processing)
+# Cache for analytics stats (expensive query)
 _analytics_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
 _ANALYTICS_STATS_CACHE_TTL = 60  # 60 seconds (longer TTL for expensive query)
 
@@ -5515,8 +5591,7 @@ def get_reports():
         if not addr:
             return jsonify({"error": "missing address"}), 400
 
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
             cur.execute("SELECT level FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1", (addr,))
             row = cur.fetchone()
@@ -5524,50 +5599,79 @@ def get_reports():
             if level < 100:
                 return jsonify({"error": "forbidden"}), 403
 
-            cur.execute(
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
+            bcur.execute(
                 """
-                SELECT r.id,
-                       r.owner,
-                       COALESCE(ru.username, ''),
-                       r.target,
-                       r.reason,
-                       r.created_at,
-                       COALESCE(p.owner, ''),
-                       COALESCE(pr.username, ''),
-                       COALESCE(p.title, ''),
-                       COALESCE(p.content, '')
-                FROM reports r
-                LEFT JOIN profiles ru ON LOWER(ru.owner) = LOWER(r.owner)
-                LEFT JOIN posts p ON LOWER(p.txhash) = LOWER(r.target)
-                LEFT JOIN profiles pr ON pr.owner = p.owner
-                ORDER BY r.created_at DESC
+                SELECT id, owner, target, reason, created_at
+                FROM reports
+                ORDER BY created_at DESC
                 LIMIT %s
                 """,
                 (limit,),
             )
-            rows = cur.fetchall()
-            out = []
-            for r in rows:
-                out.append(
-                    {
-                        "id": int(r[0]),
-                        "reporter_owner": (r[1] or "").lower(),
-                        "reporter_username": r[2] or "",
-                        "target": (r[3] or "").lower(),
-                        "reason": r[4] or "",
-                        "timestamp": int(r[5] or 0),
-                        "post_owner": (r[6] or "").lower(),
-                        "post_username": r[7] or "",
-                        "title": r[8] or "",
-                        "content": r[9] or "",
-                    }
+            report_rows = bcur.fetchall()
+
+        if not report_rows:
+            return jsonify({"reports": []})
+
+        reporter_addrs = list({(r[1] or "").lower() for r in report_rows if r[1]})
+        target_hashes = list({(r[2] or "").lower() for r in report_rows if r[2]})
+
+        username_map: dict[str, str] = {}
+        post_map: dict[str, dict] = {}
+
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+            if reporter_addrs:
+                ph = ",".join(["%s"] * len(reporter_addrs))
+                cur.execute(
+                    f"SELECT LOWER(owner), COALESCE(username, '') FROM profiles WHERE LOWER(owner) IN ({ph})",
+                    reporter_addrs,
                 )
-            return jsonify({"reports": out})
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+                for owner_lc, uname in cur.fetchall():
+                    username_map[owner_lc] = uname
+
+            if target_hashes:
+                ph = ",".join(["%s"] * len(target_hashes))
+                cur.execute(
+                    f"""SELECT LOWER(txhash), owner, COALESCE(title, ''), COALESCE(content, '')
+                        FROM posts WHERE LOWER(txhash) IN ({ph})""",
+                    target_hashes,
+                )
+                for txh, p_owner, title, content in cur.fetchall():
+                    post_map[txh] = {"owner": (p_owner or "").lower(), "title": title, "content": content}
+                post_owner_addrs = list({v["owner"] for v in post_map.values() if v["owner"]})
+                if post_owner_addrs:
+                    ph2 = ",".join(["%s"] * len(post_owner_addrs))
+                    cur.execute(
+                        f"SELECT LOWER(owner), COALESCE(username, '') FROM profiles WHERE LOWER(owner) IN ({ph2})",
+                        post_owner_addrs,
+                    )
+                    for owner_lc, uname in cur.fetchall():
+                        username_map[owner_lc] = uname
+
+        out = []
+        for r in report_rows:
+            reporter_lc = (r[1] or "").lower()
+            target_lc = (r[2] or "").lower()
+            post = post_map.get(target_lc, {})
+            post_owner = post.get("owner", "")
+            out.append(
+                {
+                    "id": int(r[0]),
+                    "reporter_owner": reporter_lc,
+                    "reporter_username": username_map.get(reporter_lc, ""),
+                    "target": target_lc,
+                    "reason": r[3] or "",
+                    "timestamp": int(r[4] or 0),
+                    "post_owner": post_owner,
+                    "post_username": username_map.get(post_owner, ""),
+                    "title": post.get("title", ""),
+                    "content": post.get("content", ""),
+                }
+            )
+        return jsonify({"reports": out})
     except Exception as e:
         return safe_error(e)
 
@@ -6595,13 +6699,16 @@ def mark_inbox_viewed():
     now_ts = int(time.time())
 
     try:
-        conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
+        conn = connect_backend_db()
         cur = conn.cursor()
         cur.execute(
-            "UPDATE profiles SET inbox_last_viewed_at = %s WHERE LOWER(owner) = %s",
-            (now_ts, addr_lower),
+            """
+            INSERT INTO user_inbox_state (owner, inbox_last_viewed_at)
+            VALUES (%s, %s)
+            ON CONFLICT (owner) DO UPDATE SET inbox_last_viewed_at = EXCLUDED.inbox_last_viewed_at
+            """,
+            (addr_lower, now_ts),
         )
-        conn.commit()
         conn.close()
         _invalidate_inbox_cache(addr_lower)
 
@@ -6885,105 +6992,16 @@ def stream_proxy(video_uid, path):
         return safe_error(e)
 
 
-_STATS_BOT_NAMES = {
-    "googlebot",
-    "applebot",
-    "bingbot",
-    "yandexbot",
-    "baiduspider",
-    "duckduckbot",
-    "slurp",
-    "facebook",
-    "facebookexternalhit",
-    "facebot",
-    "twitterbot",
-    "twitter",
-    "linkedinbot",
-    "pinterest",
-    "semrushbot",
-    "ahrefsbot",
-    "mj12bot",
-    "dotbot",
-    "petalbot",
-    "bytespider",
-}
-
-
 @public_bp.route("/api/stats/event", methods=["POST"])
 def stats_event():
-    """Record analytics events (visits, sessions, page views). Bot requests are silently discarded.
-
-    The raw User-Agent is never stored. Only coarse categories are persisted
-    (e.g. "Chrome", "Windows", "desktop") which are shared by millions of users.
-    """
+    """Stats event tracking disabled (page/visit tracking removed)."""
     rid = next_request_id()
-    try:
-        # Server-side: parse User-Agent for bot detection + coarse category extraction
-        ua_string = request.headers.get("User-Agent", "")
-        browser_family = None
-        os_family = None
-        device_type = None
-        if ua_string:
-            try:
-                ua = parse_user_agent(ua_string)
-                if ua.is_bot or (ua.browser.family or "").lower() in _STATS_BOT_NAMES:
-                    return jsonify({"success": True})
-                # Extract coarse categories only (never store the raw UA string)
-                browser_family = ua.browser.family or None
-                os_family = ua.os.family or None
-                if ua.is_mobile:
-                    device_type = "mobile"
-                elif ua.is_tablet:
-                    device_type = "tablet"
-                elif ua.is_pc:
-                    device_type = "desktop"
-                else:
-                    device_type = "other"
-            except Exception:
-                pass
-
-        data = request.get_json(force=True) or {}
-        event_type = str(data.get("event_type", "")).strip()
-        session_id = str(data.get("session_id", "")).strip()
-        user_address = data.get("user_address")
-        user_address = str(user_address).strip().lower() if user_address else None
-        page_path = data.get("page_path")
-        page_path = str(page_path).strip() if page_path else None
-
-        if not event_type or not session_id:
-            return jsonify({"error": "missing required fields"}), 400
-
-        if event_type not in ("visit", "session_start", "session_end", "page_view"):
-            return jsonify({"error": "invalid event_type"}), 400
-
-        timestamp = int(time.time())
-
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO stats_events(event_type, user_address, session_id, created_at, page_path, browser_family, os_family, device_type)
-                VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (event_type, user_address, session_id, timestamp, page_path, browser_family, os_family, device_type),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        return jsonify({"success": True})
-    except Exception as e:
-        log_event(rid, "stats_event.err", error=str(e))
-        return safe_error(e)
+    log_event(rid, "stats_event.disabled")
+    return jsonify({"error": "stats_event_disabled"}), 410
 
 
 def _get_stats_analytics(rid: int):
-    """Return analytics stats from stats_events (DAU/MAU, browser/OS/device breakdown).
-
-    Bots are filtered at ingest time so all stored events are from real users.
-    Only coarse categories are stored (e.g. "Chrome", "Windows", "desktop").
-    """
+    """Return analytics stats from user_last_seen (DAU/MAU only)."""
     now = int(time.time())
 
     # Check cache first
@@ -6992,124 +7010,7 @@ def _get_stats_analytics(rid: int):
         return jsonify(_analytics_stats_cache["data"])
 
     try:
-        conn = connect_db(timeout=15.0, busy_timeout_ms=20000)
-        try:
-            cur = conn.cursor()
-            today_start = now - 86400
-            yesterday_start = now - (2 * 86400)
-            thirty_days_ago = now - (30 * 86400)
-
-            stats: dict[str, Any] = {}
-
-            # Fetch events from last 30 days (bots already filtered at ingest)
-            cur.execute(
-                """
-                SELECT session_id, user_address, created_at, event_type, browser_family, os_family, device_type
-                FROM stats_events
-                WHERE created_at >= %s
-                """,
-                (thirty_days_ago,),
-            )
-            all_events = cur.fetchall()
-
-            if all_events:
-                # Calculate DAU/MAU
-                dau_today_set: set[str] = set()
-                dau_yesterday_set: set[str] = set()
-                mau_set: set[str] = set()
-                dau_reg_set: set[str] = set()
-                unreg_sessions: set[str] = set()
-
-                # Track coarse categories per session (deduplicated)
-                session_browser: dict[str, str] = {}
-                session_os: dict[str, str] = {}
-                session_device: dict[str, str] = {}
-
-                for sess_id, user_addr, created_at, event_type, browser, os_fam, dev_type in all_events:
-                    if event_type not in ("visit", "session_start", "page_view"):
-                        continue
-                    user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
-
-                    mau_set.add(user_key)
-
-                    if created_at >= today_start:
-                        dau_today_set.add(user_key)
-                        if user_addr and user_addr.strip():
-                            dau_reg_set.add(user_addr.lower())
-
-                    if yesterday_start <= created_at < today_start:
-                        dau_yesterday_set.add(user_key)
-
-                    if not user_addr or not user_addr.strip():
-                        unreg_sessions.add(sess_id)
-
-                    # Store first seen category per session
-                    if browser and sess_id not in session_browser:
-                        session_browser[sess_id] = browser
-                    if os_fam and sess_id not in session_os:
-                        session_os[sess_id] = os_fam
-                    if dev_type and sess_id not in session_device:
-                        session_device[sess_id] = dev_type
-
-                stats["dau_today"] = len(dau_today_set)
-                stats["dau_any_today"] = len(dau_today_set)
-                stats["dau_yesterday"] = len(dau_yesterday_set)
-                stats["maus"] = len(mau_set)
-                stats["dau_registered_today"] = len(dau_reg_set)
-                stats["unregistered_users"] = len(unreg_sessions)
-
-                # Browser breakdown
-                browser_counts: dict[str, int] = {}
-                for b in session_browser.values():
-                    browser_counts[b] = browser_counts.get(b, 0) + 1
-                total_sessions = len(session_browser) or 1
-                browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
-                browser_pcts.sort(key=lambda x: x[1], reverse=True)
-                top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
-                if len(browser_pcts) > 4:
-                    other_pct = round(sum(p for _, p in browser_pcts[4:]), 1)
-                    if other_pct > 0:
-                        top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
-                stats["browser_breakdown"] = top_browsers
-
-                # OS breakdown
-                os_counts: dict[str, int] = {}
-                for o in session_os.values():
-                    os_counts[o] = os_counts.get(o, 0) + 1
-                total_os = len(session_os) or 1
-                os_pcts = [(k, round(v / total_os * 100, 1)) for k, v in os_counts.items()]
-                os_pcts.sort(key=lambda x: x[1], reverse=True)
-                top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
-                if len(os_pcts) > 4:
-                    other_pct = round(sum(p for _, p in os_pcts[4:]), 1)
-                    if other_pct > 0:
-                        top_os.append({"name": "Other", "pct": f"{other_pct}%"})
-                stats["os_breakdown"] = top_os
-
-                # Device type breakdown
-                device_counts: dict[str, int] = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
-                for d in session_device.values():
-                    if d in device_counts:
-                        device_counts[d] += 1
-                    else:
-                        device_counts["other"] += 1
-                device_total = sum(device_counts.values()) or 1
-                stats["device_breakdown"] = {
-                    k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
-                }
-            else:
-                stats["dau_today"] = 0
-                stats["dau_any_today"] = 0
-                stats["dau_yesterday"] = 0
-                stats["maus"] = 0
-                stats["dau_registered_today"] = 0
-                stats["unregistered_users"] = 0
-                stats["browser_breakdown"] = []
-                stats["os_breakdown"] = []
-                stats["device_breakdown"] = {"desktop": "0%", "mobile": "0%", "tablet": "0%", "other": "0%"}
-
-        finally:
-            conn.close()
+        stats = _get_last_seen_rollups(now)
 
         # Cache the result
         _analytics_stats_cache["data"] = stats
@@ -7117,7 +7018,6 @@ def _get_stats_analytics(rid: int):
 
         log_event(rid, "get_stats.analytics.ok", dau=stats.get("dau_today", 0), mau=stats.get("maus", 0))
         return jsonify(stats)
-
     except Exception as e:
         log_event(rid, "get_stats.analytics.err", error=str(e))
         return safe_error(e)
@@ -7134,12 +7034,11 @@ def _get_stats_rewards(rid: int):
         distributor = get_distributor()
         pool_balance = distributor.get_pool_balance() if distributor.is_configured() else 0
 
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
-            cur = conn.cursor()
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
 
             # Get overall stats
-            cur.execute(
+            bcur.execute(
                 """
                 SELECT 
                     COUNT(*) as total_rewards,
@@ -7157,7 +7056,7 @@ def _get_stats_rewards(rid: int):
                 FROM pending_rewards
             """
             )
-            summary_row = cur.fetchone()
+            summary_row = bcur.fetchone()
 
             summary = {
                 "total_rewards": summary_row[0] or 0,
@@ -7174,7 +7073,7 @@ def _get_stats_rewards(rid: int):
 
             # Calculate daily rate (last 7 days)
             week_ago = ts - (7 * 86400)
-            cur.execute(
+            bcur.execute(
                 """
                 SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
                     COALESCE(payout_amount, (reward_data->>'amount')::bigint)
@@ -7184,69 +7083,80 @@ def _get_stats_rewards(rid: int):
             """,
                 (week_ago,),
             )
-            week_total = cur.fetchone()[0] or 0
+            week_total = bcur.fetchone()[0] or 0
             summary["daily_rate"] = week_total // 7
 
-            # Get per-user stats
-            cur.execute(
+            # Get per-user reward stats (without profile join)
+            bcur.execute(
                 """
                 SELECT 
-                    pr.owner,
-                    p.username,
+                    owner,
                     COUNT(*) as reward_count,
-                    COUNT(CASE WHEN pr.claimed_at IS NOT NULL THEN 1 END) as claimed_count,
-                    COUNT(CASE WHEN pr.claimed_at IS NULL THEN 1 END) as pending_count,
-                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN 
-                        COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                    COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                    COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
                     ELSE 0 END), 0) as total_earned,
-                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN 
-                        COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
                     ELSE 0 END), 0) as claimed_amount,
-                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
-                    MIN(pr.created_at) as first_reward_at,
-                    MAX(pr.created_at) as last_reward_at,
-                    p.created_at as account_created_at
-                FROM pending_rewards pr
-                LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
-                GROUP BY pr.owner, p.username, p.created_at
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                    MIN(created_at) as first_reward_at,
+                    MAX(created_at) as last_reward_at
+                FROM pending_rewards
+                GROUP BY owner
                 ORDER BY total_earned DESC
             """
             )
-            user_rows = cur.fetchall()
+            user_rows = bcur.fetchall()
 
-            users = []
-            for row in user_rows:
-                owner = row[0]
-                first_reward_at = row[8]
-                last_reward_at = row[9]
-                total_earned = row[5] or 0
-
-                # Calculate earnings per day
-                if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
-                    days_active = max(1, (last_reward_at - first_reward_at) // 86400)
-                    earnings_per_day = total_earned // days_active
-                else:
-                    earnings_per_day = total_earned
-
-                users.append(
-                    {
-                        "address": owner,
-                        "username": row[1],
-                        "reward_count": row[2] or 0,
-                        "claimed_count": row[3] or 0,
-                        "pending_count": row[4] or 0,
-                        "total_earned": total_earned,
-                        "claimed_amount": row[6] or 0,
-                        "pending_amount": row[7] or 0,
-                        "first_reward_at": first_reward_at,
-                        "last_reward_at": last_reward_at,
-                        "account_created_at": row[10],
-                        "earnings_per_day": earnings_per_day,
-                    }
+        # Enrich with profile info from indexer
+        owner_addrs = list({(r[0] or "").lower() for r in user_rows if r[0]})
+        username_map: dict[str, str] = {}
+        created_at_map: dict[str, int] = {}
+        if owner_addrs:
+            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                cur = conn.cursor()
+                ph = ",".join(["%s"] * len(owner_addrs))
+                cur.execute(
+                    f"SELECT LOWER(owner), COALESCE(username, ''), created_at FROM profiles WHERE LOWER(owner) IN ({ph})",
+                    owner_addrs,
                 )
+                for owner_lc, uname, p_created_at in cur.fetchall():
+                    username_map[owner_lc] = uname
+                    if p_created_at is not None:
+                        created_at_map[owner_lc] = int(p_created_at)
 
-        finally:
-            conn.close()
+        users = []
+        for row in user_rows:
+            owner = row[0]
+            owner_lc = (owner or "").lower()
+            first_reward_at = row[7]
+            last_reward_at = row[8]
+            total_earned = row[4] or 0
+
+            if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
+                days_active = max(1, (last_reward_at - first_reward_at) // 86400)
+                earnings_per_day = total_earned // days_active
+            else:
+                earnings_per_day = total_earned
+
+            users.append(
+                {
+                    "address": owner,
+                    "username": username_map.get(owner_lc),
+                    "reward_count": row[1] or 0,
+                    "claimed_count": row[2] or 0,
+                    "pending_count": row[3] or 0,
+                    "total_earned": total_earned,
+                    "claimed_amount": row[5] or 0,
+                    "pending_amount": row[6] or 0,
+                    "first_reward_at": first_reward_at,
+                    "last_reward_at": last_reward_at,
+                    "account_created_at": created_at_map.get(owner_lc),
+                    "earnings_per_day": earnings_per_day,
+                }
+            )
 
         log_event(rid, "get_stats.rewards.ok", user_count=len(users))
         return jsonify({"summary": summary, "users": users})
@@ -7262,54 +7172,62 @@ def _get_stats_rewards_history(rid: int):
         offset = int(request.args.get("offset", 0))
         limit = min(int(request.args.get("limit", 50)), 100)
 
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
-            cur = conn.cursor()
-            cur.execute(
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
+            bcur.execute(
                 """
                 SELECT 
-                    pr.owner,
-                    p.username,
-                    pr.reward_type,
-                    pr.reward_data,
-                    pr.reason,
-                    pr.created_at,
-                    pr.claimed_at,
-                    pr.payout_amount
-                FROM pending_rewards pr
-                LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
-                ORDER BY pr.created_at DESC
+                    owner,
+                    reward_type,
+                    reward_data,
+                    reason,
+                    created_at,
+                    claimed_at,
+                    payout_amount
+                FROM pending_rewards
+                ORDER BY created_at DESC
                 LIMIT %s OFFSET %s
             """,
                 (limit + 1, offset),
             )
-            reward_rows = cur.fetchall()
+            reward_rows = bcur.fetchall()
 
-            has_more = len(reward_rows) > limit
-            if has_more:
-                reward_rows = reward_rows[:limit]
+        has_more = len(reward_rows) > limit
+        if has_more:
+            reward_rows = reward_rows[:limit]
 
-            rewards = []
-            for row in reward_rows:
-                reward_data = row[3] if isinstance(row[3], dict) else {}
-                base_amount = reward_data.get("amount", 0)
-                payout_amount = row[7]
-                display_amount = payout_amount if payout_amount is not None else base_amount
-                rewards.append(
-                    {
-                        "address": row[0],
-                        "username": row[1],
-                        "type": row[2],
-                        "amount": display_amount,
-                        "reason": row[4],
-                        "created_at": row[5],
-                        "claimed_at": row[6],
-                        "claimed": row[6] is not None,
-                    }
+        owner_addrs = list({(r[0] or "").lower() for r in reward_rows if r[0]})
+        username_map: dict[str, str] = {}
+        if owner_addrs:
+            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                cur = conn.cursor()
+                ph = ",".join(["%s"] * len(owner_addrs))
+                cur.execute(
+                    f"SELECT LOWER(owner), COALESCE(username, '') FROM profiles WHERE LOWER(owner) IN ({ph})",
+                    owner_addrs,
                 )
+                for owner_lc, uname in cur.fetchall():
+                    username_map[owner_lc] = uname
 
-        finally:
-            conn.close()
+        rewards = []
+        for row in reward_rows:
+            reward_data = row[2] if isinstance(row[2], dict) else {}
+            base_amount = reward_data.get("amount", 0)
+            payout_amount = row[6]
+            display_amount = payout_amount if payout_amount is not None else base_amount
+            owner_lc = (row[0] or "").lower()
+            rewards.append(
+                {
+                    "address": row[0],
+                    "username": username_map.get(owner_lc),
+                    "type": row[1],
+                    "amount": display_amount,
+                    "reason": row[3],
+                    "created_at": row[4],
+                    "claimed_at": row[5],
+                    "claimed": row[5] is not None,
+                }
+            )
 
         log_event(rid, "get_stats.rewards_history.ok", count=len(rewards), offset=offset)
         return jsonify({"rewards": rewards, "has_more": has_more})
@@ -7322,111 +7240,105 @@ def _get_stats_rewards_history(rid: int):
 def _get_stats_signups(rid: int):
     """Return recent signups via invite codes with referrer info."""
     try:
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
-            cur = conn.cursor()
-            # Get recent signups (used_by is not null means invite was used)
-            # Join with profiles to get username/moniker for both signup and referrer
-            cur.execute(
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
+            bcur.execute(
                 """
-                SELECT 
-                    ic.code,
-                    ic.used_by,
-                    ic.owner as invited_by,
-                    ic.used_at,
-                    ic.created_at as code_created_at,
-                    p_signup.username as signup_username,
-                    p_signup.avatar as signup_avatar,
-                    p_signup.level as signup_level,
-                    p_signup.subscription_expiry as signup_sub_expiry,
-                    p_signup.created_at as signup_created_at,
-                    p_ref.username as referrer_username,
-                    p_ref.avatar as referrer_avatar,
-                    p_ref.level as referrer_level
-                FROM invite_codes ic
-                LEFT JOIN profiles p_signup ON LOWER(p_signup.owner) = LOWER(ic.used_by)
-                LEFT JOIN profiles p_ref ON LOWER(p_ref.owner) = LOWER(ic.owner)
-                WHERE ic.used_by IS NOT NULL
-                ORDER BY ic.used_at DESC NULLS LAST
+                SELECT code, used_by, owner, used_at, created_at
+                FROM invite_codes
+                WHERE used_by IS NOT NULL
+                ORDER BY used_at DESC NULLS LAST
                 LIMIT 100
                 """
             )
-            rows = cur.fetchall()
-            now = int(time.time())
-            signups = []
-            for row in rows:
-                (
-                    code,
-                    used_by,
-                    invited_by,
-                    used_at,
-                    code_created_at,
-                    signup_username,
-                    signup_avatar,
-                    signup_level,
-                    signup_sub_expiry,
-                    signup_created_at,
-                    referrer_username,
-                    referrer_avatar,
-                    referrer_level,
-                ) = row
-                signups.append(
-                    {
-                        "code": code,
-                        "signup": {
-                            "address": used_by,
-                            "username": signup_username or None,
-                            "avatar": signup_avatar or None,
-                            "level": signup_level or 0,
-                            "is_subscriber": (signup_sub_expiry or 0) > now,
-                            "created_at": signup_created_at or used_at,
-                        },
-                        "referrer": {
-                            "address": invited_by,
-                            "username": referrer_username or None,
-                            "avatar": referrer_avatar or None,
-                            "level": referrer_level or 0,
-                        },
-                        "used_at": used_at,
-                    }
-                )
+            ic_rows = bcur.fetchall()
 
-            # Get summary stats
-            cur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NOT NULL")
-            total_used = cur.fetchone()[0] or 0
-            cur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NULL")
-            total_available = cur.fetchone()[0] or 0
-            cur.execute("SELECT COUNT(DISTINCT owner) FROM invite_codes WHERE used_by IS NOT NULL")
-            unique_referrers = cur.fetchone()[0] or 0
+            bcur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NOT NULL")
+            total_used = bcur.fetchone()[0] or 0
+            bcur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NULL")
+            total_available = bcur.fetchone()[0] or 0
+            bcur.execute("SELECT COUNT(DISTINCT owner) FROM invite_codes WHERE used_by IS NOT NULL")
+            unique_referrers = bcur.fetchone()[0] or 0
 
-            # Get top referrers
-            cur.execute(
+            bcur.execute(
                 """
-                SELECT 
-                    ic.owner,
-                    COUNT(*) as invite_count,
-                    p.username,
-                    p.avatar
-                FROM invite_codes ic
-                LEFT JOIN profiles p ON LOWER(p.owner) = LOWER(ic.owner)
-                WHERE ic.used_by IS NOT NULL
-                GROUP BY ic.owner, p.username, p.avatar
+                SELECT owner, COUNT(*) as invite_count
+                FROM invite_codes
+                WHERE used_by IS NOT NULL
+                GROUP BY owner
                 ORDER BY invite_count DESC
                 LIMIT 10
                 """
             )
-            top_referrers = [
-                {
-                    "address": r[0],
-                    "invite_count": r[1],
-                    "username": r[2] or None,
-                    "avatar": r[3] or None,
-                }
-                for r in cur.fetchall()
-            ]
+            top_referrer_rows = bcur.fetchall()
 
-        finally:
-            conn.close()
+        all_addrs = set()
+        for row in ic_rows:
+            if row[1]:
+                all_addrs.add(row[1].lower())
+            if row[2]:
+                all_addrs.add(row[2].lower())
+        for row in top_referrer_rows:
+            if row[0]:
+                all_addrs.add(row[0].lower())
+
+        profile_map: dict[str, dict] = {}
+        if all_addrs:
+            addr_list = list(all_addrs)
+            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                cur = conn.cursor()
+                ph = ",".join(["%s"] * len(addr_list))
+                cur.execute(
+                    f"""SELECT LOWER(owner), username, avatar, level, subscription_expiry, created_at
+                        FROM profiles WHERE LOWER(owner) IN ({ph})""",
+                    addr_list,
+                )
+                for owner_lc, uname, avatar, lvl, sub_exp, created_at in cur.fetchall():
+                    profile_map[owner_lc] = {
+                        "username": uname or None,
+                        "avatar": avatar or None,
+                        "level": int(lvl) if lvl is not None else 0,
+                        "subscription_expiry": int(sub_exp) if sub_exp is not None else 0,
+                        "created_at": int(created_at) if created_at is not None else None,
+                    }
+
+        now = int(time.time())
+        signups = []
+        for code, used_by, invited_by, used_at, code_created_at in ic_rows:
+            sp = profile_map.get((used_by or "").lower(), {})
+            rp = profile_map.get((invited_by or "").lower(), {})
+            signups.append(
+                {
+                    "code": code,
+                    "signup": {
+                        "address": used_by,
+                        "username": sp.get("username"),
+                        "avatar": sp.get("avatar"),
+                        "level": sp.get("level", 0),
+                        "is_subscriber": (sp.get("subscription_expiry", 0) or 0) > now,
+                        "created_at": sp.get("created_at") or used_at,
+                    },
+                    "referrer": {
+                        "address": invited_by,
+                        "username": rp.get("username"),
+                        "avatar": rp.get("avatar"),
+                        "level": rp.get("level", 0),
+                    },
+                    "used_at": used_at,
+                }
+            )
+
+        top_referrers = []
+        for r_owner, invite_count in top_referrer_rows:
+            rp = profile_map.get((r_owner or "").lower(), {})
+            top_referrers.append(
+                {
+                    "address": r_owner,
+                    "invite_count": invite_count,
+                    "username": rp.get("username"),
+                    "avatar": rp.get("avatar"),
+                }
+            )
 
         log_event(rid, "get_stats.signups.ok", total_signups=len(signups))
         return jsonify(
@@ -7598,11 +7510,10 @@ def get_welcome_stats():
         return jsonify(_welcome_stats_cache["data"])
 
     try:
-        conn = connect_db(timeout=3.0, busy_timeout_ms=5000)
-        try:
-            cur = conn.cursor()
-            today_start = now - 86400  # last 24h window
+        today_start = now - 86400  # last 24h window
 
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+            cur = conn.cursor()
             # Query 1: registered users count
             cur.execute("SELECT COUNT(*) FROM profiles")
             registered_users = cur.fetchone()[0] or 0
@@ -7618,38 +7529,31 @@ def get_welcome_stats():
             )
             posts_24h = cur.fetchone()[0] or 0
 
-            # Query 3: DAU from stats_events (actual page visits, same as /stats page)
-            # Count unique visitors: registered users by address, guests by session_id
-            cur.execute(
+        # Query 3: active users from last_seen (backend DB)
+        with connect_backend_db() as bconn:
+            bcur = bconn.cursor()
+            bcur.execute(
                 """
-                SELECT COUNT(DISTINCT 
-                    CASE 
-                        WHEN user_address IS NOT NULL AND user_address != '' THEN LOWER(user_address)
-                        ELSE session_id
-                    END
-                )
-                FROM stats_events
-                WHERE created_at >= %s
-                  AND event_type IN ('visit', 'session_start', 'page_view')
+                SELECT COUNT(*)
+                FROM user_last_seen
+                WHERE last_seen_at >= %s
                 """,
                 (today_start,),
             )
-            active_24h = cur.fetchone()[0] or 0
+            active_24h = bcur.fetchone()[0] or 0
 
-            result = {
-                "registered_users": registered_users,
-                "posts_24h": posts_24h,
-                "active_24h": active_24h,
-            }
+        result = {
+            "registered_users": registered_users,
+            "posts_24h": posts_24h,
+            "active_24h": active_24h,
+        }
 
-            # Cache the result
-            _welcome_stats_cache["data"] = result
-            _welcome_stats_cache["expires"] = now + _WELCOME_STATS_CACHE_TTL
+        # Cache the result
+        _welcome_stats_cache["data"] = result
+        _welcome_stats_cache["expires"] = now + _WELCOME_STATS_CACHE_TTL
 
-            log_event(rid, "get_welcome_stats.ok", **result)
-            return jsonify(result)
-        finally:
-            conn.close()
+        log_event(rid, "get_welcome_stats.ok", **result)
+        return jsonify(result)
     except Exception as e:
         log_event(rid, "get_welcome_stats.err", error=str(e))
         return safe_error(e)
@@ -7919,15 +7823,19 @@ def get_stats():
                 "porn": tag_counts.get("porn", 0),
             }
 
-            # Analytics stats (DAU/MAU, device breakdown) are loaded separately via tab=analytics
-            # Use on-chain active users as a fast proxy for DAU
             stats["chain_active_24h"] = stats.get("chain_active_24h", 0)
-            stats["dau_any_today"] = stats["chain_active_24h"]  # Fast approximation
-            stats["dau_today"] = stats["chain_active_24h"]
             stats["total_users"] = stats.get("registered_users", 0)
 
         finally:
             conn.close()
+
+        last_seen = _get_last_seen_rollups(now)
+        stats.update(last_seen)
+        logger.debug(
+            "get_stats.overview.last_seen dau=%d maus=%d",
+            last_seen.get("dau_today", 0),
+            last_seen.get("maus", 0),
+        )
 
         # Cache the result
         _overview_stats_cache["data"] = stats
@@ -7985,10 +7893,9 @@ def get_referral_stats():
 
     log_event(rid, "referral.stats.begin", address=address)
     try:
-        with connect_db() as conn:
-            with conn.cursor() as cur:
-                # Get pending and paid reward totals
-                cur.execute(
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                bcur.execute(
                     """
                     SELECT 
                         COALESCE(SUM(CASE WHEN status = 'pending' THEN total_pending ELSE 0 END), 0) as pending_total,
@@ -7998,40 +7905,21 @@ def get_referral_stats():
                 """,
                     (address,),
                 )
-                row = cur.fetchone()
+                row = bcur.fetchone()
                 pending_total = float(row[0]) if row else 0.0
                 paid_total = float(row[1]) if row else 0.0
 
-                # Get who referred this user
-                cur.execute(
-                    """
-                    SELECT 
-                        rl.referrer_address,
-                        COALESCE(p.username, '') as username
-                    FROM referral_links rl
-                    LEFT JOIN profiles p ON LOWER(p.owner) = rl.referrer_address
-                    WHERE rl.user_address = %s
-                    """,
+                bcur.execute(
+                    "SELECT referrer_address FROM referral_links WHERE user_address = %s",
                     (address,),
                 )
-                referrer_row = cur.fetchone()
-                referred_by = None
-                if referrer_row:
-                    referred_by = {
-                        "address": referrer_row[0],
-                        "username": referrer_row[1] or None,
-                    }
+                referrer_row = bcur.fetchone()
+                referrer_address = referrer_row[0] if referrer_row else None
 
-                # Load all referral links for tree building
-                cur.execute("SELECT user_address, referrer_address FROM referral_links")
-                all_links = {r[0]: r[1] for r in cur.fetchall()}
+                bcur.execute("SELECT user_address, referrer_address FROM referral_links")
+                all_links = {r[0]: r[1] for r in bcur.fetchall()}
 
-                # Load all usernames
-                cur.execute("SELECT LOWER(owner), username FROM profiles WHERE username IS NOT NULL AND username != ''")
-                usernames = {r[0]: r[1] for r in cur.fetchall()}
-
-                # Load actual accruals for this user (from referral_user_accruals table)
-                cur.execute(
+                bcur.execute(
                     """
                     SELECT referee_address, level, pending, paid, COALESCE(denied, 0)
                     FROM referral_user_accruals
@@ -8041,85 +7929,86 @@ def get_referral_stats():
                 )
                 accruals = {
                     r[0]: {"level": r[1], "pending": float(r[2]), "paid": float(r[3]), "denied": float(r[4])}
-                    for r in cur.fetchall()
+                    for r in bcur.fetchall()
                 }
 
-                # Reward rates by level (same as referral_accrue.py)
-                REWARD_RATES = [0.0, 1.0, 0.5, 0.25, 0.125, 0.0625]
-
-                def build_tree(parent_addr: str, level: int, max_depth: int = 5):
-                    """Build referral tree recursively with actual accrued earnings."""
-                    if level > max_depth:
-                        return []
-
-                    # Find direct referees of this parent
-                    direct_referees = [addr for addr, ref in all_links.items() if ref == parent_addr]
-
-                    tree = []
-                    for ref_addr in direct_referees:
-                        rate = REWARD_RATES[level] if level < len(REWARD_RATES) else 0.0
-
-                        # Get actual accrued amounts from database
-                        accrual = accruals.get(ref_addr, {"pending": 0.0, "paid": 0.0, "denied": 0.0})
-
-                        # Get children recursively
-                        children = build_tree(ref_addr, level + 1, max_depth)
-
-                        def count_descendants(nodes):
-                            total = len(nodes)
-                            for n in nodes:
-                                total += count_descendants(n.get("children", []))
-                            return total
-
-                        tree.append(
-                            {
-                                "address": ref_addr,
-                                "username": usernames.get(ref_addr),
-                                "level": level,
-                                "rate": rate,
-                                "pending": accrual["pending"],
-                                "paid": accrual["paid"],
-                                "denied": accrual["denied"],
-                                "children": children,
-                                "descendant_count": count_descendants(children),
-                            }
-                        )
-
-                    return tree
-
-                # Build the referral tree starting from the user
-                referral_tree = build_tree(address, 1, 5)
-
-                # Count total referrals and sum pending/paid from tree
-                def count_all(nodes):
-                    total = len(nodes)
-                    for n in nodes:
-                        total += count_all(n.get("children", []))
-                    return total
-
-                def sum_tree_amounts(nodes):
-                    pending = 0.0
-                    paid = 0.0
-                    for n in nodes:
-                        pending += n.get("pending", 0.0)
-                        paid += n.get("paid", 0.0)
-                        child_pending, child_paid = sum_tree_amounts(n.get("children", []))
-                        pending += child_pending
-                        paid += child_paid
-                    return pending, paid
-
-                total_referrals = count_all(referral_tree)
-                tree_pending, tree_paid = sum_tree_amounts(referral_tree)
-
-                # Get next update time from referral daemon state
-                cur.execute("SELECT value FROM referral_state WHERE key = %s", ("referral_accrue_last_run",))
-                state_row = cur.fetchone()
+                bcur.execute("SELECT value FROM referral_state WHERE key = %s", ("referral_accrue_last_run",))
+                state_row = bcur.fetchone()
                 last_run_ts = int(state_row[0]) if state_row else None
-                # Read period from database (stored by accrue script), fallback to 24h
-                cur.execute("SELECT value FROM referral_state WHERE key = %s", ("referral_accrue_period",))
-                period_row = cur.fetchone()
+                bcur.execute("SELECT value FROM referral_state WHERE key = %s", ("referral_accrue_period",))
+                period_row = bcur.fetchone()
                 period_seconds = int(period_row[0]) if period_row else 86400
                 next_update_ts = (last_run_ts + period_seconds) if last_run_ts else None
+
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT LOWER(owner), username FROM profiles WHERE username IS NOT NULL AND username != ''")
+                usernames = {r[0]: r[1] for r in cur.fetchall()}
+
+        referred_by = None
+        if referrer_address:
+            referred_by = {
+                "address": referrer_address,
+                "username": usernames.get(referrer_address) or None,
+            }
+
+        REWARD_RATES = [0.0, 1.0, 0.5, 0.25, 0.125, 0.0625]
+
+        def build_tree(parent_addr: str, level: int, max_depth: int = 5):
+            if level > max_depth:
+                return []
+
+            direct_referees = [addr for addr, ref in all_links.items() if ref == parent_addr]
+
+            tree = []
+            for ref_addr in direct_referees:
+                rate = REWARD_RATES[level] if level < len(REWARD_RATES) else 0.0
+                accrual = accruals.get(ref_addr, {"pending": 0.0, "paid": 0.0, "denied": 0.0})
+                children = build_tree(ref_addr, level + 1, max_depth)
+
+                def count_descendants(nodes):
+                    total = len(nodes)
+                    for n in nodes:
+                        total += count_descendants(n.get("children", []))
+                    return total
+
+                tree.append(
+                    {
+                        "address": ref_addr,
+                        "username": usernames.get(ref_addr),
+                        "level": level,
+                        "rate": rate,
+                        "pending": accrual["pending"],
+                        "paid": accrual["paid"],
+                        "denied": accrual["denied"],
+                        "children": children,
+                        "descendant_count": count_descendants(children),
+                    }
+                )
+
+            return tree
+
+        referral_tree = build_tree(address, 1, 5)
+
+        def count_all(nodes):
+            total = len(nodes)
+            for n in nodes:
+                total += count_all(n.get("children", []))
+            return total
+
+        def sum_tree_amounts(nodes):
+            pending = 0.0
+            paid = 0.0
+            for n in nodes:
+                pending += n.get("pending", 0.0)
+                paid += n.get("paid", 0.0)
+                child_pending, child_paid = sum_tree_amounts(n.get("children", []))
+                pending += child_pending
+                paid += child_paid
+            return pending, paid
+
+        total_referrals = count_all(referral_tree)
+        tree_pending, tree_paid = sum_tree_amounts(referral_tree)
 
         result = {
             "pending_total": tree_pending,
@@ -8157,7 +8046,7 @@ def get_invite_codes():
         return jsonify({"error": "address required"}), 400
 
     try:
-        conn = connect_db(timeout=5.0)
+        conn = connect_backend_db()
         cur = conn.cursor()
 
         cur.execute(
@@ -8209,7 +8098,7 @@ def validate_invite_code():
         return jsonify({"valid": False, "error": "Invalid code format"}), 400
 
     try:
-        conn = connect_db(timeout=5.0)
+        conn = connect_backend_db()
         cur = conn.cursor()
 
         cur.execute(

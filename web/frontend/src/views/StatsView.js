@@ -272,8 +272,6 @@ export default function StatsView() {
     const location = useLocation();
     const [activeTab, setActiveTab] = useTabs('overview', VALID_TABS);
     const [stats, setStats] = useState(null);
-    const [analyticsStats, setAnalyticsStats] = useState(null);
-    const [analyticsLoading, setAnalyticsLoading] = useState(false);
     const [signupsData, setSignupsData] = useState(null);
     const [subscribersData, setSubscribersData] = useState(null);
     const [accountsData, setAccountsData] = useState(null);
@@ -286,10 +284,7 @@ export default function StatsView() {
     const [error, setError] = useState(null);
 
     // Merge stats with analytics when both are loaded
-    const mergedStats = stats ? {
-        ...stats,
-        ...(analyticsStats || {}),
-    } : null;
+    const mergedStats = stats;
 
     // Fetch reward history with pagination
     const fetchRewardHistory = useCallback(async (offset = 0, append = false) => {
@@ -314,20 +309,6 @@ export default function StatsView() {
         }
     }, []);
 
-    // Fetch analytics stats separately (slow - user agent parsing)
-    const fetchAnalytics = useCallback(async () => {
-        setAnalyticsLoading(true);
-        try {
-            const data = await Api.get('get_stats', { tab: 'analytics' }, { timeoutMs: 30000 });
-            setAnalyticsStats(data);
-        } catch (err) {
-            console.error('Failed to load analytics:', err);
-            // Don't set error - analytics is optional enhancement
-        } finally {
-            setAnalyticsLoading(false);
-        }
-    }, []);
-
     // Fetch data based on active tab
     const fetchData = useCallback(async (tab) => {
         setLoading(true);
@@ -336,8 +317,6 @@ export default function StatsView() {
             const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
             if (tab === 'overview') {
                 setStats(data);
-                // Also fetch analytics separately (lazy load)
-                fetchAnalytics();
             } else if (tab === 'signups') {
                 setSignupsData(data);
             } else if (tab === 'subscribers') {
@@ -355,7 +334,7 @@ export default function StatsView() {
         } finally {
             setLoading(false);
         }
-    }, [fetchRewardHistory, fetchAnalytics]);
+    }, [fetchRewardHistory]);
 
     useEffect(() => {
         fetchData(activeTab);
@@ -598,20 +577,9 @@ export default function StatsView() {
                                         </Label>
                                         <ValueBox>
                                             <Mono>
-                                                {analyticsLoading ? '...' : formatNumber(mergedStats.dau_any_today || mergedStats.dau_today || 0)}
-                                                {!analyticsLoading && dauTrend && <TrendIndicator trend={dauTrend}>{trendSymbol}</TrendIndicator>}
+                                                {formatNumber(mergedStats.dau_any_today || mergedStats.dau_today || 0)}
+                                                {dauTrend && <TrendIndicator trend={dauTrend}>{trendSymbol}</TrendIndicator>}
                                             </Mono>
-                                        </ValueBox>
-                                    </Row>
-                                    <Row>
-                                        <Label>
-                                            DAUs (Registered)
-                                            <InfoIcon data-tooltip="Daily Active Users: unique logged-in users today">
-                                                ?
-                                            </InfoIcon>
-                                        </Label>
-                                        <ValueBox>
-                                            <Mono>{analyticsLoading ? '...' : formatNumber(mergedStats.dau_registered_today || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -622,7 +590,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{analyticsLoading ? '...' : formatNumber(mergedStats.maus || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.maus || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -830,99 +798,6 @@ export default function StatsView() {
                                                             <Mono>Death</Mono>
                                                             <Mono>{formatNumber(mergedStats.tag_counts.death || 0)}</Mono>
                                                         </StatItem>
-                                                    </StatList>
-                                                </ValueBox>
-                                            </Row>
-                                        </>
-                                    )}
-                                    {/* Analytics sections - loaded lazily */}
-                                    {analyticsLoading && (
-                                        <SectionNote style={{ textAlign: 'center', padding: '1rem' }}>
-                                            Loading analytics...
-                                        </SectionNote>
-                                    )}
-                                    {mergedStats.device_breakdown && !analyticsLoading && (
-                                        <>
-                                            <SectionTitle>
-                                                Device Types
-                                                <SectionInfoIcon data-tooltip="Session breakdown by device type (last 30 days).">
-                                                    ?
-                                                </SectionInfoIcon>
-                                            </SectionTitle>
-                                            <Row>
-                                                <Label>
-                                                    By Device
-                                                </Label>
-                                                <ValueBox>
-                                                    <StatList>
-                                                        <StatItem>
-                                                            <Mono>Desktop</Mono>
-                                                            <Mono>{mergedStats.device_breakdown.desktop}</Mono>
-                                                        </StatItem>
-                                                        <StatItem>
-                                                            <Mono>Mobile</Mono>
-                                                            <Mono>{mergedStats.device_breakdown.mobile}</Mono>
-                                                        </StatItem>
-                                                        <StatItem>
-                                                            <Mono>Tablet</Mono>
-                                                            <Mono>{mergedStats.device_breakdown.tablet}</Mono>
-                                                        </StatItem>
-                                                        {mergedStats.device_breakdown.other && mergedStats.device_breakdown.other !== "0%" && (
-                                                            <StatItem>
-                                                                <Mono>Other</Mono>
-                                                                <Mono>{mergedStats.device_breakdown.other}</Mono>
-                                                            </StatItem>
-                                                        )}
-                                                    </StatList>
-                                                </ValueBox>
-                                            </Row>
-                                        </>
-                                    )}
-                                    {mergedStats.browser_breakdown && mergedStats.browser_breakdown.length > 0 && !analyticsLoading && (
-                                        <>
-                                            <SectionTitle>
-                                                Browsers
-                                                <SectionInfoIcon data-tooltip="Top browsers (last 30 days).">
-                                                    ?
-                                                </SectionInfoIcon>
-                                            </SectionTitle>
-                                            <Row>
-                                                <Label>
-                                                    Top Browsers
-                                                </Label>
-                                                <ValueBox>
-                                                    <StatList>
-                                                        {mergedStats.browser_breakdown.map((item, idx) => (
-                                                            <StatItem key={idx}>
-                                                                <Mono>{item.name}</Mono>
-                                                                <Mono>{item.pct}</Mono>
-                                                            </StatItem>
-                                                        ))}
-                                                    </StatList>
-                                                </ValueBox>
-                                            </Row>
-                                        </>
-                                    )}
-                                    {mergedStats.os_breakdown && mergedStats.os_breakdown.length > 0 && !analyticsLoading && (
-                                        <>
-                                            <SectionTitle>
-                                                Operating Systems
-                                                <SectionInfoIcon data-tooltip="Top operating systems (last 30 days).">
-                                                    ?
-                                                </SectionInfoIcon>
-                                            </SectionTitle>
-                                            <Row>
-                                                <Label>
-                                                    Top OS
-                                                </Label>
-                                                <ValueBox>
-                                                    <StatList>
-                                                        {mergedStats.os_breakdown.map((item, idx) => (
-                                                            <StatItem key={idx}>
-                                                                <Mono>{item.name}</Mono>
-                                                                <Mono>{item.pct}</Mono>
-                                                            </StatItem>
-                                                        ))}
                                                     </StatList>
                                                 </ValueBox>
                                             </Row>

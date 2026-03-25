@@ -64,7 +64,6 @@ from indexer.settings import (
     COMMUNITY_VOTE_MAX_POSTS,
     COMMUNITY_VOTE_BOOST_MULTIPLIER,
 )
-from indexer.quest_tracker import QuestTracker
 from indexer.database import DatabaseManager
 import re
 import socket
@@ -151,7 +150,6 @@ class MessageProcessor:
         self.chain = chain_client
         self.log_yaml = log_yaml_fn
         self.iso_timestamp = iso_timestamp_fn
-        self.quest_tracker = QuestTracker(db_manager)
 
     def process_core_message(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Process a core message."""
@@ -381,32 +379,6 @@ class MessageProcessor:
                 },
             )
 
-        # Track quest progress for new posts/comments (not edits)
-        if not existing and owner:
-            try:
-                # Determine action type: root post or comment
-                action_type = "comment" if target else "post"
-                self.quest_tracker.update_progress(
-                    owner,
-                    action_type,
-                    ts,
-                    topic=root_topic,
-                    target_topic=root_topic,
-                    content_length=len(content),
-                    root_post_id=root_post_id,
-                )
-                # Also track unique_topic_post for root posts
-                if not target and root_topic:
-                    self.quest_tracker.update_progress(
-                        owner,
-                        "unique_topic_post",
-                        ts,
-                        topic=root_topic,
-                        content_length=len(content),
-                    )
-            except Exception as e:
-                logger.warning("Quest progress tracking failed for post %s: %s", txhash, e)
-
         # Extract @mentions from content for new posts
         if not existing and owner and content:
             try:
@@ -414,12 +386,7 @@ class MessageProcessor:
             except Exception:
                 logger.exception("Failed to extract mentions for post %s", txhash)
 
-        # Push notifications for new posts only (skip edits and old blocks during catch-up)
-        age = int(time.time()) - ts
-        if not existing and owner and age < 120:
-            self._fire_push_for_post(owner, txhash, target, content)
-        elif not existing and owner and age >= 120:
-            logger.debug("[Push] Skipped stale post %s (age=%ds)", txhash[:16], age)
+        # Push notifications handled by backend (indexer must not write backend tables)
 
     def _extract_and_store_mentions(self, content: str, post_txhash: str, mentioner_address: str, ts: int):
         """Parse @username mentions from content and store them in the mentions table.
@@ -458,33 +425,6 @@ class MessageProcessor:
             post_txhash,
             [u for u, a in username_to_addr.items() if a.lower() != mentioner_lower],
         )
-
-    def _fire_push_for_post(self, owner: str, txhash: str, target: str, content: str) -> None:
-        """Send push notifications for a new post/comment (reply + mentions)."""
-        try:
-            from shared.push import send_push_for_reply, send_push_for_mentions
-
-            profile = self.db.get_profile(owner)
-            poster_username = profile[0] if profile else ""
-
-            if target:
-                send_push_for_reply(owner, poster_username, target, content, txhash)
-
-            send_push_for_mentions(owner, poster_username, content, txhash, target or "")
-        except Exception:
-            logger.exception("[Push] Failed to fire push for post %s", txhash)
-
-    def _fire_push_for_award(self, awarder: str, post_owner: str, target: str, award_type: str) -> None:
-        """Send push notification for an award."""
-        try:
-            from shared.push import send_push_for_award
-
-            profile = self.db.get_profile(awarder)
-            awarder_username = profile[0] if profile else ""
-
-            send_push_for_award(awarder, awarder_username, post_owner, target, award_type)
-        except Exception:
-            logger.exception("[Push] Failed to fire push for award on %s", target)
 
     def _handle_vote(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgVote."""
@@ -756,92 +696,6 @@ class MessageProcessor:
 
         # Persist both the user vote and the weighted contribution.
         self.db.upsert_vote(txhash, owner, ts, target, user_vote, user_weight, paid, relayer=relayer)
-
-        # Track quest progress for votes
-        if owner and raw_direction != 0:
-            try:
-                # A vote is only a "change" if there was a non-zero previous vote.
-                # If user unvoted (set to 0) first, then votes again, that's a NEW vote.
-                is_vote_change = previous_vote is not None and prev_vote != 0
-                logger.info(
-                    "Vote quest tracking: owner=%s target=%s direction=%s previous_vote=%s prev_vote=%s is_vote_change=%s",
-                    owner[:12] if owner else None,
-                    target[:12] if target else None,
-                    raw_direction,
-                    previous_vote is not None,
-                    prev_vote,
-                    is_vote_change,
-                )
-                self.quest_tracker.update_progress(
-                    owner,
-                    "vote",
-                    ts,
-                    target=target,
-                    target_owner=target_author,
-                    target_topic=root_topic,
-                    vote_direction=raw_direction,
-                    vote_is_change=is_vote_change,
-                )
-                # Also track balanced_vote action type
-                self.quest_tracker.update_progress(
-                    owner,
-                    "balanced_vote",
-                    ts,
-                    target=target,
-                    target_owner=target_author,
-                    target_topic=root_topic,
-                    vote_direction=raw_direction,
-                    vote_is_change=is_vote_change,
-                )
-            except Exception as e:
-                logger.warning("Quest progress tracking failed for vote %s: %s", txhash, e)
-
-        # Track quest progress for received upvotes (post/comment authors)
-        if target_author and raw_direction > 0:
-            try:
-                delta_upvotes = 1 if prev_vote <= 0 else 0
-                if delta_upvotes > 0:
-                    upvotes, downvotes = self.db.get_target_vote_counts(target)
-                    post_row = self.db.get_post(target)
-                    if not post_row:
-                        raise ValueError(f"Vote {txhash} target not found for content length")
-                    content_length = len(post_row[2] or "")
-                    target_norm = str(target or "").strip().lower()
-                    root_norm = str(root_post_id or "").strip().lower()
-                    is_root_target = bool(root_norm) and target_norm == root_norm
-                    action_type = "upvotes_received" if is_root_target else "comment_upvotes_received"
-                    logger.debug(
-                        "Received upvote quest check: target=%s author=%s root_post=%s upvotes=%s downvotes=%s action=%s",
-                        target_norm[:12] if target_norm else None,
-                        target_author[:12] if target_author else None,
-                        root_norm[:12] if root_norm else None,
-                        upvotes,
-                        downvotes,
-                        action_type,
-                    )
-                    self.quest_tracker.update_progress(
-                        target_author,
-                        action_type,
-                        ts,
-                        target=target,
-                        root_post_id=root_post_id,
-                        content_length=content_length,
-                        quality=upvotes,
-                        target_owner=owner,
-                    )
-                    if not is_root_target:
-                        self.quest_tracker.update_progress(
-                            target_author,
-                            "quality_comments",
-                            ts,
-                            target=target,
-                            root_post_id=root_post_id,
-                            content_length=content_length,
-                            quality=upvotes,
-                            target_owner=owner,
-                        )
-            except Exception as e:
-                logger.warning("Quest progress tracking failed for received upvote %s: %s", txhash, e)
 
         # Build detailed vote log
         vote_log = {
@@ -1191,16 +1045,9 @@ class MessageProcessor:
                 },
             )
 
-            # Track quest progress for the post/comment author (not the award giver)
             target_author = self.db.get_post_owner(target)
-            if target_author:
-                self.quest_tracker.update_progress(target_author, "award_received", ts, target=target)
-                if award_type == "quality_post":
-                    self.quest_tracker.update_progress(target_author, "quality_award_received", ts, target=target)
 
-            # Push notification for award (skip old blocks during catch-up)
-            if target_author and int(time.time()) - ts < 120:
-                self._fire_push_for_award(owner, target_author, target, award_type)
+            # Push notifications handled by backend (indexer must not write backend tables)
         except Exception as e:
             logger.error("Error handling MsgAward %s: %s", tx_hash, e, exc_info=True)
 

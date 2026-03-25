@@ -86,6 +86,22 @@ def get_completed_migrations(config_dir: Path) -> set[str]:
     return completed
 
 
+def _has_existing_data(config_dir: Path) -> bool:
+    data_root = Path(config_dir).parent
+    if (data_root / "postgres" / "PG_VERSION").exists():
+        return True
+    if (data_root / "node" / "config" / "genesis.json").exists():
+        return True
+    node_data = data_root / "node" / "data"
+    if node_data.exists():
+        try:
+            for _ in node_data.iterdir():
+                return True
+        except Exception:
+            return True
+    return False
+
+
 def mark_migration_complete(config_dir: Path, migration_key: str, result: str = "completed") -> None:
     """Mark a migration as completed."""
     migrations_file = get_migrations_file(config_dir)
@@ -123,10 +139,13 @@ def run_one_time_migrations(config_dir: Path) -> int:
     # defaults — mark all existing migrations as completed so they don't run.
     migrations_file = get_migrations_file(config_dir)
     if not migrations_file.exists():
-        logger.info("Fresh deployment detected (no .migrations file) — skipping all existing migrations")
-        for _, key, module in migrations:
-            mark_migration_complete(config_dir, key, "skipped (fresh deploy)")
-        return 0
+        if _has_existing_data(config_dir):
+            logger.warning("No .migrations file but existing data detected — running all migrations")
+        else:
+            logger.info("Fresh deployment detected (no .migrations file) — skipping all existing migrations")
+            for _, key, module in migrations:
+                mark_migration_complete(config_dir, key, "skipped (fresh deploy)")
+            return 0
 
     completed = get_completed_migrations(config_dir)
     pending = [(name, key, mod) for name, key, mod in migrations if key not in completed]
@@ -149,10 +168,7 @@ def run_one_time_migrations(config_dir: Path) -> int:
             run_count += 1
         except Exception as e:
             logger.error(f"Migration {migration_key} failed: {e}", exc_info=True)
-            # Don't fail the whole startup, just log and continue
-            # Mark as failed so we can retry
-            mark_migration_complete(config_dir, migration_key, f"FAILED: {e}")
-            continue
+            raise
 
     return run_count
 

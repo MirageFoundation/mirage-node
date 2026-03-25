@@ -26,10 +26,12 @@ The `shared/` directory contains Python modules that are imported by multiple se
 |--------|---------|
 | `datatypes.py` | Dynamic protobuf message classes for custom Mirage types |
 | `canon.py` | Canonical byte serialization for relay signature verification |
-| `config.py` | Centralized configuration loading from node HOME files |
+| `config.py` | Centralized configuration loading from node HOME files + DB URL helpers |
 | `logging_setup.py` | Structured logging with date-based rotation |
 | `client.py` | gRPC client utilities (optional) |
 | `fingerprint.py` | Device fingerprinting utilities (fraud detection) |
+| `push.py` | Push notification sending (Expo) — writes to backend DB |
+| `inbox.py` | Inbox/notification helpers — reads from both DBs |
 
 **Key Design Principle:** These modules exist to prevent code duplication and ensure identical behavior across services. When multiple services need to perform the same operation (e.g., serialize a message for signature verification), they must produce byte-identical results.
 
@@ -367,6 +369,18 @@ def get_indexer_config(self) -> Dict[str, Any]:
         "reconnect": {"initial_delay": 1, "max_delay": 60, "max_retries": -1},
     }
 ```
+
+### Database URL Helpers
+
+`config.py` also provides helpers for the dual-database architecture:
+
+```python
+def get_indexer_db_url() -> str:       # INDEXER_DB_URL (indexer read-write)
+def get_indexer_ro_url() -> str:       # INDEXER_DB_RO_URL (backend read-only)
+def get_backend_db_url() -> str:       # BACKEND_DB_URL (backend read-write)
+```
+
+All three raise `RuntimeError` if the corresponding environment variable is missing or empty.
 
 ---
 

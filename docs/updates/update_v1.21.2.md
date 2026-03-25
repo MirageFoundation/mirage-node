@@ -4,7 +4,7 @@
 
 If you have the Mirage mobile app, you now get push notifications. When someone replies to your post, mentions you in a comment, or gives you an award, your device lights up with the notification. Tapping it takes you straight to the conversation. Notifications are tied to your inbox — you get up to three pushes per batch, and the counter resets every time you open your inbox, so you are never buried in alerts but you never miss what matters either. If you have not tried the app yet, grab it at mirage.foundation/app.
 
-Because Mirage is decentralized, push delivery had to work regardless of which node processed the transaction. Notifications are triggered by the indexer as it processes on-chain events, not by the backend that happened to relay the transaction. This means a reply posted through any node in the network reaches your phone, not just replies that went through the same node you are connected to. Token registration is cryptographically signed with your private key, so no one can register a push token on your behalf or hijack your notifications.
+Because Mirage is decentralized, push delivery had to work regardless of which node processed the transaction. The backend runs a push listener that polls the indexer database for new on-chain events (posts, awards), so notifications fire even when the action originated from a different node. Token registration is cryptographically signed with your private key, so no one can register a push token on your behalf or hijack your notifications.
 
 ### Replay Protection — Start to Finish
 

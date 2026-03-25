@@ -8,7 +8,7 @@ function AuthPageShell({ activeTab, children }) {
     const handleSelect = (tab) => {
         if (tab === activeTab) return;
         if (tab === "create") {
-            navigate("/create_account");
+            navigate("/signup");
         } else if (tab === "login") {
             navigate("/login");
         }

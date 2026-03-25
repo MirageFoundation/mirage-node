@@ -214,7 +214,7 @@ class ChainClient:
         next_key: str | None = None
 
         while True:
-            url = f"{rest_url}/mirage/core/v1/profiles?pagination.limit=500"
+            url = f"{rest_url}/mirage/core/v1/profiles?pagination.limit=5000"
             if next_key:
                 url += f"&pagination.key={_up.quote(next_key)}"
 

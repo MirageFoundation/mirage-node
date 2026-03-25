@@ -433,11 +433,22 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
     status("Copying PostgreSQL indexer dump...")
     run(["bash", "-lc", f"docker cp '{indexer_sql}' mirage:/root/.mirage/node.clone/indexer.sql"])
 
+    backend_sql = backup_root / "backup_backend.sql"
+    if backend_sql.exists():
+        status("Copying PostgreSQL backend dump...")
+        run(["bash", "-lc", f"docker cp '{backend_sql}' mirage:/root/.mirage/node.clone/backend.sql"])
+    else:
+        status("No backend SQL dump found (will be initialized by the application)")
+
     # Copy env directory (node.env, backend.env, .migrations, etc.)
     # These provide RETENTION_BLOCKS, INDEXER_DB_URL, etc. for the entrypoint
     env_dir = backup_root / "env"
     if env_dir.exists() and env_dir.is_dir():
-        status("Copying env files from backup...")
+        migrations_file = env_dir / ".migrations"
+        if not migrations_file.exists():
+            status("Backup env missing .migrations (migrations will be re-evaluated on startup)")
+        status("Copying env files from backup (clearing old env first)...")
+        run(["bash", "-lc", "docker exec mirage rm -rf /root/.mirage/env"])
         run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/env"])
         for item in sorted(env_dir.iterdir()):
             if item.is_file():
@@ -495,16 +506,36 @@ for i in $(seq 1 30); do
     pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1 && break || sleep 1
 done
 
-# Drop and recreate the mirage database and role, then restore dump as postgres (peer auth)
+    # Drop and recreate databases + roles, then restore dumps
 su - postgres <<EOF
-psql -c "DROP DATABASE IF EXISTS mirage"
+psql -c "DROP DATABASE IF EXISTS mirage_indexer"
+psql -c "DROP DATABASE IF EXISTS mirage_backend"
+psql -c "DROP ROLE IF EXISTS mirage_indexer_ro"
+psql -c "DROP ROLE IF EXISTS mirage_indexer"
+psql -c "DROP ROLE IF EXISTS mirage_backend"
+psql -c "DROP ROLE IF EXISTS mirage_ro"
 psql -c "DROP ROLE IF EXISTS mirage"
-psql -c "CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage'"
-psql -c "CREATE DATABASE mirage OWNER mirage"
-psql -d mirage -f "$DUMP_FILE"
+psql -c "CREATE ROLE mirage_indexer WITH LOGIN PASSWORD 'mirage_indexer'"
+psql -c "CREATE ROLE mirage_indexer_ro WITH LOGIN PASSWORD 'mirage_indexer_ro'"
+psql -c "CREATE ROLE mirage_backend WITH LOGIN PASSWORD 'mirage_backend'"
+psql -c "CREATE DATABASE mirage_indexer OWNER mirage_indexer"
+psql -c "CREATE DATABASE mirage_backend OWNER mirage_backend"
+psql -d mirage_indexer -f "$DUMP_FILE"
+psql -d mirage_indexer -c "GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro"
+psql -d mirage_indexer -c "GRANT USAGE ON SCHEMA public TO mirage_indexer_ro"
+psql -d mirage_indexer -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro"
+psql -d mirage_indexer -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro"
 EOF
 
-echo "Index DB restored from dump"
+BACKEND_DUMP="/root/.mirage/node.clone/backend.sql"
+if [ -f "$BACKEND_DUMP" ]; then
+    su - postgres -c "psql -d mirage_backend -f $BACKEND_DUMP"
+    echo "Backend DB restored from dump"
+else
+    echo "No backend dump found, backend DB will be initialized by the application"
+fi
+
+echo "Databases restored"
 """
 
     ensure_mirage_tmp()
@@ -552,10 +583,12 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-su - postgres -c "psql -c \\"DROP DATABASE IF EXISTS mirage;\\""
+su - postgres -c "psql -c \\"DROP DATABASE IF EXISTS mirage_indexer;\\""
+su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage_indexer_ro;\\""
+su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage_indexer;\\""
 su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage;\\""
-su - postgres -c "psql -c \\"CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage';\\""
-su - postgres -c "psql -c \\"CREATE DATABASE mirage OWNER mirage;\\""
+su - postgres -c "psql -c \\"CREATE ROLE mirage_indexer WITH LOGIN PASSWORD 'mirage_indexer';\\""
+su - postgres -c "psql -c \\"CREATE DATABASE mirage_indexer OWNER mirage_indexer;\\""
 """
     ensure_mirage_tmp()
     tmp = Path(tempfile.mkdtemp(prefix="pg-init-", dir=str(MIRAGE_TMP)))

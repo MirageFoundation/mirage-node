@@ -95,20 +95,29 @@ The validator's account pays all gas fees. This is recouped through:
 
 ```
 web/backend/
-├── app.py           # Entry point (Flask app)
-├── factory.py       # App factory, blueprint registration
-├── node.py          # Runtime initialization, validator key resolution
-├── chain.py         # Chain queries (difficulty, block hashes)
-├── pow.py           # PoW helpers, canonical message building
-├── tx.py            # Transaction building, simulation, broadcast
-├── bank.py          # Balance queries
-├── params.py        # Chain parameter loading/caching
-├── db.py            # Database connection helper
+├── app.py              # Entry point (Flask app)
+├── factory.py          # App factory, blueprint registration, push listener startup
+├── node.py             # Runtime initialization, validator key resolution
+├── chain.py            # Chain queries (difficulty, block hashes)
+├── pow.py              # PoW helpers, canonical message building
+├── tx.py               # Transaction building, simulation, broadcast
+├── bank.py             # Balance queries
+├── params.py           # Chain parameter loading/caching
+├── db.py               # Database connections (indexer RO + backend RW) and schema init
+├── quest_tracker.py    # Quest progress tracking (backend-owned)
+├── quest_settings.py   # Quest system constants
+├── quests.yaml         # Quest definitions
+├── reward_distributor.py # Token reward distribution
+├── similarity.py       # User similarity cache
+├── user_last_seen.py   # DAU/MAU tracking via authenticated API hits
+├── push_events.py      # Push notification deduplication helpers
+├── push_listener.py    # Background thread polling indexer for cross-node push events
 ├── routes/
-│   ├── public.py    # Read-only endpoints (feeds, profiles, search)
-│   ├── core.py      # Write endpoints (post, vote, username, etc.)
-│   └── bridge.py    # Bridge endpoints (attested transfers)
-└── logging_utils.py # Structured logging
+│   ├── public.py       # Read-only endpoints (feeds, profiles, search, stats)
+│   ├── core.py         # Write endpoints (post, vote, username, etc.)
+│   ├── quests.py       # Quest/reward endpoints
+│   └── bridge.py       # Bridge endpoints (attested transfers)
+└── logging_utils.py    # Structured logging
 ```
 
 ### Blueprint Organization
@@ -119,6 +128,7 @@ Routes are organized into three Flask blueprints:
 |-----------|--------|---------|
 | `public_bp` | `/api/` | Read operations, no auth required |
 | `core_bp` | `/api/core/` | Write operations, requires meta-signature |
+| `quests_bp` | `/api/rewards/` | Quest/reward endpoints |
 | `bridge_bp` | `/api/bridge/` | Cross-chain operations |
 
 ---
@@ -504,6 +514,16 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `GET /api/get_comments` | Comment tree for a post |
 | `GET /api/get_profile` | User profile with lists |
 | `GET /api/search` | Full-text search |
+| `GET /api/get_welcome_stats` | Public stats: registered users, posts 24h, DAU |
+| `GET /api/get_stats` | Admin stats (overview, signups tabs) |
+| `POST /api/signup` | Account creation (validates invite code) |
+| `GET /api/validate_invite_code` | Check invite code validity |
+| `GET /api/get_inbox` | Push notification inbox |
+| `POST /api/mark_inbox_viewed` | Mark inbox items as read |
+| `GET /api/rewards/summary` | Quest/reward progress |
+| `GET /api/rewards/achievements` | Achievement list |
+| `POST /api/rewards/claim` | Claim pending reward |
+| `GET /api/referral/stats` | Referrer's invite stats |
 
 ### Core Endpoints (Write)
 
@@ -526,6 +546,7 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/upgrade_level` | MsgUpgradeLevel |
 | `POST /api/core/set_auto_renewal` | MsgSetAutoRenewal |
 | `POST /api/core/award` | MsgAward (burn MIRAGE to award a post/comment) |
+| `POST /api/core/report` | Content reporting |
 
 ### Bridge Endpoints
 
@@ -587,57 +608,90 @@ def get_recent_block_hashes(timeout_s: int = 5) -> list[str]:
 
 ## Database Integration
 
-### Indexer Database Queries
+### Dual-Database Architecture
 
-The backend queries the indexer's PostgreSQL database for read operations:
+The backend uses two separate PostgreSQL databases with strict ownership boundaries:
 
-```python
-def connect_db(timeout: float = 30.0, busy_timeout_ms: int = 60000):
-    """Connect to indexer database."""
-    return psycopg.connect(db_url, autocommit=True)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DATABASE ARCHITECTURE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Indexer DB (mirage_indexer)      Backend DB (mirage_backend)                │
+│  ┌──────────────────────┐         ┌──────────────────────────────┐          │
+│  │ posts, votes, awards │         │ invite_codes, referral_*     │          │
+│  │ profiles, balances   │         │ user_daily_quests, pending_  │          │
+│  │ followed_*, blocked_*│         │   rewards, user_quest_state  │          │
+│  │ preferences          │         │ push_tokens, push_throttle   │          │
+│  │ bridge_transactions  │         │ push_event_cursor/seen       │          │
+│  │ supply_history       │         │ reports, user_similarity_    │          │
+│  │ mentions, tx_index   │         │   cache, user_last_seen      │          │
+│  │ (chain-indexed data) │         │ user_inbox_state             │          │
+│  └──────────┬───────────┘         └──────────────┬───────────────┘          │
+│             │                                    │                          │
+│     READ-ONLY access                    READ-WRITE access                   │
+│     (mirage_indexer_ro role)            (mirage_backend role)                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Common Query Patterns:**
+**Connection helpers in `db.py`:**
 
 ```python
-# Check if user is subscriber
+def connect_db() -> psycopg.Connection:
+    """READ-ONLY connection to the indexer DB (via mirage_indexer_ro role)."""
+    url = cfg.get_indexer_ro_url()  # INDEXER_DB_RO_URL env var
+    return psycopg.connect(url, autocommit=True)
+
+def connect_backend_db() -> psycopg.Connection:
+    """READ-WRITE connection to the backend-owned DB."""
+    url = cfg.get_backend_db_url()  # BACKEND_DB_URL env var
+    return psycopg.connect(url, autocommit=True)
+```
+
+**Required environment variables:**
+
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `INDEXER_DB_URL` | `postgresql://mirage_indexer:mirage_indexer@127.0.0.1:5432/mirage_indexer` | Indexer read-write (used by indexer process) |
+| `INDEXER_DB_RO_URL` | `postgresql://mirage_indexer_ro:mirage_indexer_ro@127.0.0.1:5432/mirage_indexer` | Backend read-only access to indexer |
+| `BACKEND_DB_URL` | `postgresql://mirage_backend:mirage_backend@127.0.0.1:5432/mirage_backend` | Backend-owned tables |
+
+The backend **never writes** to the indexer DB. The `mirage_indexer_ro` PostgreSQL role enforces this at the database level — any accidental write attempt results in `permission denied`.
+
+### Schema Initialization
+
+`init_backend_schema()` runs at backend startup and creates all backend-owned tables idempotently (`CREATE TABLE IF NOT EXISTS`). It also validates existing table schemas via `_assert_table_schema()`, which raises `RuntimeError` if columns are missing or types don't match.
+
+### Common Query Patterns
+
+```python
+# Read from indexer DB (chain-indexed data)
 def is_subscriber(addr: str) -> bool:
     with connect_db() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s)",
-            (addr,)
-        )
+        cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s)", (addr,))
         row = cur.fetchone()
         return row and row[0] >= 1
 
-# Get post owner for authorization
-def _get_post_owner(txhash: str) -> str | None:
-    with connect_db() as conn:
+# Write to backend DB (operational data)
+def update_user_last_seen(addr: str) -> None:
+    with connect_backend_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s)",
-            (txhash,)
+            "INSERT INTO user_last_seen (owner, last_seen_at) VALUES (%s, %s) "
+            "ON CONFLICT (owner) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at",
+            (addr, int(time.time())),
         )
-        row = cur.fetchone()
-        return row[0].lower() if row else None
 ```
 
-### Caching
+### Push Listener
 
-Subscriber status is cached with a short TTL to avoid database hits:
+The backend runs a background thread (`push_listener.py`) that polls the indexer DB for new posts and awards, triggering push notifications for cross-node activity (e.g., someone replies to your post via a different node). The listener uses `push_event_seen` and `push_event_cursor` tables for deduplication and cursor tracking. Only one listener runs across all Gunicorn workers (gated by `fcntl.flock`).
 
-```python
-# In-process cache with 10-second TTL
-if not hasattr(is_subscriber, "_cache"):
-    is_subscriber._cache = {}
-    is_subscriber._ttl = 10.0
+### User Activity Tracking
 
-now = time.time()
-entry = cache.get(addr)
-if entry and (now - entry[0]) < ttl:
-    return entry[1]  # Return cached result
-```
+`user_last_seen.py` updates a timestamp in the backend DB on every authenticated API hit, throttled to one DB write per user per 60 seconds via an in-memory cache. This powers the DAU/MAU metrics in `/api/get_welcome_stats` and `/api/get_stats`.
 
 ---
 
@@ -781,15 +835,23 @@ gunicorn --bind 0.0.0.0:5000 --workers 4 app:app
 ### Dependencies
 
 Required at runtime:
-- PostgreSQL (indexer database)
+- PostgreSQL — two databases: `mirage_indexer` (indexer) and `mirage_backend` (backend)
+- `mirage_indexer_ro` PostgreSQL role with read-only access to the indexer DB
 - Mirage node (RPC, gRPC)
 - Validator keyring with "validator" key
 
 ### Configuration
 
-Environment variables or `~/.mirage/env/backend.env`:
+Environment variables (set in `~/.mirage/env/backend.env`):
 - `BACKEND_PORT` - Listen port (default: 5000)
 - `BACKEND_HOST` - Bind address (default: 127.0.0.1)
+- `INDEXER_DB_URL` - Indexer DB connection string (used by indexer, not backend directly)
+- `INDEXER_DB_RO_URL` - Read-only connection to indexer DB (used by backend)
+- `BACKEND_DB_URL` - Backend-owned DB connection string
+- `CLIENT_HASH_SALT` - Salt for hashing client identifiers (compliance)
+- `REFERRALS_ENABLED` - Enable referral system endpoints (default: false)
+- `PUSH_NOTIFICATIONS_ENABLED` - Enable push notification system (default: false)
+- `PUSH_LISTENER_LOCK_PATH` - Lock file path for push listener singleton
 
 ### Health Checks
 
@@ -803,7 +865,8 @@ Rate limiting is currently handled at the infrastructure level (nginx, cloud pro
 
 | Failure | Impact | Recovery |
 |---------|--------|----------|
-| Database unavailable | Read endpoints fail | Automatic reconnection |
+| Indexer DB unavailable | Read endpoints fail | Automatic reconnection |
+| Backend DB unavailable | Quests, push, stats fail | Automatic reconnection |
 | Node RPC unavailable | All endpoints fail 503 | Backend waits for node |
 | Validator underfunded | Broadcasts fail | Fund validator account |
 | Chain params unavailable | Backend won't start | Chain must be accessible |

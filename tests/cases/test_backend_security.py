@@ -10,6 +10,7 @@ import string
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 from cosmpy.crypto.keypairs import PrivateKey
@@ -107,6 +108,22 @@ from tests.backend_helpers import (
     _rpc_latest_height,
     _wait_next_block,
 )
+
+
+def _parse_db_name(db_url: str) -> str:
+    parsed = urlparse(db_url)
+    return parsed.path.lstrip("/")
+
+
+def _get_backend_db_name() -> str:
+    url = os.environ.get("BACKEND_DB_URL", "").strip()
+    if url:
+        return _parse_db_name(url)
+    if _check_local_docker():
+        code, out = _docker_exec("printenv BACKEND_DB_URL")
+        if code == 0 and out:
+            return _parse_db_name(out.strip())
+    return ""
 
 
 def test_security(backend: str):
@@ -743,16 +760,21 @@ def test_security(backend: str):
     # 10.21b mark_inbox_viewed clears push throttle cooldown
     if _check_local_docker():
         try:
+            db_name = _get_backend_db_name()
+            if not db_name:
+                _fail("attack.mark_inbox_viewed_clears_push_cooldown", "BACKEND_DB_URL not set")
+                return
             owner_lc = str(free_wallet.address()).lower()
             now = int(time.time())
             cooldown_until = now + 7200
+            sql = (
+                f"INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) "
+                f"VALUES ('{owner_lc}', {now}, 5, 3, {cooldown_until}) "
+                f"ON CONFLICT (owner) DO UPDATE SET "
+                f"window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"
+            )
             rc, out = _docker_exec(
-                f"""su - postgres -c "psql -d mirage -tAc \\""""
-                f"""INSERT INTO push_throttle (owner, window_start, sent_count, suppressed_count, cooldown_until) """
-                f"""VALUES (:'owner', {now}, 5, 3, {cooldown_until}) """
-                f"""ON CONFLICT (owner) DO UPDATE SET """
-                f"""window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"""
-                f"""\\" -v owner='{owner_lc}' 2>&1" """,
+                f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql}\\\" 2>&1\"",
                 timeout=10,
             )
             if rc != 0:
@@ -775,10 +797,9 @@ def test_security(backend: str):
                 if code != 200:
                     _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"code={code} resp={resp}")
                 else:
+                    sql2 = f"SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner='{owner_lc}' LIMIT 1;"
                     rc2, out2 = _docker_exec(
-                        f"""su - postgres -c "psql -d mirage -tAc \\""""
-                        f"""SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner=:'owner' LIMIT 1;"""
-                        f"""\\" -v owner='{owner_lc}' 2>&1" """,
+                        f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql2}\\\" 2>&1\"",
                         timeout=10,
                     )
                     if rc2 != 0:
@@ -790,6 +811,24 @@ def test_security(backend: str):
                             _pass("attack.mark_inbox_viewed_clears_push_cooldown")
                         else:
                             _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"got={raw}")
+
+                    sql3 = f"SELECT inbox_last_viewed_at FROM user_inbox_state WHERE owner='{owner_lc}' LIMIT 1;"
+                    rc3, out3 = _docker_exec(
+                        f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql3}\\\" 2>&1\"",
+                        timeout=10,
+                    )
+                    if rc3 != 0:
+                        _fail("attack.mark_inbox_viewed_updates_backend_state", f"query rc={rc3} out={out3}")
+                    else:
+                        raw_state = out3.strip()
+                        try:
+                            last_seen = int(raw_state) if raw_state else 0
+                        except ValueError:
+                            last_seen = 0
+                        if last_seen > 0:
+                            _pass("attack.mark_inbox_viewed_updates_backend_state")
+                        else:
+                            _fail("attack.mark_inbox_viewed_updates_backend_state", f"got={raw_state!r}")
         except Exception as e:
             _fail("attack.mark_inbox_viewed_clears_push_cooldown", str(e))
     else:

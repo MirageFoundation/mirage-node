@@ -116,20 +116,22 @@ def create_codes(cur, owner: str, count: int, existing_codes: set) -> list:
     return new_codes
 
 
-def list_codes_for_user(conn, username: str) -> None:
+def list_codes_for_user(indexer_conn, backend_conn, username: str) -> None:
     """List unused codes for a user."""
-    cur = conn.cursor()
-    owner, actual_username = get_user(cur, username)
+    idx_cur = indexer_conn.cursor()
+    owner, actual_username = get_user(idx_cur, username)
     print(f"User: {actual_username} ({owner[:20]}...)")
     print()
+    cur = backend_conn.cursor()
     unused_codes = get_unused_codes(cur, owner)
     print_unused_codes(actual_username, unused_codes)
 
 
-def add_codes_to_user(conn, username: str, count: int, dry_run: bool) -> None:
+def add_codes_to_user(indexer_conn, backend_conn, username: str, count: int, dry_run: bool) -> None:
     """Add a specific number of new codes to a user."""
-    cur = conn.cursor()
-    owner, actual_username = get_user(cur, username)
+    idx_cur = indexer_conn.cursor()
+    owner, actual_username = get_user(idx_cur, username)
+    cur = backend_conn.cursor()
 
     unused_count = get_unused_count(cur, owner)
     print(f"User: {actual_username} ({owner[:20]}...)")
@@ -157,10 +159,11 @@ def add_codes_to_user(conn, username: str, count: int, dry_run: bool) -> None:
     print_unused_codes(actual_username, unused_codes)
 
 
-def replenish_user(conn, username: str, target: int, dry_run: bool) -> None:
+def replenish_user(indexer_conn, backend_conn, username: str, target: int, dry_run: bool) -> None:
     """Top up a single user to the target number of unused codes."""
-    cur = conn.cursor()
-    owner, actual_username = get_user(cur, username)
+    idx_cur = indexer_conn.cursor()
+    owner, actual_username = get_user(idx_cur, username)
+    cur = backend_conn.cursor()
 
     unused_count = get_unused_count(cur, owner)
     needed = max(0, target - unused_count)
@@ -197,18 +200,18 @@ def replenish_user(conn, username: str, target: int, dry_run: bool) -> None:
     print_unused_codes(actual_username, unused_codes)
 
 
-def replenish_all(conn, target: int, dry_run: bool) -> None:
+def replenish_all(indexer_conn, backend_conn, target: int, dry_run: bool) -> None:
     """Top up all users to the target number of unused codes."""
     print(f"Replenishing invite codes (target: {target} unused per user)")
     if dry_run:
         print("DRY RUN - no changes will be made")
     print()
 
-    cur = conn.cursor()
+    idx_cur = indexer_conn.cursor()
+    cur = backend_conn.cursor()
 
-    # Get all users with profiles
-    cur.execute("SELECT owner FROM profiles")
-    users = [row[0] for row in cur.fetchall()]
+    idx_cur.execute("SELECT owner FROM profiles")
+    users = [row[0] for row in idx_cur.fetchall()]
     print(f"Found {len(users)} users with profiles")
 
     # Get existing codes for uniqueness check
@@ -323,27 +326,33 @@ def main():
         print("Error: specify --replenish N (with or without --user), --user USERNAME, or --user USERNAME --add N", file=sys.stderr)
         sys.exit(1)
 
-    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
-    if not db_url:
+    indexer_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    backend_url = os.environ.get("BACKEND_DB_URL", "").strip()
+    if not indexer_url:
         print("Error: INDEXER_DB_URL environment variable not set", file=sys.stderr)
+        sys.exit(1)
+    if not backend_url:
+        print("Error: BACKEND_DB_URL environment variable not set", file=sys.stderr)
         sys.exit(1)
 
     try:
-        conn = psycopg.connect(db_url, autocommit=True)
+        indexer_conn = psycopg.connect(indexer_url, autocommit=True)
+        backend_conn = psycopg.connect(backend_url, autocommit=True)
     except Exception as e:
         print(f"Error connecting to database: {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.user and args.add:
-        add_codes_to_user(conn, args.user, args.add, args.dry_run)
+        add_codes_to_user(indexer_conn, backend_conn, args.user, args.add, args.dry_run)
     elif args.user and args.replenish is not None:
-        replenish_user(conn, args.user, args.replenish, args.dry_run)
+        replenish_user(indexer_conn, backend_conn, args.user, args.replenish, args.dry_run)
     elif args.user:
-        list_codes_for_user(conn, args.user)
+        list_codes_for_user(indexer_conn, backend_conn, args.user)
     else:
-        replenish_all(conn, args.replenish, args.dry_run)
+        replenish_all(indexer_conn, backend_conn, args.replenish, args.dry_run)
 
-    conn.close()
+    indexer_conn.close()
+    backend_conn.close()
 
 
 if __name__ == "__main__":

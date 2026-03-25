@@ -15,7 +15,7 @@ Usage:
     # Dry run (show what would happen):
     python3 scripts/assign_all_quests.py --user Alice --complete --dry-run
 
-Requires INDEXER_DB_URL environment variable.
+Requires INDEXER_DB_URL and BACKEND_DB_URL environment variables.
 """
 
 import argparse
@@ -235,19 +235,27 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Show what would happen without making changes")
     args = parser.parse_args()
 
-    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
-    if not db_url:
+    indexer_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    backend_url = os.environ.get("BACKEND_DB_URL", "").strip()
+    if not indexer_url:
         print("Error: INDEXER_DB_URL environment variable not set", file=sys.stderr)
+        sys.exit(1)
+    if not backend_url:
+        print("Error: BACKEND_DB_URL environment variable not set", file=sys.stderr)
         sys.exit(1)
 
     try:
-        conn = psycopg.connect(db_url, autocommit=True)
+        indexer_conn = psycopg.connect(indexer_url, autocommit=True)
+        backend_conn = psycopg.connect(backend_url, autocommit=True)
     except Exception as e:
         print(f"Error connecting to database: {e}", file=sys.stderr)
         sys.exit(1)
 
-    cur = conn.cursor()
-    owner, display_name = resolve_user(cur, args.user)
+    idx_cur = indexer_conn.cursor()
+    owner, display_name = resolve_user(idx_cur, args.user)
+    indexer_conn.close()
+
+    cur = backend_conn.cursor()
     ts = int(time.time())
     day_utc = _utc_day(ts)
     mode = "completed + rewards" if args.complete else "pending (must complete naturally)"
@@ -259,17 +267,14 @@ def main():
         print(f"        ** DRY RUN — no changes will be made **")
     print()
 
-    # Daily + special quests
     print("Daily & special quests:")
     n_daily = assign_daily_quests(cur, owner, day_utc, args.complete, ts, args.dry_run)
     print(f"  -> {n_daily} quests")
 
-    # Flash quests
     print("\nFlash quests:")
     n_flash = assign_flash_quests(cur, owner, args.complete, ts, args.dry_run)
     print(f"  -> {n_flash} quests")
 
-    # Achievements
     print("\nAchievements:")
     n_ach = assign_achievements(cur, owner, args.complete, ts, args.dry_run)
     print(f"  -> {n_ach} achievements")
@@ -284,7 +289,7 @@ def main():
         print(f"Pending rewards: {total_mirage:,} MIRAGE + 1 invite code")
         print(f"User can claim via /api/rewards/claim")
 
-    conn.close()
+    backend_conn.close()
 
 
 if __name__ == "__main__":

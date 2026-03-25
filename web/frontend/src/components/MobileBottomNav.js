@@ -528,7 +528,7 @@ function MobileBottomNav({ state }) {
         e.preventDefault();
 
         if (!hasPublicKey) {
-            navigate('/create_account');
+            navigate('/signup');
             return;
         }
 
@@ -581,7 +581,7 @@ function MobileBottomNav({ state }) {
         ? (currentTopic
             ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
             : '/create_post')
-        : '/create_account';
+        : '/signup';
 
     return ReactDOM.createPortal(
         <>

@@ -241,12 +241,15 @@ def test_params(backend: str):
 
     # 1.9 get_total_supply positive (returns plain text, not JSON)
     try:
-        r4 = requests.get(f"{backend}/api/get_total_supply", timeout=10)
-        supply_val = float(r4.text.strip()) if r4.status_code == 200 else 0
-        if supply_val > 0:
-            _pass("params.get_total_supply positive", value=supply_val)
+        code4, body4 = _get(f"{backend}/api/get_total_supply")
+        if code4 == 200:
+            supply_val = float(body4) if isinstance(body4, (int, float)) else float(str(body4).strip())
+            if supply_val > 0:
+                _pass("params.get_total_supply positive", value=supply_val)
+            else:
+                _fail("params.get_total_supply positive", f"supply={supply_val}")
         else:
-            _fail("params.get_total_supply positive", f"code={r4.status_code}")
+            _fail("params.get_total_supply positive", f"code={code4}")
     except Exception as e:
         _fail("params.get_total_supply positive", str(e))
 
