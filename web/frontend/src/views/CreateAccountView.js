@@ -580,9 +580,9 @@ function CreateAccountView({ state, setCredentials }) {
                                                 style={{ opacity: 0.7, cursor: 'default', color: '#7ecf7e' }}
                                                 tabIndex={-1}
                                             />
-                                            {referrerAvailable > 0 && referrerAvailable <= 5 && (
+                                            {referrerAvailable > 0 && (
                                                 <div style={{ color: '#f5a623', fontSize: '0.7rem', marginTop: '0.25rem' }}>
-                                                    Only {referrerAvailable} {referrerAvailable === 1 ? 'spot' : 'spots'} left
+                                                    {referrerAvailable} {referrerAvailable === 1 ? 'spot' : 'spots'} left
                                                 </div>
                                             )}
                                         </>
