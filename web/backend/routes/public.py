@@ -7946,17 +7946,18 @@ def referrals_precheck():
             log_event(rid, "referrals.precheck.no_codes", username=username, address=address)
             return jsonify({"valid": False, "error": "referrer has no available codes"})
 
-        client_hash = hash_client_ip(get_trusted_client_ip())
-        if client_hash:
-            with connect_backend_db() as bconn2:
-                with bconn2.cursor() as bcur2:
-                    bcur2.execute(
-                        "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
-                        (client_hash, address),
-                    )
-                    if bcur2.fetchone():
-                        log_event(rid, "referrals.precheck.client_gate", username=username, address=address)
-                        return jsonify({"valid": False, "error": "already used this referrer"})
+        # TODO(nik): re-enable client_hash gate after testing
+        # client_hash = hash_client_ip(get_trusted_client_ip())
+        # if client_hash:
+        #     with connect_backend_db() as bconn2:
+        #         with bconn2.cursor() as bcur2:
+        #             bcur2.execute(
+        #                 "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
+        #                 (client_hash, address),
+        #             )
+        #             if bcur2.fetchone():
+        #                 log_event(rid, "referrals.precheck.client_gate", username=username, address=address)
+        #                 return jsonify({"valid": False, "error": "already used this referrer"})
 
         log_event(rid, "referrals.precheck.ok", username=username, available=available)
         return jsonify({"valid": True, "available": available})
