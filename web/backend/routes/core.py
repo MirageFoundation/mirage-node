@@ -17,7 +17,6 @@ import logging
 import os
 import random
 import re
-import secrets
 import time
 import threading
 from typing import Any, Dict
@@ -196,7 +195,10 @@ def _get_utc_julian_day(ts: int) -> int:
 
 
 def _get_trusted_client_ip() -> str | None:
+    """CF-Connecting-IP (Cloudflare, not spoofable) or raw TCP peer."""
     raw_ip = str(request.headers.get("CF-Connecting-IP", "") or "").strip()
+    if not raw_ip:
+        raw_ip = str(request.remote_addr or "").strip()
     if not raw_ip:
         return None
     try:
@@ -211,11 +213,11 @@ def _get_trusted_client_ip() -> str | None:
     return str(ip_obj)
 
 
-_CLIENT_HASH_SALT = secrets.token_bytes(32)
+_CLIENT_HASH_SALT = bytes.fromhex(os.environ["CLIENT_HASH_SALT"].strip())
 
 
 def _hash_client_ip(ip: str | None) -> str | None:
-    """One-way salted hash of client IP. Salt rotates on process restart."""
+    """One-way salted hash of client IP. Salt is stable across workers."""
     if not ip:
         return None
     return hashlib.sha256(_CLIENT_HASH_SALT + ip.encode()).hexdigest()[:32]

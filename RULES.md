@@ -50,6 +50,12 @@ Use these rules to avoid hanging sessions and enforce fail-fast behavior.
   - NEVER set `authority` to the user's address
   - User's address is derived from `envelope_pubkey`
 
+### Client IP — Trusted Sources Only
+
+- **NEVER trust `X-Forwarded-For`** — trivially spoofable by the client.
+- Use `CF-Connecting-IP` (set by Cloudflare, not spoofable) with fallback to `request.remote_addr` (TCP peer, not spoofable).
+- See `_get_trusted_client_ip()` in `web/backend/routes/core.py`.
+
 ### Database Schema Changes
 
 - **Do NOT create new tables when an existing table can be extended.** Add a column to an existing table instead.
