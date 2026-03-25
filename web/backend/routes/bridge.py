@@ -21,7 +21,7 @@ from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 from shared.datatypes import MsgBridgeBurn
 from shared.canon import canon_signed_with_pow
 
-from error_utils import safe_error
+from error_utils import api_error_code, safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, require_runtime
 from user_last_seen import update_user_last_seen
@@ -365,7 +365,7 @@ def bridge_burn():
     log_event(rid, "bridge_burn.begin")
     try:
         if is_node_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         data = request.get_json(force=True) or {}
         log_event(rid, "bridge_burn.data", dest_chain=data.get("destination_chain"), amount=data.get("amount"))

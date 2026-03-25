@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from flask import Blueprint, jsonify, request, has_request_context
 
-from error_utils import safe_error
+from error_utils import safe_error, api_error_code
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
 from user_last_seen import update_user_last_seen
@@ -869,7 +869,7 @@ def _invalidate_inbox_cache(address: str) -> None:
 def get_blocked_users():
     address = request.args.get("address", default="", type=str)
     if not address:
-        return jsonify({"error": "address is required"}), 400
+        return jsonify({"error": "address required"}), 400
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -940,11 +940,11 @@ def get_profile():
     """Get profile: all fields from indexer DB."""
     address = request.args.get("address", default="", type=str)
     if not address:
-        return jsonify({"error": "address is required"}), 400
+        return jsonify({"error": "address required"}), 400
 
     try:
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         profile = _db_get_profile_scalars(address)
         lists = _get_profile_lists_from_indexer(address)
@@ -2691,7 +2691,7 @@ def get_tx_status():
     rid = next_request_id()
     try:
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         tx_hash = str(request.args.get("hash", "") or "").strip().lower()
         if not tx_hash or len(tx_hash) != 64:
@@ -2824,7 +2824,7 @@ def get_parameters():
     log_event(rid, "get_parameters.begin", address=request.args.get("address"))
     try:
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
         addr = request.args.get("address", default=None, type=str)
         now = time.monotonic()
         cached = _PARAMS_CACHE["data"]
@@ -2880,7 +2880,7 @@ def get_user_status():
         if not addr:
             return jsonify({"error": "address required"}), 400
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         username = None
         user_level = 0
@@ -3282,7 +3282,7 @@ def get_network_stats():
     log_event(rid, "get_network_stats.begin")
     try:
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         # Get block time
         try:
@@ -3428,7 +3428,7 @@ def get_supply_history():
     log_event(rid, "get_supply_history.begin")
     try:
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         history = _get_cached_supply_history()
 
@@ -3529,7 +3529,7 @@ def get_circulation_stats():
     log_event(rid, "get_circulation_stats.begin")
     try:
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         now = time.time()
         if _circulation_cache["data"] and _circulation_cache["expires"] > now:
@@ -3609,7 +3609,7 @@ def get_chain_config():
             return jsonify(_CHAIN_CONFIG_CACHE)
 
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         p = expect_params()
 
@@ -3660,7 +3660,7 @@ def get_node_config():
             return jsonify(_NODE_CONFIG_CACHE)
 
         if _is_catching_up():
-            return jsonify({"error": "node_catching_up"}), 503
+            return api_error_code("node_catching_up", 503)
 
         rt = require_runtime()
 
@@ -3838,7 +3838,7 @@ def get_address_from_username():
         # Single mode
         if not single:
             conn.close()
-            return jsonify({"error": "username is required"}), 400
+            return jsonify({"error": "username required"}), 400
         username = single.strip()
         cur.execute(
             "SELECT owner FROM profiles WHERE LOWER(username)=LOWER(%s) AND deleted_at IS NULL LIMIT 1", (username,)
@@ -3932,7 +3932,7 @@ def get_username_from_address():
         # Single mode
         if not single:
             conn.close()
-            return jsonify({"error": "address is required"}), 400
+            return jsonify({"error": "address required"}), 400
         address = single.strip()
         cur.execute("SELECT username FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1", (address,))
         row = cur.fetchone()
@@ -4842,7 +4842,7 @@ def get_posts():
 
         # Only supported sort modes.
         if sort_mode and sort_mode not in ("magic", "newest"):
-            return jsonify({"error": f"unsupported sort mode: {sort_mode}"}), 400
+            return jsonify({"error": "unsupported sort mode", "sort_mode": sort_mode}), 400
 
         sort_mode = sort_mode or "magic"
         if feed in ("home", "following"):
@@ -5256,7 +5256,7 @@ def get_user_posts():
             pass
 
     if not owner:
-        return jsonify({"error": "owner is required"}), 400
+        return jsonify({"error": "owner required"}), 400
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5602,7 +5602,7 @@ def get_reports():
         limit = request.args.get("limit", default=100, type=int)
         limit = max(1, min(limit, 500))
         if not addr:
-            return jsonify({"error": "missing address"}), 400
+            return jsonify({"error": "address required"}), 400
 
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
@@ -5610,7 +5610,7 @@ def get_reports():
             row = cur.fetchone()
             level = int(row[0]) if row and row[0] is not None else 0
             if level < 100:
-                return jsonify({"error": "forbidden"}), 403
+                return api_error_code("forbidden", 403)
 
         with connect_backend_db() as bconn:
             bcur = bconn.cursor()
@@ -6159,7 +6159,7 @@ def get_comments():
         if not root:
             conn.close()
             log_event(rid, "get_comments.not_found", post_id=post_id[:16])
-            return jsonify({"error": "Post not found"}), 404
+            return jsonify({"error": "post not found"}), 404
 
         # Count total nodes for logging
         def count_nodes(nodes):
@@ -6346,7 +6346,7 @@ def get_root_post_id():
         root_id = _find_root_post_id(cur, comment_id)
         conn.close()
         if not root_id:
-            return jsonify({"error": "Comment not found or invalid"}), 404
+            return jsonify({"error": "comment not found or invalid"}), 404
         return jsonify({"root_post_id": root_id, "comment_id": comment_id})
     except Exception as e:
         return safe_error(e)
@@ -6367,10 +6367,10 @@ def get_comment_context():
             max_depth = int(max_depth_raw)
         except (ValueError, TypeError):
             log_event(rid, "get_comment_context.invalid_depth", raw=max_depth_raw)
-            return jsonify({"error": f"Invalid max_depth '{max_depth_raw}'. Must be integer 1-5."}), 400
+            return jsonify({"error": "invalid max_depth", "max_depth": max_depth_raw}), 400
         if max_depth < 1 or max_depth > 5:
             log_event(rid, "get_comment_context.invalid_depth", value=max_depth)
-            return jsonify({"error": f"max_depth must be 1-5, got {max_depth}"}), 400
+            return jsonify({"error": "invalid max_depth", "max_depth": max_depth}), 400
 
     if not comment_id:
         return jsonify({"error": "comment_id is required"}), 400
@@ -6400,7 +6400,7 @@ def get_inbox():
     limit = request.args.get("limit", 25, type=int)
 
     if not address:
-        return jsonify({"error": "address is required"}), 400
+        return jsonify({"error": "address required"}), 400
 
     limit = min(max(1, limit), 100)
     page = max(1, page)
@@ -6764,7 +6764,7 @@ def get_upload_url():
             stream_customer = os.environ.get("CLOUDFLARE_STREAM_CUSTOMER_CODE", "").strip()
             if not account_id or not api_token:
                 log_event(rid, "get_upload_url.err", error="missing_stream_credentials")
-                return jsonify({"error": "Cloudflare Stream credentials not configured"}), 500
+                return jsonify({"error": "cloudflare stream credentials not configured"}), 500
 
             url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/stream/direct_upload"
             headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
@@ -6784,7 +6784,7 @@ def get_upload_url():
                     error=f"cloudflare_stream_api_error_{response.status_code}",
                     cf_response=cf_body,
                 )
-                user_msg = "Upload service error"
+                user_msg = "upload service error"
                 try:
                     cf_errors = response.json().get("errors", [])
                     for e in cf_errors:
@@ -6804,7 +6804,7 @@ def get_upload_url():
 
             if not upload_url:
                 log_event(rid, "get_upload_url.err", error="missing_stream_upload_url")
-                return jsonify({"error": "No Stream upload URL received from Cloudflare"}), 500
+                return jsonify({"error": "no stream upload URL received from cloudflare"}), 500
 
             log_event(rid, "get_upload_url.ok", upload_id=direct_uid)
             # Return uid so client can embed immediately after upload
@@ -6816,7 +6816,7 @@ def get_upload_url():
         account_hash = os.environ.get("CLOUDFLARE_ACCOUNT_HASH", "").strip()
         if not account_id or not api_token or not account_hash:
             log_event(rid, "get_upload_url.err", error="missing_credentials")
-            return jsonify({"error": "Cloudflare credentials not configured"}), 500
+            return jsonify({"error": "cloudflare credentials not configured"}), 500
 
         url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/images/v2/direct_upload"
         headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
@@ -6824,14 +6824,14 @@ def get_upload_url():
 
         if response.status_code != 200:
             log_event(rid, "get_upload_url.err", error=f"cloudflare_api_error_{response.status_code}")
-            return jsonify({"error": "Upload service error"}), 500
+            return jsonify({"error": "upload service error"}), 500
 
         result = response.json()
         if not result.get("success"):
             errors = result.get("errors", [])
             error_msg = errors[0].get("message", "Unknown error") if errors else "Unknown error"
             log_event(rid, "get_upload_url.err", error=f"cloudflare_error_{error_msg}")
-            return jsonify({"error": "Upload service error"}), 500
+            return jsonify({"error": "upload service error"}), 500
 
         upload_data = result.get("result", {})
         upload_url = upload_data.get("uploadURL", "")
@@ -6839,7 +6839,7 @@ def get_upload_url():
 
         if not upload_url:
             log_event(rid, "get_upload_url.err", error="missing_upload_url")
-            return jsonify({"error": "No upload URL received from Cloudflare"}), 500
+            return jsonify({"error": "no upload URL received from cloudflare"}), 500
 
         log_event(rid, "get_upload_url.ok", upload_id=upload_id)
         return jsonify({"uploadURL": upload_url, "id": upload_id, "accountHash": account_hash})
@@ -6864,7 +6864,7 @@ def stream_proxy(video_uid, path):
     try:
         # Validate video UID format (hex string, reasonable length)
         if not video_uid or len(video_uid) < 10 or len(video_uid) > 100:
-            return jsonify({"error": "Invalid video UID"}), 400
+            return jsonify({"error": "invalid video uid"}), 400
 
         # Construct the URL
         if path:
@@ -7010,7 +7010,7 @@ def stats_event():
     """Stats event tracking disabled (page/visit tracking removed)."""
     rid = next_request_id()
     log_event(rid, "stats_event.disabled")
-    return jsonify({"error": "stats_event_disabled"}), 410
+    return api_error_code("stats_event_disabled", 410)
 
 
 def _get_stats_analytics(rid: int):
@@ -7981,7 +7981,7 @@ def referrals_precheck_opt_in():
     except (TypeError, ValueError):
         return jsonify({"error": "invalid timestamp"}), 400
     if not isinstance(enabled, bool):
-        return jsonify({"error": "enabled must be boolean"}), 400
+        return api_error_code("enabled_must_be_boolean")
 
     from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
 
@@ -8042,7 +8042,7 @@ def referrals_summary():
     rid = next_request_id()
     address = request.args.get("address", "").strip().lower()
     if not address:
-        return jsonify({"error": "address required"}), 400
+        return api_error_code("address_required")
 
     period = request.args.get("period", "7d").strip()
     month = request.args.get("month", "").strip()
@@ -8384,13 +8384,13 @@ def validate_invite_code():
 
     if not _is_main_site():
         log_event(rid, "invite.validate.blocked", host=request.host)
-        return jsonify({"error": "Invite codes only work on mirage.talk"}), 403
+        return jsonify({"error": "invite codes only work on mirage.talk"}), 403
 
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()
 
     if not code or len(code) != 9 or code[4] != "-":
-        return jsonify({"valid": False, "error": "Invalid code format"}), 400
+        return jsonify({"valid": False, "error": "invalid code format"}), 400
 
     try:
         conn = connect_backend_db()
@@ -8405,12 +8405,12 @@ def validate_invite_code():
 
         if not row:
             log_event(rid, "invite.validate.notfound", code=code)
-            return jsonify({"valid": False, "error": "Invalid invite code"})
+            return jsonify({"valid": False, "error": "invalid invite code"})
 
         owner, used_by = row
         if used_by:
             log_event(rid, "invite.validate.used", code=code)
-            return jsonify({"valid": False, "error": "This invite code has already been used"})
+            return jsonify({"valid": False, "error": "this invite code has already been used"})
 
         log_event(rid, "invite.validate.ok", code=code)
         return jsonify({"valid": True, "owner": owner})

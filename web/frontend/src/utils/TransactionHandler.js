@@ -11,6 +11,63 @@ import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
 
+const LOCAL_ERROR_CODE_BY_MESSAGE = {
+    "empty username": "username_required",
+    "empty txhash": "tx_hash_required",
+    "post is already blocked": "post_already_blocked",
+    "block post already in progress": "block_post_in_progress",
+    "unblock post already in progress": "unblock_post_in_progress",
+    "empty address": "address_required",
+    "empty user address": "address_required",
+    "user is already blocked": "user_already_blocked",
+    "block user already in progress": "block_user_in_progress",
+    "unblock user already in progress": "unblock_user_in_progress",
+    "empty topic": "topic_required",
+    "topic is already blocked": "topic_already_blocked",
+    "block topic already in progress": "block_topic_in_progress",
+    "unblock topic already in progress": "unblock_topic_in_progress",
+    "Not logged in": "not_logged_in",
+    "follow user already in progress": "follow_user_in_progress",
+    "unfollow user already in progress": "unfollow_user_in_progress",
+    "follow topic already in progress": "follow_topic_in_progress",
+    "unfollow topic already in progress": "unfollow_topic_in_progress",
+    "empty agent address": "agent_address_required",
+    "enable agent already in progress": "enable_agent_in_progress",
+    "disable agent already in progress": "disable_agent_in_progress",
+    "agents must be an array": "agents_must_be_array",
+    "empty target": "target_required",
+    "empty reason": "reason_required",
+    "Invalid recipient or amount": "invalid_recipient_or_amount",
+    "Recipient must be a mirage1 address": "recipient_must_be_mirage1",
+    "Minimum amount is 0.001 MIRAGE": "amount_too_small",
+    "Missing target or award type": "award_missing_target_or_type",
+    "Invalid level (must be 1 or 10)": "invalid_level",
+    "destination_chain required": "destination_chain_required",
+    "destination_address required": "destination_address_required",
+    "amount must be positive": "amount_must_be_positive",
+    "missing recovery phrase": "missing_recovery_phrase",
+    "invalid signer address": "invalid_signer_address",
+    "invalid address": "address_invalid",
+    "delete account already in progress": "delete_in_progress",
+    "invalid override": "invalid_override",
+    "invalid tag": "invalid_tag",
+    "Vote already pending": "vote_already_pending",
+    "Proof of work took too long (>60s). Your device may be too slow, or the network difficulty is too high. Please try again later.": "pow_timeout",
+    "Proof of work failed: invalid worker response.": "pow_worker_invalid_response",
+    "Proof of work failed": "pow_worker_failed",
+    "client error": "client_error",
+    "transaction failed": "transaction_failed",
+    "insufficient balance": "insufficient_balance",
+};
+
+function getLocalErrorCode(message) {
+    const code = LOCAL_ERROR_CODE_BY_MESSAGE[message];
+    if (!code) {
+        throw new Error(`[tx] unmapped local error message: ${message}`);
+    }
+    return code;
+}
+
 let __CosmSecp256k1 = null;
 let __CosmSha256 = null;
 async function ensureCosmCrypto() {
@@ -124,6 +181,27 @@ class TransactionHandler {
             TransactionHandler.instance = this;
         }
         return TransactionHandler.instance;
+    }
+
+    _fail(message, extra) {
+        const code = getLocalErrorCode(message);
+        const payload = { success: false, error_code: code, error: message };
+        if (extra && typeof extra === 'object') {
+            Object.assign(payload, extra);
+        }
+        return payload;
+    }
+
+    _failFromException(err) {
+        if (err && typeof err === 'object' && err.error_code) {
+            return {
+                success: false,
+                error_code: err.error_code,
+                error: String(err.error || err.message || err.error_code),
+            };
+        }
+        const msg = String(err?.message || err || "");
+        return this._fail("client error", msg ? { details: msg } : undefined);
     }
 
     _persistUserBalance(balanceVal, { normalizeStorage = false, updateLastOnchain = true } = {}) {
@@ -491,7 +569,7 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
-            if (!username) return { success: false, error: "empty username" };
+            if (!username) return this._fail("empty username");
 
             // Determine subscriber path
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
@@ -533,7 +611,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -542,7 +620,7 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
-            if (!username) return { success: false, error: "empty username" };
+            if (!username) return this._fail("empty username");
 
             // Subscribers do not need parameters; free users do
             let last_block_hash = "";
@@ -582,7 +660,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -627,7 +705,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -641,20 +719,20 @@ class TransactionHandler {
         try {
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
-            if (!txhashTrimmed) return { success: false, error: "empty txhash" };
+            if (!txhashTrimmed) return this._fail("empty txhash");
 
             // Check if post is already blocked
             try {
                 const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
                 const blockedPosts = (blocked?.blocked_posts || []).map(p => String(p).toLowerCase());
                 if (blockedPosts.includes(txhashTrimmed)) {
-                    return { success: false, error: "post is already blocked" };
+                    return this._fail("post is already blocked");
                 }
             } catch (_) { }
 
             const key = `post:${txhashTrimmed}`;
             if (this.pendingBlocks.has(key)) {
-                return { success: false, error: "block post already in progress" };
+                return this._fail("block post already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -680,17 +758,17 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
     async unblockPost(txhash) {
         try {
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
-            if (!txhashTrimmed) return { success: false, error: "empty txhash" };
+            if (!txhashTrimmed) return this._fail("empty txhash");
             const key = `post:${txhashTrimmed}`;
             if (this.pendingBlocks.has(key)) {
-                return { success: false, error: "unblock post already in progress" };
+                return this._fail("unblock post already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -716,7 +794,7 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -724,20 +802,20 @@ class TransactionHandler {
         try {
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
-            if (!addressTrimmed) return { success: false, error: "empty address" };
+            if (!addressTrimmed) return this._fail("empty address");
 
             // Check if user is already blocked
             try {
                 const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
                 const blockedUsers = (blocked?.blocked_users || []).map(u => String(u).toLowerCase());
                 if (blockedUsers.includes(addressTrimmed)) {
-                    return { success: false, error: "user is already blocked" };
+                    return this._fail("user is already blocked");
                 }
             } catch (_) { }
 
             const key = `user:${addressTrimmed}`;
             if (this.pendingBlocks.has(key)) {
-                return { success: false, error: "block user already in progress" };
+                return this._fail("block user already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -763,17 +841,17 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
     async unblockUser(address) {
         try {
             const addressTrimmed = String(address || "").trim().toLowerCase();
-            if (!addressTrimmed) return { success: false, error: "empty address" };
+            if (!addressTrimmed) return this._fail("empty address");
             const key = `user:${addressTrimmed}`;
             if (this.pendingBlocks.has(key)) {
-                return { success: false, error: "unblock user already in progress" };
+                return this._fail("unblock user already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -799,7 +877,7 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -807,20 +885,20 @@ class TransactionHandler {
         try {
             const publicKey = Storage.load("publicKey", "");
             const topicTrimmed = String(topic || "").trim().toLowerCase();
-            if (!topicTrimmed) return { success: false, error: "empty topic" };
+            if (!topicTrimmed) return this._fail("empty topic");
 
             // Check if topic is already blocked
             try {
                 const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
                 const blockedTopics = (blocked?.blocked_topics || []).map(t => String(t).toLowerCase());
                 if (blockedTopics.includes(topicTrimmed)) {
-                    return { success: false, error: "topic is already blocked" };
+                    return this._fail("topic is already blocked");
                 }
             } catch (_) { }
 
             const key = `topic:${topicTrimmed}`;
             if (this.pendingBlocks.has(key)) {
-                return { success: false, error: "block topic already in progress" };
+                return this._fail("block topic already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -857,17 +935,17 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
     async unblockTopic(topic) {
         try {
             const topicTrimmed = String(topic || "").trim().toLowerCase();
-            if (!topicTrimmed) return { success: false, error: "empty topic" };
+            if (!topicTrimmed) return this._fail("empty topic");
             const key = `topic:${topicTrimmed}`;
             if (this.pendingBlocks.has(key)) {
-                return { success: false, error: "unblock topic already in progress" };
+                return this._fail("unblock topic already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -897,7 +975,7 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -906,17 +984,17 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const userTrimmed = String(userAddress || "").trim().toLowerCase();
         if (!userTrimmed) {
-            return Promise.resolve({ success: false, error: "empty user address" });
+            return Promise.resolve(this._fail("empty user address"));
         }
 
         const key = `user:${userTrimmed}`;
         if (this.pendingFollows.has(key)) {
-            return Promise.resolve({ success: false, error: "follow user already in progress" });
+            return Promise.resolve(this._fail("follow user already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
@@ -947,17 +1025,17 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const userTrimmed = String(userAddress || "").trim().toLowerCase();
         if (!userTrimmed) {
-            return Promise.resolve({ success: false, error: "empty user address" });
+            return Promise.resolve(this._fail("empty user address"));
         }
 
         const key = `user:${userTrimmed}`;
         if (this.pendingFollows.has(key)) {
-            return Promise.resolve({ success: false, error: "unfollow user already in progress" });
+            return Promise.resolve(this._fail("unfollow user already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
@@ -988,17 +1066,17 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const topicTrimmed = String(topic || "").trim().toLowerCase();
         if (!topicTrimmed) {
-            return Promise.resolve({ success: false, error: "empty topic" });
+            return Promise.resolve(this._fail("empty topic"));
         }
 
         const key = `topic:${topicTrimmed}`;
         if (this.pendingFollows.has(key)) {
-            return Promise.resolve({ success: false, error: "follow topic already in progress" });
+            return Promise.resolve(this._fail("follow topic already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
@@ -1029,17 +1107,17 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const topicTrimmed = String(topic || "").trim().toLowerCase();
         if (!topicTrimmed) {
-            return Promise.resolve({ success: false, error: "empty topic" });
+            return Promise.resolve(this._fail("empty topic"));
         }
 
         const key = `topic:${topicTrimmed}`;
         if (this.pendingFollows.has(key)) {
-            return Promise.resolve({ success: false, error: "unfollow topic already in progress" });
+            return Promise.resolve(this._fail("unfollow topic already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
@@ -1074,16 +1152,16 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const agentTrimmed = String(agentAddress || "").trim().toLowerCase();
         if (!agentTrimmed) {
-            return Promise.resolve({ success: false, error: "empty agent address" });
+            return Promise.resolve(this._fail("empty agent address"));
         }
 
         if (this.pendingAgents.has(agentTrimmed)) {
-            return Promise.resolve({ success: false, error: "enable agent already in progress" });
+            return Promise.resolve(this._fail("enable agent already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
@@ -1115,16 +1193,16 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const agentTrimmed = String(agentAddress || "").trim().toLowerCase();
         if (!agentTrimmed) {
-            return Promise.resolve({ success: false, error: "empty agent address" });
+            return Promise.resolve(this._fail("empty agent address"));
         }
 
         if (this.pendingAgents.has(agentTrimmed)) {
-            return Promise.resolve({ success: false, error: "disable agent already in progress" });
+            return Promise.resolve(this._fail("disable agent already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
@@ -1156,11 +1234,11 @@ class TransactionHandler {
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         if (!Array.isArray(agents)) {
-            return Promise.resolve({ success: false, error: "agents must be an array" });
+            return Promise.resolve(this._fail("agents must be an array"));
         }
 
         const normalized = agents.map(a => String(a || "").trim().toLowerCase()).filter(Boolean);
@@ -1211,8 +1289,8 @@ class TransactionHandler {
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             const why = String(reason || "").trim();
-            if (!txhashTrimmed) return { success: false, error: "empty target" };
-            if (!why) return { success: false, error: "empty reason" };
+            if (!txhashTrimmed) return this._fail("empty target");
+            if (!why) return this._fail("empty reason");
 
             updateNotification("Preparing report");
             const [statusData] = await Promise.all([
@@ -1246,7 +1324,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, true);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1263,18 +1341,18 @@ class TransactionHandler {
             const targetTrimmed = String(targetAddress || "").trim().toLowerCase();
 
             if (!targetTrimmed || !amountMirage || amountMirage <= 0) {
-                return { success: false, error: "Invalid recipient or amount" };
+                return this._fail("Invalid recipient or amount");
             }
 
             // Validate mirage1 address
             if (!targetTrimmed.startsWith("mirage1")) {
-                return { success: false, error: "Recipient must be a mirage1 address" };
+                return this._fail("Recipient must be a mirage1 address");
             }
 
             // Convert MIRAGE to umirage
             const amountUmirage = Math.floor(amountMirage * 1000000);
             if (amountUmirage < 1000) {
-                return { success: false, error: "Minimum amount is 0.001 MIRAGE" };
+                return this._fail("Minimum amount is 0.001 MIRAGE");
             }
 
             updateNotification("Sending tokens");
@@ -1299,7 +1377,7 @@ class TransactionHandler {
             if (balance < totalNeeded) {
                 const haveM = (balance / 1000000).toFixed(3);
                 const needM = (totalNeeded / 1000000).toFixed(3);
-                return { success: false, error: `Insufficient balance. Have: ${haveM} MIRAGE, Need: ${needM} MIRAGE` };
+                return this._fail("insufficient balance", { balance: haveM, needed: needM });
             }
 
             const tx = {
@@ -1320,7 +1398,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1338,7 +1416,7 @@ class TransactionHandler {
             const type = String(awardType || "").trim();
 
             if (!target || !type) {
-                return { success: false, error: "Missing target or award type" };
+                return this._fail("Missing target or award type");
             }
 
             updateNotification("Giving award");
@@ -1373,7 +1451,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1389,7 +1467,7 @@ class TransactionHandler {
             const targetLevel = Number(level);
 
             if (targetLevel !== 1 && targetLevel !== 10) {
-                return { success: false, error: "Invalid level (must be 1 or 10)" };
+                return this._fail("Invalid level (must be 1 or 10)");
             }
 
             updateNotification("Upgrading subscription");
@@ -1412,7 +1490,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1441,7 +1519,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1457,13 +1535,13 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
 
             const chain = String(destinationChain || "").trim().toLowerCase();
-            if (!chain) return { success: false, error: "destination_chain required" };
+            if (!chain) return this._fail("destination_chain required");
 
             const address = String(destinationAddress || "").trim();
-            if (!address) return { success: false, error: "destination_address required" };
+            if (!address) return this._fail("destination_address required");
 
             const amount = Number(amountUmirage) || 0;
-            if (amount <= 0) return { success: false, error: "amount must be positive" };
+            if (amount <= 0) return this._fail("amount must be positive");
 
             // Bridge burn never uses PoW - token transfers are self-authenticating
             // (you can't burn tokens you don't have)
@@ -1484,7 +1562,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1496,16 +1574,16 @@ class TransactionHandler {
         try {
             const seedPhrase = seedVault.getSeed() || "";
             if (!seedPhrase) {
-                return { success: false, error: "missing recovery phrase" };
+                return this._fail("missing recovery phrase");
             }
             const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
             const target = String(derivedAddress || "").trim().toLowerCase();
-            if (!target) return { success: false, error: "invalid signer address" };
-            if (!target.startsWith("mirage1")) return { success: false, error: "invalid address" };
+            if (!target) return this._fail("invalid signer address");
+            if (!target.startsWith("mirage1")) return this._fail("invalid address");
 
             const key = `account:${target}`;
             if (this.pendingDeletes.has(key)) {
-                return { success: false, error: "delete account already in progress" };
+                return this._fail("delete account already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
@@ -1531,7 +1609,7 @@ class TransactionHandler {
                 this.processTransactions();
             });
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1545,7 +1623,7 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
-            if (!txhashTrimmed) return { success: false, error: "empty txhash" };
+            if (!txhashTrimmed) return this._fail("empty txhash");
 
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
@@ -1584,7 +1662,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1599,14 +1677,14 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const overrideLower = String(overrideId || "").trim().toLowerCase();
-            if (!overrideLower || overrideLower.length !== 64) return { success: false, error: "invalid override id" };
+            if (!overrideLower || overrideLower.length !== 64) return this._fail("invalid override");
             const content = String(changes?.content || "").trim();
             const title = String(changes?.title || "").trim();
             const topic = String(changes?.topic || "").trim();
             const target = String(changes?.target || "").trim();
             const tagRaw = String(changes?.tag || "").trim().toLowerCase();
             const media = Array.isArray(changes?.media) ? changes.media : [];
-            if (!ALLOWED_TAGS.has(tagRaw)) return { success: false, error: "invalid tag" };
+            if (!ALLOWED_TAGS.has(tagRaw)) return this._fail("invalid tag");
 
             const userLevelE = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash_e = "";
@@ -1645,7 +1723,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1661,7 +1739,7 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const overrideLower = String(overrideId || "").trim().toLowerCase();
-            if (!overrideLower || overrideLower.length !== 64) return { success: false, error: "invalid override id" };
+            if (!overrideLower || overrideLower.length !== 64) return this._fail("invalid override");
             const topic = String(fields?.topic ?? ".").trim();
             const title = String(fields?.title ?? ".").trim();
             const content = String(fields?.content ?? ".").trim();
@@ -1690,7 +1768,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1798,14 +1876,14 @@ class TransactionHandler {
         let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
-            return Promise.resolve({ success: false, error: "Not logged in" });
+            return Promise.resolve(this._fail("Not logged in"));
         }
 
         const postKey = String(parentId || '').toLowerCase();
 
         // Check if vote already pending for this post
         if (this.pendingVotes.has(postKey)) {
-            return Promise.resolve({ success: false, error: "Vote already pending" });
+            return Promise.resolve(this._fail("Vote already pending"));
         }
 
         const baseTx = {
@@ -1878,12 +1956,12 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             if (!publicKey || !seedPhrase) {
-                return { success: false, error: "Not logged in" };
+                return this._fail("Not logged in");
             }
 
             const cleanTag = typeof tag === 'string' ? tag.trim().toLowerCase() : "";
             if (!ALLOWED_TAGS.has(cleanTag)) {
-                return { success: false, error: "invalid tag" };
+                return this._fail("invalid tag");
             }
 
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
@@ -1920,7 +1998,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -1958,7 +2036,7 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             if (!publicKey || !seedPhrase) {
-                return { success: false, error: "Not logged in" };
+                return this._fail("Not logged in");
             }
 
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
@@ -1993,7 +2071,7 @@ class TransactionHandler {
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
-            return { success: false, error: String(e?.message || e) };
+            return this._failFromException(e);
         }
     }
 
@@ -2342,7 +2420,7 @@ class TransactionHandler {
                 } else {
                     updateNotification(errMsg || 'Transaction failed', 5, true);
                 }
-                if (_resolve) _resolve({ success: false, error: errMsg });
+                if (_resolve) _resolve(this._fail("transaction failed", errMsg ? { details: errMsg } : undefined));
                 hadFailure = true;
                 break;
             }
@@ -2361,7 +2439,13 @@ class TransactionHandler {
                 } else {
                     updateNotification(msg || 'Transaction failed', 5, true);
                 }
-                if (_resolve) _resolve(result || { success: false, error: msg });
+                if (_resolve) {
+                    if (result && result.error_code) {
+                        _resolve(result);
+                    } else {
+                        _resolve(this._fail("transaction failed", msg ? { details: msg } : undefined));
+                    }
+                }
                 hadFailure = true;
                 break;
             }
@@ -4989,7 +5073,7 @@ class TransactionHandler {
                     } catch (err) {
                         const msg = String(err && err.message ? err.message : err);
                         updateNotification(msg || "Transaction failed", 5, true);
-                        wrapResolve({ success: false, error: msg || "Transaction failed" });
+                        wrapResolve(this._fail("transaction failed", msg ? { details: msg } : undefined));
                     } finally {
                         this._setStatus("idle");
                     }
@@ -5520,7 +5604,7 @@ class TransactionHandler {
                 }
                 this._setStatus("idle");
                 updateNotification("PoW took too long. Please try again.", 5.0, true);
-                wrapResolve({ success: false, error: "Proof of work took too long (>60s). Your device may be too slow, or the network difficulty is too high. Please try again later." });
+                wrapResolve(this._fail("Proof of work took too long (>60s). Your device may be too slow, or the network difficulty is too high. Please try again later."));
             }, 60000);
 
             worker.onmessage = async function (e) {
@@ -5544,13 +5628,13 @@ class TransactionHandler {
                 if (workerData && typeof workerData === 'object' && workerData.error) {
                     try { console.error('[PoW] worker error', workerData); } catch (_) { }
                     updateNotification("PoW failed. Please try again.", 5.0, true);
-                    wrapResolve({ success: false, error: `Proof of work failed: ${workerData.error}` });
+                    wrapResolve(this._fail("Proof of work failed", { details: String(workerData.error || "") }));
                     return;
                 }
                 if (typeof workerData !== 'number' || !Number.isFinite(workerData)) {
                     try { console.error('[PoW] invalid worker response', workerData); } catch (_) { }
                     updateNotification("PoW failed. Please try again.", 5.0, true);
-                    wrapResolve({ success: false, error: "Proof of work failed: invalid worker response." });
+                    wrapResolve(this._fail("Proof of work failed: invalid worker response."));
                     return;
                 }
 

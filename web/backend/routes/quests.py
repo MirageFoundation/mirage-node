@@ -39,7 +39,7 @@ def _get_balance(address) -> int:
 
 
 from db import connect_backend_db, connect_db
-from error_utils import safe_error
+from error_utils import api_error_code, safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
@@ -756,16 +756,7 @@ def claim_rewards():
 
         # Check if suspended
         if _is_user_suspended(owner, ts):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "suspended",
-                        "message": "Your rewards are suspended",
-                    }
-                ),
-                403,
-            )
+            return api_error_code("suspended", 403, success=False)
 
         # Use reward distributor to process claim
         distributor = get_distributor()
@@ -773,16 +764,7 @@ def claim_rewards():
         # Check if rewards distribution is properly configured
         if not distributor.is_configured():
             log_event(rid, "rewards.claim.not_configured", owner=owner)
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "not_configured",
-                        "message": "Reward distribution is not yet configured. Please try again later.",
-                    }
-                ),
-                503,
-            )  # Service Unavailable
+            return api_error_code("not_configured", 503, success=False)
 
         result = distributor.claim_rewards(owner, ts)
 
@@ -790,73 +772,22 @@ def claim_rewards():
             error_msg = result.get("error", "unknown_error")
             if error_msg == "no_rewards":
                 log_event(rid, "rewards.claim.empty", owner=owner)
-                return jsonify(
-                    {
-                        "success": False,
-                        "error": "no_rewards",
-                        "message": "No pending rewards to claim",
-                    }
-                )
+                return api_error_code("no_rewards", 200, success=False)
             elif error_msg == "insufficient_pool_balance":
                 log_event(rid, "rewards.claim.insufficient_funds", owner=owner)
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "insufficient_funds",
-                            "message": "Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.",
-                        }
-                    ),
-                    503,
-                )  # Service Unavailable
+                return api_error_code("insufficient_funds", 503, success=False)
             elif error_msg == "rewards_pool_key_not_configured":
                 log_event(rid, "rewards.claim.pool_not_configured", owner=owner)
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "pool_not_configured",
-                            "message": "Reward payouts are not yet configured. Please notify the admins.",
-                        }
-                    ),
-                    503,
-                )  # Service Unavailable
+                return api_error_code("pool_not_configured", 503, success=False)
             elif error_msg == "sequence_mismatch_retry":
                 log_event(rid, "rewards.claim.sequence_mismatch", owner=owner)
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "retry",
-                            "message": "Transaction conflict, please try again.",
-                        }
-                    ),
-                    503,
-                )  # Service Unavailable
+                return api_error_code("retry", 503, success=False)
             elif error_msg == "payout_transaction_failed":
                 log_event(rid, "rewards.claim.tx_failed", owner=owner)
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "payout_failed",
-                            "message": "Payout transaction failed. Please try again or notify the admins.",
-                        }
-                    ),
-                    503,
-                )  # Service Unavailable
+                return api_error_code("payout_failed", 503, success=False)
             else:
                 log_event(rid, "rewards.claim.failed", owner=owner, error=error_msg)
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": error_msg,
-                            "message": f"Failed to claim rewards: {error_msg}",
-                        }
-                    ),
-                    500,
-                )
+                return api_error_code("internal_error", 500, success=False)
 
         log_event(
             rid,
@@ -911,7 +842,7 @@ def admin_suspend_rewards():
         # Check admin level
         admin_level = get_user_level(admin)
         if admin_level < 100:
-            return jsonify({"error": "unauthorized", "message": "Admin level required"}), 403
+            return api_error_code("unauthorized", 403)
 
         ts = int(time.time())
 
@@ -984,7 +915,7 @@ def admin_unsuspend_rewards():
         # Check admin level
         admin_level = get_user_level(admin)
         if admin_level < 100:
-            return jsonify({"error": "unauthorized", "message": "Admin level required"}), 403
+            return api_error_code("unauthorized", 403)
 
         ts = int(time.time())
 
@@ -1049,7 +980,7 @@ def admin_list_suspensions():
         # Check admin level
         admin_level = get_user_level(admin)
         if admin_level < 100:
-            return jsonify({"error": "unauthorized", "message": "Admin level required"}), 403
+            return api_error_code("unauthorized", 403)
 
         ts = int(time.time())
 
@@ -1250,7 +1181,7 @@ def debug_complete_quest():
 
         quest_def = all_defs.get(quest_id)
         if not quest_def:
-            return jsonify({"error": f"unknown quest_id: {quest_id}"}), 400
+            return jsonify({"error": "unknown quest_id", "quest_id": quest_id}), 400
 
         with connect_backend_db() as conn:
             with conn.cursor() as cur:
@@ -1264,10 +1195,10 @@ def debug_complete_quest():
                 row = cur.fetchone()
 
                 if not row:
-                    return jsonify({"error": f"quest {quest_id} not assigned for today"}), 400
+                    return jsonify({"error": "quest not assigned", "quest_id": quest_id}), 400
 
                 if row[0] is not None:
-                    return jsonify({"error": f"quest {quest_id} already completed"}), 400
+                    return jsonify({"error": "quest already completed", "quest_id": quest_id}), 400
 
         target = quest_def.get("target_count", 1)
         rewards = quest_def.get("rewards", [])

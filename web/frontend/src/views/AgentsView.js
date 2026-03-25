@@ -11,6 +11,7 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 import * as tx from '../utils/tx';
 import { usePendingAgents } from '../utils/usePendingAgents';
+import { formatError } from '../utils/errorMessages';
 
 const SectionSubtitle = styled.div`
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
@@ -382,7 +383,7 @@ export default function AgentsView({ state }) {
                 setDraftOrder(newList);
                 setDraftDirty(false);
             } else {
-                const errText = String(result?.error || 'Failed to update agents.');
+                const errText = formatError(result);
                 const lower = errText.toLowerCase();
                 if (lower.includes('limit') || lower.includes('too many agents')) {
                     setErrorMessage(`Enabled agents limit reached (${maxEnabledAgents}). Disable one first.`);
@@ -451,7 +452,7 @@ export default function AgentsView({ state }) {
                 setEnabledOrder(desired);
                 setDraftOrder(desired);
             } else {
-                setErrorMessage(result?.error || 'Failed to reorder agents.');
+                setErrorMessage(formatError(result));
             }
         } catch (err) {
             setErrorMessage(String(err?.message || err || 'Reorder failed.'));

@@ -11,6 +11,7 @@ import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
+import { formatError } from "../utils/errorMessages";
 
 const BlockingOverlay = styled.div`
     position: fixed;
@@ -285,7 +286,7 @@ function ChangeUsernameView({ state }) {
                 } else if (/insufficient funds/i.test(msg)) {
                     setSubmitError("Insufficient funds to complete this transaction.");
                 } else {
-                    setSubmitError(msg);
+                    setSubmitError(formatError(result));
                 }
                 const until = Date.now() + 1000;
                 setCooldownUntil(until);
