@@ -821,23 +821,22 @@ def core_set_username():
                                 address=referrer_address,
                                 user=user_addr,
                             )
-                        # TODO(nik): re-enable client_hash gate after testing
-                        # client_hash = _hash_client_ip(_get_trusted_client_ip())
-                        # if client_hash:
-                        #     with connect_backend_db() as bconn:
-                        #         with bconn.cursor() as bcur:
-                        #             bcur.execute(
-                        #                 "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
-                        #                 (client_hash, referrer_address),
-                        #             )
-                        #             if bcur.fetchone():
-                        #                 log_event(
-                        #                     rid,
-                        #                     "set_username.referral_client_gate",
-                        #                     referrer=referrer_address,
-                        #                     user=user_addr,
-                        #                 )
-                        #                 return api_error_code("referrer_already_used")
+                        client_hash = _hash_client_ip(_get_trusted_client_ip())
+                        if client_hash:
+                            with connect_backend_db() as bconn:
+                                with bconn.cursor() as bcur:
+                                    bcur.execute(
+                                        "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
+                                        (client_hash, referrer_address),
+                                    )
+                                    if bcur.fetchone():
+                                        log_event(
+                                            rid,
+                                            "set_username.referral_client_gate",
+                                            referrer=referrer_address,
+                                            user=user_addr,
+                                        )
+                                        return api_error_code("referrer_already_used")
                     except Exception as ref_err:
                         log_event(rid, "set_username.referrer_resolve_error", error=str(ref_err))
                         return api_error_code("referrer_check_failed", 500)

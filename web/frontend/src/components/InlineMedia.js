@@ -361,9 +361,10 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const dimensionsKnown = naturalWidth && naturalHeight;
         const mediaStyle = {
             width: dimensionsKnown ? `${currentWidth}px` : 'auto',
-            height: 'auto',
+            height: dimensionsKnown ? `${currentHeight}px` : 'auto',
             maxWidth: '100%',
             maxHeight: dimensionsKnown ? undefined : `${maxHeight}px`,
+            objectFit: 'cover',
             borderRadius: '4px',
             cursor: isMobile ? 'auto' : 'ew-resize',
             userSelect: 'none',
