@@ -525,6 +525,29 @@ def init_backend_schema() -> None:
             """
             )
 
+            # ── Fix SERIAL sequences after data migration ─────────────────
+            # The DB-split migration inserts rows with explicit id values but
+            # doesn't advance the sequences.  Reset each SERIAL sequence to
+            # MAX(id) so the next INSERT without an explicit id won't collide.
+            _SERIAL_TABLES = [
+                ("pending_rewards", "id"),
+                ("referral_pending_rewards", "id"),
+                ("referral_analysis", "id"),
+                ("reports", "id"),
+                ("push_tokens", "id"),
+                ("push_receipts", "id"),
+                ("push_nonces", "id"),
+            ]
+            for table, col in _SERIAL_TABLES:
+                seq_name = f"{table}_{col}_seq"
+                cur.execute(
+                    f"SELECT setval(pg_get_serial_sequence(%s, %s), GREATEST(COALESCE((SELECT MAX({col}) FROM {table}), 0), 1))",
+                    (table, col),
+                )
+                new_val = cur.fetchone()[0]
+                if new_val > 1:
+                    logger.info("backend.schema.seq_reset table=%s seq=%s val=%s", table, seq_name, new_val)
+
         logger.debug("backend.schema.init.ok")
         logger.info("Backend schema initialized successfully")
     finally:

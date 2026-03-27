@@ -72,6 +72,9 @@ def run(config_dir, logger):
         except Exception as e:
             logger.error(f"  {table}: migration error: {e}")
 
+    # Reset SERIAL sequences so nextval() doesn't collide with migrated IDs
+    _reset_serial_sequences(dst, logger)
+
     src.close()
     dst.close()
     elapsed = time.time() - start
@@ -79,6 +82,33 @@ def run(config_dir, logger):
     msg = f"migrated {total_migrated} rows across {len(BACKEND_TABLES) - skipped} tables in {elapsed:.1f}s ({skipped} skipped)"
     logger.info(f"migrate_backend_db: {msg}")
     return msg
+
+
+def _reset_serial_sequences(conn, logger) -> None:
+    """Reset SERIAL sequences to MAX(id) so nextval() won't collide with migrated rows."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT c.relname AS table_name, a.attname AS column_name
+        FROM pg_class c
+        JOIN pg_attribute a ON a.attrelid = c.oid
+        JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+        WHERE c.relkind = 'r'
+          AND c.relnamespace = 'public'::regnamespace
+          AND pg_get_expr(d.adbin, d.adrelid) LIKE 'nextval%'
+        """
+    )
+    for table_name, col_name in cur.fetchall():
+        try:
+            cur.execute(
+                f"SELECT setval(pg_get_serial_sequence(%s, %s), GREATEST(COALESCE((SELECT MAX({col_name}) FROM {table_name}), 0), 1))",
+                (table_name, col_name),
+            )
+            new_val = cur.fetchone()[0]
+            if new_val > 1:
+                logger.info(f"  {table_name}.{col_name}: sequence reset to {new_val}")
+        except Exception as e:
+            logger.warning(f"  {table_name}.{col_name}: sequence reset failed: {e}")
 
 
 def _table_exists(cur, table: str) -> bool:

@@ -357,12 +357,11 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
             onDragStart: (e) => e.preventDefault()
         };
 
-        // Before dimensions are known, limit height via CSS to prevent layout shift
         const maxHeight = variant === 'root_post' ? MAX_INITIAL_HEIGHT_ROOT : MAX_INITIAL_HEIGHT_COMMENT;
         const dimensionsKnown = naturalWidth && naturalHeight;
         const mediaStyle = {
             width: dimensionsKnown ? `${currentWidth}px` : 'auto',
-            height: dimensionsKnown ? `${currentHeight}px` : 'auto',
+            height: 'auto',
             maxWidth: '100%',
             maxHeight: dimensionsKnown ? undefined : `${maxHeight}px`,
             borderRadius: '4px',
@@ -404,8 +403,8 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                     style={{
                         position: 'relative',
                         width: naturalWidth ? `${currentWidth}px` : `${MAX_INITIAL_WIDTH}px`,
-                        height: naturalHeight ? `${currentHeight}px` : `${Math.round(MAX_INITIAL_WIDTH * 9 / 16)}px`,
                         maxWidth: '100%',
+                        aspectRatio: naturalWidth && naturalHeight ? `${naturalWidth} / ${naturalHeight}` : '16 / 9',
                         overflow: 'hidden',
                         borderRadius: '4px',
                     }}
@@ -458,8 +457,8 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                     style={{
                         position: 'relative',
                         width: naturalWidth ? `${currentWidth}px` : 'auto',
-                        height: naturalHeight ? `${currentHeight}px` : 'auto',
                         maxWidth: '100%',
+                        aspectRatio: naturalWidth && naturalHeight ? `${naturalWidth} / ${naturalHeight}` : undefined,
                         overflow: 'hidden',
                         borderRadius: '4px',
                     }}
