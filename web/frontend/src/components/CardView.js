@@ -421,6 +421,18 @@ const MobileCardTitleBar = styled.div`
     }
 `
 
+const MobileCardTitleBelow = styled.div`
+    display: none;
+    @media (max-width: 600px) {
+        display: block;
+        padding: 0.5rem 0.65rem;
+        font-weight: 700;
+        font-size: clamp(0.65rem, 3.2vw, 0.95rem);
+        line-height: 1.25;
+        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    }
+`
+
 const HideOnMobileTitle = styled.div`
     margin: 0.4rem 0;
     @media (max-width: 600px) {
@@ -1956,19 +1968,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 if (displayMobileSrc) {
                                     return (
                                         <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
-                                            <MobileCardFitTitle titleText={post && post.title ? post.title : ''}>
-                                                <MobileCardImg
-                                                    src={displayMobileSrc}
-                                                    alt=""
-                                                    loading="lazy"
-                                                    style={(() => {
-                                                        const s = {};
-                                                        if (shouldBlurMedia) s.filter = 'blur(15px)';
-                                                        if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
-                                                        return Object.keys(s).length ? s : undefined;
-                                                    })()}
-                                                />
-                                            </MobileCardFitTitle>
+                                            <MobileCardImg
+                                                src={displayMobileSrc}
+                                                alt=""
+                                                loading="lazy"
+                                                style={(() => {
+                                                    const s = {};
+                                                    if (shouldBlurMedia) s.filter = 'blur(15px)';
+                                                    if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
+                                                    return Object.keys(s).length ? s : undefined;
+                                                })()}
+                                            />
                                         </Link>
                                     );
                                 } else {
@@ -1980,6 +1990,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 }
                             })()}
                         </MobileCardSquare>
+                        {thumbSrc && post && post.title ? (
+                            <MobileCardTitleBelow>
+                                <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ color: 'inherit', textDecoration: 'none' }}>
+                                    {post.title}
+                                </Link>
+                            </MobileCardTitleBelow>
+                        ) : null}
                     </MobileCardWrapper>}
                     <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>
