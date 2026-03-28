@@ -65,6 +65,8 @@ from params import expect_params
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
 from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
+from shared.inbox import record_inbox_event, follow_event_key, donation_event_key
+from shared.push import send_push_for_follow, send_push_for_donation
 from pow import (
     argon2_digest,
     canon_base_post,
@@ -2268,6 +2270,31 @@ def core_follow_user():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/follow_user", "MsgFollowUser", code, tx_hash, raw_log, extra)
+        log_event(rid, "follow_user.success", tx_hash=tx_hash, target=user)
+        if user_addr.lower() != user.lower():
+            event_key = follow_event_key(user_addr, user, tx_hash)
+            inserted = record_inbox_event(
+                event_key=event_key,
+                recipient=user,
+                actor=user_addr,
+                event_type="follow",
+                created_at=int(time.time()),
+                tx_hash=tx_hash,
+            )
+            log_event(
+                rid,
+                "follow_user.notify",
+                recipient=user,
+                actor=user_addr,
+                tx_hash=tx_hash,
+                inserted=inserted,
+            )
+            if inserted:
+                follower_username = _get_username_for_owner(user_addr)
+                send_push_for_follow(user_addr, follower_username, user)
+            from routes.public import _invalidate_inbox_cache
+
+            _invalidate_inbox_cache(user)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_user.err", error=str(e))
@@ -4095,6 +4122,32 @@ def core_send_tokens():
             return _tx_error(rid, "core/send_tokens", "MsgSendTokens", code, tx_hash, raw_log, extra)
 
         log_event(rid, "send_tokens.success", tx_hash=tx_hash)
+        if user_addr.lower() != target.lower():
+            event_key = donation_event_key(user_addr, target, tx_hash)
+            inserted = record_inbox_event(
+                event_key=event_key,
+                recipient=target,
+                actor=user_addr,
+                event_type="donation",
+                created_at=int(time.time()),
+                amount=int(amount),
+                tx_hash=tx_hash,
+            )
+            log_event(
+                rid,
+                "send_tokens.notify",
+                recipient=target,
+                actor=user_addr,
+                amount=int(amount),
+                tx_hash=tx_hash,
+                inserted=inserted,
+            )
+            if inserted:
+                sender_username = _get_username_for_owner(user_addr)
+                send_push_for_donation(user_addr, sender_username, target, int(amount))
+            from routes.public import _invalidate_inbox_cache
+
+            _invalidate_inbox_cache(target)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "send_tokens.err", error=str(e))

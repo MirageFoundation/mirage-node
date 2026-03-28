@@ -334,6 +334,15 @@ export default function InboxView({ state }) {
         if (wasUnread) {
             setBadgeCount(badgeCountRef.current - 1);
         }
+        const isProfileNotice = reply.type === 'follow' || reply.type === 'donation';
+        if (isProfileNotice) {
+            const actorIdentity = reply.reply_username || reply.reply_owner;
+            if (actorIdentity) {
+                setActiveReplyId(reply.reply_id);
+                navigate(`/u/${encodeURIComponent(actorIdentity)}`);
+            }
+            return;
+        }
         if (reply.root_post_id) {
             try {
                 Storage.setPendingPostHighlight(reply.reply_id);
@@ -409,11 +418,17 @@ export default function InboxView({ state }) {
                 const displayUsername = `@${reply.reply_username || shortenAddress(reply.reply_owner)}`;
                 const isMention = reply.type === 'mention';
                 const isAward = reply.type === 'award';
+                const isFollow = reply.type === 'follow';
+                const isDonation = reply.type === 'donation';
                 const awardLabel = isAward ? formatAwardLabel(reply.award_type) : '';
                 const awardTarget = isAward && reply.root_post_id && reply.root_post_id === reply.reply_id ? 'post' : 'comment';
                 const hasParent = Boolean(reply.parent_content);
+                const actorIdentity = reply.reply_username || reply.reply_owner;
+                const profileUrl = actorIdentity ? `/u/${encodeURIComponent(actorIdentity)}` : `/u/${encodeURIComponent(reply.reply_owner)}`;
                 // Use new clean URL with depth=1 for reply with parent context
-                const replyUrl = `/p/${reply.reply_id}?depth=1`;
+                const replyUrl = (isFollow || isDonation) ? profileUrl : `/p/${reply.reply_id}?depth=1`;
+                const donationAmount = Number(reply.amount);
+                const formattedDonation = Number.isFinite(donationAmount) ? donationAmount.toLocaleString() : '';
                 return (
                     <ReplyItem
                         key={`${reply.reply_id}_${reply.type || 'reply'}`}
@@ -432,6 +447,16 @@ export default function InboxView({ state }) {
                             <ReplyHeader $isUnread={isUnread}>
                                 {isAward ? (
                                     <>Award received</>
+                                ) : isFollow ? (
+                                    <>
+                                        <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
+                                        {' followed you'}
+                                    </>
+                                ) : isDonation ? (
+                                    <>
+                                        <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
+                                        {' donated to you'}
+                                    </>
                                 ) : (
                                     <>
                                         <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
@@ -459,6 +484,12 @@ export default function InboxView({ state }) {
                                     <QuoteBlock>{truncateWords(reply.reply_content, 50)}</QuoteBlock>
                                 )}
                             </ReplyContentText>
+                        ) : isDonation ? (
+                            formattedDonation ? (
+                                <ReplyContentText>{`Amount: ${formattedDonation} MIRAGE`}</ReplyContentText>
+                            ) : null
+                        ) : isFollow ? (
+                            <ReplyContentText>View profile</ReplyContentText>
                         ) : (
                             reply.reply_content && <ReplyContentText>{reply.reply_content}</ReplyContentText>
                         )}

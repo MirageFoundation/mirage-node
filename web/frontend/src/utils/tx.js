@@ -108,6 +108,27 @@ export async function getPendingBlockInfo(type, target) {
     return h.getPendingBlockInfo(type, target);
 }
 
+// Send tokens tracking
+export async function addSendListener(fn) {
+    const h = await getHandler();
+    return h.addSendListener(fn);
+}
+
+export async function getPendingSends() {
+    const h = await getHandler();
+    return h.getPendingSends();
+}
+
+export async function isPendingSend(target) {
+    const h = await getHandler();
+    return h.isPendingSend(target);
+}
+
+export async function getPendingSendInfo(target) {
+    const h = await getHandler();
+    return h.getPendingSendInfo(target);
+}
+
 // Delete-account tracking
 export async function addDeleteListener(fn) {
     const h = await getHandler();

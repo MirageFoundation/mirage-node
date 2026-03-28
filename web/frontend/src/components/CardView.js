@@ -15,6 +15,7 @@ import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
 import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
+import { usePendingSends } from "../utils/usePendingSends";
 import { Tooltip, tooltipStyles } from "./Tooltip";
 
 const pickCard = (theme, key) => {
@@ -901,11 +902,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [topicFollowOverride, setTopicFollowOverride] = useState(null);
     const [confirmDonate, setConfirmDonate] = useState(false);
     const [donateAmountRaw, setDonateAmountRaw] = useState("10000");
-    const [isDonating, setIsDonating] = useState(false);
     const [donateMessage, setDonateMessage] = useState(null); // { type, message }
     const [confirmAward, setConfirmAward] = useState(false);
     const [isAwarding, setIsAwarding] = useState(false);
     const [awardMessage, setAwardMessage] = useState(null); // { type, message }
+    const { isPending: isSendPending, formatStatus: formatSendStatus } = usePendingSends();
     const [shareCopied, setShareCopied] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(false);
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
@@ -1227,6 +1228,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleDonate = () => {
         setMenuOpen(false);
         if (!post || !post.user_id) return;
+        if (!hasValidAccount) {
+            alert('Please log in to donate');
+            return;
+        }
         setConfirmDelete(false);
         setConfirmSuspendQuests(false);
         setSuspendSuccess(null);
@@ -1247,29 +1252,31 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const confirmDonateAction = async () => {
         if (!post || !post.user_id) return;
-        setIsDonating(true);
+        if (isSendPending(post.user_id)) return;
         const amount = parseInt(String(donateAmountRaw || "").replace(/[^\d]/g, ""), 10);
-        if (isNaN(amount) || amount < 10000) {
+        if (!Number.isFinite(amount) || amount < 10000) {
             setDonateMessage({ type: 'error', message: 'Minimum donation is 10,000 MIRAGE' });
             setTimeout(() => setDonateMessage(null), 5000);
-            setIsDonating(false);
             return;
         }
         try {
+            console.debug('[CardView] donate.submit', { target: post.user_id, amount });
             const result = await tx.sendTokens(post.user_id, amount);
             if (result.success) {
                 setDonateMessage({ type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` });
                 setConfirmDonate(false);
                 setTimeout(() => setDonateMessage(null), 5000);
             } else {
-                setDonateMessage({ type: 'error', message: `Failed: ${result.error || 'Unknown error'}` });
+                if (!result?.error) {
+                    throw new Error('Missing error for send_tokens');
+                }
+                setDonateMessage({ type: 'error', message: `Failed: ${result.error}` });
                 setTimeout(() => setDonateMessage(null), 5000);
             }
         } catch (error) {
             setDonateMessage({ type: 'error', message: `Error: ${error.message || error}` });
             setTimeout(() => setDonateMessage(null), 5000);
         }
-        setIsDonating(false);
     };
 
     const cancelDonate = () => {
@@ -2213,7 +2220,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     {!isOwnPost && (
                                         <>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleGiveAward(); }}>Give Award</MenuItem>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
+                                            {hasValidAccount && (
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
+                                            )}
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
                                             {post?.topic && <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockTopic(); }} data-danger="true">Block topic</MenuItem>}
@@ -2546,6 +2555,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onChange={(e) => setDonateAmountRaw(e.target.value.replace(/[^\d]/g, ""))}
                                         placeholder="10,000"
                                         maxLength={11}
+                                        disabled={isSendPending(post?.user_id)}
                                         style={{
                                             width: '5.5rem',
                                             background: 'transparent',
@@ -2560,8 +2570,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
                                 </div>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                    <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
-                                        {isDonating ? 'Sending...' : 'Send'}
+                                    <Button
+                                        variant="warning"
+                                        size="sm"
+                                        onClick={confirmDonateAction}
+                                        disabled={isSendPending(post?.user_id)}
+                                    >
+                                        {formatSendStatus(post?.user_id) || 'Send'}
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                                 </ConfirmButtons>

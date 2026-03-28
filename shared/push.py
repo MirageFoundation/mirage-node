@@ -545,6 +545,76 @@ def _do_award_push(
     _check_old_receipts()
 
 
+def send_push_for_follow(
+    follower_addr: str,
+    follower_username: str,
+    target_owner: str,
+) -> None:
+    """Fire push for a follow. Called after successful broadcast."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping follow push for %s", follower_addr[:16])
+        return
+    if target_owner == follower_addr.lower():
+        return
+    logger.info(
+        "[Push] Firing follow push: follower=%s recipient=%s",
+        follower_addr[:16],
+        target_owner[:16],
+    )
+    _fire_and_forget(_do_follow_push, follower_addr, follower_username, target_owner)
+    _maybe_flush_pending_summaries()
+
+
+def _do_follow_push(
+    follower_addr: str,
+    follower_username: str,
+    target_owner: str,
+) -> None:
+    display_name = f"@{follower_username}" if follower_username else follower_addr[:12]
+    title = f"{display_name} followed you"
+    body = "Tap to view their profile"
+    data = {"type": "follow", "user": follower_addr.lower()}
+    _send_push_to_user(target_owner, title, body, data)
+    _check_old_receipts()
+
+
+def send_push_for_donation(
+    sender_addr: str,
+    sender_username: str,
+    recipient_addr: str,
+    amount: int,
+) -> None:
+    """Fire push for a donation. Called after successful broadcast."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping donation push for %s", sender_addr[:16])
+        return
+    if recipient_addr == sender_addr.lower():
+        return
+    logger.info(
+        "[Push] Firing donation push: sender=%s recipient=%s amount=%s",
+        sender_addr[:16],
+        recipient_addr[:16],
+        amount,
+    )
+    _fire_and_forget(_do_donation_push, sender_addr, sender_username, recipient_addr, amount)
+    _maybe_flush_pending_summaries()
+
+
+def _do_donation_push(
+    sender_addr: str,
+    sender_username: str,
+    recipient_addr: str,
+    amount: int,
+) -> None:
+    amount_int = int(amount)
+    display_name = f"@{sender_username}" if sender_username else sender_addr[:12]
+    title = f"{display_name} donated {amount_int:,} MIRAGE"
+    body = "You received a donation"
+    data = {"type": "donation", "user": sender_addr.lower(), "amount": amount_int}
+    _send_push_to_user(recipient_addr, title, body, data)
+    _check_old_receipts()
+
+
 def clear_push_throttle(owner: str) -> None:
     """Clear throttle state after the user views their inbox."""
     owner_lower = owner.lower()

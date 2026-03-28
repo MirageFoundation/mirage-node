@@ -525,6 +525,31 @@ def init_backend_schema() -> None:
             """
             )
 
+            # ── Inbox events (follow + donation notifications) ───────────
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS inbox_events (
+                    event_key TEXT PRIMARY KEY,
+                    recipient TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    created_at BIGINT NOT NULL,
+                    amount BIGINT,
+                    tx_hash TEXT
+                )
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_recipient_lower ON inbox_events(LOWER(recipient))")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_created_at ON inbox_events(created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_type ON inbox_events(event_type)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_inbox_events_recipient_created ON inbox_events(LOWER(recipient), created_at DESC)"
+            )
+            _assert_table_schema(
+                "inbox_events",
+                {"event_key", "recipient", "actor", "event_type", "created_at", "amount", "tx_hash"},
+            )
+
             # ── Fix SERIAL sequences after data migration ─────────────────
             # The DB-split migration inserts rows with explicit id values but
             # doesn't advance the sequences.  Reset each SERIAL sequence to

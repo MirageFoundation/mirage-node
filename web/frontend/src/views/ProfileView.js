@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from 'react-helmet-async';
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from "../utils/Storage";
@@ -18,6 +18,7 @@ import { tooltipStyles } from "../components/Tooltip";
 import { useTxStatus } from "../utils/useTxStatus";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
 import { formatMirage } from "../utils/formatters";
+import { usePendingSends } from "../utils/usePendingSends";
 
 const Row = styled.div`
     display: grid;
@@ -241,6 +242,7 @@ export default function ProfileView({ state }) {
     const navigate = useNavigate();
     const location = useLocation();
     const routeParams = useParams();
+    const theme = useTheme();
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     // State for username resolution (for /u/:identity route)
@@ -342,6 +344,9 @@ export default function ProfileView({ state }) {
     const [bioSaving, setBioSaving] = useState(false);
     const [bioError, setBioError] = useState('');
     const [bioButtonStatus, setBioButtonStatus] = useState('');
+    const [confirmDonate, setConfirmDonate] = useState(false);
+    const [donateAmountRaw, setDonateAmountRaw] = useState("10000");
+    const [donateMessage, setDonateMessage] = useState(null);
     const formatPrefWeight = (w) => {
         const num = Number(w);
         if (!Number.isFinite(num)) return '0';
@@ -349,6 +354,8 @@ export default function ProfileView({ state }) {
     };
     const colorForWeight = (w) => (w > 0 ? '#22c55e' : w < 0 ? '#f87171' : '#888');
     // Server metrics are shown on ServerView; no local server balance state here
+    const hasValidAccount = Boolean(address) && address !== 'guest';
+    const { isPending: isSendPending, formatStatus: formatSendStatus } = usePendingSends();
 
     // Fetch preferences for Algo tab
     useEffect(() => {
@@ -435,6 +442,12 @@ export default function ProfileView({ state }) {
         setPrefAuthorUsernames({});
         setSimilarUsers([]);
         setSimilarUsersError('');
+    }, [profileAddress]);
+
+    useEffect(() => {
+        setConfirmDonate(false);
+        setDonateMessage(null);
+        setDonateAmountRaw("10000");
     }, [profileAddress]);
 
     useEffect(() => {
@@ -814,6 +827,8 @@ export default function ProfileView({ state }) {
         : '(address required)';
     const registeredDisplay = formatRegistrationDate(profileRegisteredAt);
     const canEditProfile = isOwnProfile && Boolean(address);
+    const donatePending = isSendPending(profileAddress);
+    const donateStatus = formatSendStatus(profileAddress);
 
     const profileTitle = profileUsername
         ? `@${profileUsername}`
@@ -861,6 +876,57 @@ export default function ProfileView({ state }) {
             setBioSaving(false);
             setBioButtonStatus('');
         }
+    };
+
+    const formatDonateAmount = (value) => {
+        const digits = String(value || "").replace(/[^\d]/g, "");
+        if (!digits) return "";
+        return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    };
+
+    const handleDonate = () => {
+        if (!profileAddress || !hasValidAccount) {
+            setDonateMessage({ type: 'error', message: 'Please log in to donate' });
+            setTimeout(() => setDonateMessage(null), 5000);
+            return;
+        }
+        console.debug('[ProfileView] donate.open', { target: profileAddress });
+        setDonateAmountRaw("10000");
+        setDonateMessage(null);
+        setConfirmDonate(true);
+    };
+
+    const confirmDonateAction = async () => {
+        if (!profileAddress || !hasValidAccount) return;
+        if (donatePending) return;
+        const amount = parseInt(String(donateAmountRaw || "").replace(/[^\d]/g, ""), 10);
+        if (!Number.isFinite(amount) || amount < 10000) {
+            setDonateMessage({ type: 'error', message: 'Minimum donation is 10,000 MIRAGE' });
+            setTimeout(() => setDonateMessage(null), 5000);
+            return;
+        }
+        console.debug('[ProfileView] donate.submit', { target: profileAddress, amount });
+        try {
+            const result = await tx.sendTokens(profileAddress, amount);
+            if (result.success) {
+                setDonateMessage({ type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` });
+                setConfirmDonate(false);
+                setTimeout(() => setDonateMessage(null), 5000);
+            } else {
+                if (!result?.error) {
+                    throw new Error('Missing error for send_tokens');
+                }
+                setDonateMessage({ type: 'error', message: `Failed: ${result.error}` });
+                setTimeout(() => setDonateMessage(null), 5000);
+            }
+        } catch (error) {
+            setDonateMessage({ type: 'error', message: `Error: ${error.message || error}` });
+            setTimeout(() => setDonateMessage(null), 5000);
+        }
+    };
+
+    const cancelDonate = () => {
+        setConfirmDonate(false);
     };
 
     // Show loading/error states for username resolution
@@ -987,10 +1053,82 @@ export default function ProfileView({ state }) {
                                         <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
                                             Balance:
                                         </HoverableLabel>
-                                        <ValueBox>
+                                        <ValueBoxWithButton>
                                             <Mono>{balanceDisplay}</Mono>
-                                        </ValueBox>
+                                            {!isOwnProfile && profileAddress && hasValidAccount && (
+                                                <Button size="sm" minWidth="copy" mobileFullWidth onClick={handleDonate} disabled={donatePending}>
+                                                    {donatePending ? (donateStatus || 'Sending...') : 'Donate'}
+                                                </Button>
+                                            )}
+                                        </ValueBoxWithButton>
                                     </RowCentered>
+                                    {confirmDonate && (
+                                        <Row>
+                                            <div />
+                                            <ValueBox style={{ background: 'rgba(251, 191, 36, 0.1)', borderColor: '#f59e0b' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%', flexWrap: 'wrap' }}>
+                                                    <span style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                                                        Donate to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
+                                                    </span>
+                                                    <div style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.35rem',
+                                                        background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
+                                                        border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
+                                                        borderRadius: '8px',
+                                                        padding: '0.2rem 0.5rem',
+                                                    }}>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="numeric"
+                                                            value={formatDonateAmount(donateAmountRaw)}
+                                                            onChange={(e) => setDonateAmountRaw(e.target.value.replace(/[^\d]/g, ""))}
+                                                            placeholder="10,000"
+                                                            maxLength={11}
+                                                            disabled={donatePending}
+                                                            style={{
+                                                                width: '5.5rem',
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                outline: 'none',
+                                                                color: theme?.colors?.text || 'inherit',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: 700,
+                                                                textAlign: 'right',
+                                                            }}
+                                                        />
+                                                        <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto', flexShrink: 0 }}>
+                                                        <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={donatePending}>
+                                                            {donateStatus || 'Send'}
+                                                        </Button>
+                                                        <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
+                                                    </div>
+                                                </div>
+                                            </ValueBox>
+                                        </Row>
+                                    )}
+                                    {donateMessage && (
+                                        <Row>
+                                            <div />
+                                            <div style={{
+                                                background: donateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                                border: donateMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                                                borderRadius: '8px',
+                                                padding: '0.6rem 0.85rem',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                color: donateMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                                                fontSize: '0.8rem',
+                                            }}>
+                                                <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                                {donateMessage.message}
+                                            </div>
+                                        </Row>
+                                    )}
                                     <RowCentered>
                                         <HoverableLabel tabIndex={0} data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
                                             Reserve:

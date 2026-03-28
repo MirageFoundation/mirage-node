@@ -18,6 +18,7 @@ import Storage from '../utils/Storage';
 import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
 import { fetchFollowedUsers, follow as followAuthor, unfollow as unfollowAuthor, invalidateCache as invalidateFollowCache } from '../utils/FollowUsers';
 import { usePendingFollows } from '../utils/useFollowState';
+import { usePendingSends } from '../utils/usePendingSends';
 import { uploadImage } from '../utils/ImageUpload';
 import { sortComments } from '../utils/SortComments';
 import StickerPicker from '../components/StickerPicker';
@@ -845,8 +846,7 @@ function ViewPostView({ state, updatePost }) {
     const [isUnsuspending, setIsUnsuspending] = useState(false);
     const [userSuspendedMap, setUserSuspendedMap] = useState({}); // { userId: true/false/null }
     const [confirmDonate, setConfirmDonate] = useState(null); // { userId, postId }
-    const [donateAmount, setDonateAmount] = useState("1");
-    const [isDonating, setIsDonating] = useState(false);
+    const [donateAmount, setDonateAmount] = useState("10000");
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [confirmAward, setConfirmAward] = useState(null); // { postId }
     const [isAwarding, setIsAwarding] = useState(false);
@@ -1046,6 +1046,7 @@ function ViewPostView({ state, updatePost }) {
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [topicFollowHover, setTopicFollowHover] = useState(false);
     const { isTopicPending, isUserPending, formatTopicStatus, formatUserStatus } = usePendingFollows();
+    const { isPending: isSendPending, formatStatus: formatSendStatus } = usePendingSends();
 
     // Menu state for three-dots dropdown
     const [openMenuId, setOpenMenuId] = useState(null);
@@ -1718,6 +1719,11 @@ function ViewPostView({ state, updatePost }) {
         if (!userAddress) {
             return;
         }
+        const viewerAddress = Storage.load('publicKey', '');
+        if (!viewerAddress || viewerAddress === 'guest') {
+            alert('Please log in to donate');
+            return;
+        }
         setConfirmBlockPost(null);
         setConfirmBlockUser(null);
         setConfirmDeletePost(null);
@@ -1726,7 +1732,7 @@ function ViewPostView({ state, updatePost }) {
         setConfirmUnsuspendQuests(null);
         setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
-        setDonateAmount("1"); // Reset to default
+        setDonateAmount("10000"); // Reset to default
     };
 
     const { displayBalance: userBalanceUmirage } = useBalance();
@@ -1903,15 +1909,16 @@ function ViewPostView({ state, updatePost }) {
     const confirmDonateAction = async () => {
         const userAddress = confirmDonate?.userId;
         const postId = confirmDonate?.postId;
-        setConfirmDonate(null);
-        setIsDonating(true);
+        if (userAddress && isSendPending(userAddress)) {
+            return;
+        }
 
         const amount = parseInt(String(donateAmount || "").replace(/[^\d]/g, ""), 10);
-        if (isNaN(amount) || amount <= 0) {
+        if (isNaN(amount) || amount < 10000) {
             if (postId) {
                 setDonateMessages(prev => ({
                     ...prev,
-                    [postId]: { type: 'error', message: 'Invalid amount' }
+                    [postId]: { type: 'error', message: 'Minimum donation is 10,000 MIRAGE' }
                 }));
                 setTimeout(() => {
                     setDonateMessages(prev => {
@@ -1921,11 +1928,11 @@ function ViewPostView({ state, updatePost }) {
                     });
                 }, 5000);
             }
-            setIsDonating(false);
             return;
         }
 
         try {
+            console.debug('[ViewPostView] donate.submit', { target: userAddress, amount });
             const result = await tx.sendTokens(userAddress, amount);
             if (result.success) {
                 if (postId) {
@@ -1941,6 +1948,7 @@ function ViewPostView({ state, updatePost }) {
                         });
                     }, 5000);
                 }
+                setConfirmDonate(null);
             } else {
                 if (postId) {
                     setDonateMessages(prev => ({
@@ -1971,8 +1979,6 @@ function ViewPostView({ state, updatePost }) {
                     });
                 }, 5000);
             }
-        } finally {
-            setIsDonating(false);
         }
     };
 
@@ -3070,6 +3076,7 @@ function ViewPostView({ state, updatePost }) {
                                 onChange={(e) => handleDonateAmountChange(e.target.value)}
                                 placeholder="10,000"
                                 maxLength={11}
+                                disabled={isSendPending(confirmDonate?.userId)}
                                 style={{
                                     width: '5.5rem',
                                     background: 'transparent',
@@ -3084,8 +3091,13 @@ function ViewPostView({ state, updatePost }) {
                             <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
                         </div>
                         <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
-                            <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
-                                {isDonating ? 'Sending...' : 'Send'}
+                            <Button
+                                variant="warning"
+                                size="sm"
+                                onClick={confirmDonateAction}
+                                disabled={isSendPending(confirmDonate?.userId)}
+                            >
+                                {formatSendStatus(confirmDonate?.userId) || 'Send'}
                             </Button>
                             <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                         </ConfirmButtons>
@@ -3327,7 +3339,9 @@ function ViewPostView({ state, updatePost }) {
                                         : (isFollowingThisAuthor ? 'Unfollow user' : 'Follow user')}
                                 </MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleGiveAward(post.post_id); }}>Give Award</MenuItem>
-                                <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
+                                {viewerAddress !== 'guest' && (
+                                    <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
+                                )}
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id, post.post_id); }} data-danger="true">Block user</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockPost(post.post_id); }} data-danger="true">Block post</MenuItem>
                                 {post?.topic && <MenuItem onClick={() => { setOpenMenuId(null); handleBlockTopic(post.topic, post.post_id); }} data-danger="true">Block topic</MenuItem>}

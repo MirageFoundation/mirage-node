@@ -164,6 +164,11 @@ class TransactionHandler {
             this.pendingVotes = new Map();
             this._voteListeners = new Set();
 
+            // Track in-flight send_tokens operations
+            // Map<key, { target: string, amount: number, queuePosition: number }>
+            this.pendingSends = new Map();
+            this._sendListeners = new Set();
+
             // Vote detail polling can overlap when users vote quickly.
             // Track the latest vote tx per target and cancel/ignore stale poll loops.
             this._voteDetailsPollToken = new Map();   // Map<targetLower, number>
@@ -273,6 +278,39 @@ class TransactionHandler {
         const key = String(postId || '').toLowerCase();
         const entry = this.pendingVotes.get(key);
         return entry ? entry.direction : null;
+    }
+
+    // Send tokens tracking methods
+    addSendListener(callback) {
+        if (typeof callback === 'function') {
+            this._sendListeners.add(callback);
+        }
+        return () => this._sendListeners.delete(callback);
+    }
+
+    _notifySendListeners() {
+        const pending = this.getPendingSends();
+        this._sendListeners.forEach(cb => {
+            try { cb(pending); } catch (_) { }
+        });
+    }
+
+    getPendingSends() {
+        const result = {};
+        this.pendingSends.forEach((value, key) => {
+            result[key] = value;
+        });
+        return result;
+    }
+
+    isPendingSend(target) {
+        const key = `send:${String(target).toLowerCase()}`;
+        return this.pendingSends.has(key);
+    }
+
+    getPendingSendInfo(target) {
+        const key = `send:${String(target).toLowerCase()}`;
+        return this.pendingSends.get(key) || null;
     }
 
     // Follow tracking methods
@@ -1380,6 +1418,15 @@ class TransactionHandler {
                 return this._fail("insufficient balance", { balance: haveM, needed: needM });
             }
 
+            const sendKey = `send:${targetTrimmed}`;
+            if (this.pendingSends.has(sendKey)) {
+                return this._fail("send tokens already in progress");
+            }
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingSends.set(sendKey, { target: targetTrimmed, amount: amountUmirage, queuePosition });
+            this._notifySendListeners();
+            console.debug("[send_tokens] enqueue", { target: targetTrimmed, amount: amountUmirage, queuePosition });
+
             const tx = {
                 action: 'send_tokens',
                 target: targetTrimmed,
@@ -1395,8 +1442,19 @@ class TransactionHandler {
             const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
             const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
 
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            let result = null;
+            try {
+                result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+                return result;
+            } finally {
+                this.pendingSends.delete(sendKey);
+                this._notifySendListeners();
+                console.debug("[send_tokens] resolved", {
+                    target: targetTrimmed,
+                    success: !!result?.success,
+                    error: result?.error,
+                });
+            }
         } catch (e) {
             return this._failFromException(e);
         }

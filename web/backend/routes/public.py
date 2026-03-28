@@ -6406,6 +6406,7 @@ def get_inbox():
     page = max(1, page)
     offset = (page - 1) * limit
     viewer_lower = address.lower()
+    need = offset + limit
 
     try:
         t_db_open = time.time()
@@ -6541,8 +6542,8 @@ def get_inbox():
             viewer_lower,
             viewer_lower,
             viewer_lower,
-            limit,
-            offset,
+            need,
+            0,
         ]
 
         t_query = time.time()
@@ -6550,6 +6551,25 @@ def get_inbox():
         rows = cur.fetchall()
         query_ms = (time.time() - t_query) * 1000
         logger.info(f"[get_inbox] Main query: {query_ms:.1f}ms, rows={len(rows)}")
+
+        t_backend = time.time()
+        backend_rows = []
+        bconn = connect_backend_db()
+        bcur = bconn.cursor()
+        bcur.execute(
+            """
+            SELECT event_key, actor, event_type, created_at, amount, tx_hash
+            FROM inbox_events
+            WHERE LOWER(recipient) = %s
+              AND LOWER(actor) != %s
+              AND event_type IN ('follow', 'donation')
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (viewer_lower, viewer_lower, need),
+        )
+        backend_rows = bcur.fetchall()
+        logger.info(f"[get_inbox] Backend events query: {(time.time() - t_backend)*1000:.1f}ms, rows={len(backend_rows)}")
 
         # Get total count via a separate lightweight query
         count_query = f"""
@@ -6578,40 +6598,135 @@ def get_inbox():
             [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower],
         )
         total_row = cur.fetchone()
-        total = int(total_row[0]) if total_row and total_row[0] else 0
+        total_indexer = int(total_row[0]) if total_row and total_row[0] else 0
 
-        conn.close()
+        bcur.execute(
+            """
+            SELECT COUNT(*) FROM inbox_events
+            WHERE LOWER(recipient) = %s
+              AND LOWER(actor) != %s
+              AND event_type IN ('follow', 'donation')
+            """,
+            (viewer_lower, viewer_lower),
+        )
+        backend_total_row = bcur.fetchone()
+        total_backend = int(backend_total_row[0]) if backend_total_row and backend_total_row[0] else 0
+
+        total = total_indexer + total_backend
+
+        items = []
+        for row in rows:
+            items.append(
+                {
+                    "item_id": (row[0] or "").lower(),
+                    "actor_owner": (row[1] or "").lower(),
+                    "item_timestamp": int(row[2]) if row[2] is not None else 0,
+                    "item_content": row[3] or "",
+                    "context_id": (row[4] or "").lower(),
+                    "context_content": row[5] or "",
+                    "context_title": row[6] or "",
+                    "context_target": (row[7] or "").strip().lower(),
+                    "context_owner": (row[8] or "").lower(),
+                    "actor_username": row[9] or "",
+                    "root_post_id": (row[10] or "").lower(),
+                    "actor_level": int(row[11]) if row[11] else 0,
+                    "item_award_type": row[12] or "",
+                    "item_type": row[13] or "reply",
+                    "item_topic": (row[14] or "").strip().lower() if len(row) > 14 else "",
+                    "actor_created_at": int(row[15]) if len(row) > 15 and row[15] else 0,
+                    "amount": None,
+                }
+            )
+
+        backend_profiles = {}
+        if backend_rows:
+            backend_actors = sorted({str(row[1] or "").strip().lower() for row in backend_rows if row[1]})
+            if backend_actors:
+                placeholders = ",".join(["%s"] * len(backend_actors))
+                cur.execute(
+                    f"""
+                    SELECT LOWER(owner), COALESCE(username, ''), COALESCE(level, 0), COALESCE(created_at, 0)
+                    FROM profiles WHERE LOWER(owner) IN ({placeholders})
+                    """,
+                    backend_actors,
+                )
+                for prow in cur.fetchall():
+                    backend_profiles[prow[0]] = {
+                        "username": prow[1] or "",
+                        "level": int(prow[2]) if prow[2] is not None else 0,
+                        "created_at": int(prow[3]) if prow[3] is not None else 0,
+                    }
+
+        for row in backend_rows:
+            event_key = (row[0] or "").lower()
+            actor_owner = (row[1] or "").lower()
+            event_type = row[2] or ""
+            item_timestamp = int(row[3]) if row[3] is not None else 0
+            amount = int(row[4]) if row[4] is not None else None
+            profile = backend_profiles.get(actor_owner, {})
+            items.append(
+                {
+                    "item_id": event_key,
+                    "actor_owner": actor_owner,
+                    "item_timestamp": item_timestamp,
+                    "item_content": "",
+                    "context_id": "",
+                    "context_content": "",
+                    "context_title": "",
+                    "context_target": "",
+                    "context_owner": viewer_lower,
+                    "actor_username": profile.get("username", ""),
+                    "root_post_id": "",
+                    "actor_level": profile.get("level", 0),
+                    "item_award_type": "",
+                    "item_type": event_type,
+                    "item_topic": "",
+                    "actor_created_at": profile.get("created_at", 0),
+                    "amount": amount,
+                }
+            )
+
+        items.sort(key=lambda item: (item.get("item_timestamp", 0), item.get("item_id", "")), reverse=True)
+        page_items = items[offset : offset + limit]
 
         replies = []
-        for row in rows:
-            item_id = (row[0] or "").lower()
-            actor_owner = (row[1] or "").lower()
-            item_timestamp = int(row[2]) if row[2] is not None else None
-            item_content = row[3] or ""
-            context_id = (row[4] or "").lower()
-            context_content = row[5] or ""
-            context_title = row[6] or ""
-            context_target = (row[7] or "").strip().lower()
-            context_owner = (row[8] or "").lower()
-            actor_username = row[9] or ""
-            root_post_id = (row[10] or "").lower()
-            actor_level = int(row[11]) if row[11] else 0
-            item_award_type = row[12] or ""
-            item_type = row[13] or "reply"
-            item_topic = (row[14] or "").strip().lower() if len(row) > 14 else ""
-            actor_created_at = int(row[15]) if len(row) > 15 and row[15] else 0
+        for item in page_items:
+            item_id = item["item_id"]
+            actor_owner = item["actor_owner"]
+            item_timestamp = item["item_timestamp"]
+            item_content = item["item_content"]
+            context_id = item["context_id"]
+            context_content = item["context_content"]
+            context_title = item["context_title"]
+            context_target = item["context_target"]
+            context_owner = item["context_owner"]
+            actor_username = item["actor_username"]
+            root_post_id = item["root_post_id"]
+            actor_level = item["actor_level"]
+            item_award_type = item["item_award_type"]
+            item_type = item["item_type"] or "reply"
+            item_topic = item["item_topic"]
+            actor_created_at = item["actor_created_at"]
+            amount = item["amount"]
 
-            is_own_context = context_owner == viewer_lower
-            if item_id in blocked_posts or actor_owner in blocked_users:
-                continue
-            if not is_own_context and (context_id in blocked_posts or context_owner in blocked_users):
-                continue
-            if not is_own_context and _topic_is_blocked(item_topic, blocked_topics_exact, blocked_topic_prefixes):
-                continue
-            if not root_post_id:
+            is_profile_notice = item_type in ("follow", "donation")
+            if actor_owner in blocked_users:
                 continue
 
-            if item_type == "reply":
+            if not is_profile_notice:
+                is_own_context = context_owner == viewer_lower
+                if item_id in blocked_posts:
+                    continue
+                if not is_own_context and (context_id in blocked_posts or context_owner in blocked_users):
+                    continue
+                if not is_own_context and _topic_is_blocked(item_topic, blocked_topics_exact, blocked_topic_prefixes):
+                    continue
+                if not root_post_id:
+                    continue
+
+            if is_profile_notice:
+                parent_display_text = ""
+            elif item_type == "reply":
                 if not context_target:
                     parent_display_text = context_title or ""
                 else:
@@ -6639,8 +6754,12 @@ def get_inbox():
                     "root_post_id": root_post_id,
                     "award_type": item_award_type,
                     "type": item_type,
+                    "amount": amount,
                 }
             )
+
+        bconn.close()
+        conn.close()
 
         has_more = (page * limit) < total
 

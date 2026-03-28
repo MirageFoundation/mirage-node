@@ -58,6 +58,9 @@ Use these rules to avoid hanging sessions and enforce fail-fast behavior.
 
 ### Database Schema Changes
 
+- **Approval required**:
+  - Never create new tables or add columns without explicit confirmation from me.
+
 - **Do NOT create new tables when an existing table can be extended.** Add a column to an existing table instead.
 - Only create a new table when the data has a genuinely different primary key or lifecycle.
 - Always check existing schema in `web/backend/db.py` and `indexer/database.py` before proposing new tables.
