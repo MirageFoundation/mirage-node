@@ -267,11 +267,16 @@ class Indexer:
                             tx_type = type_url_to_tx_type(core_types[0])
                         else:
                             tx_type = "multi"
+                        raw_log = ""
+                        if idx < len(txs_results):
+                            raw_entry = txs_results[idx].get("log")
+                            if raw_entry is not None:
+                                raw_log = str(raw_entry)
                         self.db.upsert_tx_index(
                             tx_hash,
                             tx_type,
                             0,
-                            "",
+                            raw_log,
                             height,
                             ts,
                         )
@@ -919,23 +924,27 @@ class Indexer:
             owner = str(p.get("owner", "")).strip().lower()
             if not owner:
                 continue
-            batch.append((
-                owner,
-                p.get("username") or None,
-                int(p.get("level", 0) or 0),
-                int(p.get("created_at", 0) or 0),
-                int(p.get("subscription_expiry", 0) or 0),
-                bool(p.get("auto_renew", False)),
-                str(p.get("biography", "") or ""),
-                str(p.get("avatar", "") or ""),
-                str(p.get("banner", "") or ""),
-                str(p.get("flair", "") or ""),
-                int(p.get("reserve_funds", 0) or 0),
-            ))
+            batch.append(
+                (
+                    owner,
+                    p.get("username") or None,
+                    int(p.get("level", 0) or 0),
+                    int(p.get("created_at", 0) or 0),
+                    int(p.get("subscription_expiry", 0) or 0),
+                    bool(p.get("auto_renew", False)),
+                    str(p.get("biography", "") or ""),
+                    str(p.get("avatar", "") or ""),
+                    str(p.get("banner", "") or ""),
+                    str(p.get("flair", "") or ""),
+                    int(p.get("reserve_funds", 0) or 0),
+                )
+            )
 
         self.db.upsert_profiles_batch(batch, now)
         t_upsert = time.time()
-        logger.info("KV Sync: Upserted %d profiles in %.1fs (total %.1fs)", len(batch), t_upsert - t_fetch, t_upsert - t0)
+        logger.info(
+            "KV Sync: Upserted %d profiles in %.1fs (total %.1fs)", len(batch), t_upsert - t_fetch, t_upsert - t0
+        )
 
 
 if __name__ == "__main__":

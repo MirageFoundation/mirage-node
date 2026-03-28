@@ -11,6 +11,7 @@ import MobileHeader from "../components/MobileHeader";
 import Button from "../components/Button";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 import { getAuthorColor, getAuthorTooltip } from '../utils/tierColors';
+import { formatMirage } from '../utils/formatters';
 
 const HeaderRow = styled.div`
     display: flex;
@@ -428,7 +429,10 @@ export default function InboxView({ state }) {
                 // Use new clean URL with depth=1 for reply with parent context
                 const replyUrl = (isFollow || isDonation) ? profileUrl : `/p/${reply.reply_id}?depth=1`;
                 const donationAmount = Number(reply.amount);
-                const formattedDonation = Number.isFinite(donationAmount) ? donationAmount.toLocaleString() : '';
+                const formattedDonation = Number.isFinite(donationAmount) ? formatMirage(donationAmount) : null;
+                if (!Number.isFinite(donationAmount)) {
+                    console.error('[inbox] invalid donation amount', { amount: reply.amount, id: reply.reply_id });
+                }
                 return (
                     <ReplyItem
                         key={`${reply.reply_id}_${reply.type || 'reply'}`}
@@ -487,7 +491,9 @@ export default function InboxView({ state }) {
                         ) : isDonation ? (
                             formattedDonation ? (
                                 <ReplyContentText>{`Amount: ${formattedDonation} MIRAGE`}</ReplyContentText>
-                            ) : null
+                            ) : (
+                                <ReplyContentText>Invalid donation amount</ReplyContentText>
+                            )
                         ) : isFollow ? (
                             <ReplyContentText>View profile</ReplyContentText>
                         ) : (

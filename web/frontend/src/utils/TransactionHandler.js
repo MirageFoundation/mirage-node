@@ -1398,16 +1398,7 @@ class TransactionHandler {
             const [statusData] = await Promise.all([
                 Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
             ]);
-            let last_block_hash = statusData?.last_block_hash || "";
-            let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
-            const pow_base_bits = requirePowBaseBits(statusData?.pow_base_bits);
-            const pow_factor = requirePowFactor(statusData?.pow_factor);
             const balance = statusData?.balance || 0;
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevel >= 1) {
-                pow_difficulty = 0;
-                last_block_hash = "";
-            }
 
             // Check balance for amount only (no gas fee for level >= 1 users)
             const totalNeeded = amountUmirage;
@@ -1427,34 +1418,28 @@ class TransactionHandler {
             this._notifySendListeners();
             console.debug("[send_tokens] enqueue", { target: targetTrimmed, amount: amountUmirage, queuePosition });
 
-            const tx = {
+            const baseTx = {
                 action: 'send_tokens',
                 target: targetTrimmed,
                 amount: amountUmirage,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
             };
 
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            let result = null;
-            try {
-                result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-                return result;
-            } finally {
-                this.pendingSends.delete(sendKey);
-                this._notifySendListeners();
-                console.debug("[send_tokens] resolved", {
-                    target: targetTrimmed,
-                    success: !!result?.success,
-                    error: result?.error,
-                });
-            }
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingSends.delete(sendKey);
+                    this._notifySendListeners();
+                    console.debug("[send_tokens] resolved", {
+                        target: targetTrimmed,
+                        success: !!result?.success,
+                        error: result?.error,
+                    });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -2379,6 +2364,19 @@ class TransactionHandler {
                 final_transaction = {
                     action: transaction.action,
                     target: transaction.target || "",
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "send_tokens") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target,
+                    amount: transaction.amount,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,

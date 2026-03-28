@@ -1637,13 +1637,18 @@ class MessageProcessor:
             logger.error("Error handling set_level: %s", e, exc_info=True)
 
     def _handle_upgrade_level(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgUpgradeLevel (user-initiated tier upgrade)."""
+        """Handle MsgUpgradeLevel (user or governance tier upgrade)."""
         try:
             parsed = MsgUpgradeLevel()
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            # For MsgUpgradeLevel, derive owner from envelope_pubkey
-            owner = derive_owner_from_msg(msg_dict)
+            owner = ""
+            if msg_dict.get("envelope_pubkey"):
+                owner = derive_owner_from_msg(msg_dict)
+            else:
+                owner = str(msg_dict.get("target", "")).strip().lower()
+                if owner:
+                    logger.debug("UpgradeLevel via governance: owner=%s", owner)
             requested_level = int(msg_dict.get("level", 0) or 0)
 
             if not owner:

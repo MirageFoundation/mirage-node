@@ -3127,15 +3127,36 @@ func (am AppModule) BurnTokens(ctx context.Context, req *types.MsgBurnTokens) (*
 func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel) (*types.MsgUpgradeLevelResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
 
-	// Derive owner from envelope_pubkey
-	if len(req.GetEnvelopePubkey()) != 33 {
-		return nil, fmt.Errorf("invalid envelope_pubkey length")
+	var owner string
+	if authority == govAuthority {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		owner = target
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		derived, err := deriveOwnerFromPubkey(req.GetEnvelopePubkey())
+		if err != nil {
+			return nil, err
+		}
+		if target != "" && target != derived {
+			return nil, fmt.Errorf("target must be empty or match envelope owner")
+		}
+		owner = derived
 	}
-	owner, err := deriveOwnerFromPubkey(req.GetEnvelopePubkey())
-	if err != nil {
-		return nil, err
-	}
+
+	sdkCtx.Logger().Debug("UpgradeLevel request",
+		"owner", owner,
+		"authority", authority,
+		"target", target,
+		"level", req.GetLevel(),
+	)
 
 	core, err := am.requireUsername(sdkCtx, owner, "UpgradeLevel")
 	if err != nil {

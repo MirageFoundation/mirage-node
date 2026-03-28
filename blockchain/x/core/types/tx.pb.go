@@ -6,6 +6,10 @@ package types
 import (
 	context "context"
 	fmt "fmt"
+	io "io"
+	math "math"
+	math_bits "math/bits"
+
 	_ "github.com/cosmos/cosmos-proto"
 	_ "github.com/cosmos/cosmos-sdk/types/msgservice"
 	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
@@ -15,9 +19,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	io "io"
-	math "math"
-	math_bits "math/bits"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -3812,7 +3813,8 @@ type MsgUpgradeLevel struct {
 	// tags 8-9 reserved
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
-	Level uint32 `protobuf:"varint,100,opt,name=level,proto3" json:"level,omitempty"`
+	Level  uint32 `protobuf:"varint,100,opt,name=level,proto3" json:"level,omitempty"`
+	Target string `protobuf:"bytes,101,opt,name=target,proto3" json:"target,omitempty"`
 }
 
 func (m *MsgUpgradeLevel) Reset()         { *m = MsgUpgradeLevel{} }
@@ -3909,6 +3911,13 @@ func (m *MsgUpgradeLevel) GetLevel() uint32 {
 		return m.Level
 	}
 	return 0
+}
+
+func (m *MsgUpgradeLevel) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
 }
 
 type MsgUpgradeLevelResponse struct {
@@ -9300,6 +9309,15 @@ func (m *MsgUpgradeLevel) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
 	if m.Level != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.Level))
 		i--
@@ -11369,6 +11387,10 @@ func (m *MsgSetLevel) Size() (n int) {
 	}
 	if m.Level != 0 {
 		n += 2 + sovTx(uint64(m.Level))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
 	}
 	return n
 }
@@ -20993,6 +21015,38 @@ func (m *MsgUpgradeLevel) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])

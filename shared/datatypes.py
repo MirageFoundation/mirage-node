@@ -405,6 +405,7 @@ def _build_pool():
     add_f(msg_upgrade_level, "envelope_nonce", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_upgrade_level, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_upgrade_level, "level", 100, descriptor_pb2.FieldDescriptorProto.TYPE_UINT32)
+    add_f(msg_upgrade_level, "target", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
     # MsgSetAutoRenewal (user-initiated toggle of auto_renew)
     msg_set_auto = file_proto.message_type.add()

@@ -17,6 +17,7 @@ import os
 import re
 import threading
 import time
+from decimal import Decimal
 from typing import Optional
 
 import psycopg
@@ -578,6 +579,25 @@ def _do_follow_push(
     _check_old_receipts()
 
 
+def _format_mirage_amount(amount_umirage: int) -> str:
+    amount_int = int(amount_umirage)
+    if amount_int < 0:
+        raise RuntimeError("amount must be non-negative")
+    value = Decimal(amount_int) / Decimal(1_000_000)
+    quantized = value.quantize(Decimal("0.000001"))
+    text = format(quantized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    if "." in text:
+        int_part, dec_part = text.split(".", 1)
+    else:
+        int_part, dec_part = text, ""
+    int_part_fmt = f"{int(int_part):,}"
+    if dec_part:
+        return f"{int_part_fmt}.{dec_part}"
+    return int_part_fmt
+
+
 def send_push_for_donation(
     sender_addr: str,
     sender_username: str,
@@ -608,7 +628,8 @@ def _do_donation_push(
 ) -> None:
     amount_int = int(amount)
     display_name = f"@{sender_username}" if sender_username else sender_addr[:12]
-    title = f"{display_name} donated {amount_int:,} MIRAGE"
+    amount_display = _format_mirage_amount(amount_int)
+    title = f"{display_name} donated {amount_display} MIRAGE"
     body = "You received a donation"
     data = {"type": "donation", "user": sender_addr.lower(), "amount": amount_int}
     _send_push_to_user(recipient_addr, title, body, data)
