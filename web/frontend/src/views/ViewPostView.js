@@ -1790,9 +1790,11 @@ function ViewPostView({ state, updatePost }) {
                 const pre = await Api.get('get_user_status', { address: userAddress, _cb: Date.now() });
                 const currentExp = Number(pre?.subscription_expiry || 0);
                 const nowSec = Math.floor(Date.now() / 1000);
+                const isExtension = currentExp > nowSec;
                 const base = Math.max(nowSec, currentExp);
                 const expectedExp = base + periodMinutes * 60;
-                const label = new Date(expectedExp * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                const dateStr = new Date(expectedExp * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                const label = isExtension ? `Extend until ${dateStr}` : `Until ${dateStr}`;
                 console.debug('[ViewPostView] gift-subscribe.expected', { target: userAddress, postId, level, currentExp, expectedExp });
                 setConfirmGiftSub((prev) => (prev && prev.userId === userAddress && prev.postId === postId ? { ...prev, loading: false, expiryLabel: label, error: null } : prev));
             } catch (e) {
@@ -1822,7 +1824,7 @@ function ViewPostView({ state, updatePost }) {
             if (result.success) {
                 const isAgent = giftLevel === 10;
                 let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
-                msg += ` Extend until ${expiryLabel}`;
+                msg += ` ${expiryLabel}`;
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: msg } }));
             } else {
                 const raw = String(result.error || 'Transaction failed');
@@ -3266,7 +3268,7 @@ function ViewPostView({ state, updatePost }) {
                                 <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
                             )}
                             {confirmGiftSub.expiryLabel && (
-                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Extend until {confirmGiftSub.expiryLabel}</span>
+                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{confirmGiftSub.expiryLabel}</span>
                             )}
                             {confirmGiftSub.error && (
                                 <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>

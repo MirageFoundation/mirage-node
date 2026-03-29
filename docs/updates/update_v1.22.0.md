@@ -92,6 +92,18 @@ The indexer now stores the Comet `raw_log` field in `tx_index`, enabling the pus
 
 ---
 
+## Node Storage Optimization
+
+State-sync snapshot retention has been reduced from 28 snapshots to 4, cutting out 24 full-state dumps that were consuming significant disk on every node. Snapshots are created every 6 hours, so 4 snapshots still provide a 24-hour window for other nodes to state-sync — more than enough for practical use. The old setting of 28 was originally tied to the 7-day blockstore retention window, but snapshot count and blockstore retention are independent concerns. Blockstore retention remains at 201,600 blocks (7 days) and is unaffected.
+
+The deploy migration updates existing nodes automatically on restart. The entrypoint now re-renders node configs after migrations run, so config changes from migrations take effect on the same startup — no second restart required. The status dashboard's retention logic has also been corrected to no longer conflate snapshot count with blockstore retention when reporting expected block counts.
+
+### Gift Subscription UX Fix
+
+The confirmation dialog for gifting a subscription previously always said "Extend until..." even when the recipient had no active subscription. It now correctly shows "Until..." for new subscriptions and "Extend until..." only when extending an existing one.
+
+---
+
 ## Upgrade Instructions
 
 The chain upgrade name is `v1.22.0` and the binary must be built from the `v1.22.0` tag. No state migration is required — the MsgSubscribe rename is wire-compatible (same field tags). All clients (frontend, backend, indexer) must be updated simultaneously. The old `/api/core/upgrade_level` endpoint no longer exists.
