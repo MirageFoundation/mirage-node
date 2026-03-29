@@ -187,18 +187,15 @@ def main() -> None:
         print("\nFATAL: Missing required environment variables")
         sys.exit(1)
 
-    backend_api = os.environ.get("BACKEND_API", "").strip()
-    if backend_api:
-        ok("BACKEND_API is set")
-        try:
-            ensure_local_url("BACKEND_API", backend_api)
-            ok("BACKEND_API is local")
-        except Exception as exc:
-            fail(str(exc))
-            print("\nFATAL: Refusing to run against non-local BACKEND_API")
-            sys.exit(1)
-    else:
-        warn("BACKEND_API not set; skipping backend route checks")
+    backend_api = os.environ.get("BACKEND_API", "").strip() or "http://127.0.0.1:80"
+    ok(f"BACKEND_API = {backend_api}")
+    try:
+        ensure_local_url("BACKEND_API", backend_api)
+        ok("BACKEND_API is local")
+    except Exception as exc:
+        fail(str(exc))
+        print("\nFATAL: Refusing to run against non-local BACKEND_API")
+        sys.exit(1)
 
     section("2. Database Connectivity")
     backend_conn = None
@@ -223,11 +220,8 @@ def main() -> None:
     check_tx_index_raw_log(indexer_conn)
 
     section("4. Backend route checks")
-    if backend_api:
-        check_subscribe_routes(backend_api)
-        check_tier_config(backend_api)
-    else:
-        warn("Skipped backend route checks (BACKEND_API missing)")
+    check_subscribe_routes(backend_api)
+    check_tier_config(backend_api)
 
     if backend_conn:
         backend_conn.close()
