@@ -267,24 +267,31 @@ class Indexer:
                             tx_type = type_url_to_tx_type(core_types[0])
                         else:
                             tx_type = "multi"
-                        if idx >= len(txs_results):
-                            logger.error(
-                                "tx_index.raw_log_missing no_tx_result height=%s txhash=%s",
-                                height,
-                                tx_hash,
-                            )
-                            raise RuntimeError(
-                                f"tx_index raw_log missing (no tx_result) height={height} txhash={tx_hash}"
-                            )
-                        raw_entry = txs_results[idx].get("log")
-                        if raw_entry is None or str(raw_entry) == "":
-                            logger.error(
-                                "tx_index.raw_log_missing empty_log height=%s txhash=%s",
-                                height,
-                                tx_hash,
-                            )
-                            raise RuntimeError(f"tx_index raw_log missing (empty log) height={height} txhash={tx_hash}")
-                        raw_log = str(raw_entry)
+                        raw_entry = None
+                        if idx < len(txs_results):
+                            raw_entry = txs_results[idx].get("log")
+                        raw_log = "" if raw_entry is None else str(raw_entry)
+                        if tx_type in ("send_tokens", "multi"):
+                            if idx >= len(txs_results):
+                                logger.error(
+                                    "tx_index.raw_log_missing no_tx_result height=%s txhash=%s type=%s",
+                                    height,
+                                    tx_hash,
+                                    tx_type,
+                                )
+                                raise RuntimeError(
+                                    f"tx_index raw_log missing (no tx_result) height={height} txhash={tx_hash}"
+                                )
+                            if raw_log == "":
+                                logger.error(
+                                    "tx_index.raw_log_missing empty_log height=%s txhash=%s type=%s",
+                                    height,
+                                    tx_hash,
+                                    tx_type,
+                                )
+                                raise RuntimeError(
+                                    f"tx_index raw_log missing (empty log) height={height} txhash={tx_hash}"
+                                )
                         self.db.upsert_tx_index(
                             tx_hash,
                             tx_type,

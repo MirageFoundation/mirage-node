@@ -420,19 +420,7 @@ def _poll_send_tokens() -> int:
         if not txhash_lc:
             raise RuntimeError("send_tokens tx_index row missing txhash")
         created_ts = int(created_at)
-        try:
-            transfers = _extract_send_tokens_transfers(raw_log, txhash_lc)
-        except Exception as exc:
-            logger().error(
-                "push.listener.send_tokens.skip tx=%s type=%s err=%s",
-                txhash_lc[:16],
-                str(tx_type or ""),
-                exc,
-            )
-            processed += 1
-            last_ts = created_ts
-            last_id = txhash_lc
-            continue
+        transfers = _extract_send_tokens_transfers(raw_log, txhash_lc)
         if not transfers:
             if str(tx_type).strip().lower() == "send_tokens":
                 raise RuntimeError(f"send_tokens log missing transfer tx={txhash_lc}")
