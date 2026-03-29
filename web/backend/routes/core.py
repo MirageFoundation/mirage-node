@@ -65,8 +65,8 @@ from params import expect_params
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
 from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
-from shared.inbox import record_inbox_event, follow_event_key, donation_event_key
-from shared.push import send_push_for_follow, send_push_for_donation
+from shared.inbox import record_inbox_event, follow_event_key, donation_event_key, subscription_gift_event_key
+from shared.push import send_push_for_donation, send_push_for_follow, send_push_for_subscription_gift
 from pow import (
     argon2_digest,
     canon_base_post,
@@ -4400,6 +4400,50 @@ def core_subscribe():
             return _tx_error(rid, "core/subscribe", "MsgSubscribe", code, tx_hash, raw_log, extra)
 
         log_event(rid, "subscribe.success", tx_hash=tx_hash, is_gift=is_gift)
+        if is_gift and user_addr.lower() != target.lower():
+            try:
+                target_level = _db_get_profile_level(target) or 0
+                was_subscriber = target_level >= 1
+                gifter_username = _get_username_for_owner(user_addr)
+                event_key = subscription_gift_event_key(user_addr, target, tx_hash)
+                inserted = record_inbox_event(
+                    event_key=event_key,
+                    recipient=target,
+                    actor=user_addr,
+                    event_type="subscription_gift",
+                    created_at=int(time.time()),
+                    tx_hash=tx_hash,
+                )
+                log_event(
+                    rid,
+                    "subscribe.inbox",
+                    recipient=target,
+                    actor=user_addr,
+                    level=int(level),
+                    was_subscriber=was_subscriber,
+                    inserted=inserted,
+                )
+                if inserted:
+                    send_push_for_subscription_gift(
+                        user_addr,
+                        gifter_username,
+                        target,
+                        int(level),
+                        was_subscriber,
+                    )
+                    log_event(
+                        rid,
+                        "subscribe.notify",
+                        recipient=target,
+                        actor=user_addr,
+                        level=int(level),
+                        was_subscriber=was_subscriber,
+                    )
+                from routes.public import _invalidate_inbox_cache
+
+                _invalidate_inbox_cache(target)
+            except Exception as push_err:
+                log_event(rid, "subscribe.push_err", error=str(push_err))
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "subscribe.err", error=str(e))

@@ -335,7 +335,7 @@ export default function InboxView({ state }) {
         if (wasUnread) {
             setBadgeCount(badgeCountRef.current - 1);
         }
-        const isProfileNotice = reply.type === 'follow' || reply.type === 'donation';
+        const isProfileNotice = reply.type === 'follow' || reply.type === 'donation' || reply.type === 'subscription_gift';
         if (isProfileNotice) {
             const actorIdentity = reply.reply_username || reply.reply_owner;
             if (actorIdentity) {
@@ -421,13 +421,14 @@ export default function InboxView({ state }) {
                 const isAward = reply.type === 'award';
                 const isFollow = reply.type === 'follow';
                 const isDonation = reply.type === 'donation';
+                const isSubscriptionGift = reply.type === 'subscription_gift';
                 const awardLabel = isAward ? formatAwardLabel(reply.award_type) : '';
                 const awardTarget = isAward && reply.root_post_id && reply.root_post_id === reply.reply_id ? 'post' : 'comment';
                 const hasParent = Boolean(reply.parent_content);
                 const actorIdentity = reply.reply_username || reply.reply_owner;
                 const profileUrl = actorIdentity ? `/u/${encodeURIComponent(actorIdentity)}` : `/u/${encodeURIComponent(reply.reply_owner)}`;
                 // Use new clean URL with depth=1 for reply with parent context
-                const replyUrl = (isFollow || isDonation) ? profileUrl : `/p/${reply.reply_id}?depth=1`;
+                const replyUrl = (isFollow || isDonation || isSubscriptionGift) ? profileUrl : `/p/${reply.reply_id}?depth=1`;
                 const donationAmount = Number(reply.amount);
                 const formattedDonation = Number.isFinite(donationAmount) ? formatMirage(donationAmount) : null;
                 if (!Number.isFinite(donationAmount)) {
@@ -460,6 +461,11 @@ export default function InboxView({ state }) {
                                     <>
                                         <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
                                         {' donated to you'}
+                                    </>
+                                ) : isSubscriptionGift ? (
+                                    <>
+                                        <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
+                                        {' gifted you a subscription'}
                                     </>
                                 ) : (
                                     <>
@@ -495,6 +501,8 @@ export default function InboxView({ state }) {
                                 <ReplyContentText>Invalid donation amount</ReplyContentText>
                             )
                         ) : isFollow ? (
+                            <ReplyContentText>View profile</ReplyContentText>
+                        ) : isSubscriptionGift ? (
                             <ReplyContentText>View profile</ReplyContentText>
                         ) : (
                             reply.reply_content && <ReplyContentText>{reply.reply_content}</ReplyContentText>

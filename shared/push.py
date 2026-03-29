@@ -620,6 +620,50 @@ def send_push_for_donation(
     _maybe_flush_pending_summaries()
 
 
+def send_push_for_subscription_gift(
+    gifter_addr: str,
+    gifter_username: str,
+    recipient_addr: str,
+    level: int,
+    was_subscriber: bool,
+) -> None:
+    """Fire push for a gifted subscription. Called after successful broadcast."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping subscription gift push for %s", gifter_addr[:16])
+        return
+    if recipient_addr == gifter_addr.lower():
+        return
+    logger.info(
+        "[Push] Firing subscription gift push: gifter=%s recipient=%s level=%s was_sub=%s",
+        gifter_addr[:16],
+        recipient_addr[:16],
+        level,
+        was_subscriber,
+    )
+    _fire_and_forget(_do_subscription_gift_push, gifter_addr, gifter_username, recipient_addr, level, was_subscriber)
+    _maybe_flush_pending_summaries()
+
+
+def _do_subscription_gift_push(
+    gifter_addr: str,
+    gifter_username: str,
+    recipient_addr: str,
+    level: int,
+    was_subscriber: bool,
+) -> None:
+    display_name = f"@{gifter_username}" if gifter_username else gifter_addr[:12]
+    tier = "agent subscription" if int(level) == 10 else "subscription"
+    if was_subscriber:
+        title = f"{display_name} extended your {tier}"
+        body = "Your subscription has been extended"
+    else:
+        title = f"{display_name} gifted you a {tier}"
+        body = "Welcome to Mirage"
+    data = {"type": "subscription_gift", "user": gifter_addr.lower(), "level": int(level)}
+    _send_push_to_user(recipient_addr, title, body, data)
+    _check_old_receipts()
+
+
 def _do_donation_push(
     sender_addr: str,
     sender_username: str,

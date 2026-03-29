@@ -51,6 +51,15 @@ def donation_event_key(sender: str, recipient: str, tx_hash: str) -> str:
     return f"donation:{sender_lc}:{recipient_lc}:{tx_lc}"
 
 
+def subscription_gift_event_key(gifter: str, recipient: str, tx_hash: str) -> str:
+    gifter_lc = str(gifter or "").strip().lower()
+    recipient_lc = str(recipient or "").strip().lower()
+    tx_lc = str(tx_hash or "").strip().lower()
+    if not gifter_lc or not recipient_lc or not tx_lc:
+        raise RuntimeError("subscription_gift_event_key requires gifter, recipient, and tx_hash")
+    return f"subscription_gift:{gifter_lc}:{recipient_lc}:{tx_lc}"
+
+
 def record_inbox_event(
     event_key: str,
     recipient: str,
@@ -106,7 +115,7 @@ def _count_inbox_events(address: str, last_seen: int) -> int:
                 WHERE LOWER(recipient) = LOWER(%s)
                   AND LOWER(actor) != LOWER(%s)
                   AND created_at > %s
-                  AND event_type IN ('follow', 'donation')
+                  AND event_type IN ('follow', 'donation', 'subscription_gift')
                 """,
                 (viewer, viewer, int(last_seen)),
             )

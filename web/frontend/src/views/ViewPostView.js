@@ -1822,7 +1822,7 @@ function ViewPostView({ state, updatePost }) {
             if (result.success) {
                 const isAgent = giftLevel === 10;
                 let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
-                msg += ` Extended until ${expiryLabel}`;
+                msg += ` Extend until ${expiryLabel}`;
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: msg } }));
             } else {
                 const raw = String(result.error || 'Transaction failed');
@@ -3266,7 +3266,7 @@ function ViewPostView({ state, updatePost }) {
                                 <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
                             )}
                             {confirmGiftSub.expiryLabel && (
-                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Extended until {confirmGiftSub.expiryLabel}</span>
+                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Extend until {confirmGiftSub.expiryLabel}</span>
                             )}
                             {confirmGiftSub.error && (
                                 <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>

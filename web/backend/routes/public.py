@@ -6562,14 +6562,16 @@ def get_inbox():
             FROM inbox_events
             WHERE LOWER(recipient) = %s
               AND LOWER(actor) != %s
-              AND event_type IN ('follow', 'donation')
+              AND event_type IN ('follow', 'donation', 'subscription_gift')
             ORDER BY created_at DESC
             LIMIT %s
             """,
             (viewer_lower, viewer_lower, need),
         )
         backend_rows = bcur.fetchall()
-        logger.info(f"[get_inbox] Backend events query: {(time.time() - t_backend)*1000:.1f}ms, rows={len(backend_rows)}")
+        logger.info(
+            f"[get_inbox] Backend events query: {(time.time() - t_backend)*1000:.1f}ms, rows={len(backend_rows)}"
+        )
 
         # Get total count via a separate lightweight query
         count_query = f"""
@@ -6605,7 +6607,7 @@ def get_inbox():
             SELECT COUNT(*) FROM inbox_events
             WHERE LOWER(recipient) = %s
               AND LOWER(actor) != %s
-              AND event_type IN ('follow', 'donation')
+              AND event_type IN ('follow', 'donation', 'subscription_gift')
             """,
             (viewer_lower, viewer_lower),
         )

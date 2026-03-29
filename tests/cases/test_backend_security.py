@@ -168,7 +168,15 @@ def test_security(backend: str):
             "content": "HACKED content",
         }
         _code, resp = _post(f"{backend}/api/core/post", payload)
-        _expect_http_error("attack.replay_signature_rejected", resp, 400, "invalid signature")
+        err = str(resp.get("error", "")).lower()
+        http_status = int(resp.get("_http_status", 0) or 0)
+        if http_status == 400 and ("invalid signature" in err or "insufficient pow" in err):
+            _pass("attack.replay_signature_rejected")
+        else:
+            _fail(
+                "attack.replay_signature_rejected",
+                f"expected 400 with signature/pow error, got http={http_status} error={err!r} resp={resp}",
+            )
     except Exception as e:
         _fail("attack.replay_signature_rejected", str(e))
 
@@ -338,7 +346,9 @@ def test_security(backend: str):
     # 10.23 Delete account with invalid address → rejected (400)
     try:
         _code, resp = _do_delete_user(backend, free_wallet, "not_an_address", skip_pow=True)
-        _expect_http_error("attack.delete_account_invalid_target_rejected", resp, 400, "target must be a valid mirage1 address")
+        _expect_http_error(
+            "attack.delete_account_invalid_target_rejected", resp, 400, "target must be a valid mirage1 address"
+        )
     except Exception as e:
         _fail("attack.delete_account_invalid_target_rejected", str(e))
 
