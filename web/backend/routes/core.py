@@ -441,6 +441,24 @@ def _effective_difficulty(declared: int) -> int:
     return eff
 
 
+def _log_subscriber_pow_ignored(
+    rid: str,
+    action: str,
+    difficulty: int,
+    proof: int,
+    has_difficulty: bool | None = None,
+    has_pow: bool | None = None,
+) -> None:
+    if int(difficulty) <= 0 and int(proof) <= 0 and not (has_difficulty or has_pow):
+        return
+    payload = {"difficulty": int(difficulty), "proof": int(proof)}
+    if has_difficulty is not None:
+        payload["has_difficulty"] = bool(has_difficulty)
+    if has_pow is not None:
+        payload["has_pow"] = bool(has_pow)
+    log_event(rid, f"{action}.pow_ignored", **payload)
+
+
 def _pow_factor() -> float:
     p = expect_params()
     return float(p["pow_factor"])
@@ -734,7 +752,7 @@ def core_set_username():
         if raw_referrer and not re.fullmatch(r"[A-Za-z0-9-]+", raw_referrer):
             return api_error_code("referrer_username_invalid_format")
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -756,8 +774,7 @@ def core_set_username():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "set_username", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
         try:
             base = canon_base_set_username(
@@ -1100,7 +1117,7 @@ def core_set_biography():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -1122,8 +1139,7 @@ def core_set_biography():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "set_biography", difficulty, proof, has_difficulty, has_pow)
 
         # Verify signature over canonical signed bytes
         try:
@@ -1263,8 +1279,7 @@ def core_enable_agent():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "enable_agent", difficulty, proof, has_difficulty, has_pow)
 
         msg = MsgEnableAgent()
         msg.authority = validator_addr
@@ -1366,8 +1381,7 @@ def core_disable_agent():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "disable_agent", difficulty, proof)
 
         msg = MsgDisableAgent()
         msg.authority = validator_addr
@@ -1511,8 +1525,7 @@ def core_set_agents():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "set_agents", difficulty, proof)
 
         msg = MsgSetAgents()
         msg.authority = validator_addr
@@ -1638,8 +1651,7 @@ def core_block_post():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "block_post", difficulty, proof)
 
         msg = MsgBlockPost()
         msg.authority = validator_addr
@@ -1764,8 +1776,7 @@ def core_block_user():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "block_user", difficulty, proof)
 
         msg = MsgBlockUser()
         msg.authority = validator_addr
@@ -1858,8 +1869,7 @@ def core_unblock_post():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "unblock_post", difficulty, proof)
 
         msg = MsgUnblockPost()
         msg.authority = validator_addr
@@ -1952,8 +1962,7 @@ def core_unblock_user():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "unblock_user", difficulty, proof)
 
         msg = MsgUnblockUser()
         msg.authority = validator_addr
@@ -2077,8 +2086,7 @@ def core_block_topic():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "block_topic", difficulty, proof)
 
         msg = MsgBlockTopic()
         msg.authority = validator_addr
@@ -2172,8 +2180,7 @@ def core_unblock_topic():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "unblock_topic", difficulty, proof)
 
         msg = MsgUnblockTopic()
         msg.authority = validator_addr
@@ -3165,7 +3172,7 @@ def core_edit():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -3193,8 +3200,7 @@ def core_edit():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "edit", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
         topic_for_canon = topic if (topic and not is_comment) else ""
         try:
@@ -3658,7 +3664,7 @@ def core_post():
                     400,
                 )
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -3692,8 +3698,7 @@ def core_post():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "post", difficulty, proof, has_difficulty, has_pow)
 
         # Verify signature over canonical signed bytes
         try:
@@ -3891,7 +3896,7 @@ def core_vote():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         user_is_sub = is_subscriber(user_addr)
         log_event(
             rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty
@@ -3976,8 +3981,7 @@ def core_vote():
                 log_event(rid, "vote.sig_exception", error=str(sig_err))
                 return jsonify({"error": "invalid signature"}), 400
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "vote", difficulty, proof, has_difficulty, has_pow)
             # Subscribers: skip backend signature verification - chain verifies via ante handler
         msg = MsgVote()
         # authority is the validator/node address relaying this transaction, NOT the user's address
@@ -4128,7 +4132,7 @@ def core_send_tokens():
         if int(amount) > have:
             return jsonify({"error": "insufficient balance", "balance": have, "needed": int(amount)}), 400
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -4151,8 +4155,7 @@ def core_send_tokens():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "send_tokens", difficulty, proof, has_difficulty, has_pow)
 
         # Backend signature verification (first line of defense)
         try:

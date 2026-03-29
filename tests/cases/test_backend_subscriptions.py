@@ -259,7 +259,7 @@ def test_subscriber(backend: str):
             else:
                 _fail(f"tiers.{name}_vote_without_pow succeeds", f"resp={resp}")
 
-    # 7.7 Subscriber sending PoW should be REJECTED
+    # 7.7 Subscriber sending PoW should be ACCEPTED (PoW fields ignored)
     for level, name, w in [
         (1, "sub1", sub1_wallet),
         (1, "sub2", sub2_wallet),
@@ -291,12 +291,64 @@ def test_subscriber(backend: str):
                 "content": "body",
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
-            if code >= 400:
-                _pass(f"tiers.{name}_pow_rejected")
+            if code < 400:
+                _pass(f"tiers.{name}_pow_accepted")
             else:
-                _fail(f"tiers.{name}_pow_rejected", f"code={code}")
+                _fail(f"tiers.{name}_pow_accepted", f"code={code} resp={resp}")
         except Exception as e:
-            _fail(f"tiers.{name}_pow_rejected", str(e))
+            _fail(f"tiers.{name}_pow_accepted", str(e))
+
+    # 7.7b Subscriber vote with PoW should be ACCEPTED (PoW fields ignored)
+    txh_pow_vote_target = _do_post(
+        backend, free_wallet, "test", f"Pow vote target {_rand_str(4)}", "pow vote body", skip_pow=False
+    )
+    if txh_pow_vote_target:
+        for name, w in [
+            ("sub1", sub1_wallet),
+            ("sub2", sub2_wallet),
+            ("agent1", agent1_wallet),
+        ]:
+            try:
+                resp = _do_vote(backend, w, txh_pow_vote_target, 1, skip_pow=False)
+                txh_v = str(resp.get("tx_hash", "")).lower() if resp else ""
+                err = str(resp.get("error", "")).lower() if resp else ""
+                if txh_v:
+                    _pass(f"tiers.{name}_vote_pow_accepted")
+                elif "pow not allowed" in err:
+                    _fail(f"tiers.{name}_vote_pow_accepted", "old rejection still active")
+                else:
+                    _fail(f"tiers.{name}_vote_pow_accepted", f"err={err[:200]}")
+            except Exception as e:
+                _fail(f"tiers.{name}_vote_pow_accepted", str(e))
+    else:
+        _fail("tiers.vote_pow_target_post", "failed to create target post for pow vote")
+
+    # 7.7c Subscriber edit with PoW should be ACCEPTED (PoW fields ignored)
+    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
+        if name in tier_posts:
+            if _wait_indexed(backend, str(w.address()), tier_posts[name]):
+                try:
+                    resp = _do_edit(
+                        backend,
+                        w,
+                        tier_posts[name],
+                        "test",
+                        f"PowEdit {name} {_rand_str(4)}",
+                        f"pow edit body {name}",
+                        skip_pow=False,
+                    )
+                    txh_e = str(resp.get("tx_hash", "")).lower() if resp else ""
+                    err = str(resp.get("error", "")).lower() if resp else ""
+                    if txh_e:
+                        _pass(f"tiers.{name}_edit_pow_accepted")
+                    elif "pow not allowed" in err:
+                        _fail(f"tiers.{name}_edit_pow_accepted", "old rejection still active")
+                    else:
+                        _fail(f"tiers.{name}_edit_pow_accepted", f"err={err[:200]}")
+                except Exception as e:
+                    _fail(f"tiers.{name}_edit_pow_accepted", str(e))
+            else:
+                _fail(f"tiers.{name}_edit_pow_accepted", "post not indexed after timeout")
 
     # 7.8 Free user without PoW should be REJECTED
     try:

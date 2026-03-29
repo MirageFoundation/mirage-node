@@ -68,7 +68,6 @@ const ERROR_MAP = {
     pow_not_allowed_agents: "Proof-of-work is not allowed for agents.",
     pow_not_allowed_for_award: "Proof-of-work is not allowed for awards.",
     pow_not_allowed_for_set_auto_renewal: "Proof-of-work is not allowed for auto-renewal.",
-    pow_not_allowed_for_subscribers: "Proof-of-work is not allowed for subscribers.",
     pow_required: "Proof-of-work is required.",
     invalid_pow_fields: "Invalid proof-of-work fields.",
     invalid_last_block_hash: "Invalid last block hash.",

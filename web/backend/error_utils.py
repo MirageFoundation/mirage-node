@@ -81,7 +81,6 @@ ERRORS = {
     "pow_not_allowed_agents": "pow not allowed for agents",
     "pow_not_allowed_for_award": "pow not allowed for award",
     "pow_not_allowed_for_set_auto_renewal": "pow not allowed for set_auto_renewal",
-    "pow_not_allowed_for_subscribers": "pow not allowed for subscribers",
     "pow_required": "proof of work required",
     "invalid_pow_fields": "invalid pow fields",
     "invalid_last_block_hash": "invalid last_block_hash",

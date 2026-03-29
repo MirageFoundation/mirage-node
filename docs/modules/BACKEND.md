@@ -756,9 +756,7 @@ if not user_is_sub:
     if not is_valid_recent_block_hash(last_block_hash):
         return error("invalid last_block_hash")
 else:
-    # Subscriber: PoW not allowed (prevents confusion)
-    if difficulty > 0 or proof > 0:
-        return error("pow not allowed for subscribers")
+    pass  # Subscriber: PoW fields ignored; chain handles via reserve
 ```
 
 ### Error Response Format

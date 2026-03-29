@@ -5141,7 +5141,7 @@ class TransactionHandler {
             this._setStatus("preparing");
 
             if (canSkipPow) {
-                // Skip PoW computation - subscribers must NOT use PoW (difficulty and proof must be 0)
+                // Skip PoW computation for subscribers (PoW fields ignored by backend/chain)
                 if (transaction && typeof transaction === "object") {
                     transaction.pow_difficulty = 0;
                     transaction.difficulty = 0;

@@ -11,6 +11,7 @@ Checks:
   6. Chain params completeness via /api/get_chain_config
   7. Backend API health: key GET endpoints return valid data
   8. Core routes: subscribe exists, upgrade_level removed, POST routes reachable
+  9. Error catalog: deprecated errors removed (e.g. pow_not_allowed_for_subscribers)
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -494,7 +495,23 @@ def check_core_routes_reachable(backend_api: str) -> None:
             ok(f"{route} reachable ({resp.status_code})")
 
 
-# ─── Backend DB checks ───────────────────────────────────────────────
+# ─── Backend DB + error catalog checks ───────────────────────────────
+
+
+def check_error_catalog() -> None:
+    """Verify deprecated error codes have been removed from the backend error registry."""
+    try:
+        from error_utils import ERRORS
+    except ImportError:
+        warn("could not import error_utils (expected inside container)")
+        return
+
+    deprecated = ["pow_not_allowed_for_subscribers"]
+    for code in deprecated:
+        if code in ERRORS:
+            fail(f"deprecated error code still in catalog: {code}")
+        else:
+            ok(f"deprecated error code removed: {code}")
 
 
 def check_backend_schema(conn: psycopg.Connection) -> None:
@@ -593,6 +610,9 @@ def main() -> None:
     section("8. Core Routes")
     check_subscribe_routes(backend_api)
     check_core_routes_reachable(backend_api)
+
+    section("9. Error Catalog")
+    check_error_catalog()
 
     if backend_conn:
         backend_conn.close()
