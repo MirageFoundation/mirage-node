@@ -1,7 +1,7 @@
 /**
  * Theme Registry
  *
- * Each theme lives under src/themes/<name>/ and exports a manifest from
+ * Each theme lives under src/themes/<themeId>/ and exports a manifest from
  * index.js. Visuals are theme-only: each manifest must export Style
  * (from themes/<id>/Style.js — html/body rules for that theme only), Shell, Feed, VoteSection,
  * dark/light tokens, and config. Shared code here is registry + getResolvedTheme only.
@@ -22,6 +22,22 @@ const manifests = [bluemoonManifest, oldredditManifest];
 
 export const THEMES = {};
 manifests.forEach((m) => { THEMES[m.id] = m; });
+
+/** Default when storage is missing, invalid, or an unknown id. */
+export const DEFAULT_THEME_ID = 'bluemoon';
+
+/**
+ * Map legacy ids and unknown values to a registered theme id. Persists corrected values via callers.
+ * @param {unknown} id
+ * @returns {string}
+ */
+export function normalizeThemeId(id) {
+    if (id == null || typeof id !== 'string') return DEFAULT_THEME_ID;
+    const t = id.trim();
+    if (t === 'moon') return 'bluemoon';
+    if (THEMES[t]) return t;
+    return DEFAULT_THEME_ID;
+}
 
 /**
  * Resolve a concrete theme object from a family id and a resolved variant.
