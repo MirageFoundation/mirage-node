@@ -167,7 +167,7 @@ def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
-        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:
                 delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
@@ -177,10 +177,25 @@ def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
+        if r.status_code == 500 and attempt < max_retries:
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if body and ("error" in body or "raw_log" in body or "message" in body):
+                return r.status_code, body
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry GET {url} status=500 attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
         try:
-            return r.status_code, r.json()
+            body = r.json()
         except Exception:
-            return r.status_code, {}
+            body = {}
+        if isinstance(body, dict):
+            body.setdefault("_http_status", r.status_code)
+        return r.status_code, body
 
     return 599, {}
 
@@ -198,7 +213,7 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
-        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:
                 delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
@@ -208,13 +223,39 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
+        if r.status_code == 500 and attempt < max_retries:
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if body and ("error" in body or "raw_log" in body or "message" in body):
+                return r.status_code, body
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry POST {url} status=500 attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
         try:
             body = r.json()
         except Exception:
             body = {}
+        if isinstance(body, dict):
+            body.setdefault("_http_status", r.status_code)
         return r.status_code, body
 
     return 599, {}
+
+
+def _expect_http_error(label: str, resp: dict, status: int, contains: str | None = None) -> None:
+    http_status = int(resp.get("_http_status", 0) or 0)
+    err = str(resp.get("error", "")).lower()
+    if http_status != status:
+        _fail(label, f"expected http={status}, got http={http_status} error={err!r} resp={resp}")
+        return
+    if contains and contains.lower() not in err:
+        _fail(label, f"expected error~={contains!r}, got error={err!r} resp={resp}")
+        return
+    _pass(label)
 
 
 # ---------------------------------------------------------------------------

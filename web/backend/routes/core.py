@@ -144,6 +144,7 @@ def derive_address_from_pubkey(pub_dec: bytes) -> str:
 GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
+ENVELOPE_TIMESTAMP_SKEW_MS = 90 * 1000
 
 
 # ── Quest tracker (lazy singleton, backend-owned DB) ────────────────────────
@@ -386,6 +387,16 @@ def _guard_push_request(owner: str, action: str, timestamp_ms: int, nonce: int):
         return True, None
     except Exception:
         return False, (jsonify({"error": "indexer DB unavailable"}), 503)
+
+
+def _validate_envelope_timestamp(timestamp_ms: int):
+    """Reject envelope timestamps outside the allowed window."""
+    if timestamp_ms < 10_000_000_000:
+        return False, api_error_code("timestamp_must_be_millis")
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - timestamp_ms) > ENVELOPE_TIMESTAMP_SKEW_MS:
+        return False, api_error_code("timestamp_outside_window")
+    return True, None
 
 
 def _hex_to_bytes(s: str) -> bytes:
@@ -646,6 +657,10 @@ def core_set_username():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        ts_ok, ts_err = _validate_envelope_timestamp(timestamp)
+        if not ts_ok:
+            log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
+            return ts_err[0], ts_err[1]
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]
@@ -687,6 +702,10 @@ def core_set_username():
         user_addr = derive_address_from_pubkey(pub_dec)
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
+
+        target = str(data.get("target", "")).strip().lower()
+        if target and target != user_addr.lower():
+            return api_error_code("unauthorized", 403)
 
         validator_addr = require_runtime().validator_payer_addr
 
@@ -1719,6 +1738,10 @@ def core_block_user():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if user_addr.lower() == target.lower():
+            log_event(rid, "block_user.self_block", user_addr=user_addr)
+            return jsonify({"error": "cannot block yourself"}), 400
+
         # Check if user is already blocked (indexer DB)
         try:
             if _db_list_contains("blocked_users", user_addr, "target", target):
@@ -2229,6 +2252,15 @@ def core_follow_user():
         user_addr = derive_address_from_pubkey(pub_dec)
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
+
+        if not _is_valid_mirage_addr(target):
+            return jsonify({"error": "target must be a valid mirage1 address"}), 400
+        if not _is_valid_mirage_addr(user):
+            return jsonify({"error": "user must be a valid mirage1 address"}), 400
+
+        if user_addr.lower() == user.lower():
+            log_event(rid, "follow_user.self_follow", user_addr=user_addr)
+            return jsonify({"error": "cannot follow yourself"}), 400
 
         # Check if user is already followed (indexer DB)
         try:
