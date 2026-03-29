@@ -851,8 +851,6 @@ function ViewPostView({ state, updatePost }) {
     const [donateAmount, setDonateAmount] = useState("10000");
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [giftSubMessages, setGiftSubMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
-    const [giftSubPending, setGiftSubPending] = useState(null); // userId being gifted
-    const [giftSubMessages, setGiftSubMessages] = useState({}); // { userId: { type, message } }
     const [confirmAward, setConfirmAward] = useState(null); // { postId }
     const [isAwarding, setIsAwarding] = useState(false);
     const [awardMessages, setAwardMessages] = useState({}); // { postId: { type, message } }
