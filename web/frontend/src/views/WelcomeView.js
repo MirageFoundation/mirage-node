@@ -29,8 +29,8 @@ const SeedGrid = styled.div`
     max-width: 100%;
     margin: 0.75rem auto;
     padding: 0.75rem;
-    background-color: ${({ theme }) => theme?.colors?.panel || '#1a1e23'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 4px;
     position: relative;
     box-sizing: border-box;
@@ -43,13 +43,13 @@ const SeedGrid = styled.div`
 `
 
 const SeedWord = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 3px;
     padding: 0.3rem 0.2rem;
     text-align: left;
     font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
+    color: ${({ theme }) => theme.colors.text};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     display: flex;
     align-items: center;
@@ -60,7 +60,7 @@ const SeedWord = styled.div`
     
     &:before {
         content: attr(data-index);
-        color: ${({ theme }) => theme?.colors?.subtleText || '#9ca3af'};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-size: 0.5rem;
         min-width: 12px;
         font-weight: bold;
@@ -83,8 +83,8 @@ const InfoSection = styled.div`
 `
 
 const WarningBox = styled.div`
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#f59e0b'};
-    color: ${({ theme }) => theme?.colors?.text || 'rgb(200, 196, 194)'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.text};
     padding: 0.5rem;
     border-radius: 4px;
     margin: 0.5rem 0;
@@ -106,9 +106,9 @@ const WarningBox = styled.div`
 const WelcomeHeading = styled.div`
     text-align: center;
     font-size: 2.0rem;
-    color: ${({ theme }) => (theme?.name === 'light')
-        ? (theme?.colors?.text || '#111827')
-        : (theme?.colors?.subtleText || '#ccc')};
+    color: ${({ theme }) => (theme.name === 'light')
+        ? (theme.colors.text)
+        : (theme.colors.subtleText)};
     margin-bottom: 0.75rem;
     margin-top: 0.5rem;
     

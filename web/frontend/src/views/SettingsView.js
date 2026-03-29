@@ -15,14 +15,12 @@ import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from '../styled/Layout';
 import { formatError } from '../utils/errorMessages';
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const Row = styled.div`
     display: grid;
-    grid-template-columns: ${({ theme }) => isOr(theme) ? '10rem minmax(0, 1fr)' : '14rem minmax(0, 1fr)'};
-    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
-    align-items: ${({ theme }) => isOr(theme) ? 'center' : 'start'};
-    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.4rem 0'};
+    grid-template-columns: ${({ theme }) => theme.layout.formRowColumns};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    align-items: ${({ theme }) => theme.layout.formRowAlign};
+    margin: ${({ theme }) => theme.layout.formRowMargin};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
@@ -31,11 +29,11 @@ const Row = styled.div`
 `;
 
 const Label = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: ${({ theme }) => theme.layout.labelWeight};
+    font-size: ${({ theme }) => theme.layout.labelSize};
     white-space: nowrap;
-    padding-top: ${({ theme }) => isOr(theme) ? '0' : '0.7rem'};
+    padding-top: ${({ theme }) => theme.layout.labelPaddingTop};
     @media (max-width: 1000px) {
         padding-top: 0;
         margin-bottom: 0.1rem;
@@ -43,23 +41,23 @@ const Label = styled.div`
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
-    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.75rem 1rem'};
+    background-color: ${({ theme }) => theme.layout.containerBg };
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPadding};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
 `;
 
 const ThemeSelect = styled.select`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.25rem 0.4rem' : '0.5rem 0.85rem'};
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     width: 100%;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -67,13 +65,13 @@ const ThemeSelect = styled.select`
     &:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 `;
 
 const ExplanationText = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.7rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: ${({ theme }) => theme.layout.smallSize};
     margin-top: 0.25rem;
     font-style: italic;
     line-height: 1.4;
@@ -82,10 +80,10 @@ const ExplanationText = styled.div`
 const CheckboxLabel = styled.label`
     display: inline-grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: ${({ theme }) => isOr(theme) ? '0.35rem' : '0.5rem'};
+    column-gap: ${({ theme }) => theme.layout.formRowGap};
     align-items: flex-start;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: ${({ theme }) => theme.layout.bodySize};
     line-height: 1.25;
     white-space: normal;
     max-width: 100%;
@@ -93,8 +91,8 @@ const CheckboxLabel = styled.label`
     user-select: none;
 
     &:hover input[type="checkbox"] {
-        border-color: ${({ theme }) => theme?.colors?.borderStrong || theme?.colors?.border || 'rgba(255,255,255,0.28)'};
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(59, 130, 246, 0.12)'};
+        border-color: ${({ theme }) => theme.colors.borderStrong };
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 `;
 
@@ -106,9 +104,9 @@ const CheckboxInput = styled.input.attrs({ type: 'checkbox' })`
     flex: 0 0 0.75rem;
     margin: 0;
     margin-top: 0.18rem;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '0.25rem'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || 'rgba(255,255,255,0.18)'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panelAlt};
     box-sizing: border-box;
     display: inline-block;
     position: relative;
@@ -116,12 +114,12 @@ const CheckboxInput = styled.input.attrs({ type: 'checkbox' })`
     transition: background-color 0.12s ease, border-color 0.12s ease;
 
     &:hover {
-        border-color: ${({ theme }) => theme?.colors?.borderStrong || theme?.colors?.border || 'rgba(255,255,255,0.28)'};
+        border-color: ${({ theme }) => theme.colors.borderStrong };
     }
 
     &:focus {
         outline: none;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(59, 130, 246, 0.25)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 
     &:checked {
@@ -148,34 +146,34 @@ const CheckboxInput = styled.input.attrs({ type: 'checkbox' })`
 `;
 
 const HelperText = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.75rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: ${({ theme }) => theme.layout.smallSize};
 `;
 
 const SecurityBanner = styled.div`
     background-color: rgba(245, 158, 11, 0.1);
     border: 1px solid #f59e0b;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.4rem 0.5rem' : '0.75rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.35rem' : '0.75rem'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.65rem' : '0.78rem'};
+    border-radius: ${({ theme }) => theme.layout.bannerRadius};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    font-size: ${({ theme }) => theme.layout.bannerSize};
     line-height: 1.4;
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const RadioGroup = styled.div`
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => isOr(theme) ? '0.35rem' : '0.6rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
 `;
 
 const RadioLabel = styled.label`
     display: inline-grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: ${({ theme }) => isOr(theme) ? '0.35rem' : '0.5rem'};
+    column-gap: ${({ theme }) => theme.layout.formRowGap};
     align-items: flex-start;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: ${({ theme }) => theme.layout.bodySize};
     line-height: 1.25;
     cursor: ${({ $disabled }) => $disabled ? 'not-allowed' : 'pointer'};
     opacity: ${({ $disabled }) => $disabled ? 0.45 : 1};
@@ -191,8 +189,8 @@ const RadioInput = styled.input.attrs({ type: 'radio' })`
     margin: 0;
     margin-top: 0.15rem;
     border-radius: 50%;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || 'rgba(255,255,255,0.18)'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panelAlt};
     box-sizing: border-box;
     display: inline-block;
     position: relative;
@@ -224,8 +222,8 @@ const RadioInput = styled.input.attrs({ type: 'radio' })`
 
 const RadioDescription = styled.span`
     display: block;
-    font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.7rem'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#777'};
+    font-size: ${({ theme }) => theme.layout.smallSize};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-style: italic;
     margin-top: 0.1rem;
 `;
@@ -242,28 +240,28 @@ const PasswordInput = styled.input`
     flex: 1;
     min-width: 120px;
     max-width: 220px;
-    padding: ${({ theme }) => isOr(theme) ? '0.25rem 0.4rem' : '0.45rem 0.7rem'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    color: ${({ theme }) => theme.colors.text};
     box-sizing: border-box;
 
     &:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 `;
 
 const SmallButton = styled.button`
-    padding: ${({ theme }) => isOr(theme) ? '0.25rem 0.5rem' : '0.45rem 0.85rem'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.65rem' : '0.78rem'};
+    padding: ${({ theme }) => theme.layout.buttonPadding};
+    font-size: ${({ theme }) => theme.layout.buttonSize};
     font-weight: 600;
     cursor: pointer;
     border: none;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    border-radius: ${({ theme }) => theme.layout.buttonRadius};
     background: #3b82f6;
     color: #fff;
     transition: background 0.15s ease;
@@ -290,18 +288,18 @@ const DangerButton = styled(SmallButton)`
 const DangerInput = styled.input`
     flex: 1;
     min-width: 160px;
-    padding: ${({ theme }) => isOr(theme) ? '0.25rem 0.4rem' : '0.45rem 0.7rem'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    color: ${({ theme }) => theme.colors.text};
     box-sizing: border-box;
 
     &:focus {
         outline: none;
         border-color: #ef4444;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(239, 68, 68, 0.2)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 `;
 
@@ -314,9 +312,9 @@ const DangerRow = styled.div`
 
 const DangerNotice = styled.div`
     color: #fca5a5;
-    font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.72rem'};
+    font-size: ${({ theme }) => theme.layout.smallSize};
     line-height: 1.4;
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
 `;
 
 const SecurityError = styled.div`
@@ -328,11 +326,11 @@ const SecurityError = styled.div`
 const SecuritySuccess = styled.div`
     background-color: rgba(34, 197, 94, 0.1);
     border: 1px solid #22c55e;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '3px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
-    margin-top: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    border-radius: ${({ theme }) => theme.layout.bannerRadius};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    margin-top: ${({ theme }) => theme.layout.sectionMarginBottom};
     color: #22c55e;
-    font-size: ${({ theme }) => isOr(theme) ? '0.65rem' : '0.78rem'};
+    font-size: ${({ theme }) => theme.layout.bannerSize};
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -345,8 +343,8 @@ const SeedGrid = styled.div`
     max-width: 100%;
     margin: 0.5rem 0;
     padding: 0.75rem;
-    background-color: ${({ theme }) => theme?.colors?.panel || '#1a1e23'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 4px;
     position: relative;
     box-sizing: border-box;
@@ -359,13 +357,13 @@ const SeedGrid = styled.div`
 `;
 
 const SeedWord = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 3px;
     padding: 0.3rem 0.2rem;
     text-align: left;
     font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
+    color: ${({ theme }) => theme.colors.text};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     display: flex;
     align-items: center;
@@ -376,7 +374,7 @@ const SeedWord = styled.div`
 
     &:before {
         content: attr(data-index);
-        color: ${({ theme }) => theme?.colors?.subtleText || '#9ca3af'};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-size: 0.5rem;
         min-width: 12px;
         font-weight: bold;
@@ -402,8 +400,8 @@ const SeedWarning = styled.div`
 
 const Divider = styled.hr`
     border: none;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    margin: ${({ theme }) => isOr(theme) ? '0.35rem 0' : '0.75rem 0'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    margin: ${({ theme }) => theme.layout.dividerMargin};
 `;
 
 

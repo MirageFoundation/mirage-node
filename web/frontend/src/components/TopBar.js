@@ -18,8 +18,8 @@ const BalanceDisplay = styled.div`
     align-items: center;
     gap: 0.4rem;
     padding: 0.55rem 0.85rem;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 18px;
     flex-shrink: 0;
 
@@ -31,26 +31,26 @@ const BalanceDisplay = styled.div`
 const BalanceAmount = styled.span`
     font-size: 0.85rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-variant-numeric: tabular-nums;
 `;
 
 const BalanceLabel = styled.span`
     font-size: 0.75rem;
     font-weight: 500;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const TabletLogo = styled(Link)`
     display: none;
     font-size: 1rem;
     font-weight: 800;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     letter-spacing: 0.05em;
     white-space: nowrap;
     flex-shrink: 0;
-    ${({ theme }) => theme?.name !== 'light' && `
+    ${({ theme }) => theme.name !== 'light' && `
         animation: glowWander 8s ease-in-out infinite;
     `}
 
@@ -81,11 +81,11 @@ const TabletNavItem = styled(Link)`
     text-decoration: none;
     font-size: 0.8rem;
     font-weight: 500;
-    color: ${({ theme, $active }) => $active ? '#fff' : (theme?.colors?.text || '#FFFFFF')};
+    color: ${({ theme, $active }) => $active ? '#fff' : (theme.colors.text)};
     background: ${({ theme, $active }) => $active
         ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-        : (theme?.colors?.panelAlt || '#2a2d31')};
-    border: 1px solid ${({ theme, $active }) => $active ? 'transparent' : (theme?.colors?.border || '#333')};
+        : (theme.colors.panelAlt)};
+    border: 1px solid ${({ theme, $active }) => $active ? 'transparent' : (theme.colors.border)};
     transition: all 0.15s ease;
 
     &:hover {
@@ -109,16 +109,16 @@ const InboxLink = styled.a`
     width: 2.2rem;
     height: 2.2rem;
     border-radius: 50%;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || "#333"};
-    background: ${({ theme }) => theme?.colors?.panel || "#23272C"};
-    color: ${({ $hasUnread, theme }) => $hasUnread ? '#FF3B30' : (theme?.colors?.text || "#FFFFFF")};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
+    color: ${({ $hasUnread, theme }) => $hasUnread ? '#FF3B30' : (theme.colors.text)};
     text-decoration: none;
     transition: all 0.15s ease;
     position: relative;
     cursor: pointer;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accent || "#E5E7EB"};
+        background: ${({ theme }) => theme.colors.accent};
         transform: scale(1.05);
     }
 
@@ -144,7 +144,7 @@ const UnreadBadge = styled.span`
     padding: 0 6px;
     background: #FF3B30;
     border-radius: 12px;
-    border: 2px solid ${({ theme }) => theme?.colors?.panel || "#23272C"};
+    border: 2px solid ${({ theme }) => theme.colors.panel};
     color: #fff;
     font-size: 11px;
     font-weight: 700;
@@ -197,8 +197,8 @@ const Dropdown = styled.div`
     position: absolute;
     right: 0;
     top: calc(100% + 0.5rem);
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 12px;
     padding: 0.5rem 0;
     min-width: 12rem;
@@ -208,14 +208,14 @@ const Dropdown = styled.div`
 
 const DropdownHeader = styled.div`
     padding: 0.6rem 0.85rem 0.7rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     margin-bottom: 0.35rem;
 `;
 
 const DropdownUsername = styled.div`
     font-size: 0.9rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     word-break: break-all;
 `;
 
@@ -225,17 +225,17 @@ const MenuItem = styled(Link)`
     font-size: 0.85rem;
     white-space: nowrap;
     font-weight: 500;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     transition: background-color 0.15s;
     &:hover {
-        background-color: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
+        background-color: ${({ theme }) => theme.colors.panelAlt};
     }
 `;
 
 const MenuDivider = styled.div`
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.colors.border};
     margin: 0.35rem 0;
 `;
 
@@ -458,7 +458,7 @@ function TopBar({ state }) {
         }
     };
 
-    if (theme?.themeId === 'oldreddit') return null;
+    if (!theme.caps.showDefaultChrome) return null;
     if (isMobile) return null;
 
     const handleNavClick = (targetPath, e) => {

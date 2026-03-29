@@ -30,7 +30,7 @@ const MobileBrandText = styled.a`
     font-size: 1.6rem;
     font-weight: 800;
     letter-spacing: 0.05rem;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     text-transform: uppercase;
     flex-shrink: 0;
     line-height: 1;
@@ -38,7 +38,7 @@ const MobileBrandText = styled.a`
     transform: ${({ $hidden }) => $hidden ? 'translateX(-100px)' : 'translateX(0)'};
     opacity: ${({ $hidden }) => $hidden ? 0 : 1};
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
-    ${({ theme }) => theme?.name !== 'light' && `
+    ${({ theme }) => theme.name !== 'light' && `
         animation: glowWander 8s ease-in-out infinite;
     `}
 
@@ -91,9 +91,9 @@ const MobileSearchButton = styled.button`
     width: 1.6rem;
     height: 1.6rem;
     border-radius: 50%;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     justify-content: center;
@@ -105,8 +105,8 @@ const MobileSearchButton = styled.button`
     padding: 0;
     
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accent || '#3A3F46'};
-        border-color: ${({ theme }) => theme?.colors?.link || '#667eea'};
+        background: ${({ theme }) => theme.colors.accent};
+        border-color: ${({ theme }) => theme.colors.link};
     }
     
     &:active {
@@ -127,8 +127,8 @@ const MobileSearchInputWrapper = styled.div`
     right: 0;
     display: flex;
     align-items: center;
-    background: ${({ theme, $expanded }) => $expanded ? (theme?.colors?.panelAlt || '#33373C') : 'transparent'};
-    border: ${({ $expanded, theme }) => $expanded ? `1px solid ${theme?.colors?.border || '#444'}` : '1px solid transparent'};
+    background: ${({ theme, $expanded }) => $expanded ? (theme.colors.panelAlt) : 'transparent'};
+    border: ${({ $expanded, theme }) => $expanded ? `1px solid ${theme.colors.border}` : '1px solid transparent'};
     border-radius: 20px;
     overflow: hidden;
     width: ${({ $expanded }) => $expanded ? '100%' : '1.6rem'};
@@ -143,14 +143,14 @@ const MobileSearchInput = styled.input`
     padding-right: 2rem;
     background: transparent;
     border: none;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.75rem;
     font-family: inherit;
     opacity: ${({ $visible }) => $visible ? 1 : 0};
     transition: opacity 0.15s ease 0.1s;
     
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
     }
     
     &:focus {
@@ -167,8 +167,8 @@ const MobileSearchClose = styled.button`
     height: 24px;
     border-radius: 50%;
     border: none;
-    background: ${({ theme }) => theme?.colors?.border || '#444'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    background: ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     justify-content: center;
@@ -179,14 +179,14 @@ const MobileSearchClose = styled.button`
     transition: opacity 0.15s ease 0.1s;
     
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accent || '#555'};
+        background: ${({ theme }) => theme.colors.accent};
     }
 `;
 
 const MobileBrandDivider = styled.div`
     width: 100%;
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.border};
     margin-top: 0.5rem;
 `;
 
@@ -195,8 +195,8 @@ const MobileBalanceDisplay = styled.div`
     align-items: center;
     gap: 0.25rem;
     padding: 0.3rem 0.55rem;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 14px;
     flex-shrink: 0;
     transform: ${({ $hidden }) => $hidden ? 'scale(0.8)' : 'scale(1)'};
@@ -207,14 +207,14 @@ const MobileBalanceDisplay = styled.div`
 const MobileBalanceAmount = styled.span`
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-variant-numeric: tabular-nums;
 `;
 
 const MobileBalanceLabel = styled.span`
     font-size: 0.6rem;
     font-weight: 500;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const MobileHeader = () => {
@@ -251,7 +251,7 @@ const MobileHeader = () => {
         setSearchQuery('');
     };
 
-    if (theme?.themeId === 'oldreddit') return null;
+    if (!theme.caps.showDefaultChrome) return null;
 
     return (
         <MobileHeaderContainer>

@@ -49,8 +49,8 @@ export const MediaPreviewWrapper = styled.div`
     max-width: 100%;
     border-radius: 8px;
     overflow: hidden;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
 `;
 
 export const MediaPreviewImage = styled.img`
@@ -68,8 +68,8 @@ export const MediaSpinner = styled.div`
     margin-top: -13px;
     margin-left: -13px;
     border-radius: 999px;
-    border: 2px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-top-color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    border: 2px solid ${({ theme }) => theme.colors.border};
+    border-top-color: ${({ theme }) => theme.colors.subtleText};
     animation: media-spin 0.8s linear infinite;
 
     @keyframes media-spin {

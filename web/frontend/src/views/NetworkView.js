@@ -10,14 +10,12 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 import { formatMirage } from "../utils/formatters";
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const Row = styled.div`
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);
-    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
-    align-items: ${({ theme }) => isOr(theme) ? 'center' : 'start'};
-    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.4rem 0'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    align-items: ${({ theme }) => theme.layout.formRowAlign};
+    margin: ${({ theme }) => theme.layout.formRowMargin};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
@@ -33,9 +31,9 @@ const SectionRow = styled(Row)`
 `;
 
 const Label = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: ${({ theme }) => theme.layout.labelWeight};
+    font-size: ${({ theme }) => theme.layout.labelSize};
 `;
 
 const SectionLabel = styled(Label)`
@@ -43,11 +41,11 @@ const SectionLabel = styled(Label)`
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
-    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.6rem 0.85rem'};
+    background-color: ${({ theme }) => theme.layout.containerBg };
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPaddingCompact};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -58,7 +56,7 @@ const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: ${({ theme }) => isOr(theme) ? '0.4rem' : '0.75rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
     flex-wrap: nowrap;
     overflow: hidden;
     @media (max-width: 1000px) {
@@ -69,8 +67,8 @@ const ValueBoxWithButton = styled(ValueBox)`
 
 
 const Mono = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 `;
 
@@ -93,19 +91,19 @@ const PeerItem = styled.div`
     flex-direction: row;
     align-items: center;
     gap: 0.5rem;
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
-    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panel || '#23272C')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    background: ${({ theme }) => theme.layout.cardBg };
+    border-radius: ${({ theme }) => theme.layout.cardRadius};
+    border-bottom: ${({ theme }) => theme.layout.cardBorderBottom};
     transition: background 0.2s ease;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.panelAlt || '#2E3238'};
+        background: ${({ theme }) => theme.colors.panelAlt};
     }
 `;
 
 const PeerLink = styled.a`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-size: 0.85rem;
     font-weight: 500;
@@ -114,7 +112,7 @@ const PeerLink = styled.a`
 `;
 
 const PeerIp = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.75rem;
 `;
 
@@ -130,7 +128,7 @@ const AccountItem = styled.div`
     align-items: center;
     gap: 0.5rem;
     padding: 0.4rem 0.6rem;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    background: ${({ theme }) => theme.colors.panel};
     border-radius: 6px;
     
     @media (max-width: 1000px) {
@@ -141,14 +139,14 @@ const AccountItem = styled.div`
 `;
 
 const AccountRank = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.75rem;
     font-weight: 600;
     text-align: center;
 `;
 
 const AccountName = styled.a`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-size: 0.8rem;
     font-weight: 500;
@@ -159,7 +157,7 @@ const AccountName = styled.a`
 `;
 
 const AccountBalance = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.8rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     white-space: nowrap;
@@ -184,7 +182,7 @@ const ChartLabel = styled.div`
     display: flex;
     justify-content: space-between;
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const ChartLegend = styled.div`
@@ -197,7 +195,7 @@ const LegendItem = styled.span`
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const LegendDot = styled.span`

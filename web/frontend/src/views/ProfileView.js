@@ -12,7 +12,7 @@ import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
-import ListFeedView from "../components/ListFeedView";
+import { getThemeFamily } from "../styled/theme";
 import { useTabs } from "../utils/useTabs";
 import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { tooltipStyles } from "../components/Tooltip";
@@ -21,14 +21,12 @@ import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCac
 import { formatMirage } from "../utils/formatters";
 import { usePendingSends } from "../utils/usePendingSends";
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const Row = styled.div`
     display: grid;
-    grid-template-columns: ${({ theme }) => isOr(theme) ? '5.5rem minmax(0, 1fr)' : '6rem minmax(0, 1fr)'};
-    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
-    align-items: ${({ theme }) => isOr(theme) ? 'center' : 'start'};
-    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.4rem 0'};
+    grid-template-columns: ${({ theme }) => theme.layout.formRowColumns};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    align-items: ${({ theme }) => theme.layout.formRowAlign};
+    margin: ${({ theme }) => theme.layout.formRowMargin};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
@@ -41,9 +39,9 @@ const RowCentered = styled(Row)`
 `;
 
 const Label = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: ${({ theme }) => theme.layout.labelWeight};
+    font-size: ${({ theme }) => theme.layout.labelSize};
     white-space: nowrap;
     @media (max-width: 1000px) {
         margin-bottom: 0.1rem;
@@ -51,9 +49,9 @@ const Label = styled.div`
 `;
 
 const HoverableLabel = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: ${({ theme }) => theme.layout.labelWeight};
+    font-size: ${({ theme }) => theme.layout.labelSize};
     white-space: nowrap;
     ${tooltipStyles()}
     
@@ -63,11 +61,11 @@ const HoverableLabel = styled.div`
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
-    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.6rem 0.85rem'};
+    background-color: ${({ theme }) => theme.layout.containerBg };
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -76,23 +74,23 @@ const ValueBox = styled.div`
 const BioTextarea = styled.textarea`
     width: 100%;
     box-sizing: border-box;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.6rem 0.85rem'};
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    color: ${({ theme }) => theme.colors.text};
     font-family: inherit;
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     resize: vertical;
-    min-height: ${({ theme }) => isOr(theme) ? '60px' : '80px'};
-    &:focus { outline: none; border-color: ${({ theme }) => theme?.colors?.accent || '#7c6dcd'}; }
+    min-height: ${({ theme }) => theme.layout.textareaMinHeight};
+    &:focus { outline: none; border-color: ${({ theme }) => theme.colors.accent}; }
 `;
 
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: ${({ theme }) => isOr(theme) ? '0.4rem' : '0.75rem'};
+    gap: ${({ theme }) => theme.layout.containerGap};
     flex-wrap: nowrap;
     overflow: hidden;
     @media (max-width: 1000px) {
@@ -103,11 +101,11 @@ const ValueBoxWithButton = styled(ValueBox)`
 
 
 const SectionTitle = styled.div`
-    margin-top: ${({ $first, theme }) => $first ? '0' : (isOr(theme) ? '0.75rem' : '1.5rem')};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    margin-top: ${({ $first, theme }) => $first ? '0' : (theme.layout.sectionMarginTop)};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.75rem' : '0.95rem'};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -116,61 +114,57 @@ const SectionTitle = styled.div`
         content: '';
         flex: 1;
         height: 1px;
-        background: ${({ theme }) => theme?.colors?.border || '#333'};
+        background: ${({ theme }) => theme.colors.border};
     }
 `;
 
 const FilterSelect = styled.select`
     width: 100%;
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.35rem' : '0.75rem'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.25rem 0.4rem' : '0.5rem 0.85rem'};
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    margin-bottom: ${({ theme }) => theme.layout.inputMarginBottom};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     cursor: pointer;
     transition: all 0.2s ease;
     
     &:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 `;
 
 const PostsList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => isOr(theme) ? '0' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
 `;
 
 const PostItem = styled.a`
     display: block;
     text-decoration: none;
     color: inherit;
-    border: ${({ theme, isActive }) => isOr(theme)
-        ? 'none'
-        : `1px solid ${isActive ? '#667eea' : (theme?.colors?.border || '#444')}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    background-color: ${({ theme, isActive }) => isOr(theme)
-        ? 'transparent'
-        : (isActive ? 'rgba(102, 126, 234, 0.1)' : (theme?.colors?.panel || '#23272C'))};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.35rem 0.4rem' : '0.6rem 0.85rem'};
+    border: ${({ theme, isActive }) => theme.layout.cardBorder};
+    border-bottom: ${({ theme }) => theme.layout.cardBorderBottom};
+    background-color: ${({ theme, isActive }) => isActive ? theme.colors.accentSubtle : theme.layout.cardBg};
+    border-radius: ${({ theme }) => theme.layout.cardRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
     cursor: pointer;
     transition: background-color 0.2s ease, border-color 0.2s ease;
-    box-shadow: ${({ theme, isActive }) => isOr(theme) ? 'none' : (isActive ? '0 0 12px rgba(102, 126, 234, 0.25)' : 'none')};
+    box-shadow: ${({ theme, isActive }) => isActive ? '0 0 12px rgba(102, 126, 234, 0.25)' : theme.layout.cardShadow};
 
     &:hover {
-        background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2E3238'};
-        border-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.subtleText || '#666')};
+        background-color: ${({ theme }) => theme.colors.panelAlt};
+        border-color: ${({ theme }) => theme.layout.cardHoverBorder };
     }
 `;
 
 const PostMeta = styled.div`
     font-size: 0.55rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-bottom: 0.25rem;
     display: flex;
     flex-wrap: wrap;
@@ -179,15 +173,15 @@ const PostMeta = styled.div`
 
 const PostPreview = styled.div`
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.text || '#DDDDDD'};
+    color: ${({ theme }) => theme.colors.text};
     line-height: 1.3;
     word-break: break-word;
     white-space: pre-line;
 `;
 
 const Mono = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     white-space: normal;
     word-break: break-word;
@@ -205,8 +199,8 @@ const InlineMono = styled(Mono)`
 const LoadingSpinner = styled.div`
     width: 16px;
     height: 16px;
-    border: 2px solid ${({ theme }) => theme?.colors?.border || theme?.colors?.borderSubtle || '#393E46'};
-    border-top: 2px solid ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    border: 2px solid ${({ theme }) => theme.colors.border };
+    border-top: 2px solid ${({ theme }) => theme.colors.subtleText};
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     
@@ -217,7 +211,7 @@ const LoadingSpinner = styled.div`
 `;
 
 const SubtleMono = styled(Mono)`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const LoadingRow = styled.div`
@@ -226,7 +220,7 @@ const LoadingRow = styled.div`
     gap: 0.5rem;
     margin: 0.5rem 0 0.75rem;
     padding: 0.5rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 // (no footer actions here; sign out moved to header menu)
@@ -309,11 +303,12 @@ export default function ProfileView({ state }) {
         ? normalizedOwn === normalizedProfile
         : Boolean(normalizedOwn) && !routeIdentity;
 
-    const isOldReddit = theme?.themeId === 'oldreddit';
-    const VALID_TABS = isOldReddit
-        ? ['profile', 'overview', 'submissions', 'comments', 'algo']
-        : ['profile', 'posts', 'algo'];
-    const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
+    const VALID_TABS = theme.caps.profileTabs;
+    const [activeTab, setActiveTab] = useTabs(theme.caps.profileDefaultTab, VALID_TABS);
+    const profileUsesListFeed = theme.caps.profileUsesListFeed;
+    const profileHideFilterSelect = theme.caps.profileHideFilterSelect;
+    const profilePostsFullWidth = theme.caps.profilePostsFullWidth;
+    const FeedComponent = useMemo(() => getThemeFamily(theme.themeId).Feed, [theme.themeId]);
     const isPostsTab = activeTab === 'posts' || activeTab === 'overview' || activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => (isOwnProfile ? (username || '') : ''));
     const [balance, setBalance] = useState(null);
@@ -584,7 +579,7 @@ export default function ProfileView({ state }) {
         }
     }, [profileAddress]);
 
-    const effectivePostsFilter = isOldReddit
+    const effectivePostsFilter = profileUsesListFeed
         ? (activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : 'all')
         : recentPostsFilter;
 
@@ -985,39 +980,13 @@ export default function ProfileView({ state }) {
                     <MobileHeader />
                     <TabbedContainer>
                         <TabsRow>
-                            {isOldReddit ? (
-                                <>
-                                    <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
-                                        profile
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
-                                        overview
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'submissions'} onClick={() => setActiveTab('submissions')}>
-                                        submissions
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'comments'} onClick={() => setActiveTab('comments')}>
-                                        comments
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
-                                        algo
-                                    </ClickableTab>
-                                </>
-                            ) : (
-                                <>
-                                    <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
-                                        Profile
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'posts'} onClick={() => setActiveTab('posts')}>
-                                        Posts
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
-                                        Algo
-                                    </ClickableTab>
-                                </>
-                            )}
+                            {VALID_TABS.map(tab => (
+                                <ClickableTab key={tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
+                                    {tab}
+                                </ClickableTab>
+                            ))}
                         </TabsRow>
-                        <ContainerBody $fullWidth={isOldReddit && isPostsTab}>
+                        <ContainerBody $fullWidth={profilePostsFullWidth && isPostsTab}>
                             {activeTab === 'profile' && (
                                 <>
                                     <RowCentered>
@@ -1113,8 +1082,8 @@ export default function ProfileView({ state }) {
                                                         display: 'flex',
                                                         alignItems: 'center',
                                                         gap: '0.35rem',
-                                                        background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
-                                                        border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
+                                                        background: theme.colors.surface2 ,
+                                                        border: `1px solid ${theme.colors.borderSubtle}`,
                                                         borderRadius: '8px',
                                                         padding: '0.2rem 0.5rem',
                                                     }}>
@@ -1131,7 +1100,7 @@ export default function ProfileView({ state }) {
                                                                 background: 'transparent',
                                                                 border: 'none',
                                                                 outline: 'none',
-                                                                color: theme?.colors?.text || 'inherit',
+                                                                color: theme.colors.text,
                                                                 fontSize: '0.8rem',
                                                                 fontWeight: 700,
                                                                 textAlign: 'right',
@@ -1260,7 +1229,7 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
 
-                            {isPostsTab && isOldReddit && (
+                            {isPostsTab && profileUsesListFeed && (
                                 <>
                                     {isLoadingRecentPosts && recentPosts.length === 0 && (
                                         <LoadingRow>
@@ -1275,7 +1244,7 @@ export default function ProfileView({ state }) {
                                         <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : (effectivePostsFilter === 'submissions' ? 'submissions' : 'comments')} yet.</SubtleMono>
                                     )}
                                     {recentPosts.length > 0 && (
-                                        <ListFeedView
+                                        <FeedComponent
                                             posts={recentPosts}
                                             state={state}
                                             showSortTabs={false}
@@ -1290,9 +1259,9 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
 
-                            {isPostsTab && !isOldReddit && (
+                            {isPostsTab && !profileUsesListFeed && (
                                 <>
-                                    {profileAddress && (
+                                    {!profileHideFilterSelect && profileAddress && (
                                         <FilterSelect
                                             value={recentPostsFilter}
                                             onChange={(e) => setRecentPostsFilter(e.target.value)}

@@ -6,7 +6,7 @@ import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import QuestHeroCard from "../components/QuestHeroCard";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link, useLocation, useParams, useNavigationType } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import { getAllowedTagsParam } from '../utils/ContentTags';
@@ -23,8 +23,8 @@ import {
 } from "../styled/Layout";
 
 const pickThemeColor = (theme, key) => {
-    if (theme?.colors?.[key]) return theme.colors[key];
-    const isLight = theme?.name === 'light';
+    if (theme.colors[key]) return theme.colors[key];
+    const isLight = theme.name === 'light';
     return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
 };
 
@@ -89,10 +89,10 @@ const WelcomeText = styled.a`
 // Invite-only hero for logged-out users on the front page
 const InviteOnlyHero = styled.div`
     margin-top: 1rem;
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)'
         : 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)'};
-    border: 1px solid ${({ theme }) => theme?.name === 'light'
+    border: 1px solid ${({ theme }) => theme.name === 'light'
         ? 'rgba(102, 126, 234, 0.3)'
         : 'rgba(102, 126, 234, 0.35)'};
     border-radius: 16px;
@@ -129,7 +129,7 @@ const InviteOnlyHeroEmoji = styled.span`
 const InviteOnlyHeroTitle = styled.h1`
     font-size: 1.5rem;
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
     line-height: 1.2;
 
@@ -159,7 +159,7 @@ const InviteOnlyHeroSubtitle = styled.div`
 
 const InviteOnlyHeroDescription = styled.p`
     font-size: 0.85rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.6;
     margin: 0;
     max-width: 500px;
@@ -195,10 +195,10 @@ const WelcomeStatsGrid = styled.div`
     gap: 0.75rem;
     margin: 0.5rem 0;
     padding: 0.75rem 0;
-    border-top: 1px solid ${({ theme }) => theme?.name === 'light'
+    border-top: 1px solid ${({ theme }) => theme.name === 'light'
         ? 'rgba(102, 126, 234, 0.2)'
         : 'rgba(102, 126, 234, 0.25)'};
-    border-bottom: 1px solid ${({ theme }) => theme?.name === 'light'
+    border-bottom: 1px solid ${({ theme }) => theme.name === 'light'
         ? 'rgba(102, 126, 234, 0.2)'
         : 'rgba(102, 126, 234, 0.25)'};
     width: 100%;
@@ -221,7 +221,7 @@ const WelcomeStatItem = styled.div`
 const WelcomeStatValue = styled.div`
     font-size: 1.25rem;
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-variant-numeric: tabular-nums;
 
     @media (max-width: 1000px) {
@@ -236,7 +236,7 @@ const WelcomeStatValue = styled.div`
 const WelcomeStatLabel = styled.div`
     font-size: 0.65rem;
     font-weight: 500;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.03em;
 
@@ -253,10 +253,10 @@ const WelcomeStatLabel = styled.div`
 
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
 const InviteOnlyBanner = styled.div`
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
         : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
-    border: 2px solid ${({ theme }) => theme?.name === 'light'
+    border: 2px solid ${({ theme }) => theme.name === 'light'
         ? 'rgba(59, 130, 246, 0.5)'
         : 'rgba(96, 165, 250, 0.6)'};
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
@@ -264,7 +264,7 @@ const InviteOnlyBanner = styled.div`
     display: flex;
     flex-direction: column;
     gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-    box-shadow: ${({ theme }) => theme?.name === 'light'
+    box-shadow: ${({ theme }) => theme.name === 'light'
         ? '0 0 12px rgba(59, 130, 246, 0.2)'
         : '0 0 15px rgba(96, 165, 250, 0.25)'};
 
@@ -378,7 +378,7 @@ const CollapseButton = styled.button`
 
     &:hover {
         color: ${({ theme }) => pickThemeColor(theme, 'text')};
-        background: ${({ theme }) => theme?.name === 'light'
+        background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.05)'};
     }
@@ -400,8 +400,8 @@ const InviteModalOverlay = styled.div`
 `;
 
 const InviteModalContent = styled.div`
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 16px;
     padding: 1.5rem;
     max-width: 420px;
@@ -424,7 +424,7 @@ const InviteModalHeader = styled.div`
 const InviteModalTitle = styled.h2`
     font-size: 1.1rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
     display: flex;
     align-items: center;
@@ -434,13 +434,13 @@ const InviteModalTitle = styled.h2`
 const InviteModalClose = styled.button`
     background: none;
     border: none;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     cursor: pointer;
     font-size: 1.5rem;
     line-height: 1;
     padding: 0;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -457,7 +457,7 @@ const InviteCodeText = styled.div`
     font-size: 1.75rem;
     font-weight: 700;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     letter-spacing: 0.1em;
     margin-bottom: 0.5rem;
 
@@ -468,7 +468,7 @@ const InviteCodeText = styled.div`
 
 const InviteCodeSubtext = styled.div`
     font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const InviteShareButtons = styled.div`
@@ -491,16 +491,16 @@ const InviteShareButton = styled.button`
     font-size: 0.75rem;
     font-weight: 500;
     font-family: inherit;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    color: ${({ theme }) => theme.colors.text};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s ease;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accent || '#3A3F46'};
-        border-color: ${({ theme }) => theme?.colors?.text || '#666'};
+        background: ${({ theme }) => theme.colors.accent};
+        border-color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -546,13 +546,13 @@ const InviteDesktopShareButtons = styled.div`
 const InviteRemainingText = styled.div`
     text-align: center;
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const InviteNoCodesText = styled.div`
     text-align: center;
     padding: 1rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.85rem;
 `;
 
@@ -601,7 +601,7 @@ const NsfwWelcomeHero = styled.div`
 const NsfwHeroTitle = styled.div`
     font-size: 1rem;
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -618,7 +618,7 @@ const NsfwHeroEmoji = styled.span`
 `;
 
 const NsfwHeroDescription = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     line-height: 1.6;
 
@@ -627,7 +627,7 @@ const NsfwHeroDescription = styled.div`
     }
 
     strong {
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.text};
         font-weight: 600;
     }
 `;
@@ -678,13 +678,13 @@ const NsfwHeroButton = styled.button`
 `;
 
 const NsfwHeroNote = styled.div`
-    color: ${({ theme }) => theme?.colors?.mutedText || '#64748b'};
+    color: ${({ theme }) => theme.colors.mutedText};
     font-size: 0.7rem;
     font-style: italic;
     margin-top: 0.25rem;
 
     a {
-        color: ${({ theme }) => theme?.colors?.link || '#818cf8'};
+        color: ${({ theme }) => theme.colors.link};
         text-decoration: none;
         &:hover {
             text-decoration: underline;
@@ -716,7 +716,7 @@ const AndroidAppHero = styled.div`
 const AndroidHeroTitle = styled.div`
     font-size: 1rem;
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -733,7 +733,7 @@ const AndroidHeroEmoji = styled.span`
 `;
 
 const AndroidHeroDescription = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     line-height: 1.6;
 
@@ -852,7 +852,7 @@ const IPhoneHeroButton = styled.a`
 const HomeFeedInfoTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -890,7 +890,7 @@ const HomeFeedInfoEmoji = styled.span`
 `;
 
 const HomeFeedInfoDescription = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.65rem;
     line-height: 1.5;
 
@@ -899,7 +899,7 @@ const HomeFeedInfoDescription = styled.div`
     }
 
     strong {
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.text};
         font-weight: 600;
     }
 `;
@@ -908,14 +908,12 @@ const HomeFeedModeSelect = styled.select`
     font-size: 0.65rem;
     padding: 0.15rem 0.35rem;
     border-radius: 6px;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#cbd5e1'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) =>
-        theme?.colors?.inputBackground ||
-        theme?.colors?.surface ||
-        (theme?.name === 'light' ? '#f3f4f6' : '#1f1f1f')};
-    color: ${({ theme }) => theme?.colors?.text || (theme?.name === 'light' ? '#0f172a' : '#fff')};
+        theme.colors.inputBackground  };
+    color: ${({ theme }) => theme.colors.text };
     outline: none;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'};
+    box-shadow: ${({ theme }) => theme.name === 'light' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'};
 `;
 
 // Post header card shown on single post view
@@ -925,7 +923,7 @@ const PostHeaderCard = styled.div`
     margin-right: 1rem;
     background-color: ${({ theme }) => pickThemeColor(theme, 'card') || '#23272C'};
     border: 1px solid ${({ theme }) => pickThemeColor(theme, 'cardBorder') || '#333'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     border-radius: 6px;
     padding: 0.2rem 0.6rem 0.4rem 0.6rem;
     display: flex;
@@ -939,24 +937,24 @@ const PostHeaderCard = styled.div`
 `;
 
 const PostHeaderText = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.6rem;
     line-height: 1.5;
 `;
 
 const TopicLinkInHeader = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: 700;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        color: ${({ theme }) => theme.colors.linkHover};
         text-decoration: underline;
-        text-decoration-color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        text-decoration-color: ${({ theme }) => theme.colors.link};
     }
 `;
 
 const PostHeaderTitle = styled.div`
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.9rem;
     font-weight: bold;
 `;
@@ -966,14 +964,14 @@ const HeaderInlineLink = styled.a`
     border: none;
     padding: 0;
     margin: 0;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: 700;
     font-size: 0.6rem;
     font-family: inherit;
     cursor: pointer;
     text-decoration: none;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#EEEEEE'};
+        color: ${({ theme }) => theme.colors.text};
         text-decoration: none;
     }
 `;
@@ -986,7 +984,7 @@ const LoadingMoreIndicator = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem 1rem;
     text-align: center;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     font-style: italic;
 `;
@@ -998,12 +996,12 @@ const LoadMoreButton = styled.button`
     margin-top: 0.25rem;
     border: none;
     background: transparent;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.85rem;
     cursor: pointer;
     text-align: center;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -1016,8 +1014,8 @@ const LoadMoreButton = styled.button`
 const LoadingCard = styled.div`
     margin: ${({ $size }) => $size === 'compact' ? '0.5rem 0 0 0' : '1rem 0 0 0'};
     padding: ${({ $size }) => $size === 'compact' ? '1rem 0.6rem' : '2rem 1rem'};
-    background-color: ${({ theme }) => theme?.colors?.cardAlt || theme?.colors?.panelAlt || '#2c323a'};
-    border: 1px solid ${({ theme }) => theme?.colors?.cardBorder || theme?.colors?.border || '#393E46'};
+    background-color: ${({ theme }) => theme.colors.cardAlt };
+    border: 1px solid ${({ theme }) => theme.colors.cardBorder };
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '12px'};
     display: flex;
     flex-direction: column;
@@ -1033,8 +1031,8 @@ const LoadingCard = styled.div`
 const LoadingSpinner = styled.div`
     width: 24px;
     height: 24px;
-    border: 3px solid ${({ theme }) => theme?.colors?.border || theme?.colors?.borderSubtle || '#393E46'};
-    border-top: 3px solid ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    border: 3px solid ${({ theme }) => theme.colors.border };
+    border-top: 3px solid ${({ theme }) => theme.colors.subtleText};
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     
@@ -1045,7 +1043,7 @@ const LoadingSpinner = styled.div`
 `;
 
 const LoadingText = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.85rem;
     font-weight: 500;
 `;
@@ -1053,13 +1051,13 @@ const LoadingText = styled.div`
 // TopicsBar removed (unused)
 
 const InlineLink = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: 700;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        color: ${({ theme }) => theme.colors.linkHover};
         text-decoration: underline;
-        text-decoration-color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        text-decoration-color: ${({ theme }) => theme.colors.link};
     }
 `;
 
@@ -1089,7 +1087,7 @@ const TopicHeroCard = styled.div`
 const TopicHeroTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -1109,7 +1107,7 @@ const TopicHeroHeader = styled.div`
 `;
 
 const TopicHeroDescription = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.65rem;
     line-height: 1.5;
 
@@ -1119,7 +1117,7 @@ const TopicHeroDescription = styled.div`
     }
 
     strong {
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.text};
         font-weight: 600;
     }
 `;
@@ -1134,8 +1132,8 @@ const TopicHeroDescription = styled.div`
 const EmptyHomeCard = styled.div`
     margin: 1rem 0 0 0;
     padding: 1.5rem 1.25rem;
-    background-color: ${({ theme }) => theme?.colors?.cardAlt || theme?.colors?.panelAlt || '#2c323a'};
-    border: 1px solid ${({ theme }) => theme?.colors?.cardBorder || theme?.colors?.border || '#393E46'};
+    background-color: ${({ theme }) => theme.colors.cardAlt };
+    border: 1px solid ${({ theme }) => theme.colors.cardBorder };
     border-radius: 12px;
     text-align: center;
 
@@ -1148,13 +1146,13 @@ const EmptyHomeTitle = styled.div`
     font-size: 1rem;
     font-weight: 600;
     margin-bottom: 0.5rem;
-    color: ${({ theme }) => theme?.colors?.text || '#DFD0B8'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const EmptyHomeBody = styled.div`
     font-size: 0.8rem;
     line-height: 1.5;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const EmptyHomeMessage = () => (
@@ -1340,7 +1338,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const urlTopic = routeTopic || params.topic || "home"; // Get the topic from URL or prop
     const navigationType = useNavigationType(); // 'POP' = back/forward, 'PUSH'/'REPLACE' = direct nav
     const isBackNavigation = getIsBackNavigation(navigationType);
-    const isOldReddit = state?.themeId === 'oldreddit';
+    const theme = useTheme();
+    const showHero = theme.caps.showHeroCards;
+    const mapHomeSortMode = theme.caps.mapHomeSortMode;
 
     const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
@@ -1458,14 +1458,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }, []);
 
     useEffect(() => {
-        if (!isOldReddit) return;
+        if (!mapHomeSortMode) return;
         const mapped = oldRedditSort === 'new' ? 'newest' : 'magic';
         if (homeSortMode !== mapped) {
             console.debug('[OldReddit] sort.map', { oldRedditSort, homeSortMode, mapped });
             setHomeSortMode(mapped);
             Storage.save('home_sort_mode', mapped);
         }
-    }, [isOldReddit, oldRedditSort, homeSortMode]);
+    }, [mapHomeSortMode, oldRedditSort, homeSortMode]);
     const [cardSize, setCardSize] = useState(() => {
         try {
             return Storage.load('card_size', 'compact');
@@ -2911,7 +2911,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                     <ModernPostFeed>
                         <MobileHeader />
 
-                        {isLoggedIn && isCurrentTopic && !isOldReddit && (
+                        {isLoggedIn && isCurrentTopic && showHero && (
                             <TopicHeroCard>
                                 <TopicHeroHeader>
                                     <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
@@ -2985,7 +2985,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Invite-only banner - shown only when invite codes are enabled on this node */}
-                        {isLoggedIn && !isOldReddit && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && (
+                        {isLoggedIn && showHero && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && (
                             <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
@@ -3028,7 +3028,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Android app banner - shown once for Android users until dismissed */}
-                        {!isOldReddit && showAndroidBanner && (
+                        {showHero && showAndroidBanner && (
                             <AndroidAppHero role="region" aria-label="Android app available">
                                 <AndroidHeroTitle>
                                     <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
@@ -3047,7 +3047,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </AndroidAppHero>
                         )}
 
-                        {!isOldReddit && showIPhoneBanner && (
+                        {showHero && showIPhoneBanner && (
                             <IPhoneAppHero role="region" aria-label="iPhone app available">
                                 <AndroidHeroTitle>
                                     <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
@@ -3067,7 +3067,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
-                        {isLoggedIn && !isOldReddit && urlTopic === 'home' && showNsfwHero && (
+                        {isLoggedIn && showHero && urlTopic === 'home' && showNsfwHero && (
                             <NsfwWelcomeHero role="region" aria-label="Content preferences">
                                 <NsfwHeroTitle>
                                     <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
@@ -3090,7 +3090,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
-                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && !isOldReddit && (
+                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && showHero && (
                             <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
@@ -3125,7 +3125,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Following feed info card - permanent for logged-in users */}
-                        {isLoggedIn && urlTopic === 'following' && !isOldReddit && (
+                        {isLoggedIn && urlTopic === 'following' && showHero && (
                             <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>

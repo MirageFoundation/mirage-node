@@ -22,14 +22,14 @@ const Centered = styled.div`
 `;
 
 const StyledTextArea = styled.textarea`    
-    border: 1px solid ${({ theme }) => theme?.colors?.text || 'white'};
+    border: 1px solid ${({ theme }) => theme.colors.text};
     display: block;
     width: 100%;
     max-width: 400px;
     min-height: 120px;
     margin: 8px auto;    
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCC'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-align: left;
     resize: vertical;
     font-size: 0.75rem;
@@ -39,7 +39,7 @@ const StyledTextArea = styled.textarea`
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 
     &:hover,&:focus {
-        background-color: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
+        background-color: ${({ theme }) => theme.colors.panelAlt};
     }
 `;
 
@@ -55,7 +55,7 @@ const IntroP = styled.p`
     margin: 0.35rem 0;
     line-height: 1.35;
     font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     max-width: 800px;
     margin-bottom: 0.7rem;
 `;

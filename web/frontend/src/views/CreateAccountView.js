@@ -30,8 +30,8 @@ const StyledInfo = styled.div`
     margin-left: 0;
     margin-right: 0;
     padding: 1.5rem 1.25rem;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2A2E33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     text-align: center;
     
@@ -41,13 +41,13 @@ const StyledInfo = styled.div`
 `
 
 const StyledInputBox = styled.input`    
-    border: 1px solid ${({ theme }) => theme?.colors?.text || 'white'};
+    border: 1px solid ${({ theme }) => theme.colors.text};
     display: block;
     width: 100%;
     max-width: 320px;
     margin: 8px auto;    
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCC'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-align: center;
     resize: none;
     font-size: 0.7rem;
@@ -56,7 +56,7 @@ const StyledInputBox = styled.input`
     box-sizing: border-box;
 
     &:hover,&:focus {
-        background-color: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
+        background-color: ${({ theme }) => theme.colors.panelAlt};
     }
 `
 
@@ -72,7 +72,7 @@ const IntroP = styled.p`
     margin: 0 0 1rem 0;
     line-height: 1.6;
     font-size: 0.85rem;
-    color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
+    color: ${({ theme }) => theme.colors.text};
     max-width: 800px;
     text-align: justify;
     text-align-last: center;
@@ -92,7 +92,7 @@ const WelcomeTitle = styled.div`
     font-size: 1.5rem;
     font-weight: 600;
     margin-bottom: 1.25rem;
-    color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
+    color: ${({ theme }) => theme.colors.text};
     text-align: center;
     @media (max-width: 1000px) {
         font-size: 1.25rem;
@@ -105,7 +105,7 @@ const UsernameLabel = styled.div`
     font-weight: 600;
     margin-top: 1.75rem;
     margin-bottom: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 function CreateAccountView({ state, setCredentials }) {

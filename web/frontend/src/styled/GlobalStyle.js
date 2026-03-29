@@ -10,14 +10,13 @@ export const GlobalStyle = createGlobalStyle`
   /* This makes the entire UI more compact without changing any component code */
   html {
     box-sizing: border-box;
-    font-family: ${({ theme }) => theme?.fontFamily || "'Noto Sans'"};
+    font-family: ${({ theme }) => theme.layout.fontFamily};
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
     font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
     min-height: 100vh;
-    background-color: 
-      ${({ theme }) => (theme && theme.colors && theme.colors.bg) ? theme.colors.bg : '#1A1A1A'};
+    background-color: ${({ theme }) => theme.colors.bg};
   }
 
   /* Bump root size by ~10% on mobile/tablet without changing component code */
@@ -37,10 +36,8 @@ export const GlobalStyle = createGlobalStyle`
 
   body {    
     min-height: 100vh;
-    color: 
-      ${({ theme }) => (theme && theme.colors && theme.colors.text) ? theme.colors.text : '#FFFFFF'};
-    background-color: 
-      ${({ theme }) => (theme && theme.colors && theme.colors.bg) ? theme.colors.bg : '#1A1A1A'};
+    color: ${({ theme }) => theme.colors.text};
+    background-color: ${({ theme }) => theme.colors.bg};
     word-break: normal;      /* do not break words into pieces */
     overflow-wrap: normal;   /* wrap only at normal break points (spaces) */
     text-indent: 0;
@@ -74,8 +71,7 @@ export const GlobalStyle = createGlobalStyle`
   }
 
   &::-webkit-scrollbar-thumb {
-    background: 
-      ${({ theme }) => (theme && theme.colors && theme.colors.scrollbar) ? theme.colors.scrollbar : '#CCCCCC'};
+    background: ${({ theme }) => theme.colors.scrollbar};
   }
 
   /* When switching theme, temporarily disable transitions to avoid mass flashing */
@@ -86,10 +82,7 @@ export const GlobalStyle = createGlobalStyle`
     animation: none !important;
   }
 
-  /* oldreddit: force flat aesthetic globally —
-     covers all views/components without per-component overrides.
-     Circular elements (spinners, avatars, dots) get preserved below. */
-  ${({ theme }) => theme?.themeId === 'oldreddit' ? `
+  ${({ theme }) => theme.caps.flatMode ? `
   div, section, article, aside, main,
   button, input, select, textarea, a,
   nav, header, footer, blockquote, pre,

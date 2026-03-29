@@ -1,23 +1,23 @@
 import React, { memo, useCallback, useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link } from 'react-router-dom';
-import VoteSection from './VoteSection';
-import { buildPhotonUrl, isLikelyImageUrl } from '../utils/media';
-import { getAuthorColor } from '../utils/tierColors';
-import Storage from '../utils/Storage';
+import VoteSection from '../../components/VoteSection';
+import { buildPhotonUrl, isLikelyImageUrl } from '../../utils/media';
+import { getAuthorColor } from '../../utils/tierColors';
+import Storage from '../../utils/Storage';
 
 const ListContainer = styled.div`
     display: flex;
     flex-direction: column;
-    border: 1px solid ${({ theme }) => theme?.colors?.border};
-    background: ${({ theme }) => theme?.colors?.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
 `;
 
 const Row = styled.div`
     display: flex;
     align-items: flex-start;
     padding: 0.4rem 0.5rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.4rem;
     min-height: 52px;
 
@@ -26,7 +26,7 @@ const Row = styled.div`
     }
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.panelAlt};
+        background: ${({ theme }) => theme.colors.panelAlt};
     }
 `;
 
@@ -35,7 +35,7 @@ const Rank = styled.span`
     text-align: right;
     font-size: 0.75rem;
     font-weight: 500;
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     padding-top: 0.25rem;
 `;
 
@@ -53,7 +53,7 @@ const Thumbnail = styled(Link)`
     width: 70px;
     height: 70px;
     overflow: hidden;
-    background: ${({ theme }) => theme?.colors?.panelAlt};
+    background: ${({ theme }) => theme.colors.panelAlt};
     display: flex;
     align-items: center;
     justify-content: center;
@@ -82,7 +82,7 @@ const ContentColumn = styled.div`
 const Title = styled(Link)`
     font-size: 0.8rem;
     font-weight: 400;
-    color: ${({ theme }) => theme?.colors?.link};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     line-height: 1.3;
     overflow: hidden;
@@ -92,7 +92,7 @@ const Title = styled(Link)`
     -webkit-box-orient: vertical;
 
     &:visited {
-        color: ${({ theme }) => theme?.colors?.subtleText};
+        color: ${({ theme }) => theme.colors.subtleText};
     }
 
     &:hover {
@@ -102,7 +102,7 @@ const Title = styled(Link)`
 
 const MetaLine = styled.div`
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
@@ -120,7 +120,7 @@ const MetaLink = styled(Link)`
 const AuthorLink = styled(Link)`
     text-decoration: none;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     &:hover {
         text-decoration: underline;
     }
@@ -130,7 +130,7 @@ const TagBadge = styled.span`
     display: inline;
     font-size: 0.6rem;
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-right: 0.3rem;
     text-transform: uppercase;
     &::before { content: '['; }
@@ -141,7 +141,7 @@ const ActionsLine = styled.div`
     display: flex;
     gap: 0.6rem;
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.35;
 `;
 
@@ -171,22 +171,22 @@ const SortTabs = styled.div`
     display: flex;
     gap: 0.5rem;
     padding: 0.4rem 0.5rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border};
-    background: ${({ theme }) => theme?.colors?.panel};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
 `;
 
 const SortTab = styled.button`
-    background: ${({ $active, theme }) => ($active ? theme?.colors?.panelAlt : 'transparent')};
-    border: 1px solid ${({ $active, theme }) => ($active ? theme?.colors?.border : 'transparent')};
-    color: ${({ $active, theme }) => ($active ? theme?.colors?.text : theme?.colors?.subtleText)};
+    background: ${({ $active, theme }) => ($active ? theme.colors.panelAlt : 'transparent')};
+    border: 1px solid ${({ $active, theme }) => ($active ? theme.colors.border : 'transparent')};
+    color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.subtleText)};
     font-size: 0.65rem;
     font-weight: 700;
     padding: 0.15rem 0.4rem;
     text-transform: lowercase;
     cursor: pointer;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text};
-        border-color: ${({ theme }) => theme?.colors?.border};
+        color: ${({ theme }) => theme.colors.text};
+        border-color: ${({ theme }) => theme.colors.border};
     }
 `;
 
@@ -210,25 +210,35 @@ function getThumbUrl(post) {
     return null;
 }
 
+function truncateText(text, max) {
+    if (!text) return '';
+    if (text.length <= max) return text;
+    return text.slice(0, max) + '…';
+}
+
 function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive }) {
     if (!post || !post.post_id) return null;
-    if (typeof post.title !== 'string' || typeof post.topic !== 'string') {
+    const isComment = !!(post.target && String(post.target).trim());
+    if (!isComment && (typeof post.title !== 'string' || typeof post.topic !== 'string')) {
         throw new Error('ListFeedView: post title/topic missing');
     }
     const postId = String(post.post_id);
-    const topic = post.topic;
-    const title = post.title;
+    const topic = post.topic || '';
+    const title = isComment
+        ? truncateText(post.content || post.title || '(comment)', 200)
+        : (post.title || '');
     const author = post.author || '';
     const username = post.username;
+    const linkTarget = isComment ? `/p/${post.target}?depth=1` : `/p/${postId}`;
     let ts = Number(post.timestamp);
     if (!Number.isFinite(ts)) {
         throw new Error('ListFeedView: timestamp missing');
     }
     if (ts > 1e12) ts = Math.floor(ts / 1000);
     const numComments = Number(post.comments) || 0;
-    const thumbUrl = getThumbUrl(post);
+    const thumbUrl = isComment ? null : getThumbUrl(post);
     const authorColor = getAuthorColor(post?.author_level, post?.author_is_new);
-    const hasTag = !!(post.tag && String(post.tag).trim());
+    const hasTag = !isComment && !!(post.tag && String(post.tag).trim());
     const shouldBlur = blurSensitive && hasTag;
     let displayAuthor = '';
     if (typeof username === 'string' && username.trim().length > 0) {
@@ -244,29 +254,33 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                 <VoteSection state={state} post={post} updatePost={updatePost} showToggle={false} />
             </VoteColumn>
             {thumbUrl ? (
-                <Thumbnail to={`/p/${postId}`}>
+                <Thumbnail to={linkTarget}>
                     <img src={thumbUrl} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
                 </Thumbnail>
             ) : null}
             <ContentColumn>
-                <Title to={`/p/${postId}`}>
+                <Title to={linkTarget}>
                     {hasTag && <TagBadge>{String(post.tag).trim()}</TagBadge>}
                     {title}
                 </Title>
                 <MetaLine>
-                    submitted {formatAge(ts)} by{' '}
+                    {isComment ? 'commented' : 'submitted'} {formatAge(ts)} by{' '}
                     <AuthorLink
                         to={`/u/${encodeURIComponent(username || author)}`}
                         style={authorColor ? { color: authorColor } : undefined}
                     >
                         {displayAuthor}
                     </AuthorLink>
-                    {' '}to{' '}
-                    <MetaLink to={`/t/${encodeURIComponent(topic)}`}>t/{topic}</MetaLink>
+                    {!isComment && topic && (
+                        <>
+                            {' '}to{' '}
+                            <MetaLink to={`/t/${encodeURIComponent(topic)}`}>t/{topic}</MetaLink>
+                        </>
+                    )}
                 </MetaLine>
                 <ActionsLine>
-                    <ActionLink to={`/p/${postId}`}>
-                        {numComments} comment{numComments !== 1 ? 's' : ''}
+                    <ActionLink to={linkTarget}>
+                        {isComment ? 'context' : `${numComments} comment${numComments !== 1 ? 's' : ''}`}
                     </ActionLink>
                     <ActionButton type="button" onClick={() => onShare(postId)}>
                         share
@@ -277,7 +291,7 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                     <ActionButton type="button" onClick={() => onHide(postId)}>
                         hide
                     </ActionButton>
-                    <ActionLink to={`/p/${postId}`}>
+                    <ActionLink to={linkTarget}>
                         report
                     </ActionLink>
                 </ActionsLine>

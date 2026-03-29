@@ -13,8 +13,6 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBo
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
 import { formatError } from "../utils/errorMessages";
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const BlockingOverlay = styled.div`
     position: fixed;
     top: 0;
@@ -41,9 +39,9 @@ const Centered = styled.div`
 const InputWrapper = styled.div`
     display: flex;
     align-items: center;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
     margin: 0.75rem auto;
     overflow: hidden;
     opacity: ${({ $disabled }) => $disabled ? 0.5 : 1};
@@ -52,13 +50,13 @@ const InputWrapper = styled.div`
     box-sizing: border-box;
 
     &:hover, &:focus-within {
-        border-color: ${({ $disabled, theme }) => $disabled ? (theme?.colors?.border || '#444') : (theme?.colors?.link || '#667eea')};
+        border-color: ${({ $disabled, theme }) => $disabled ? (theme.colors.border) : (theme.colors.link)};
     }
 `
 
 const InputPrefix = styled.span`
     padding: 0.41rem 0 0.5rem 0.75rem;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.85rem;
     line-height: 1.3;
     user-select: none;
@@ -71,25 +69,24 @@ const StyledInputBox = styled.input`
     min-width: 0;
     width: 100%;
     background-color: transparent;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     text-align: ${({ $hasPrefix }) => $hasPrefix ? 'left' : 'center'};
     resize: none;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : 'inherit'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     line-height: 1.3;
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.45rem' : '0.5rem 0.75rem'};
-    padding-left: ${({ $hasPrefix, theme }) =>
-        $hasPrefix ? (isOr(theme) ? '0.09rem' : '0.15rem') : (isOr(theme) ? '0.45rem' : '0.75rem')};
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    padding-left: ${({ $hasPrefix }) => $hasPrefix ? '0.15rem' : '0.75rem'};
     box-sizing: border-box;
     text-overflow: ellipsis;
 
     &:focus {
         outline: none;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : 'unset'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
     }
 
     &:disabled {
@@ -105,11 +102,11 @@ const ButtonWrapper = styled.div`
 const WarningBox = styled.div`
     background-color: rgba(245, 158, 11, 0.1);
     border: 1px solid #f59e0b;
-    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    border-radius: ${({ theme }) => theme.layout.bannerRadius};
     margin-bottom: 0.75rem;
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    font-size: ${({ theme }) => theme.layout.bannerSize};
+    color: ${({ theme }) => theme.colors.text};
     text-align: left;
     box-sizing: border-box;
     word-wrap: break-word;
@@ -127,8 +124,8 @@ const WarningBox = styled.div`
 
 const SuccessBox = styled.div`
     text-align: center;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : 'unset'};
-    padding: ${({ theme }) => isOr(theme) ? '0.9rem 0' : '1.5rem 0'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPadding};
 `;
 
 const SuccessTitle = styled.div`
@@ -140,13 +137,13 @@ const SuccessTitle = styled.div`
 
 const SuccessText = styled.div`
     font-size: 1rem;
-    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+    color: ${({ theme }) => theme.colors.text};
     margin-bottom: 0.5rem;
 `;
 
 const SuccessSubtext = styled.div`
     font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 function ChangeUsernameView({ state }) {

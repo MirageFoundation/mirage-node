@@ -147,8 +147,8 @@ const PickerButton = styled.button`
 const Popover = styled.div`
     position: fixed;
     z-index: 10100;
-    background: ${({ theme }) => theme?.colors?.panel || '#1a1d21'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     width: 340px;
@@ -171,7 +171,7 @@ const PopoverHeader = styled.div`
     display: flex;
     align-items: center;
     padding: 0.75rem 1rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.5rem;
     flex-wrap: wrap;
 `;
@@ -187,7 +187,7 @@ const PackTab = styled.button`
     background: ${({ $active, theme }) =>
         $active
             ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-            : (theme?.colors?.panelAlt || '#2a2d31')};
+            : (theme.colors.panelAlt)};
     color: ${({ $active }) => ($active ? '#fff' : '#aaa')};
 
     &:hover {
@@ -218,7 +218,7 @@ const StickerItem = styled.button`
     width: 56px;
     height: 56px;
     border: none;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2a2d31'};
+    background: ${({ theme }) => theme.colors.panelAlt};
     border-radius: 8px;
     cursor: pointer;
     padding: 4px;

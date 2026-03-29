@@ -21,7 +21,7 @@ const NavContainer = styled.nav`
         width: 100%;
         max-width: 100vw;
         box-sizing: border-box;
-        border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+        border-top: 1px solid ${({ theme }) => theme.colors.border};
         padding: 0;
         padding-bottom: env(safe-area-inset-bottom, 0px);
         overflow: visible;
@@ -29,7 +29,7 @@ const NavContainer = styled.nav`
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         background: ${({ theme }) =>
-        theme?.name !== 'light'
+        theme.name !== 'light'
             ? 'rgba(26, 26, 26, 0.95)'
             : 'rgba(255, 255, 255, 0.95)'};
         box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
@@ -61,19 +61,19 @@ const NavItemBase = styled.div`
     text-decoration: none;
     color: ${({ theme, $active }) =>
         $active
-            ? (theme?.colors?.link || theme?.colors?.accent || '#667eea')
-            : (theme?.colors?.subtleText || '#888')};
+            ? (theme.colors.link )
+            : (theme.colors.subtleText)};
     transition: color 0.15s ease;
     position: relative;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
 
     &:hover, &:focus {
-        color: ${({ theme }) => theme?.colors?.link || theme?.colors?.accent || '#667eea'};
+        color: ${({ theme }) => theme.colors.link };
     }
 
     &:focus-visible {
-        outline: 2px solid ${({ theme }) => theme?.colors?.link || '#667eea'};
+        outline: 2px solid ${({ theme }) => theme.colors.link};
         outline-offset: -2px;
         border-radius: 8px;
     }
@@ -91,19 +91,19 @@ const NavItemLink = styled(Link)`
     text-decoration: none;
     color: ${({ theme, $active }) =>
         $active
-            ? (theme?.colors?.link || theme?.colors?.accent || '#667eea')
-            : (theme?.colors?.subtleText || '#888')};
+            ? (theme.colors.link )
+            : (theme.colors.subtleText)};
     transition: color 0.15s ease;
     position: relative;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
 
     &:hover, &:focus {
-        color: ${({ theme }) => theme?.colors?.link || theme?.colors?.accent || '#667eea'};
+        color: ${({ theme }) => theme.colors.link };
     }
 
     &:focus-visible {
-        outline: 2px solid ${({ theme }) => theme?.colors?.link || '#667eea'};
+        outline: 2px solid ${({ theme }) => theme.colors.link};
         outline-offset: -2px;
         border-radius: 8px;
     }
@@ -122,19 +122,19 @@ const InboxNavItem = styled.a`
     text-decoration: none;
     color: ${({ theme, $active }) =>
         $active
-            ? (theme?.colors?.link || theme?.colors?.accent || '#667eea')
-            : (theme?.colors?.subtleText || '#888')};
+            ? (theme.colors.link )
+            : (theme.colors.subtleText)};
     transition: color 0.15s ease;
     position: relative;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
 
     &:hover, &:focus {
-        color: ${({ theme }) => theme?.colors?.link || theme?.colors?.accent || '#667eea'};
+        color: ${({ theme }) => theme.colors.link };
     }
 
     &:focus-visible {
-        outline: 2px solid ${({ theme }) => theme?.colors?.link || '#667eea'};
+        outline: 2px solid ${({ theme }) => theme.colors.link};
         outline-offset: -2px;
         border-radius: 8px;
     }
@@ -157,7 +157,7 @@ const CreateButton = styled(Link)`
     padding-bottom: 4px;
 
     &:focus-visible {
-        outline: 2px solid ${({ theme }) => theme?.colors?.link || '#667eea'};
+        outline: 2px solid ${({ theme }) => theme.colors.link};
         outline-offset: -2px;
         border-radius: 8px;
     }
@@ -212,7 +212,7 @@ const Label = styled.span`
 `;
 
 const CreateLabel = styled(Label)`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 // Unread badge with count
@@ -225,10 +225,7 @@ const UnreadBadge = styled.span`
     padding: 0 6px;
     background: #FF3B30;
     border-radius: 12px;
-    border: 2px solid ${({ theme }) =>
-        theme?.name === 'dark'
-            ? 'rgba(26, 26, 26, 0.92)'
-            : 'rgba(255, 255, 255, 0.92)'};
+    background: ${({ theme }) => theme.colors.bg};
     color: #fff;
     font-size: 11px;
     font-weight: 700;
@@ -258,7 +255,7 @@ const ProfileSheetBackdrop = styled.div`
     align-items: flex-end;
     justify-content: center;
     background: ${({ theme }) =>
-        theme?.colors?.overlay || 'rgba(0, 0, 0, 0.7)'};
+        theme.colors.overlay};
     /* Slightly below the bottom nav so nav remains visually on top */
     z-index: 10001;
 
@@ -271,10 +268,10 @@ const ProfileSheetBackdrop = styled.div`
 const ProfileSheet = styled.div`
     width: 100%;
     max-width: min(430px, 100%);
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    background-color: ${({ theme }) => theme.colors.panel};
     border-top-left-radius: 16px;
     border-top-right-radius: 16px;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-bottom: none;
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
     padding: 0.6rem 0.9rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
@@ -304,7 +301,7 @@ const ProfileSheetHandle = styled.div`
     width: 32px;
     height: 3px;
     border-radius: 999px;
-    background: ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.colors.border};
     opacity: 0.7;
     margin: 0 auto 0.4rem;
 `;

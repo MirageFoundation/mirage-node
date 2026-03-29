@@ -40,18 +40,16 @@ const getTierColor = (level) => {
 
 const isAdmin = (level) => level >= 100;
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const CurrentTierBanner = styled.div`
-    background: ${({ theme }) => isOr(theme) ? 'transparent' : `linear-gradient(135deg, ${theme?.colors?.panelAlt || '#1f2328'} 0%, ${theme?.colors?.panel || '#23272C'} 100%)`};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '12px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.75rem' : '1.25rem 1.5rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.75rem' : '1.5rem'};
+    background: ${({ theme }) => theme.layout.containerBg};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginTop};
     display: grid;
     grid-template-columns: 1fr;
     gap: 1.25rem;
-    box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.2)'};
+    box-shadow: ${({ theme }) => theme.caps.flatMode ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.2)'};
     
     @media (min-width: 600px) {
         grid-template-columns: auto 1fr;
@@ -63,15 +61,15 @@ const TierSection = styled.div`
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding-right: ${({ theme }) => isOr(theme) ? '1.2rem' : '2rem'};
-    border-right: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    padding-right: ${({ theme }) => theme.layout.containerPadding};
+    border-right: 1px solid ${({ theme }) => theme.colors.border};
     min-width: 180px;
 
     @media (max-width: 600px) {
         border-right: none;
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+        border-bottom: 1px solid ${({ theme }) => theme.colors.border};
         padding-right: 0;
-        padding-bottom: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
+        padding-bottom: ${({ theme }) => theme.layout.sectionMarginTop};
         align-items: center;
         text-align: center;
     }
@@ -81,21 +79,21 @@ const CurrentPlanLabel = styled.div`
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.15em;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-bottom: 0.5rem;
     font-weight: 600;
 `;
 
 const TierNameDisplay = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '1.275rem' : '1.5rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 800;
     line-height: 1.5;
-    background: ${({ theme, $color }) => isOr(theme) ? 'transparent' : `linear-gradient(135deg, ${$color}, ${$color}88)`};
-    -webkit-background-clip: ${({ theme }) => isOr(theme) ? 'unset' : 'text'};
-    -webkit-text-fill-color: ${({ theme }) => isOr(theme) ? 'unset' : 'transparent'};
-    background-clip: ${({ theme }) => isOr(theme) ? 'unset' : 'text'};
+    background: ${({ theme, $color }) => theme.caps.flatMode ? 'transparent' : `linear-gradient(135deg, ${$color}, ${$color}88)`};
+    -webkit-background-clip: ${({ theme }) => theme.caps.flatMode ? 'unset' : 'text'};
+    -webkit-text-fill-color: ${({ theme }) => theme.caps.flatMode ? 'unset' : 'transparent'};
+    background-clip: ${({ theme }) => theme.caps.flatMode ? 'unset' : 'text'};
     color: ${({ $color }) => $color};
-    filter: ${({ theme, $color }) => isOr(theme) ? 'none' : `drop-shadow(0 2px 10px ${$color}33)`};
+    filter: ${({ theme, $color }) => theme.caps.flatMode ? 'none' : `drop-shadow(0 2px 10px ${$color}33)`};
     letter-spacing: -0.03em;
 `;
 
@@ -126,8 +124,8 @@ const StatusBadge = styled.div`
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: ${({ theme }) => isOr(theme) ? '0.24rem 0.45rem' : '0.4rem 0.75rem'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    padding: ${({ theme }) => theme.layout.buttonPadding};
+    border-radius: ${({ theme }) => theme.layout.buttonRadius};
     font-size: 0.75rem;
     font-weight: 600;
     width: fit-content;
@@ -162,12 +160,12 @@ const StatusIndicator = styled.span`
 
 const RenewalTime = styled.div`
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#AAA'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-top: 0.25rem;
 `;
 
 const TimeHighlight = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#EEE'};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 500;
     ${tooltipStyles()}
 `;
@@ -180,7 +178,7 @@ const HorizontalDivider = styled.div`
 
 const SectionSeparator = styled.div`
     width: 1px;
-    background-color: ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.border};
     align-self: stretch;
     display: none;
     @media (min-width: 600px) {
@@ -192,10 +190,10 @@ const BalanceSection = styled.div`
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#33373C')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.45rem' : '0.5rem 0.75rem'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.layout.containerBg };
+    border-radius: ${({ theme }) => theme.layout.bannerRadius};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     min-width: 180px;
     margin-left: auto;
 `;
@@ -209,18 +207,18 @@ const BalanceItem = styled.div`
 
 const BalanceValueDisplay = styled.div`
     font-size: ${({ theme, $small }) => {
-        if ($small) return isOr(theme) ? '0.7225rem' : '0.85rem';
-        return isOr(theme) ? '0.85rem' : '1rem';
+        if ($small) return theme.layout.labelSize;
+        return theme.layout.sectionSize;
     }};
     font-weight: 700;
-    color: ${props => props.$small ? ({ theme }) => theme?.colors?.subtleText || '#AAA' : ({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${props => props.$small ? ({ theme }) => theme.colors.subtleText : ({ theme }) => theme.colors.text};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     letter-spacing: -0.02em;
     text-align: right;
 
     span {
         font-size: 0.65rem;
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         margin-left: 0.2rem;
         font-weight: normal;
     }
@@ -228,7 +226,7 @@ const BalanceValueDisplay = styled.div`
 
 const BalanceLabel = styled.div`
     font-size: 0.6rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
@@ -248,18 +246,18 @@ const TiersGrid = styled.div`
 
 const TierCard = styled.div`
     background: ${({ theme, $isActive }) => {
-        if (isOr(theme)) {
-            return $isActive ? (theme?.colors?.panelAlt || '#33373C') : 'transparent';
+        if (theme.caps.flatMode) {
+            return $isActive ? (theme.colors.panelAlt) : 'transparent';
         }
         return $isActive
-            ? (theme?.colors?.panelAlt || '#33373C')
-            : (theme?.colors?.panel || '#23272C');
+            ? (theme.colors.panelAlt)
+            : (theme.colors.panel);
     }};
     border: 2px solid ${props => props.$isActive
         ? props.$color
-        : (props.theme?.colors?.border || '#444')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+        : (props.theme.colors.border)};
+    border-radius: ${({ theme }) => theme.layout.cardRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
     display: flex;
     flex-direction: column;
     transition: border-color 0.2s, transform 0.1s;
@@ -278,15 +276,15 @@ const TierHeader = styled.div`
 `;
 
 const TierName = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: bold;
     color: ${props => props.$color || '#FFFFFF'};
 `;
 
 const TierPrice = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '1.275rem' : '1.5rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: bold;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0.5rem 0;
     display: flex;
     align-items: baseline;
@@ -295,7 +293,7 @@ const TierPrice = styled.div`
     
     span {
         font-size: 0.7rem;
-        color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-weight: normal;
         white-space: nowrap;
     }
@@ -306,7 +304,7 @@ const TierFeatures = styled.ul`
     padding: 0;
     margin: 0.5rem 0;
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     flex: 1;
     
     li {
@@ -325,10 +323,10 @@ const TierFeatures = styled.ul`
 `;
 
 const TierDetailsPanel = styled.div`
-    margin-top: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
+    margin-top: ${({ theme }) => theme.layout.sectionMarginTop};
+    padding: ${({ theme }) => theme.layout.containerPadding};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    background: ${({ theme }) => theme.layout.containerBg };
     border: 2px solid ${props => props.$color || 'rgba(255, 255, 255, 0.1)'};
     animation: slideDown 0.3s ease-out;
 
@@ -348,14 +346,14 @@ const TierDetailsHeader = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
-    padding-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    padding-bottom: ${({ theme }) => theme.layout.bannerPadding};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const TierDetailsTitle = styled.h3`
     margin: 0;
-    font-size: ${({ theme }) => isOr(theme) ? '1.02rem' : '1.2rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 700;
     color: ${props => props.$color || '#fff'};
 `;
@@ -365,7 +363,7 @@ const TierDetailsContent = styled.div`
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 1rem;
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#aaa'};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.5;
 `;
 
@@ -388,26 +386,26 @@ const TierDetailItem = styled.div`
 
 const InfoText = styled.div`
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-align: center;
     margin-top: 1rem;
     line-height: 1.5;
 `;
 
 const Mono = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.8rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 `;
 
 const ErrorMessageBox = styled.div`
-    background: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(220, 38, 38, 0.1)'};
+    background: ${({ theme }) => theme.layout.containerBg};
     border: 1px solid #dc2626;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
     color: #dc2626;
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
+    font-size: ${({ theme }) => theme.layout.inputSize};
 `;
 
 const TIERS = [
@@ -1202,8 +1200,8 @@ Not directly spendable and will get burned if not used.`}>
                                                                 disabled={isActive || isUpgrading || isSubscribePending(address) || (!affordable && tier.level > 0)}
                                                                 style={{
                                                                     marginTop: 'auto',
-                                                                    ...(isActive ? {} : isOr(theme) ? {
-                                                                        background: theme?.colors?.panelAlt || '#33373C',
+                                                                    ...(isActive ? {} : theme.caps.flatMode ? {
+                                                                        background: theme.colors.panelAlt,
                                                                         borderColor: color
                                                                     } : {
                                                                         background: `linear-gradient(135deg, ${color}, ${color}CC)`,

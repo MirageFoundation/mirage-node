@@ -233,7 +233,20 @@ class ChainClient:
         return profiles
 
     def fetch_proposal_messages(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
-        """Fetch proposal messages from gRPC, handling both v1beta1 (content) and v1 (messages) formats."""
+        """Fetch proposal messages via gRPC v1beta1, falling back to REST v1 for multi-message proposals."""
+        try:
+            return self._fetch_proposal_messages_grpc(proposal_id, type_url_to_proto)
+        except RuntimeError as e:
+            if "not exactly one" not in str(e):
+                raise
+            logger.info(
+                "Proposal %s has multiple messages — falling back to REST gov/v1",
+                proposal_id,
+            )
+            return self._fetch_proposal_messages_rest(proposal_id, type_url_to_proto)
+
+    def _fetch_proposal_messages_grpc(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
+        """Fetch proposal via gRPC v1beta1 (single-message proposals only)."""
         try:
             with grpc.insecure_channel(self.grpc_target) as channel:
                 stub = gov_query_pb2_grpc.QueryStub(channel)
@@ -276,6 +289,51 @@ class ChainClient:
                 return messages
         except Exception as e:
             raise RuntimeError(f"Failed to fetch proposal {proposal_id} messages: {e}") from e
+
+    def _fetch_proposal_messages_rest(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
+        """Fetch proposal via REST gov/v1 and convert JSON messages to protobuf bytes."""
+        from google.protobuf import json_format
+
+        rest_url = self._derive_rest_url(self.jsonrpc_url)
+        url = f"{rest_url}/cosmos/gov/v1/proposals/{proposal_id}"
+        r = requests.get(url, timeout=HTTP_TIMEOUT_MEDIUM)
+        r.raise_for_status()
+        data = r.json()
+
+        proposal = data.get("proposal") or {}
+        raw_messages = proposal.get("messages") or []
+        if not raw_messages:
+            raise RuntimeError(
+                f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTokens or MsgBurnTokens)"
+            )
+
+        messages: list[dict] = []
+        for msg_json in raw_messages:
+            type_url = msg_json.get("@type", "")
+            if type_url not in type_url_to_proto:
+                continue
+            proto_cls = type_url_to_proto[type_url]
+            fields = {k: v for k, v in msg_json.items() if k != "@type" and v is not None}
+            msg = json_format.ParseDict(fields, proto_cls())
+            serialized = msg.SerializeToString()
+            messages.append(
+                {
+                    "type_url": type_url,
+                    "value": base64.b64encode(serialized).decode("ascii"),
+                }
+            )
+
+        if not messages:
+            raise RuntimeError(
+                f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTokens or MsgBurnTokens)"
+            )
+
+        logger.info(
+            "REST gov/v1 resolved proposal %s: %d message(s)",
+            proposal_id,
+            len(messages),
+        )
+        return messages
 
     @staticmethod
     def parse_header_time(ts_str: str) -> int:

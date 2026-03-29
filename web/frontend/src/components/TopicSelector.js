@@ -16,17 +16,17 @@ const SelectorButton = styled.button`
     justify-content: space-between;
     width: 100%;
     padding: 0.5rem 0.75rem;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.85rem;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
 
     &:hover:not(:disabled) {
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        border-color: ${({ theme }) => theme.colors.subtleText};
     }
     
     &:focus {
@@ -61,7 +61,7 @@ const TopicName = styled.span`
 `;
 
 const Placeholder = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const ChevronIcon = styled.span`
@@ -80,14 +80,14 @@ const SearchInput = styled.input`
     padding: 0.5rem 0.75rem;
     border: 1px solid #667eea;
     border-radius: 8px;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.85rem;
     outline: none;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
 
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
     }
 `;
 
@@ -96,8 +96,8 @@ const Dropdown = styled.div`
     top: calc(100% + 4px);
     left: 0;
     right: 0;
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     z-index: 1000;
@@ -116,10 +116,10 @@ const SectionHeader = styled.div`
     padding: 0.4rem 0.75rem;
     font-size: 0.65rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
     position: sticky;
     top: 0;
 `;
@@ -132,26 +132,26 @@ const TopicItem = styled.div`
     cursor: pointer;
     transition: background-color 0.15s ease;
     background-color: ${({ $highlighted, theme }) =>
-        $highlighted ? (theme?.colors?.accent || 'rgba(102, 126, 234, 0.15)') : 'transparent'};
+        $highlighted ? (theme.colors.accent) : 'transparent'};
 
     &:hover {
-        background-color: ${({ theme }) => theme?.colors?.accent || 'rgba(102, 126, 234, 0.15)'};
+        background-color: ${({ theme }) => theme.colors.accent};
     }
 `;
 
 const TopicItemIcon = styled.span`
     font-size: 0.85rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const TopicItemName = styled.span`
     font-size: 0.85rem;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const TopicItemMeta = styled.span`
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-left: auto;
 `;
 
@@ -174,7 +174,7 @@ const FlagBadge = styled.span`
 `;
 
 const CreateNewItem = styled(TopicItem)`
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
     background-color: ${({ $highlighted }) =>
         $highlighted ? 'rgba(102, 126, 234, 0.15)' : 'rgba(102, 126, 234, 0.05)'};
     
@@ -192,7 +192,7 @@ const CreateNewLabel = styled.span`
 const EmptyState = styled.div`
     padding: 1rem 0.75rem;
     text-align: center;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
 `;
 

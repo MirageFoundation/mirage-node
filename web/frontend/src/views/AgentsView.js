@@ -14,7 +14,7 @@ import { usePendingAgents } from '../utils/usePendingAgents';
 import { formatError } from '../utils/errorMessages';
 
 const SectionSubtitle = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     margin-bottom: 0.75rem;
     line-height: 1.4;
@@ -27,15 +27,15 @@ const AgentsList = styled.div`
 `;
 
 const AgentCard = styled.div`
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
     border-radius: 8px;
     padding: 0.75rem 1rem;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 
     &:hover {
-        background-color: ${({ theme }) => theme?.colors?.accent || '#2E3238'};
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        background-color: ${({ theme }) => theme.colors.accent};
+        border-color: ${({ theme }) => theme.colors.subtleText};
     }
 `;
 
@@ -78,29 +78,29 @@ const AgentNameRow = styled.div`
 `;
 
 const AgentName = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     font-weight: 600;
     font-size: 0.85rem;
     white-space: nowrap;
-    &:hover { color: ${({ theme }) => theme?.colors?.link || '#667eea'}; }
+    &:hover { color: ${({ theme }) => theme.colors.link}; }
 `;
 
 const AgentLastActive = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.65rem;
     white-space: nowrap;
 `;
 
 const AgentBio = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     line-height: 1.4;
     word-break: break-word;
 `;
 
 const EmptyMessage = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     padding: 1rem 0;
 `;
@@ -127,9 +127,9 @@ const OrderButton = styled.button`
     width: 1.6rem;
     height: 1.6rem;
     border-radius: 6px;
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     cursor: pointer;
     display: inline-flex;
@@ -138,9 +138,9 @@ const OrderButton = styled.button`
     transition: all 0.15s ease;
 
     &:hover:not(:disabled) {
-        background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        background: ${({ theme }) => theme.colors.panelAlt};
+        color: ${({ theme }) => theme.colors.text};
+        border-color: ${({ theme }) => theme.colors.subtleText};
     }
 
     &:disabled {
@@ -168,13 +168,13 @@ const Divider = styled.div`
     gap: 0.5rem;
     margin: 0.25rem 0;
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 
     &::before, &::after {
         content: '';
         flex: 1;
         height: 1px;
-        background: ${({ theme }) => theme?.colors?.border || '#333'};
+        background: ${({ theme }) => theme.colors.border};
     }
 `;
 

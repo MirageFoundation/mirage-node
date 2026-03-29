@@ -211,9 +211,9 @@ const Toolbar = styled.div`
 `;
 
 const ToolButton = styled.button`
-	background-color: ${({ theme }) => theme?.colors?.panelAlt || "#33373C"};
-	color: ${({ theme }) => theme?.colors?.text || "#FFFFFF"};
-	border: 1px solid ${({ theme }) => theme?.colors?.border || "#555"};
+	background-color: ${({ theme }) => theme.colors.panelAlt};
+	color: ${({ theme }) => theme.colors.text};
+	border: 1px solid ${({ theme }) => theme.colors.border};
 	border-radius: 3px;
 	/* Scale padding with button size to keep proportions reasonable */
 	padding: calc((var(--btn-size, 1.75rem)) * 0.12) calc((var(--btn-size, 1.75rem)) * 0.23);
@@ -231,12 +231,12 @@ const ToolButton = styled.button`
 		max-height: calc(var(--btn-size, 1.75rem) - 0.2rem);
 	}
 	&[data-active="true"] {
-		background-color: ${({ theme }) => theme?.colors?.panel || "#23272C"};
-		border-color: ${({ theme }) => theme?.colors?.link || "#667eea"};
-		color: ${({ theme }) => theme?.colors?.text || "#FFFFFF"};
+		background-color: ${({ theme }) => theme.colors.panel};
+		border-color: ${({ theme }) => theme.colors.link};
+		color: ${({ theme }) => theme.colors.text};
 	}
 	&:hover {
-		background-color: ${({ theme }) => theme?.colors?.panel || "#23272C"};
+		background-color: ${({ theme }) => theme.colors.panel};
 	}
 	&:disabled {
 		opacity: 0.5;
@@ -347,11 +347,11 @@ const IconTable = styled.span`
 `;
 
 const Area = styled.textarea`
-	border: 1px solid ${({ theme }) => theme?.colors?.border || "#444"};
+	border: 1px solid ${({ theme }) => theme.colors.border};
 	border-radius: 8px;
 	margin: 0;
-	background-color: ${({ theme }) => theme?.colors?.panelAlt || "#1f2328"};
-	color: ${({ theme }) => theme?.colors?.text || "#DDDDDD"};
+	background-color: ${({ theme }) => theme.colors.panelAlt};
+	color: ${({ theme }) => theme.colors.text};
 	padding: 0.5rem 0.75rem;
 	resize: none;
 	min-height: ${({ $minHeight }) => $minHeight || '4rem'};
@@ -364,7 +364,7 @@ const Area = styled.textarea`
 	max-width: 100%;
 	transition: all 0.2s ease;
 	&:hover {
-		border-color: ${({ theme }) => theme?.colors?.subtleText || "#666"};
+		border-color: ${({ theme }) => theme.colors.subtleText};
 	}
 	&:focus {
 		outline: none;
@@ -374,8 +374,8 @@ const Area = styled.textarea`
 	&:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-		background-color: ${({ theme }) => theme?.colors?.panel || "#23272C"};
-		color: ${({ theme }) => theme?.colors?.subtleText || "#888888"};
+		background-color: ${({ theme }) => theme.colors.panel};
+		color: ${({ theme }) => theme.colors.subtleText};
 	}
 `;
 
@@ -398,11 +398,11 @@ const MentionDropdown = styled.div`
 	left: 0;
 	right: 0;
 	margin-bottom: 4px;
-	background: ${({ theme }) => theme?.colors?.surface3 || theme?.colors?.panel || "#303640"};
-	border: 1px solid ${({ theme }) => theme?.colors?.borderSubtle || theme?.colors?.border || "#3d444d"};
+	background: ${({ theme }) => theme.colors.surface3 };
+	border: 1px solid ${({ theme }) => theme.colors.borderSubtle };
 	border-radius: 6px;
 	box-shadow: ${({ theme }) =>
-        theme?.name === "dark"
+        theme.name === "dark"
             ? "0 4px 16px rgba(0, 0, 0, 0.5)"
             : "0 4px 16px rgba(0, 0, 0, 0.15)"};
 	z-index: 100;
@@ -417,11 +417,11 @@ const MentionItem = styled.div`
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
-	color: ${({ theme }) => theme?.colors?.text || "#DFD0B8"};
+	color: ${({ theme }) => theme.colors.text};
 	background: ${({ $active, theme }) =>
-        $active ? (theme?.colors?.accentSubtle || theme?.colors?.panelAlt || "rgba(148, 137, 121, 0.2)") : "transparent"};
+        $active ? (theme.colors.accentSubtle ) : "transparent"};
 	&:hover {
-		background: ${({ theme }) => theme?.colors?.accentSubtle || theme?.colors?.panelAlt || "rgba(148, 137, 121, 0.2)"};
+		background: ${({ theme }) => theme.colors.accentSubtle };
 	}
 	&:first-child {
 		border-radius: 6px 6px 0 0;
@@ -433,12 +433,12 @@ const MentionItem = styled.div`
 
 const MentionUsername = styled.span`
 	font-weight: 600;
-	color: ${({ theme }) => theme?.colors?.text || "#DFD0B8"};
+	color: ${({ theme }) => theme.colors.text};
 `;
 
 const MentionAddress = styled.span`
 	font-size: 0.65rem;
-	color: ${({ theme }) => theme?.colors?.textSecondary || theme?.colors?.subtleText || "#bcb1a2"};
+	color: ${({ theme }) => theme.colors.textSecondary };
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -446,7 +446,7 @@ const MentionAddress = styled.span`
 
 const MentionHint = styled.div`
 	padding: 0.35rem 0.6rem;
-	color: ${({ theme }) => theme?.colors?.textSecondary || theme?.colors?.subtleText || "#bcb1a2"};
+	color: ${({ theme }) => theme.colors.textSecondary };
 	font-size: 0.7rem;
 	font-style: italic;
 `;
@@ -458,11 +458,11 @@ const HiddenInput = styled.input`
 const LivePreviewContainer = styled.div`
 	margin-top: 0.5rem;
 	padding: 0.6rem 0.75rem;
-	background: ${({ theme }) => theme?.colors?.panelAlt || "#1a1d21"};
-	border: 1px solid ${({ theme }) => theme?.colors?.border || "#333"};
+	background: ${({ theme }) => theme.colors.panelAlt};
+	border: 1px solid ${({ theme }) => theme.colors.border};
 	border-radius: 6px;
 	font-size: 0.85rem;
-	color: ${({ theme }) => theme?.colors?.text || "#ccc"};
+	color: ${({ theme }) => theme.colors.text};
 	overflow-y: auto;
 	opacity: ${({ $visible }) => ($visible ? 1 : 0)};
 	transform: translateY(${({ $visible }) => ($visible ? "0" : "-4px")});
@@ -477,7 +477,7 @@ const PreviewLabel = styled.div`
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
-	color: ${({ theme }) => theme?.colors?.subtleText || "#666"};
+	color: ${({ theme }) => theme.colors.subtleText};
 	margin-bottom: 0.35rem;
 	display: flex;
 	align-items: center;
@@ -487,7 +487,7 @@ const PreviewLabel = styled.div`
 		content: "";
 		flex: 1;
 		height: 1px;
-		background: ${({ theme }) => theme?.colors?.border || "#333"};
+		background: ${({ theme }) => theme.colors.border};
 	}
 `;
 
@@ -497,18 +497,18 @@ const PreviewToggle = styled.label`
 	gap: 0.4rem;
 	cursor: pointer;
 	font-size: 0.75rem;
-	color: ${({ theme }) => theme?.colors?.subtleText || "#ccc"};
+	color: ${({ theme }) => theme.colors.subtleText};
 	margin-left: auto;
 	user-select: none;
 	padding: 0.25rem 0.55rem;
 	border-radius: 6px;
-	border: 1px solid ${({ theme }) => theme?.colors?.border || "#444"};
-	background: ${({ theme }) => theme?.colors?.panelAlt || "#1f2328"};
+	border: 1px solid ${({ theme }) => theme.colors.border};
+	background: ${({ theme }) => theme.colors.panelAlt};
 	transition: background 0.15s ease, border-color 0.15s ease;
 
 	&:hover {
-		background: ${({ theme }) => theme?.colors?.panel || "#25292f"};
-		border-color: ${({ theme }) => theme?.colors?.subtleText || "#666"};
+		background: ${({ theme }) => theme.colors.panel};
+		border-color: ${({ theme }) => theme.colors.subtleText};
 	}
 
 	input {
@@ -516,7 +516,7 @@ const PreviewToggle = styled.label`
 		height: 0.9rem;
 		margin: 0;
 		cursor: pointer;
-		accent-color: ${({ theme }) => theme?.colors?.accent || "#667eea"};
+		accent-color: ${({ theme }) => theme.colors.accent};
 	}
 
 	@media (max-width: 640px) {

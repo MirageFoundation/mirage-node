@@ -11,7 +11,7 @@ const StyledMainContainer = styled.div`
     margin-right: 1em;
     padding-top: 0.1em;
     padding-bottom: 0.25em;
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    background-color: ${({ theme }) => theme.colors.panel};
     text-align: center;
     font-size: 0.75rem;
 `

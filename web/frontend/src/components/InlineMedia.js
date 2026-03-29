@@ -3,13 +3,13 @@ import styled, { useTheme } from "styled-components";
 import { normalizeRedgifsToMp4, extractRedgifsId, redgifsCanonicalWatchUrl } from "../utils/media";
 
 const StyledLink = styled.a`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: underline;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        color: ${({ theme }) => theme.colors.linkHover};
     }
     &:visited {
-        color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.link};
     }
 `;
 
@@ -63,11 +63,11 @@ const MAX_INITIAL_HEIGHT_ROOT = 600;
 const MAX_INITIAL_HEIGHT_COMMENT = 225;
 const MAX_INITIAL_WIDTH = 600;
 
-const OLDREDDIT_MAX_VIDEO_WIDTH = 800;
+
 
 export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta = null }) {
     const theme = useTheme();
-    const isOldReddit = theme?.themeId === 'oldreddit';
+    const capMaxVideoWidth = theme.caps.maxVideoWidth;
     const [naturalWidth, setNaturalWidth] = React.useState((mediaMeta && mediaMeta.w) || 0);
     const [naturalHeight, setNaturalHeight] = React.useState((mediaMeta && mediaMeta.h) || 0);
     const [displayWidth, setDisplayWidth] = React.useState(null);
@@ -148,7 +148,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         let newWidth = dragStartWidthRef.current + expDx;
         const minWidth = 50;
         let maxWidth = containerMaxWidth || (typeof window !== 'undefined' ? window.innerWidth : 1000);
-        if (isOldReddit && maxWidth > OLDREDDIT_MAX_VIDEO_WIDTH) maxWidth = OLDREDDIT_MAX_VIDEO_WIDTH;
+        if (capMaxVideoWidth && maxWidth > capMaxVideoWidth) maxWidth = capMaxVideoWidth;
         if (newWidth < minWidth) newWidth = minWidth;
         if (newWidth > maxWidth) newWidth = maxWidth;
         setDisplayWidth(newWidth);

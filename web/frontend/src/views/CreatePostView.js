@@ -18,14 +18,12 @@ import StickerPicker from '../components/StickerPicker';
 import GifPicker from '../components/GifPicker';
 import { formatError } from '../utils/errorMessages';
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const Row = styled.div`
     display: grid;
     grid-template-columns: 5.5rem minmax(0, 1fr);
-    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
     align-items: start;
-    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.5rem 0'};
+    margin: ${({ theme }) => theme.layout.formRowMargin};
     
     &:not(:first-child) {
         margin-top: 1rem;
@@ -39,34 +37,34 @@ const Row = styled.div`
 `;
 
 const Label = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: ${({ theme }) => theme.layout.labelWeight};
+    font-size: ${({ theme }) => theme.layout.labelSize};
     white-space: nowrap;
-    padding-top: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding-top: ${({ theme }) => theme.layout.labelPaddingTop};
     @media (max-width: 1000px) {
         display: none;
     }
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
-    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.6rem 0.85rem'};
+    background-color: ${({ theme }) => theme.layout.containerBg };
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPaddingCompact};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
 `;
 
 const StyledInputBox = styled.input`    
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    padding: ${({ theme }) => theme.layout.inputPadding};
     margin: 0;
     box-sizing: border-box;
     width: 100%;
@@ -76,28 +74,28 @@ const StyledInputBox = styled.input`
     outline: none;
 
     &:hover {
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        border-color: ${({ theme }) => theme.colors.subtleText};
     }
     &:focus {
         border-color: #667eea;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
     &:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888888'};
+        color: ${({ theme }) => theme.colors.subtleText};
     }
 `;
 
 const StyledSelect = styled.select`
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    padding: ${({ theme }) => theme.layout.inputPadding};
     margin: 0;
     box-sizing: border-box;
     width: 100%;
@@ -107,11 +105,11 @@ const StyledSelect = styled.select`
     outline: none;
 
     &:hover {
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        border-color: ${({ theme }) => theme.colors.subtleText};
     }
     &:focus {
         border-color: #667eea;
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
     &:disabled {
         opacity: 0.5;
@@ -155,7 +153,7 @@ const GlobalDropOverlay = styled.div`
 const HelpText = styled.div`
     font-size: 0.65rem;
     font-style: italic;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-top: 0.35rem;
     margin-left: 0.2rem;
     margin-right: 0.2rem;
@@ -164,7 +162,7 @@ const HelpText = styled.div`
 `;
 
 const Mono = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.75rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     white-space: normal;
@@ -207,7 +205,7 @@ const TagToggle = styled.label`
     align-items: center;
     gap: 0.5rem;
     font-size: 0.9rem;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
 
     input {
         accent-color: #667eea;

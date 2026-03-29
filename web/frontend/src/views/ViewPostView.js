@@ -35,8 +35,8 @@ import { formatMirageCompact } from "../utils/formatters";
 import { Tooltip, tooltipStyles } from "../components/Tooltip";
 
 const pickCard = (theme, key) => {
-    if (theme?.colors?.[key]) return theme.colors[key];
-    const isLight = theme?.name === 'light';
+    if (theme.colors[key]) return theme.colors[key];
+    const isLight = theme.name === 'light';
     return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
 };
 
@@ -57,7 +57,7 @@ const PostCard = styled.div`
     margin: 0;
     transition: background 0.3s ease;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    ${({ $isNew, theme }) => $isNew ? `background: ${theme?.colors?.panelAlt || '#2A2E33'};` : ''}
+    ${({ $isNew, theme }) => $isNew ? `background: ${theme.colors.panelAlt};` : ''}
 
     &:hover {
         background: ${({ theme }) => pickCard(theme, 'cardAlt')};
@@ -109,18 +109,18 @@ const StyledThreadReminder = styled.div`
     border-radius: 12px;
     padding: 0.75rem 1rem;
     margin: 0.35rem 0;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: 500;    
     font-size: 0.7rem;
     
     a {
         font-size: inherit;
-        color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.link};
         text-decoration: underline;
         font-weight: 600;
 
         &:hover {
-            color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+            color: ${({ theme }) => theme.colors.linkHover};
         }
     }
 
@@ -138,7 +138,7 @@ const ContinueThreadLink = styled(Link)`
     margin-left: ${({ $level }) => `${1 * (Number($level) || 0)}rem`};
     margin-top: 0.25rem;
     margin-bottom: 0.25rem;
-    color: ${({ theme }) => theme?.colors?.link || '#64B5F6'};
+    color: ${({ theme }) => theme.colors.link};
     font-size: 0.75rem;
     font-weight: 500;
     text-decoration: none;
@@ -146,7 +146,7 @@ const ContinueThreadLink = styled(Link)`
 
     &:hover {
         background: ${({ theme }) => pickCard(theme, 'card')};
-        color: ${({ theme }) => theme?.colors?.linkHover || '#90CAF9'};
+        color: ${({ theme }) => theme.colors.linkHover};
     }
 
     @media (max-width: 1000px) {
@@ -216,7 +216,7 @@ const TopicAction = styled.div`
 
 // Title line inside the root post, above the content
 const RootTitleRow = styled.div`
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.9rem;
     font-weight: bold;
     margin-top: 0.25rem;
@@ -224,7 +224,7 @@ const RootTitleRow = styled.div`
 
 const TitleDivider = styled.div`
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.border || '#9ca3af'};
+    background: ${({ theme }) => theme.colors.border};
     margin: 0.5rem 0;
 `;
 
@@ -232,24 +232,24 @@ const TitleDivider = styled.div`
 // BreadcrumbLink removed (unused)
 
 const StyledProfileLink = styled(Link)`
-    color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
+    color: ${({ $tierColor, theme }) => $tierColor } !important;
     text-decoration: none;
     font-weight: bold;
     ${() => tooltipStyles()}
 
     &:hover {
-        color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.linkHover || '#CCCCCC'} !important;
+        color: ${({ $tierColor, theme }) => $tierColor } !important;
     }
 `;
 
 const StyledTopicLink = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: bold;
     text-transform: lowercase;
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        color: ${({ theme }) => theme.colors.linkHover};
     }
 `;
 
@@ -259,7 +259,7 @@ const BackButton = styled.button`
     gap: 0.5rem;
     background: transparent;
     border: none;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     cursor: pointer;
     font-size: 0.9rem;
     font-weight: 600;
@@ -268,7 +268,7 @@ const BackButton = styled.button`
     transition: color 0.2s ease;
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     svg {
@@ -285,20 +285,20 @@ const MetaInfoRow = styled.div`
     gap: 0.35rem;
     margin-bottom: 0.35rem;
     padding-bottom: 0.35rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.65rem;
     font-weight: 600;
     line-height: 1.1;
 
     & a {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         text-decoration: none;
         font-weight: 600;
     }
 
     & a:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     @media (max-width: 768px) {
@@ -314,7 +314,7 @@ const MetaInfoRowLeft = styled.div`
 `;
 
 const MetaSeparator = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.9rem;
     font-weight: 900;
 `;
@@ -328,8 +328,8 @@ const MobileRootMeta = styled.div`
         gap: 0;
         margin-bottom: 0.35rem;
         padding-bottom: 0.35rem;
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-size: 0.65rem;
         font-weight: 600;
         line-height: 1;
@@ -357,14 +357,14 @@ const MobileRootMetaBottom = styled.div`
     font-size: 0.65rem;
     line-height: 1;
     & a {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         text-decoration: none;
         font-weight: 600;
         font-size: inherit;
         line-height: inherit;
     }
     & a:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -406,13 +406,13 @@ const MenuButton = styled.button`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     border-radius: 4px;
     transition: all 0.2s ease;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.panelAlt || '#333'};
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        background: ${({ theme }) => theme.colors.panelAlt};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     svg {
@@ -428,8 +428,8 @@ const MenuContainer = styled.div`
 
 const MenuDropdown = styled.div`
     position: fixed;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     min-width: 180px;
@@ -443,7 +443,7 @@ const MenuItem = styled.button`
     text-align: left;
     background: none;
     border: none;
-    color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.75rem;
     cursor: pointer;
     transition: background 0.2s ease;
@@ -452,11 +452,11 @@ const MenuItem = styled.button`
     gap: 0.5rem;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.panelAlt || '#333'};
+        background: ${({ theme }) => theme.colors.panelAlt};
     }
 
     &:not(:last-child) {
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
+        border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     }
 
     &[data-danger="true"] {
@@ -467,7 +467,7 @@ const MenuItem = styled.button`
 const StyledContentArea = styled.div`
     margin-top: 0.25rem;
     margin-left: 0rem;
-    color: ${({ theme }) => theme?.colors?.text || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: normal;    
     font-size: 0.9rem;
     padding-left: 0rem;
@@ -504,8 +504,8 @@ const StyledReply = styled.div`
     gap: 0.5rem;
     width: 100%;
     padding: 0.75rem;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2A2E33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 10px;
 `;
 
@@ -522,7 +522,7 @@ const MobileReplyOverlay = styled.div`
         bottom: 56px; /* Leave room for bottom nav */
         z-index: 10001;
         flex-direction: column;
-        background: ${({ theme }) => theme?.colors?.bg || '#1a1a1a'};
+        background: ${({ theme }) => theme.colors.bg};
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
     }
@@ -532,8 +532,8 @@ const MobileReplyHeader = styled.div`
     display: flex;
     align-items: center;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
     position: sticky;
     top: 0;
     z-index: 1;
@@ -545,7 +545,7 @@ const MobileReplyBackButton = styled.button`
     gap: 0.35rem;
     background: transparent;
     border: none;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     cursor: pointer;
     font-size: 0.85rem;
     font-weight: 600;
@@ -568,15 +568,15 @@ const MobileReplyContent = styled.div`
 `;
 
 const MobileReplyPostPreview = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#f1f5f9'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#d1d5db'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     padding: 0.6rem 0.75rem;
 `;
 
 const MobileReplyPostMeta = styled.div`
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.mutedText || '#718096'};
+    color: ${({ theme }) => theme.colors.mutedText};
     margin-bottom: 0.3rem;
     display: flex;
     align-items: center;
@@ -585,7 +585,7 @@ const MobileReplyPostMeta = styled.div`
 
 const MobileReplyPostContent = styled.div`
     font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.text || '#1a202c'};
+    color: ${({ theme }) => theme.colors.text};
     line-height: 1.4;
 `;
 
@@ -600,7 +600,7 @@ const StyledSubmitButtonContainer = styled.div`
 
 const ReplyCounter = styled.span`
     font-size: 0.45rem;
-    color: ${({ $warn, theme }) => $warn ? '#ff6b6b' : (theme?.colors?.subtleText || '#888')};
+    color: ${({ $warn, theme }) => $warn ? '#ff6b6b' : (theme.colors.subtleText)};
     line-height: 1.2;
     margin-left: 0.2rem;
     margin-top: -0.25em;
@@ -635,14 +635,14 @@ const MetaRow = styled.div`
     gap: 0.5rem;
     margin-top: 0.5rem;
     padding-top: 0.5rem;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1;
 
     & a {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         text-decoration: none;
         font-size: 0.7rem;
         font-weight: 600;
@@ -650,7 +650,7 @@ const MetaRow = styled.div`
     }
 
     & a:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     & span {
@@ -678,7 +678,7 @@ const MetaRow = styled.div`
 const MetaSeparatorAction = styled.span`
     font-size: 2.5rem;
     margin: 0 0.35rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: 900;
     line-height: 1;
 
@@ -694,7 +694,7 @@ const Icon = styled.span`
     justify-content: center;
     width: 18px;
     height: 18px;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     svg {
         width: 18px;
         height: 18px;
@@ -714,7 +714,7 @@ const Icon = styled.span`
 const ActionButton = styled.a`
     &:visited { color: inherit; }
     &:hover, &:visited:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
     cursor: pointer;
     font-size: inherit;
@@ -791,9 +791,9 @@ const ReportInput = styled.input`
     box-sizing: border-box;
     padding: 0.5rem;
     font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.text || '#CCCCCC'};
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#333'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+    color: ${({ theme }) => theme.colors.text};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 4px;
 `;
 
@@ -3194,8 +3194,8 @@ function ViewPostView({ state, updatePost }) {
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.35rem',
-                            background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
-                            border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
+                            background: theme.colors.surface2 ,
+                            border: `1px solid ${theme.colors.borderSubtle}`,
                             borderRadius: '8px',
                             padding: '0.2rem 0.5rem',
                         }}>
@@ -3212,7 +3212,7 @@ function ViewPostView({ state, updatePost }) {
                                     background: 'transparent',
                                     border: 'none',
                                     outline: 'none',
-                                    color: theme?.colors?.text || 'inherit',
+                                    color: theme.colors.text,
                                     fontSize: '0.8rem',
                                     fontWeight: 700,
                                     textAlign: 'right',
@@ -3335,17 +3335,17 @@ function ViewPostView({ state, updatePost }) {
                                             alignItems: 'center',
                                             gap: '0.4rem',
                                             padding: '0.45rem 0.6rem',
-                                            background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)',
-                                            border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
+                                            background: theme.colors.surface2 ,
+                                            border: `1px solid ${theme.colors.borderSubtle}`,
                                             borderRadius: '8px',
-                                            color: theme?.colors?.text || 'inherit',
+                                            color: theme.colors.text,
                                             cursor: disabled ? (isAwarding ? 'wait' : 'not-allowed') : 'pointer',
                                             opacity: disabled ? 0.4 : 1,
                                             fontSize: '0.78rem',
                                             transition: 'background 0.15s, opacity 0.15s',
                                         }}
-                                        onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
+                                        onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme.colors.hover; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = theme.colors.surface2 ; }}
                                     >
                                         <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
                                         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>

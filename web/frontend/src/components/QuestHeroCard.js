@@ -11,17 +11,17 @@ import Api from '../lib/api';
 import Storage from '../utils/Storage';
 
 const pickThemeColor = (theme, key) => {
-    if (theme?.colors?.[key]) return theme.colors[key];
-    const isLight = theme?.name === 'light';
+    if (theme.colors[key]) return theme.colors[key];
+    const isLight = theme.name === 'light';
     return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
 };
 
 // Container styling matching invite codes card (blue/indigo theme)
 const QuestCardContainer = styled.div`
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
         : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
-    border: 2px solid ${({ theme }) => theme?.name === 'light'
+    border: 2px solid ${({ theme }) => theme.name === 'light'
         ? 'rgba(59, 130, 246, 0.5)'
         : 'rgba(59, 130, 246, 0.5)'};
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
@@ -29,7 +29,7 @@ const QuestCardContainer = styled.div`
     display: flex;
     flex-direction: column;
     gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-    box-shadow: ${({ theme }) => theme?.name === 'light'
+    box-shadow: ${({ theme }) => theme.name === 'light'
         ? '0 4px 12px rgba(59, 130, 246, 0.15)'
         : '0 4px 12px rgba(59, 130, 246, 0.25)'};
 
@@ -69,7 +69,7 @@ const QuestTitle = styled.div`
 const ResetTimer = styled.div`
     font-size: 0.6rem;
     color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.08)'};
     padding: 0.15rem 0.35rem;
@@ -94,11 +94,11 @@ const QuestItem = styled.div`
     padding: 0.4rem 0.5rem;
     background: ${({ theme, $completed }) => {
         if ($completed) {
-            return theme?.name === 'light'
+            return theme.name === 'light'
                 ? 'rgba(34, 197, 94, 0.1)'
                 : 'rgba(34, 197, 94, 0.12)';
         }
-        return theme?.name === 'light'
+        return theme.name === 'light'
             ? 'rgba(0, 0, 0, 0.03)'
             : 'rgba(255, 255, 255, 0.04)';
     }};
@@ -223,7 +223,7 @@ const ProgressContainer = styled.div`
 const ProgressBar = styled.div`
     width: 100%;
     height: 4px;
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.1)'
         : 'rgba(255, 255, 255, 0.1)'};
     border-radius: 2px;
@@ -282,7 +282,7 @@ const ClaimSection = styled.div`
     justify-content: space-between;
     align-items: flex-start;
     padding-top: 0.4rem;
-    border-top: 1px solid ${({ theme }) => theme?.name === 'light'
+    border-top: 1px solid ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.08)'
         : 'rgba(255, 255, 255, 0.08)'};
 `;
@@ -316,7 +316,7 @@ const ClaimButton = styled.button`
             transform: translateY(0);
         }
     ` : css`
-        background: ${({ theme }) => theme?.name === 'light'
+        background: ${({ theme }) => theme.name === 'light'
             ? 'rgba(0, 0, 0, 0.08)'
             : 'rgba(255, 255, 255, 0.1)'};
         color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
@@ -544,7 +544,7 @@ const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
 const DebugPanel = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem;
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(239, 68, 68, 0.1)'
         : 'rgba(239, 68, 68, 0.15)'};
     border: 1px dashed rgba(239, 68, 68, 0.5);
@@ -622,7 +622,7 @@ const DebugInput = styled.input`
     font-size: 0.5rem;
     border: 1px solid rgba(59, 130, 246, 0.5);
     border-radius: 4px;
-    background: ${({ theme }) => theme?.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
+    background: ${({ theme }) => theme.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
     color: ${({ theme }) => pickThemeColor(theme, 'text')};
     text-align: center;
 
@@ -638,7 +638,7 @@ const DebugQuestRow = styled.div`
     align-items: center;
     padding: 0.2rem 0.3rem;
     margin: 0.15rem 0;
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0,0,0,0.03)'
         : 'rgba(255,255,255,0.03)'};
     border-radius: 4px;
@@ -661,7 +661,7 @@ const CollapseButton = styled.button`
 
     &:hover {
         color: ${({ theme }) => pickThemeColor(theme, 'text')};
-        background: ${({ theme }) => theme?.name === 'light'
+        background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.05)'};
     }

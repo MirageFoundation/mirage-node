@@ -22,8 +22,8 @@ import { formatMirageCompact } from "../utils/formatters";
 import { Tooltip, tooltipStyles } from "./Tooltip";
 
 const pickCard = (theme, key) => {
-    if (theme?.colors?.[key]) return theme.colors[key];
-    const isLight = theme?.name === 'light';
+    if (theme.colors[key]) return theme.colors[key];
+    const isLight = theme.name === 'light';
     return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
 };
 
@@ -41,11 +41,11 @@ const StyledMainContainer = styled.div`
     margin: 0;
     contain: layout style;
     will-change: transform;
-    box-shadow: ${({ theme }) => theme?.colors?.cardShadow || 'none'};
+    box-shadow: ${({ theme }) => theme.colors.cardShadow};
 
     &:hover {
         background: ${({ theme }) => pickCard(theme, 'cardAlt')};
-        box-shadow: ${({ theme }) => theme?.colors?.cardShadowHover || 'none'};
+        box-shadow: ${({ theme }) => theme.colors.cardShadowHover};
     }
 
     position: relative;
@@ -56,7 +56,7 @@ const StyledMainContainer = styled.div`
 
     @keyframes flashGlow {
         0% { background: rgba(255, 255, 200, 0.3); }
-        100% { background: ${(props) => props.theme?.colors?.card || '#1a1a1a'}; }
+        100% { background: ${(props) => props.theme.colors.card}; }
     }
 
     @media (max-width: 1000px) {
@@ -151,7 +151,7 @@ const MobileMetaLine = styled.div`
         gap: 0.25rem;
         font-size: 0.7rem;
         font-weight: 600;
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         margin: 0 0 0.35rem 0;
     }
 
@@ -162,7 +162,7 @@ const MobileMetaLine = styled.div`
     }
 
     a:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `
 
@@ -392,7 +392,7 @@ const MobileCardTitleBelow = styled.div`
         font-weight: 700;
         font-size: clamp(0.65rem, 3.2vw, 0.95rem);
         line-height: 1.25;
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `
 
@@ -404,11 +404,11 @@ const HideOnMobileTitle = styled.div`
 `
 
 const StyledLink = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
 
     &:hover {
-      color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+      color: ${({ theme }) => theme.colors.linkHover};
     }
     font-weight: bold;
     font-size: 1.0rem;
@@ -423,13 +423,13 @@ const StyledLink = styled(Link)`
 
 const StyledProfileLink = styled(Link)`
     font-size: inherit;
-    color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.subtleText || '#CCCCCC'} !important;
+    color: ${({ $tierColor, theme }) => $tierColor } !important;
     text-decoration: none;
     font-weight: bold;
     ${() => tooltipStyles()}
 
     &:hover {
-        color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.text || '#EEEEEE'} !important;
+        color: ${({ $tierColor, theme }) => $tierColor } !important;
     }
 `
 
@@ -482,14 +482,14 @@ const MetaRow = styled.div`
     gap: 0.5rem;
     margin-top: 0rem;
     padding-top: .5rem;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1;
 
     & a {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         text-decoration: none;
         font-size: 0.7rem;
         font-weight: 600;
@@ -497,7 +497,7 @@ const MetaRow = styled.div`
     }
 
     & a:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     & span {
@@ -519,20 +519,20 @@ const MetaInfoRow = styled.div`
     gap: 0.35rem;
     margin-top: 0.0rem;
     padding-bottom: 0.2rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#6b7280'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.60rem;
     font-weight: 600;
     line-height: 1.1;
 
     & a {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         text-decoration: none;
         font-weight: 600;
     }
 
     & a:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     @media (max-width: 600px) {
@@ -547,7 +547,7 @@ const MetaInfoRowLeft = styled.div`
 `
 
 const MetaSeparator = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin: 0 0.0rem;
     font-size: 0.9rem;
     font-weight: 900;
@@ -564,7 +564,7 @@ const FeedReasonLine = styled.div`
         display: block;
         margin-top: 0.15rem;
         margin-bottom: 0.15rem;
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-size: 0.60rem;
         font-weight: 400;
     }
@@ -613,7 +613,7 @@ const FeedReasonWrapper = styled.span`
 
 // Inline feed reason shown next to time on desktop only
 const FeedReasonInline = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.60rem;
     font-weight: 600;
     font-style: italic;
@@ -623,8 +623,8 @@ const FeedReasonInline = styled.span`
 const FeedDebugTooltip = styled.div`
     position: fixed;
     z-index: 10000;
-    background: ${({ theme }) => theme?.colors?.panel};
-    border: 1px solid ${({ theme }) => theme?.colors?.border};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 6px;
     padding: 0.75rem;
     min-width: 420px;
@@ -634,7 +634,7 @@ const FeedDebugTooltip = styled.div`
     font-size: 0.7rem;
     line-height: 1.4;
     text-align: left;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, ${({ theme }) => theme?.name === 'light' ? '0.15' : '0.3'});
+    box-shadow: 0 4px 12px rgba(0, 0, 0, ${({ theme }) => theme.name === 'light' ? '0.15' : '0.3'});
     white-space: normal;
     word-break: break-word;
 `;
@@ -650,19 +650,19 @@ const FeedDebugRow = styled.div`
 `;
 
 const FeedDebugLabel = styled.span`
-    color: ${({ theme }) => theme?.colors?.text};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const FeedDebugValue = styled.span`
-    color: ${({ theme }) => theme?.colors?.text};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 600;
 `;
 
 const FeedDebugExplanation = styled.div`
     margin-top: 0.5rem;
     padding-top: 0.5rem;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border};
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
     white-space: normal;
 `;
 
@@ -678,7 +678,7 @@ const Icon = styled.span`
     justify-content: center;
     width: 18px;
     height: 18px;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     svg {
         width: 18px;
         height: 18px;
@@ -694,13 +694,13 @@ const MenuButton = styled.button`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     border-radius: 4px;
     transition: all 0.2s ease;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.panelAlt || '#333'};
-        color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+        background: ${({ theme }) => theme.colors.panelAlt};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     svg {
@@ -716,8 +716,8 @@ const MenuContainer = styled.div`
 
 const MenuDropdown = styled.div`
     position: fixed;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     min-width: 180px;
@@ -731,7 +731,7 @@ const MenuItem = styled.button`
     text-align: left;
     background: none;
     border: none;
-    color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.75rem;
     cursor: pointer;
     transition: background 0.2s ease;
@@ -740,11 +740,11 @@ const MenuItem = styled.button`
     gap: 0.5rem;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.panelAlt || '#333'};
+        background: ${({ theme }) => theme.colors.panelAlt};
     }
 
     &:not(:last-child) {
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#6b7280'};
+        border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     }
 
     &[data-danger="true"] {
@@ -787,7 +787,7 @@ const MediaModeContainer = styled.div`
 
 const StyledFooter = styled.div`
     margin-top: 0rem;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
     padding-top: 0.15rem;
     display: flex;
     justify-content: flex-start;
@@ -2633,8 +2633,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.35rem',
-                                    background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
-                                    border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
+                                    background: theme.colors.surface2 ,
+                                    border: `1px solid ${theme.colors.borderSubtle}`,
                                     borderRadius: '8px',
                                     padding: '0.2rem 0.5rem',
                                 }}>
@@ -2651,7 +2651,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             background: 'transparent',
                                             border: 'none',
                                             outline: 'none',
-                                            color: theme?.colors?.text || 'inherit',
+                                            color: theme.colors.text,
                                             fontSize: '0.8rem',
                                             fontWeight: 700,
                                             textAlign: 'right',
@@ -2763,17 +2763,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     alignItems: 'center',
                                                     gap: '0.4rem',
                                                     padding: '0.45rem 0.6rem',
-                                                    background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)',
-                                                    border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
+                                                    background: theme.colors.surface2 ,
+                                                    border: `1px solid ${theme.colors.borderSubtle}`,
                                                     borderRadius: '8px',
-                                                    color: theme?.colors?.text || 'inherit',
+                                                    color: theme.colors.text,
                                                     cursor: disabled ? (isAwarding ? 'wait' : 'not-allowed') : 'pointer',
                                                     opacity: disabled ? 0.4 : 1,
                                                     fontSize: '0.78rem',
                                                     transition: 'background 0.15s, opacity 0.15s',
                                                 }}
-                                                onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
-                                                onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
+                                                onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme.colors.hover; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = theme.colors.surface2 ; }}
                                             >
                                                 <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
                                                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>

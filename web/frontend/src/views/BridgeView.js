@@ -100,15 +100,13 @@ const BridgeLayout = styled.div`
     width: 100%;
 `;
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const SectionTitle = styled.h3`
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    margin: ${({ theme }) => isOr(theme) ? '0 0 0.45rem 0' : '0 0 0.75rem 0'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    margin: ${({ theme }) => theme.layout.sectionMarginBottom};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -120,21 +118,21 @@ const StepNumber = styled.span`
     justify-content: center;
     width: 1.1rem;
     height: 1.1rem;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
     background: ${({ theme }) =>
-        isOr(theme)
-            ? (theme?.colors?.panelAlt || '#333')
+        theme.caps.flatMode
+            ? (theme.colors.panelAlt)
             : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
     color: #fff;
-    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
+    font-size: ${({ theme }) => theme.layout.tinySize};
     font-weight: 700;
 `;
 
 const NetworkGrid = styled.div`
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
     
     @media (max-width: 600px) {
         grid-template-columns: 1fr;
@@ -143,15 +141,15 @@ const NetworkGrid = styled.div`
 
 const NetworkCard = styled.button`
     background: ${({ theme, $selected, $color }) =>
-        isOr(theme)
-            ? ($selected ? (theme?.colors?.panelAlt || '#1a1d22') : (theme?.colors?.panel || '#23272C'))
+        theme.caps.flatMode
+            ? ($selected ? theme.colors.panelAlt : theme.colors.panel)
             : ($selected
                 ? `linear-gradient(135deg, ${$color}22 0%, ${$color}11 100%)`
-                : (theme?.colors?.panel || '#23272C'))};
+                : (theme.colors.panel))};
     border: 2px solid ${({ $selected, $color, theme }) =>
-        $selected ? $color : (theme?.colors?.border || '#444')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
+        $selected ? $color : (theme.colors.border)};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
@@ -160,12 +158,12 @@ const NetworkCard = styled.button`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
     
     &:hover:not(:disabled) {
         border-color: ${({ $color }) => $color};
-        transform: ${({ theme }) => isOr(theme) ? 'none' : 'translateY(-2px)'};
-        box-shadow: ${({ theme, $color }) => isOr(theme) ? 'none' : `0 4px 12px ${$color}33`};
+        transform: ${({ theme }) => theme.caps.flatMode ? 'none' : 'translateY(-2px)'};
+        box-shadow: ${({ theme, $color }) => theme.caps.flatMode ? 'none' : `0 4px 12px ${$color}33`};
     }
     
     &:disabled {
@@ -174,7 +172,7 @@ const NetworkCard = styled.button`
     }
     
     ${({ $selected, $color, theme }) => $selected && css`
-        box-shadow: ${isOr(theme) ? 'none' : `0 0 0 1px ${$color}44, 0 4px 12px ${$color}22`};
+        box-shadow: ${theme.caps.flatMode ? 'none' : `0 0 0 1px ${$color}44, 0 4px 12px ${$color}22`};
     `}
 `;
 
@@ -184,22 +182,22 @@ const NetworkCardContent = styled.div`
 `;
 
 const NetworkIcon = styled.img`
-    width: ${({ theme }) => isOr(theme) ? '2.125rem' : '2.5rem'};
-    height: ${({ theme }) => isOr(theme) ? '2.125rem' : '2.5rem'};
+    width: ${({ theme }) => theme.layout.sectionSize};
+    height: ${({ theme }) => theme.layout.sectionSize};
     flex-shrink: 0;
     object-fit: contain;
 `;
 
 const NetworkName = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '0.765rem' : '0.9rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     margin-bottom: 0.2rem;
 `;
 
 const NetworkMeta = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: ${({ theme }) => theme.layout.smallSize};
+    color: ${({ theme }) => theme.colors.subtleText};
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -208,9 +206,9 @@ const NetworkMeta = styled.div`
 const NetworkBadge = styled.span`
     display: inline-flex;
     align-items: center;
-    padding: ${({ theme }) => isOr(theme) ? '0.09rem 0.24rem' : '0.15rem 0.4rem'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
+    padding: ${({ theme }) => theme.layout.buttonPadding};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    font-size: ${({ theme }) => theme.layout.tinySize};
     font-weight: 600;
     background: ${({ $color }) => `${$color}22`};
     color: ${({ $color }) => $color};
@@ -218,29 +216,29 @@ const NetworkBadge = styled.span`
 
 const SelectedIndicator = styled.div`
     position: absolute;
-    top: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
-    right: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    top: ${({ theme }) => theme.layout.cardGap};
+    right: ${({ theme }) => theme.layout.cardGap};
     width: 1rem;
     height: 1rem;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
     background: ${({ $color }) => $color};
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
+    font-size: ${({ theme }) => theme.layout.tinySize};
     color: #fff;
     animation: ${fadeIn} 0.2s ease-out;
 `;
 
 const InputSection = styled.div`
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginTop};
 `;
 
 const InputLabel = styled.label`
     display: block;
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-bottom: 0.5rem;
 `;
 
@@ -253,28 +251,28 @@ const InputWrapper = styled.div`
 const AmountInput = styled.input`
     width: 100%;
     padding: ${({ theme }) =>
-        isOr(theme) ? '0.39rem 3rem 0.39rem 0.51rem' : '0.65rem 5rem 0.65rem 0.85rem'};
+        theme.layout.inputPadding};
     border: 1px solid ${({ theme, $error }) =>
-        $error ? '#f56565' : (theme?.colors?.border || '#444')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
+        $error ? '#f56565' : (theme.colors.border)};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 600;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     outline: none;
     transition: all 0.2s ease;
     
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-weight: 400;
     }
     
     &:focus {
         border-color: ${({ theme, $error }) =>
-        $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
+        $error ? '#f56565' : (theme.colors.link)};
         box-shadow: ${({ theme, $error }) =>
-        isOr(theme) ? 'none' : `0 0 0 3px ${$error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'}`};
+        theme.layout.focusRing};
     }
     
     /* Hide number spinners */
@@ -288,23 +286,23 @@ const AmountInput = styled.input`
 
 const AmountSuffix = styled.span`
     position: absolute;
-    right: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    right: ${({ theme }) => theme.layout.cardPadding};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     pointer-events: none;
 `;
 
 const MaxButton = styled.button`
     position: absolute;
-    right: ${({ theme }) => isOr(theme) ? '2.7rem' : '4.5rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.15rem 0.3rem' : '0.25rem 0.5rem'};
+    right: ${({ theme }) => theme.layout.containerPadding};
+    padding: ${({ theme }) => theme.layout.buttonPadding};
     border: none;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
     background: ${({ theme }) =>
-        isOr(theme) ? (theme?.colors?.link || '#667eea') : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
+        theme.caps.flatMode ? (theme.colors.link) : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
     color: #fff;
-    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
+    font-size: ${({ theme }) => theme.layout.tinySize};
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -312,40 +310,40 @@ const MaxButton = styled.button`
     transition: all 0.2s ease;
     
     &:hover {
-        transform: ${({ theme }) => isOr(theme) ? 'none' : 'scale(1.05)'};
-        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 2px 8px rgba(102, 126, 234, 0.4)'};
+        transform: ${({ theme }) => theme.caps.flatMode ? 'none' : 'scale(1.05)'};
+        box-shadow: ${({ theme }) => theme.caps.flatMode ? 'none' : '0 2px 8px rgba(102, 126, 234, 0.4)'};
     }
 `;
 
 const AddressInput = styled.input`
     width: 100%;
-    padding: ${({ theme }) => isOr(theme) ? '0.39rem 0.51rem' : '0.65rem 0.85rem'};
+    padding: ${({ theme }) => theme.layout.inputPadding};
     border: 1px solid ${({ theme, $error }) =>
-        $error ? '#f56565' : (theme?.colors?.border || '#444')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
+        $error ? '#f56565' : (theme.colors.border)};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     outline: none;
     transition: all 0.2s ease;
     
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        color: ${({ theme }) => theme.colors.subtleText};
         font-family: inherit;
     }
     
     &:focus {
         border-color: ${({ theme, $error }) =>
-        $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
+        $error ? '#f56565' : (theme.colors.link)};
         box-shadow: ${({ theme, $error }) =>
-        isOr(theme) ? 'none' : `0 0 0 3px ${$error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'}`};
+        theme.layout.focusRing};
     }
 `;
 
 const ErrorText = styled.div`
     color: #f56565;
-    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
+    font-size: ${({ theme }) => theme.layout.smallSize};
     margin-top: 0.35rem;
     display: flex;
     align-items: center;
@@ -354,37 +352,37 @@ const ErrorText = styled.div`
 
 const PreviewCard = styled.div`
     background: ${({ theme }) =>
-        isOr(theme)
-            ? (theme?.colors?.panelAlt || '#1f2328')
+        theme.caps.flatMode
+            ? (theme.colors.panelAlt)
             : `linear-gradient(135deg, 
-        ${theme?.colors?.panelAlt || '#1f2328'} 0%, 
-        ${theme?.colors?.panel || '#23272C'} 100%)`};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+        ${theme.colors.panelAlt} 0%, 
+        ${theme.colors.panel} 100%)`};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
 `;
 
 const PreviewHeader = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    padding-bottom: ${({ theme }) => isOr(theme) ? '0.36rem' : '0.6rem'};
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    padding-bottom: ${({ theme }) => theme.layout.cardGap};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const PreviewTitle = styled.span`
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const PreviewNetwork = styled.span`
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     color: ${({ $color }) => $color};
     font-weight: 600;
 `;
@@ -393,19 +391,19 @@ const PreviewRow = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: ${({ theme }) => isOr(theme) ? '0.21rem 0' : '0.35rem 0'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    padding: ${({ theme }) => theme.layout.formRowMargin};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     gap: 1rem;
 `;
 
 const PreviewLabel = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     white-space: nowrap;
     flex-shrink: 0;
 `;
 
 const PreviewValue = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 500;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     text-align: right;
@@ -419,7 +417,7 @@ const PreviewValue = styled.span`
 
 const Divider = styled.div`
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.colors.border};
     margin: 0.5rem 0;
 `;
 
@@ -430,38 +428,38 @@ const SubmitSection = styled.div`
 const WarningBanner = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: ${({ theme }) => isOr(theme) ? '0.36rem' : '0.6rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
     background: rgba(245, 158, 11, 0.1);
     border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     color: #f59e0b;
     line-height: 1.5;
 `;
 
 const WarningIcon = styled.span`
-    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
+    font-size: ${({ theme }) => theme.layout.labelSize};
     flex-shrink: 0;
 `;
 
 const InfoBanner = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.5;
 `;
 
 const InfoIcon = styled.span`
-    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
+    font-size: ${({ theme }) => theme.layout.labelSize};
     flex-shrink: 0;
 `;
 
@@ -469,17 +467,17 @@ const StatusBanner = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: ${({ theme }) => isOr(theme) ? '0.24rem' : '0.4rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    margin-top: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
+    margin-top: ${({ theme }) => theme.layout.sectionMarginBottom};
     background: ${({ $success, $error }) =>
         $success ? 'rgba(72, 187, 120, 0.1)' :
             $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
     border: 1px solid ${({ $success, $error }) =>
         $success ? 'rgba(72, 187, 120, 0.3)' :
             $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     color: ${({ $success, $error }) =>
         $success ? '#48bb78' :
             $error ? '#ef4444' : '#667eea'};
@@ -488,40 +486,40 @@ const StatusBanner = styled.div`
 `;
 
 const StepsCard = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
-    margin-top: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    margin-top: ${({ theme }) => theme.layout.sectionMarginBottom};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
 `;
 
 const StepsList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
 `;
 
 const StepItem = styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => isOr(theme) ? '0.36rem' : '0.6rem'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
+    font-size: ${({ theme }) => theme.layout.monoSize};
 `;
 
 const StepDot = styled.span`
     width: 0.65rem;
     height: 0.65rem;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
     flex-shrink: 0;
     background: ${({ $state, theme }) => {
         if ($state === 'complete') return '#48bb78';
         if ($state === 'active') return '#667eea';
         if ($state === 'error') return '#ef4444';
-        return theme?.colors?.border || '#555';
+        return theme.colors.border;
     }};
     box-shadow: ${({ $state, theme }) =>
-        isOr(theme) || $state !== 'active' ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.2)'};
+        theme.caps.flatMode || $state !== 'active' ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.2)'};
 `;
 
 const StepText = styled.div`
@@ -531,16 +529,16 @@ const StepText = styled.div`
 `;
 
 const StepTitle = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 600;
 `;
 
 const StepMeta = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: ${({ theme }) => theme.layout.smallSize};
     
     a {
-        color: ${({ theme }) => theme?.colors?.link || '#667eea'};
+        color: ${({ theme }) => theme.colors.link};
     }
     
     /* Responsive address display */
@@ -564,30 +562,30 @@ const StepMeta = styled.span`
 // Progress Screen Components (full-screen progress view after submit)
 const ProgressScreenContainer = styled.div`
     animation: ${fadeIn} 0.3s ease-out;
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.5rem 0'};
+    padding: ${({ theme }) => theme.layout.containerPaddingCompact};
 `;
 
 const ProgressScreenHeader = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.75rem' : '1.25rem'};
-    padding-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginTop};
+    padding-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const ProgressScreenTitle = styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
 `;
 
 const ProgressScreenNetworkIcon = styled.img`
-    width: ${({ theme }) => isOr(theme) ? '1.7rem' : '2rem'};
-    height: ${({ theme }) => isOr(theme) ? '1.7rem' : '2rem'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
+    width: ${({ theme }) => theme.layout.sectionSize};
+    height: ${({ theme }) => theme.layout.sectionSize};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
     ${({ $isMirage, theme }) => $isMirage && `
-        filter: brightness(0) ${theme?.isDark === false ? 'invert(0)' : 'invert(1)'};
+        filter: brightness(0) ${theme.name === "dark" === false ? 'invert(0)' : 'invert(1)'};
     `}
 `;
 
@@ -598,14 +596,14 @@ const ProgressScreenTitleText = styled.div`
 `;
 
 const ProgressScreenMainTitle = styled.span`
-    font-size: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const ProgressScreenSubtitle = styled.span`
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const ProgressScreenAmount = styled.div`
@@ -613,32 +611,32 @@ const ProgressScreenAmount = styled.div`
 `;
 
 const ProgressScreenAmountValue = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '0.935rem' : '1.1rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 700;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const ProgressScreenAmountLabel = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: ${({ theme }) => theme.layout.smallSize};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const BalanceComparisonCard = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
-    margin-top: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPadding};
+    margin-top: ${({ theme }) => theme.layout.sectionMarginTop};
 `;
 
 const BalanceComparisonTitle = styled.div`
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -647,7 +645,7 @@ const BalanceComparisonTitle = styled.div`
 const BalanceComparisonGrid = styled.div`
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    gap: ${({ theme }) => theme.layout.formRowGap};
     
     @media (max-width: 500px) {
         grid-template-columns: 1fr;
@@ -657,25 +655,25 @@ const BalanceComparisonGrid = styled.div`
 const BalanceComparisonColumn = styled.div`
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
 `;
 
 const BalanceComparisonNetwork = styled.div`
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     margin-bottom: 0.25rem;
 `;
 
 const BalanceComparisonNetworkIcon = styled.img`
-    width: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
-    height: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
+    width: ${({ theme }) => theme.layout.sectionSize};
+    height: ${({ theme }) => theme.layout.sectionSize};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
     ${({ $isMirage, theme }) => $isMirage && `
-        filter: brightness(0) ${theme?.isDark === false ? 'invert(0)' : 'invert(1)'};
+        filter: brightness(0) ${theme.name === "dark" === false ? 'invert(0)' : 'invert(1)'};
     `}
 `;
 
@@ -683,9 +681,9 @@ const BalanceComparisonRow = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.21rem 0' : '0.35rem 0'};
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
+    padding: ${({ theme }) => theme.layout.formRowMargin};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     
     &:last-child {
         border-bottom: none;
@@ -693,7 +691,7 @@ const BalanceComparisonRow = styled.div`
 `;
 
 const BalanceComparisonLabel = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const BalanceComparisonValue = styled.span`
@@ -701,19 +699,19 @@ const BalanceComparisonValue = styled.span`
     font-weight: 500;
     color: ${({ theme, $highlight, $dim }) =>
         $highlight ? '#48bb78' :
-            $dim ? (theme?.colors?.subtleText || '#888') :
-                (theme?.colors?.text || '#fff')};
+            $dim ? (theme.colors.subtleText) :
+                (theme.colors.text)};
 `;
 
 // Derived address display
 const DerivedAddressBox = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.39rem 0.51rem' : '0.65rem 0.85rem'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    padding: ${({ theme }) => theme.layout.inputPadding};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
+    color: ${({ theme }) => theme.colors.text};
     word-break: break-all;
     display: flex;
     align-items: center;
@@ -734,7 +732,7 @@ const DifferentAddressToggle = styled.button`
     gap: 0.35rem;
     background: none;
     border: none;
-    color: ${({ theme }) => theme?.colors?.link || '#667eea'};
+    color: ${({ theme }) => theme.colors.link};
     font-size: 0.7rem;
     font-weight: 500;
     cursor: pointer;
@@ -752,9 +750,9 @@ const HelpIconWrapper = styled.span`
     justify-content: center;
     width: 1rem;
     height: 1rem;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
-    background: ${({ theme }) => theme?.colors?.border || '#444'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    background: ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.6rem;
     font-weight: 700;
     cursor: help;
@@ -765,19 +763,19 @@ const HelpIconWrapper = styled.span`
 const AddressExplanation = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
-    padding: ${({ theme }) => isOr(theme) ? '0.36rem 0.45rem' : '0.6rem 0.75rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    gap: ${({ theme }) => theme.layout.cardGap};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    font-size: ${({ theme }) => theme.layout.smallSize};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.5;
 `;
 
 const ExplanationIcon = styled.span`
-    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     flex-shrink: 0;
 `;
 
@@ -800,23 +798,23 @@ const SolanaWalletButton = styled.button`
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
     width: 100%;
-    padding: ${({ theme }) => isOr(theme) ? '0.45rem 0.6rem' : '0.75rem 1rem'};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
     border: 2px solid #14F195;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
     background: ${({ theme }) =>
-        isOr(theme) ? (theme?.colors?.panelAlt || '#1f2328') : 'rgba(20, 241, 149, 0.1)'};
+        theme.caps.flatMode ? (theme.colors.panelAlt) : 'rgba(20, 241, 149, 0.1)'};
     color: #14F195;
-    font-size: ${({ theme }) => isOr(theme) ? '0.765rem' : '0.9rem'};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
     
     &:hover:not(:disabled) {
         background: ${({ theme }) =>
-        isOr(theme) ? (theme?.colors?.panelAlt || '#1f2328') : 'rgba(20, 241, 149, 0.2)'};
-        transform: ${({ theme }) => isOr(theme) ? 'none' : 'translateY(-1px)'};
+        theme.caps.flatMode ? (theme.colors.panelAlt) : 'rgba(20, 241, 149, 0.2)'};
+        transform: ${({ theme }) => theme.caps.flatMode ? 'none' : 'translateY(-1px)'};
     }
     
     &:disabled {
@@ -831,29 +829,29 @@ const SolanaWalletButton = styled.button`
 `;
 
 const ConnectedWalletBox = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    background: ${({ theme }) => theme.colors.panelAlt};
     border: 1px solid #14F195;
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.bannerPadding};
 `;
 
 const WalletRow = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
 `;
 
 const WalletAddress = styled.span`
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const DisconnectButton = styled.button`
     background: transparent;
     border: none;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     cursor: pointer;
     padding: 0.25rem 0.5rem;
@@ -1577,7 +1575,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                         <span style={{ color: '#14F195', fontWeight: 600 }}>
                             {solanaCluster.toUpperCase()}
                         </span>
-                        <span style={{ color: theme?.colors?.subtleText || '#888' }}>
+                        <span style={{ color: theme.colors.subtleText }}>
                             — Set Phantom to {solanaCluster} in Settings → Developer Settings
                         </span>
                     </div>
@@ -1617,12 +1615,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                                 borderRadius: '6px',
                                 border: '1px solid rgba(20, 241, 149, 0.3)',
                             }}>
-                                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: theme?.colors?.text || '#fff' }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: theme.colors.text }}>
                                     {solanaWallet.mirageBalance !== null
                                         ? solanaWallet.mirageBalance.toLocaleString()
                                         : '...'}
                                 </span>
-                                <span style={{ fontSize: '0.7rem', color: theme?.colors?.subtleText || '#888', fontWeight: 500 }}>MIRAGE</span>
+                                <span style={{ fontSize: '0.7rem', color: theme.colors.subtleText, fontWeight: 500 }}>MIRAGE</span>
                             </div>
                             <div style={{
                                 display: 'flex',
@@ -1633,12 +1631,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                                 borderRadius: '6px',
                                 border: '1px solid rgba(20, 241, 149, 0.3)',
                             }}>
-                                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: theme?.colors?.text || '#fff' }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: theme.colors.text }}>
                                     {solanaWallet.solBalance !== null
                                         ? solanaWallet.solBalance.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })
                                         : '...'}
                                 </span>
-                                <span style={{ fontSize: '0.7rem', color: theme?.colors?.subtleText || '#888', fontWeight: 500 }}>SOL</span>
+                                <span style={{ fontSize: '0.7rem', color: theme.colors.subtleText, fontWeight: 500 }}>SOL</span>
                             </div>
                         </div>
                         {solanaWallet.mirageBalance === 0 && solanaCluster !== 'mainnet' && (
@@ -1670,7 +1668,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                             display: 'flex',
                             justifyContent: 'flex-end',
                             fontSize: '0.75rem',
-                            color: theme?.colors?.subtleText || '#888',
+                            color: theme.colors.subtleText,
                             marginBottom: '0.35rem'
                         }}>
                             Balance: {solanaWallet?.mirageBalance !== null ? `${solanaWallet.mirageBalance.toLocaleString()} MIRAGE` : '...'}
@@ -1719,18 +1717,18 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                         Destination
                     </SectionTitle>
                     <InputSection>
-                        <div style={{ fontSize: '0.75rem', color: theme?.colors?.subtleText || '#888', marginBottom: '0.35rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: theme.colors.subtleText, marginBottom: '0.35rem' }}>
                             Tokens will arrive at your Mirage address:
                         </div>
                         <div style={{
                             fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
                             fontSize: '0.8rem',
                             padding: '0.5rem 0.75rem',
-                            background: theme?.colors?.panelAlt || '#1f2328',
-                            border: `1px solid ${theme?.colors?.border || '#444'}`,
+                            background: theme.colors.panelAlt,
+                            border: `1px solid ${theme.colors.border}`,
                             borderRadius: '6px',
                             wordBreak: 'break-all',
-                            color: theme?.colors?.text || '#fff',
+                            color: theme.colors.text,
                         }}>
                             {mirageAddress}
                         </div>
@@ -2835,7 +2833,7 @@ export default function BridgeView({ state }) {
                                                     display: 'flex',
                                                     justifyContent: 'flex-end',
                                                     fontSize: '0.75rem',
-                                                    color: theme?.colors?.subtleText || '#888',
+                                                    color: theme.colors.subtleText,
                                                     marginBottom: '0.35rem'
                                                 }}>
                                                     Balance: {balanceLoading ? '...' : balanceError ? 'Error' : `${formatBalance(balance)} MIRAGE`}

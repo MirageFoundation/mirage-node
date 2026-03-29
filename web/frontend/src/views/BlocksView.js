@@ -13,14 +13,12 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, C
 import { usePendingBlocks } from "../utils/usePendingBlocks";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const SectionTitle = styled.div`
-    margin-top: ${({ $first, theme }) => $first ? '0' : (isOr(theme) ? '0.75rem' : '1.5rem')};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    margin-top: ${({ $first, theme }) => $first ? '0' : (theme.layout.sectionMarginTop)};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.75rem' : '0.95rem'};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -29,16 +27,16 @@ const SectionTitle = styled.div`
         content: '';
         flex: 1;
         height: 1px;
-        background: ${({ theme }) => theme?.colors?.border || '#333'};
+        background: ${({ theme }) => theme.colors.border};
     }
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
-    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.6rem 0.85rem'};
+    background-color: ${({ theme }) => theme.layout.containerBg };
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPaddingCompact};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -47,24 +45,24 @@ const ValueBox = styled.div`
 const PostsList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => isOr(theme) ? '0' : '0.5rem'};
+    gap: ${({ theme }) => theme.layout.cardGap};
 `;
 
 const PostItem = styled.a`
     display: block;
     text-decoration: none;
     color: inherit;
-    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
-    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panel || '#23272C')};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
-    padding: ${({ theme }) => isOr(theme) ? '0.35rem 0.4rem' : '0.6rem 0.85rem'};
+    border: ${({ theme }) => theme.layout.cardBorder};
+    border-bottom: ${({ theme }) => theme.layout.cardBorderBottom};
+    background-color: ${({ theme }) => theme.layout.cardBg };
+    border-radius: ${({ theme }) => theme.layout.cardRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
     cursor: pointer;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 
     &:hover {
-        background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2E3238'};
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        background-color: ${({ theme }) => theme.colors.panelAlt};
+        border-color: ${({ theme }) => theme.colors.subtleText};
     }
 `;
 
@@ -88,7 +86,7 @@ const BlockItemActions = styled.div`
 
 const PostMeta = styled.div`
     font-size: 0.55rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-bottom: 0.25rem;
     display: flex;
     flex-wrap: wrap;
@@ -97,14 +95,14 @@ const PostMeta = styled.div`
 
 const PostPreview = styled.div`
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.text || '#DDDDDD'};
+    color: ${({ theme }) => theme.colors.text};
     line-height: 1.3;
     word-break: break-word;
     white-space: pre-line;
 `;
 
 const Mono = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.8rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     white-space: normal;

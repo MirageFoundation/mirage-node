@@ -64,8 +64,8 @@ const PickerButton = styled.button`
 const Popover = styled.div`
     position: fixed;
     z-index: 10100;
-    background: ${({ theme }) => theme?.colors?.panel || '#1a1d21'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     width: 340px;
@@ -88,18 +88,18 @@ const SearchHeader = styled.div`
     display: flex;
     align-items: center;
     padding: 0.75rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.5rem;
 `;
 
 const SearchInput = styled.input`
     flex: 1;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2a2d31'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 6px;
     padding: 0.5rem 0.75rem;
     font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
     outline: none;
 
     &:focus {
@@ -107,7 +107,7 @@ const SearchInput = styled.input`
     }
 
     &::placeholder {
-        color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        color: ${({ theme }) => theme.colors.subtleText};
     }
 `;
 
@@ -126,7 +126,7 @@ const GifItem = styled.button`
     width: 150px;
     height: 100px;
     border: none;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2a2d31'};
+    background: ${({ theme }) => theme.colors.panelAlt};
     border-radius: 8px;
     cursor: pointer;
     padding: 0;
@@ -178,7 +178,7 @@ const CloseButton = styled.button`
 const LoadingText = styled.div`
     padding: 2rem;
     text-align: center;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
 `;
 
@@ -186,8 +186,8 @@ const PoweredBy = styled.div`
     padding: 0.5rem;
     text-align: center;
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    color: ${({ theme }) => theme.colors.subtleText};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const GifIcon = () => (

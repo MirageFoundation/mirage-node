@@ -45,7 +45,7 @@ const TableCell = styled.td`
 const RowContainer = styled.div`
     padding: 0.5rem;
     margin-bottom: 0.5rem;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    background: ${({ theme }) => theme.colors.panel};
     border-radius: 6px;
     font-size: 0.5rem;
     @media (max-width: 1000px) {
@@ -71,13 +71,13 @@ const Actions = styled.div`
 const ContentPreview = styled.div`
     margin-top: 0.25rem;
     padding: 0.25rem;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2A2E33'};
+    background: ${({ theme }) => theme.colors.panelAlt};
     border-radius: 4px;
     white-space: pre-wrap;
     word-break: break-word;
     font-size: 0.75rem;
     line-height: 1.3;
-    border-left: 2px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-left: 2px solid ${({ theme }) => theme.colors.border};
     @media (max-width: 1000px) {
         font-size: 0.7rem;
         line-height: 1.25;
@@ -94,7 +94,7 @@ const TitlePreview = styled(ContentPreview)`
 `;
 
 const StyledLink = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: 500;
     font-size: 0.5rem;
@@ -104,7 +104,7 @@ const StyledLink = styled(Link)`
     word-break: break-all; /* wrap long hashes/urls */
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        color: ${({ theme }) => theme.colors.linkHover};
         text-decoration: underline;
     }
 `;

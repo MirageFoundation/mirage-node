@@ -8,8 +8,8 @@ import { resolveUsernames } from '../utils/UsernameCache';
 
 const SidebarContainer = styled.div`
     width: 210px;
-    background: ${({ theme }) => theme?.colors?.sidebarBg || theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.sidebarBg };
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     padding: 0.75rem;
     height: fit-content;
@@ -24,19 +24,19 @@ const SidebarContainer = styled.div`
 const LogoSection = styled.div`
     margin-bottom: 0.75rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const Logo = styled(Link)`
     font-size: 1rem;
     font-weight: 800;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
     cursor: pointer;
     letter-spacing: 0.05em;
     text-decoration: none;
     display: block;
-    ${({ theme }) => theme?.name !== 'light' && `
+    ${({ theme }) => theme.name !== 'light' && `
         animation: glowWander 8s ease-in-out infinite;
     `}
 
@@ -69,7 +69,7 @@ const Logo = styled(Link)`
     }
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -82,34 +82,34 @@ const NavItem = styled(Link)`
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
     text-decoration: none;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 500;
     font-size: 0.75rem;
     transition: all 0.2s ease;
     margin-bottom: 0.04rem;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accent || '#E5E7EB'};
-        color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        background: ${({ theme }) => theme.colors.accent};
+        color: ${({ theme }) => theme.colors.link};
     }
 
     &.active {
-        background: ${({ theme }) => theme?.colors?.accent || '#E5E7EB'};
-        color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        background: ${({ theme }) => theme.colors.accent};
+        color: ${({ theme }) => theme.colors.link};
         font-weight: 600;
     }
 `;
 
 const Separator = styled.div`
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.border || '#333'};
+    background: ${({ theme }) => theme.colors.border};
     margin: 0.5rem 0;
 `;
 
 const SectionTitle = styled.h3`
     font-size: 0.65rem;
     font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 0.6rem 0 0.2rem 0;
@@ -121,7 +121,7 @@ const TopicItem = styled(Link)`
     padding: 0.2rem 0.3rem 0.2rem 0.5rem;
     border-radius: 3px;
     text-decoration: none;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.7rem;
     transition: all 0.2s ease;
     margin-bottom: 0.02rem;
@@ -130,8 +130,8 @@ const TopicItem = styled(Link)`
     text-overflow: ellipsis;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accentHover || '#D1D5DB'};
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        background: ${({ theme }) => theme.colors.accentHover};
+        color: ${({ theme }) => theme.colors.linkHover};
     }
 `;
 
@@ -140,21 +140,21 @@ const UserItem = styled(Link)`
     padding: 0.15rem 0.3rem 0.15rem 0.5rem;
     border-radius: 3px;
     text-decoration: none;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     transition: all 0.2s ease;
     margin-bottom: 0.04rem;
     font-size: 0.7rem;
     overflow: hidden;
 
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accentHover || '#D1D5DB'};
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        background: ${({ theme }) => theme.colors.accentHover};
+        color: ${({ theme }) => theme.colors.linkHover};
     }
 `;
 
 const UserName = styled.div`
     font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -166,8 +166,8 @@ const ToggleButton = styled.button`
     padding: 0.2rem 0.5rem;
     border: none;
     border-radius: 10px;
-    background: ${({ theme }) => theme?.colors?.panelAlt || 'rgba(255,255,255,0.05)'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#9CA3AF'};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.6rem;
     font-weight: 500;
     line-height: 1;
@@ -179,8 +179,8 @@ const ToggleButton = styled.button`
     transition: all 0.2s ease;
     
     &:hover {
-        background: ${({ theme }) => theme?.colors?.accent || 'rgba(255,255,255,0.1)'};
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+        background: ${({ theme }) => theme.colors.accent};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -192,7 +192,7 @@ const ChevronIcon = styled.span`
 `;
 
 const EmptyState = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#9CA3AF'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     padding: 0.1rem 0.3rem 0.1rem 0.5rem;
 `;
@@ -344,7 +344,7 @@ const Sidebar = ({ currentPath, state }) => {
         return `@${trimmed.slice(0, 10)}…${trimmed.slice(-4)}`;
     };
 
-    if (theme?.themeId === 'oldreddit') return null;
+    if (!theme.caps.showDefaultChrome) return null;
 
     return (
         <SidebarContainer>

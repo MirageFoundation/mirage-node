@@ -11,7 +11,7 @@ const Overlay = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    background: ${({ theme }) => theme?.name === 'light'
+    background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(255, 255, 255, 0.92)'
         : 'rgba(20, 20, 20, 0.95)'};
     backdrop-filter: blur(8px);
@@ -21,8 +21,8 @@ const Card = styled.div`
     width: 100%;
     max-width: 380px;
     padding: 2rem 1.5rem;
-    background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 12px;
     text-align: center;
     margin: 0 1rem;
@@ -32,12 +32,12 @@ const Title = styled.h2`
     font-size: 1.25rem;
     font-weight: 600;
     margin: 0 0 0.5rem 0;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    color: ${({ theme }) => theme.colors.text};
 `;
 
 const Subtitle = styled.p`
     font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin: 0 0 1.25rem 0;
     line-height: 1.4;
 `;
@@ -47,10 +47,10 @@ const Input = styled.input`
     width: 100%;
     padding: 0.65rem 0.85rem;
     font-size: 0.85rem;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    color: ${({ theme }) => theme.colors.text};
     box-sizing: border-box;
     margin-bottom: 0.75rem;
 
@@ -94,12 +94,12 @@ const LinkText = styled.span`
     display: inline-block;
     margin-top: 1rem;
     font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
+    color: ${({ theme }) => theme.colors.subtleText};
     cursor: pointer;
     text-decoration: underline;
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 

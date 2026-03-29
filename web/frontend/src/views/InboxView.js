@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
-import styled from 'styled-components';
+import styled, { useTheme } from 'styled-components';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
@@ -13,13 +13,11 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBo
 import { getAuthorColor, getAuthorTooltip } from '../utils/tierColors';
 import { formatMirage } from '../utils/formatters';
 
-const isOr = (theme) => theme?.themeId === 'oldreddit';
-
 const HeaderRow = styled.div`
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    margin: ${({ theme }) => isOr(theme) ? '0.35rem 0' : '0.25rem 0 0.75rem 0'};
+    margin: ${({ theme }) => theme.layout.containerPadding};
 `;
 
 // Using <a> tag so right-click "Open in new window" works natively
@@ -27,55 +25,44 @@ const ReplyItem = styled.a`
     display: block;
     text-decoration: none;
     color: inherit;
-    padding: ${({ theme }) => isOr(theme) ? '0.5rem 0.75rem' : '0.5rem'};
-    margin-bottom: ${({ theme }) => isOr(theme) ? '0' : '0.5rem'};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    margin-bottom: ${({ theme }) => theme.layout.formRowGap};
     background: ${({ theme, $isUnread, $isActive }) => {
-        if (isOr(theme)) {
-            if ($isActive) return theme?.colors?.panelAlt;
-            return $isUnread ? theme?.colors?.panelAlt : theme?.colors?.panel;
-        }
-        if ($isActive) return theme?.colors?.panelAlt || 'rgba(250, 204, 21, 0.12)';
-        return $isUnread
-            ? (theme?.name === 'dark' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.08)')
-            : (theme?.name === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)');
+        if ($isActive) return theme.colors.panelAlt;
+        return $isUnread ? theme.colors.inboxReplyUnreadBg : theme.colors.inboxReplyReadBg;
     }};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    border-radius: ${({ theme }) => theme.layout.cardRadius};
     font-size: 0.5rem;
     cursor: pointer;
     transition: background-color 0.2s;
     border: ${({ theme, $isUnread, $isActive }) => {
-        if (isOr(theme)) return 'none';
-        if ($isActive) return `1px solid ${theme?.colors?.accent || 'rgba(250, 204, 21, 0.8)'}`;
-        return `1px solid ${$isUnread
-            ? (theme?.name === 'dark' ? 'rgba(59, 130, 246, 0.4)' : 'rgba(59, 130, 246, 0.3)')
-            : (theme?.name === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)')}`;
+        if (theme.caps.flatMode) return 'none';
+        if ($isActive) return `1px solid ${theme.colors.accent}`;
+        return `1px solid ${$isUnread ? theme.colors.inboxReplyUnreadBorder : theme.colors.inboxReplyReadBorder}`;
     }};
-    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border}` : undefined};
-    opacity: ${({ theme, $isUnread, $isActive }) => isOr(theme) ? '1' : ($isActive || $isUnread ? '1' : '0.7')};
+    border-bottom: ${({ theme }) => theme.layout.cardBorderBottom};
+    opacity: ${({ theme, $isUnread, $isActive }) => theme.caps.flatMode ? '1' : ($isActive || $isUnread ? '1' : '0.7')};
 
     &:hover {
         background-color: ${({ theme, $isUnread, $isActive }) => {
-        if (isOr(theme)) return theme?.colors?.panelAlt;
-        if ($isActive) return theme?.colors?.panelAlt || 'rgba(250, 204, 21, 0.15)';
-        return $isUnread
-            ? (theme?.name === 'dark' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(59, 130, 246, 0.12)')
-            : (theme?.name === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)');
-    }};
+            if ($isActive) return theme.colors.panelAlt;
+            return $isUnread ? theme.colors.inboxReplyUnreadBgHover : theme.colors.inboxReplyReadBgHover;
+        }};
         opacity: 1;
     }
     @media (max-width: 1000px) {
-        padding: ${({ theme }) => isOr(theme) ? '0.35rem 0.5rem' : '0.35rem'};
-        margin-bottom: ${({ theme }) => isOr(theme) ? '0' : '0.35rem'};
-        border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+        padding: ${({ theme }) => theme.layout.cardPadding};
+        margin-bottom: ${({ theme }) => theme.layout.formRowGap};
+        border-radius: ${({ theme }) => theme.layout.cardRadius};
     }
 `;
 
 const ReplyContentText = styled.div`
-    color: ${({ theme }) => theme?.colors?.text || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.6rem;
     white-space: pre-wrap;
     word-break: break-word;
-    ${({ theme }) => isOr(theme) ? `
+    ${({ theme }) => theme.caps.flatMode ? `
         margin-left: 0.5rem;
         max-width: 700px;
     ` : ''}
@@ -87,18 +74,18 @@ const MarkReadButton = styled.button`
     padding: 0.15rem 0.35rem;
     font-size: 0.5rem;
     font-weight: 600;
-    background: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(102, 126, 234, 0.15)'};
-    color: ${({ theme }) => isOr(theme) ? theme?.colors?.subtleText : (theme?.colors?.text || '#fff')};
-    border: ${({ theme }) => isOr(theme) ? 'none' : '1px solid rgba(102, 126, 234, 0.3)'};
+    background: ${({ theme }) => theme.layout.containerBg};
+    color: ${({ theme }) => theme.caps.flatMode ? theme.colors.subtleText : (theme.colors.text)};
+    border: ${({ theme }) => theme.layout.cardBorder};
     border-radius: 0;
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
 
     &:hover {
-        background: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(102, 126, 234, 0.25)'};
-        border-color: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(102, 126, 234, 0.5)'};
-        text-decoration: ${({ theme }) => isOr(theme) ? 'underline' : 'none'};
+        background: ${({ theme }) => theme.layout.containerBg};
+        border-color: ${({ theme }) => theme.caps.flatMode ? 'transparent' : 'rgba(102, 126, 234, 0.5)'};
+        text-decoration: ${({ theme }) => theme.caps.flatMode ? 'underline' : 'none'};
     }
 
     @media (min-width: 1001px) {
@@ -117,12 +104,12 @@ const ReplyHeader = styled.div`
     flex: 1;
     min-width: 0;
     font-weight: ${({ $isUnread }) => ($isUnread ? 'bold' : 'normal')};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.6rem;
     line-height: 1.4;
     word-break: break-word;
     overflow-wrap: break-word;
-    ${({ theme }) => isOr(theme) ? `
+    ${({ theme }) => theme.caps.flatMode ? `
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -130,7 +117,7 @@ const ReplyHeader = styled.div`
 `;
 
 const ReplyUsername = styled.span`
-    color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
+    color: ${({ $tierColor, theme }) => $tierColor } !important;
     font-weight: bold;
     position: relative;
 
@@ -140,12 +127,12 @@ const ReplyUsername = styled.span`
         bottom: 100%;
         left: 0;
         margin-bottom: 0.3rem;
-        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
-        color: ${({ theme }) => theme?.colors?.text || '#eee'};
-        padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.5rem' : '0.5rem 0.75rem'};
+        background: ${({ theme }) => theme.colors.panel};
+        border: 1px solid ${({ theme }) => theme.colors.border};
+        color: ${({ theme }) => theme.colors.text};
+        padding: ${({ theme }) => theme.layout.cardPadding};
         border-radius: 0;
-        font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.7rem'};
+        font-size: ${({ theme }) => theme.layout.smallSize};
         font-weight: normal;
         white-space: nowrap;
         z-index: 1000;
@@ -161,7 +148,7 @@ const ReplyUsername = styled.span`
 `;
 
 const ParentContent = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: inherit;
     display: inline;
     word-break: break-word;
@@ -171,15 +158,15 @@ const ParentContent = styled.span`
 
 const Separator = styled.div`
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.border || '#444'};
+    background: ${({ theme }) => theme.colors.border};
     margin: 0.25rem 0;
 `;
 
 const QuoteBlock = styled.blockquote`
-    margin: 0.25rem 0 0 ${({ theme }) => isOr(theme) ? '0.5rem' : '0'};
+    margin: 0.25rem 0 0 ${({ theme }) => theme.caps.flatMode ? '0.5rem' : '0'};
     padding: 0.25rem 0.4rem;
-    border-left: 2px solid ${({ theme }) => theme?.colors?.border || 'rgba(250, 204, 21, 0.6)'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#AAA'};
+    border-left: 2px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.55rem;
     font-style: italic;
     line-height: 1.4;
@@ -209,6 +196,8 @@ function truncateWords(text, maxWords) {
 export default function InboxView({ state }) {
     const navigate = useNavigate();
     const location = useLocation();
+    const theme = useTheme();
+    const inboxFullWidth = theme.caps.inboxFullWidth;
     const [replies, setReplies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -397,7 +386,7 @@ export default function InboxView({ state }) {
                     <MobileHeader />
                     <TabbedContainer>
                         <ContainerTab>{heading || 'Inbox'}</ContainerTab>
-                        <ContainerBody $fullWidth>
+                        <ContainerBody $fullWidth={inboxFullWidth}>
                             {body}
                         </ContainerBody>
                     </TabbedContainer>

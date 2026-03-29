@@ -36,8 +36,8 @@ const Container = styled.div`
 	& blockquote {
 		margin: 0.5rem 0 0.75rem 0;
 		padding-left: 0.75rem;
-		border-left: 3px solid ${({ theme }) => theme?.colors?.border || '#444'};
-		color: ${({ theme }) => theme?.colors?.text || '#CCCCCC'};
+		border-left: 3px solid ${({ theme }) => theme.colors.border};
+		color: ${({ theme }) => theme.colors.text};
 	}
 	& blockquote > :last-child {
 		margin-bottom: 0;
@@ -46,12 +46,12 @@ const Container = styled.div`
 	& hr {
 		margin: 0.75rem 0;
 		border: none;
-		border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+		border-top: 1px solid ${({ theme }) => theme.colors.border};
 	}
 `;
 
 const SpoilerSpan = styled.span`
-	background-color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+	background-color: ${({ theme }) => theme.colors.text};
 	color: transparent;
 	cursor: pointer;
 	border-radius: 3px;
@@ -60,14 +60,14 @@ const SpoilerSpan = styled.span`
 	user-select: none;
 
 	&.revealed {
-		background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2d31'};
-		color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+		background-color: ${({ theme }) => theme.colors.panelAlt};
+		color: ${({ theme }) => theme.colors.text};
 		user-select: text;
 	}
 `;
 
 const MentionLink = styled.a`
-	color: ${({ theme }) => theme?.colors?.link || theme?.colors?.text || '#DFD0B8'};
+	color: ${({ theme }) => theme.colors.link };
 	font-weight: 600;
 	text-decoration: none;
 	cursor: pointer;
@@ -77,7 +77,7 @@ const MentionLink = styled.a`
 `;
 
 const HashtagLink = styled.a`
-	color: ${({ theme }) => theme?.colors?.link || theme?.colors?.text || '#DFD0B8'};
+	color: ${({ theme }) => theme.colors.link };
 	font-weight: 600;
 	text-decoration: none;
 	cursor: pointer;

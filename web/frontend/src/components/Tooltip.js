@@ -24,9 +24,9 @@ export const tooltipStyles = () => css`
         bottom: 100%;
         left: 0;
         margin-bottom: 0.3rem;
-        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
-        color: ${({ theme }) => theme?.colors?.text || '#eee'};
+        background: ${({ theme }) => theme.colors.panel};
+        border: 1px solid ${({ theme }) => theme.colors.border};
+        color: ${({ theme }) => theme.colors.text};
         padding: 0.5rem 0.75rem;
         border-radius: 4px;
         font-size: 0.7rem;
@@ -76,7 +76,7 @@ const StyledTooltip = styled.span`
         white-space: nowrap;
     `}
     ${({ $subtle }) => $subtle && css`
-        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+        color: ${({ theme }) => theme.colors.subtleText};
     `}
 `;
 
@@ -107,8 +107,8 @@ export const InfoIcon = styled(Tooltip)`
     width: 0.5rem;
     height: 0.5rem;
     border-radius: 50%;
-    background-color: ${({ theme }) => theme?.colors?.accent || '#2E3238'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
+    background-color: ${({ theme }) => theme.colors.accent};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.4rem;
     flex-shrink: 0;
     margin-left: 0.1rem;

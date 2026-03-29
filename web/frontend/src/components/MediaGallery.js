@@ -11,14 +11,14 @@ const NavBar = styled.div`
     padding: 4px 0 6px;
     font-size: 0.85rem;
     font-weight: 700;
-    color: ${({ theme }) => theme?.colors?.textSecondary || '#bbb'};
+    color: ${({ theme }) => theme.colors.textSecondary};
     user-select: none;
 `;
 
 const ArrowBtn = styled.button`
     background: none;
     border: none;
-    color: ${({ theme }) => theme?.colors?.link || '#ccc'};
+    color: ${({ theme }) => theme.colors.link};
     cursor: pointer;
     font-size: 1.3rem;
     padding: 2px 6px;

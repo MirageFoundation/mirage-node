@@ -23,19 +23,19 @@ const MIN_WIDTH_PRESETS = {
     follow: '8.5rem',
 };
 
-const oldredditOverride = css`
-    ${({ theme }) => theme?.themeId === 'oldreddit' && css`
-        background: ${theme?.colors?.panelAlt} !important;
-        color: ${theme?.colors?.text} !important;
-        border: 1px solid ${theme?.colors?.border} !important;
-        border-radius: 0 !important;
+const flatModeOverride = css`
+    ${({ theme }) => theme.caps.flatMode && css`
+        background: ${theme.colors.panelAlt} !important;
+        color: ${theme.colors.text} !important;
+        border: 1px solid ${theme.colors.border} !important;
+        border-radius: ${theme.layout.buttonRadius} !important;
         box-shadow: none !important;
         transform: none !important;
-        font-size: 0.7rem !important;
-        padding: 0.25rem 0.5rem !important;
+        font-size: ${theme.layout.buttonSize} !important;
+        padding: ${theme.layout.buttonPadding} !important;
 
         &:hover:not(:disabled) {
-            background: ${theme?.colors?.accent} !important;
+            background: ${theme.colors.accent} !important;
             box-shadow: none !important;
             transform: none !important;
         }
@@ -116,34 +116,34 @@ const getVariantStyles = (variant, theme) => {
     switch (variant) {
         case 'secondary':
             return css`
-                background: ${theme?.colors?.panel || '#23272C'};
-                color: ${theme?.colors?.text || '#FFFFFF'};
-                border: 1px solid ${theme?.colors?.border || '#333'};
+                background: ${theme.colors.panel};
+                color: ${theme.colors.text};
+                border: 1px solid ${theme.colors.border};
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
         
         &:hover:not(:disabled) {
-                    background: ${theme?.colors?.accent || '#E5E7EB'};
+                    background: ${theme.colors.accent};
             box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
         }
             `;
         case 'danger':
             return css`
-                background: ${theme?.name === 'dark' ? 'rgba(220, 38, 38, 0.15)' : '#FEE2E2'};
+                background: ${({ theme }) => theme.colors.buttonDangerBg};
         color: #dc2626;
-                border: 1px solid ${theme?.name === 'dark' ? '#7A3E3E' : '#FCA5A5'};
+                border: 1px solid ${({ theme }) => theme.colors.buttonDangerBorder};
         
         &:hover:not(:disabled) {
-                    background: ${theme?.name === 'dark' ? 'rgba(220, 38, 38, 0.25)' : '#FECACA'};
+                    background: ${({ theme }) => theme.colors.buttonDangerHoverBg};
         }
             `;
         case 'success':
             return css`
-                background: ${theme?.name === 'dark' ? 'rgba(34, 197, 94, 0.15)' : '#DCFCE7'};
+                background: ${({ theme }) => theme.colors.buttonSuccessBg};
         color: #22c55e;
-                border: 1px solid ${theme?.name === 'dark' ? '#3E6A3E' : '#86EFAC'};
+                border: 1px solid ${({ theme }) => theme.colors.buttonSuccessBorder};
         
         &:hover:not(:disabled) {
-                    background: ${theme?.name === 'dark' ? 'rgba(34, 197, 94, 0.25)' : '#BBF7D0'};
+                    background: ${({ theme }) => theme.colors.buttonSuccessHoverBg};
         }
             `;
         case 'warning':
@@ -159,13 +159,13 @@ const getVariantStyles = (variant, theme) => {
         case 'ghost':
             return css`
         background: transparent;
-                color: ${theme?.colors?.subtleText || '#aaa'};
-                border: 1px solid ${theme?.colors?.border || '#444'};
+                color: ${theme.colors.subtleText};
+                border: 1px solid ${theme.colors.border};
         
         &:hover:not(:disabled) {
-                    background: ${theme?.colors?.panelAlt || '#33373C'};
-                    color: ${theme?.colors?.text || '#fff'};
-                    border-color: ${theme?.colors?.text || '#888'};
+                    background: ${theme.colors.panelAlt};
+                    color: ${theme.colors.text};
+                    border-color: ${theme.colors.text};
                     transform: translateY(-1px);
                 }
                 
@@ -176,7 +176,7 @@ const getVariantStyles = (variant, theme) => {
         case 'subtle':
             return css`
                 background: rgba(102, 126, 234, 0.15);
-                color: ${theme?.colors?.text || '#fff'};
+                color: ${theme.colors.text};
                 border: 1px solid rgba(102, 126, 234, 0.3);
                 box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
                 
@@ -194,7 +194,7 @@ const getVariantStyles = (variant, theme) => {
         case 'link':
             return css`
         background: transparent;
-                color: ${theme?.colors?.link || '#667eea'};
+                color: ${theme.colors.link};
         border: none;
         padding: 0;
         box-shadow: none;
@@ -287,7 +287,7 @@ const StyledButton = styled.button`
         background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
         color: #FFFFFF !important;
     `}
-    ${oldredditOverride}
+    ${flatModeOverride}
     
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
@@ -303,7 +303,7 @@ const StyledLink = styled(Link)`
     ${({ $size }) => getSizeStyles($size)}
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
-    ${oldredditOverride}
+    ${flatModeOverride}
     
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
@@ -319,7 +319,7 @@ const StyledAnchor = styled.a`
     ${({ $size }) => getSizeStyles($size)}
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
-    ${oldredditOverride}
+    ${flatModeOverride}
     
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}

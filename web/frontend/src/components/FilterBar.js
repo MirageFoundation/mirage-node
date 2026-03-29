@@ -10,7 +10,7 @@ const FilterBarWrapper = styled.div`
 const StyledFilterSection = styled.div`
     display: flex;
     margin-top: 0.15rem;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     font-weight: bold;
     flex-wrap: wrap;
@@ -27,7 +27,7 @@ const StyledFilterSection = styled.div`
 `;
 
 const Separator = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.5rem;
     line-height: 1;
     user-select: none;
@@ -47,8 +47,8 @@ const FilterItem = styled.span`
 
 const Label = styled.span`
     color: ${({ theme, $textStyle }) => $textStyle === 'subtle'
-        ? (theme?.colors?.subtleText || '#CCCCCC')
-        : (theme?.colors?.text || '#FFFFFF')};
+        ? (theme.colors.subtleText)
+        : (theme.colors.text)};
     font-weight: ${({ $textStyle }) => $textStyle === 'subtle' ? 'normal' : 'bold'};
     font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
     font-family: inherit;
@@ -70,7 +70,7 @@ const SelectWrapper = styled.span`
         left: 0;
         width: 100%;
         height: 0.04rem;
-        background-color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        background-color: ${({ theme }) => theme.colors.link};
         bottom: -0.05rem;
         pointer-events: none;
         transition: background-color 0.2s ease;
@@ -78,7 +78,7 @@ const SelectWrapper = styled.span`
     }
     
     &:hover::after {
-        background-color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        background-color: ${({ theme }) => theme.colors.linkHover};
     }
     
     @media (max-width: 1000px) {
@@ -98,7 +98,7 @@ const HiddenMeasure = styled.span`
 `;
 
 const StyledSelect = styled.select`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     background-color: transparent;
     border: none;
     font-weight: bold;
@@ -116,8 +116,8 @@ const StyledSelect = styled.select`
     z-index: 1;
     
     option {
-        background-color: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        background-color: ${({ theme }) => theme.colors.panel};
+        color: ${({ theme }) => theme.colors.text};
         font-family: inherit;
         font-weight: bold;
         font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
@@ -129,20 +129,20 @@ const InlineLink = styled.a`
     border: none;
     padding: 0;
     margin: 0;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: bold;
     font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
     font-family: inherit;
     cursor: pointer;
     text-decoration: none;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#EEEEEE'};
+        color: ${({ theme }) => theme.colors.text};
         text-decoration: none;
     }
 `;
 
 const InlineParen = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: normal;
     font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
     font-family: inherit;

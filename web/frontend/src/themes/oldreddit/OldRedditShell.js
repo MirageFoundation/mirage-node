@@ -1,7 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { Link, useLocation } from 'react-router-dom';
-import MobileBottomNav from '../components/MobileBottomNav';
+import MobileBottomNav from '../../components/MobileBottomNav';
 
 const Container = styled.div`
     width: 100%;
@@ -17,8 +17,8 @@ const TopBar = styled.div`
     display: flex;
     align-items: baseline;
     padding: 0.5rem 0.5rem 0.35rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border};
-    background: ${({ theme }) => theme?.colors?.panel};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
     font-size: 0.7rem;
     gap: 0.75rem;
     flex-wrap: wrap;
@@ -27,7 +27,7 @@ const TopBar = styled.div`
 const Brand = styled(Link)`
     font-weight: 700;
     font-size: 1.4rem;
-    color: ${({ theme }) => theme?.colors?.text};
+    color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     letter-spacing: 0.05em;
     line-height: 1;
@@ -37,7 +37,7 @@ const Brand = styled(Link)`
 const PageTitle = styled.span`
     font-size: 0.8rem;
     font-weight: 400;
-    color: ${({ theme }) => theme?.colors?.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     white-space: nowrap;
 `;
 
@@ -48,11 +48,11 @@ const Nav = styled.div`
 `;
 
 const NavLink = styled(Link)`
-    color: ${({ theme, $active }) => ($active ? theme?.colors?.text : theme?.colors?.subtleText)};
+    color: ${({ theme, $active }) => ($active ? theme.colors.text : theme.colors.subtleText)};
     text-decoration: none;
     font-weight: 600;
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text};
+        color: ${({ theme }) => theme.colors.text};
         text-decoration: underline;
     }
 `;

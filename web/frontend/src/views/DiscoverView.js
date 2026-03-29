@@ -13,36 +13,34 @@ import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 
-const isOr = (t) => t?.themeId === 'oldreddit';
-
 const SearchInput = styled.input`
     width: 100%;
     padding: 0.4rem 0.6rem;
     margin-top: 0.5rem;
     margin-bottom: 0.5rem;
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: ${({ theme }) => isOr(theme) ? '0.65rem' : '0.75rem'};
+    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: ${({ theme }) => theme.layout.inputSize};
     font-family: inherit;
     &:focus {
         outline: none;
-        border-color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+        border-color: ${({ theme }) => theme.colors.link};
     }
 `;
 
 const Section = styled.div`
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.bannerRadius};
     margin: 0.5rem 0;
-    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.6rem'};
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+    background: ${({ theme }) => theme.colors.panelAlt};
 `;
 
 const SectionTitle = styled.div`
     font-weight: bold;
-    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
+    font-size: ${({ theme }) => theme.layout.monoSize};
     margin-bottom: 0.4rem;
 `;
 
@@ -51,9 +49,9 @@ const ItemRow = styled.div`
     align-items: center;
     justify-content: space-between;
     padding: 0.5rem 0;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     &:last-child { border-bottom: none; }
-    font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.7rem'};
+    font-size: ${({ theme }) => theme.layout.smallSize};
     gap: 0.4rem;
 
     @media (max-width: 700px) {
@@ -84,37 +82,37 @@ const ItemRight = styled.div`
 `;
 
 const Subtle = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: bold;
     font-size: 0.6rem;
 `;
 
 const ItemLink = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: bold;
-    &:hover { color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'}; }
+    &:hover { color: ${({ theme }) => theme.colors.linkHover}; }
 `;
 
 const CountText = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: normal;
     font-size: 0.65rem;
 `;
 
 const EmptyMessage = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     padding: 0.5rem 0;
 `;
 
 const MoreTopicsHint = styled.div`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     font-style: italic;
     text-align: center;
     padding: 0.6rem 0 0.3rem;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
     margin-top: 0.3rem;
 `;
 
