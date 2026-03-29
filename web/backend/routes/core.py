@@ -679,6 +679,10 @@ def core_set_username():
         if not ts_ok:
             log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
             return ts_err[0], ts_err[1]
+        ts_ok, ts_err = _validate_envelope_timestamp(timestamp)
+        if not ts_ok:
+            log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
+            return ts_err[0], ts_err[1]
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]
@@ -1752,7 +1756,7 @@ def core_block_user():
 
         if user_addr.lower() == target.lower():
             log_event(rid, "block_user.self_block", user_addr=user_addr)
-            return jsonify({"error": "cannot block yourself"}), 400
+            return api_error_code("cannot_block_self")
 
         # Check if user is already blocked (indexer DB)
         try:
@@ -2261,13 +2265,13 @@ def core_follow_user():
             return jsonify({"error": "invalid pubkey"}), 400
 
         if not _is_valid_mirage_addr(target):
-            return jsonify({"error": "target must be a valid mirage1 address"}), 400
+            return api_error_code("target_must_be_mirage1")
         if not _is_valid_mirage_addr(user):
-            return jsonify({"error": "user must be a valid mirage1 address"}), 400
+            return api_error_code("user_must_be_mirage1")
 
         if user_addr.lower() == user.lower():
             log_event(rid, "follow_user.self_follow", user_addr=user_addr)
-            return jsonify({"error": "cannot follow yourself"}), 400
+            return api_error_code("cannot_follow_self")
 
         # Check if user is already followed (indexer DB)
         try:

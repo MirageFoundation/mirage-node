@@ -29,6 +29,8 @@ def _get_indexer_db_name() -> str:
         if code == 0 and out:
             return urlparse(out.strip()).path.lstrip("/")
     return "mirage_indexer"
+
+
 from tests.backend_helpers import (
     _do_send_tokens,
     _do_follow_user,
@@ -113,9 +115,14 @@ def test_indexer(backend: str):
                 if code_deliver != 0:
                     _fail("indexer.balance_after_transfer", f"deliver code={code_deliver} log={log_deliver}")
                 else:
-                    time.sleep(3)
-                    code_post, post_data = _get(f"{backend}/api/get_user_status", {"address": sub2_addr})
-                    post_bal = int((post_data or {}).get("balance", 0)) if code_post == 200 else None
+                    deadline = time.time() + 15
+                    post_bal = None
+                    while time.time() < deadline:
+                        code_post, post_data = _get(f"{backend}/api/get_user_status", {"address": sub2_addr})
+                        post_bal = int((post_data or {}).get("balance", 0)) if code_post == 200 else None
+                        if post_bal is not None and post_bal > pre_bal:
+                            break
+                        time.sleep(2)
                     if post_bal is not None and post_bal > pre_bal:
                         _pass("indexer.balance_after_transfer", before=pre_bal, after=post_bal)
                     else:

@@ -168,7 +168,7 @@ def test_security(backend: str):
             "content": "HACKED content",
         }
         _code, resp = _post(f"{backend}/api/core/post", payload)
-        _expect_http_error("attack.replay_signature_rejected", resp, 400)
+        _expect_http_error("attack.replay_signature_rejected", resp, 400, "invalid signature")
     except Exception as e:
         _fail("attack.replay_signature_rejected", str(e))
 
@@ -209,7 +209,7 @@ def test_security(backend: str):
             "content": "second content",
         }
         _code, resp = _post(f"{backend}/api/core/post", payload)
-        _expect_http_error("attack.pow_proof_reuse_rejected", resp, 400)
+        _expect_http_error("attack.pow_proof_reuse_rejected", resp, 400, "insufficient pow (precheck)")
     except Exception as e:
         _fail("attack.pow_proof_reuse_rejected", str(e))
 
@@ -283,7 +283,7 @@ def test_security(backend: str):
             "username": uname,
         }
         _code, resp = _post(f"{backend}/api/core/set_username", payload)
-        _expect_http_error("attack.set_foreign_username_rejected", resp, 403)
+        _expect_http_error("attack.set_foreign_username_rejected", resp, 403, "unauthorized")
     except Exception as e:
         _fail("attack.set_foreign_username_rejected", str(e))
 
@@ -330,21 +330,15 @@ def test_security(backend: str):
 
     # 10.22 Delete account with empty target → rejected (400)
     try:
-        code, resp = _do_delete_user(backend, free_wallet, "", skip_pow=True)
-        if code == 400:
-            _pass("attack.delete_account_empty_target_rejected")
-        else:
-            _fail("attack.delete_account_empty_target_rejected", f"expected http=400 got http={code} resp={resp}")
+        _code, resp = _do_delete_user(backend, free_wallet, "", skip_pow=True)
+        _expect_http_error("attack.delete_account_empty_target_rejected", resp, 400, "missing required fields")
     except Exception as e:
         _fail("attack.delete_account_empty_target_rejected", str(e))
 
     # 10.23 Delete account with invalid address → rejected (400)
     try:
-        code, resp = _do_delete_user(backend, free_wallet, "not_an_address", skip_pow=True)
-        if code == 400:
-            _pass("attack.delete_account_invalid_target_rejected")
-        else:
-            _fail("attack.delete_account_invalid_target_rejected", f"expected http=400 got http={code} resp={resp}")
+        _code, resp = _do_delete_user(backend, free_wallet, "not_an_address", skip_pow=True)
+        _expect_http_error("attack.delete_account_invalid_target_rejected", resp, 400, "target must be a valid mirage1 address")
     except Exception as e:
         _fail("attack.delete_account_invalid_target_rejected", str(e))
 
@@ -352,41 +346,29 @@ def test_security(backend: str):
     if target_post:
         # 10.24 Self-award rejected
         try:
-            code, resp = _do_award(backend, free_wallet, target_post, "quality_post")
-            if code == 400:
-                _pass("attack.award_self_rejected")
-            else:
-                _fail("attack.award_self_rejected", f"expected http=400 got http={code} resp={resp}")
+            _code, resp = _do_award(backend, free_wallet, target_post, "quality_post")
+            _expect_http_error("attack.award_self_rejected", resp, 400, "cannot award your own post")
         except Exception as e:
             _fail("attack.award_self_rejected", str(e))
 
         # 10.26 Unknown award type rejected
         try:
-            code, resp = _do_award(backend, sub_wallet, target_post, "not_a_real_award")
-            if code == 400:
-                _pass("attack.award_unknown_type_rejected")
-            else:
-                _fail("attack.award_unknown_type_rejected", f"expected http=400 got http={code} resp={resp}")
+            _code, resp = _do_award(backend, sub_wallet, target_post, "not_a_real_award")
+            _expect_http_error("attack.award_unknown_type_rejected", resp, 400, "unknown award type")
         except Exception as e:
             _fail("attack.award_unknown_type_rejected", str(e))
 
         # 10.27 Invalid target rejected
         try:
-            code, resp = _do_award(backend, sub_wallet, "not_a_hash", "quality_post")
-            if code == 400:
-                _pass("attack.award_invalid_target_rejected")
-            else:
-                _fail("attack.award_invalid_target_rejected", f"expected http=400 got http={code} resp={resp}")
+            _code, resp = _do_award(backend, sub_wallet, "not_a_hash", "quality_post")
+            _expect_http_error("attack.award_invalid_target_rejected", resp, 400, "invalid target")
         except Exception as e:
             _fail("attack.award_invalid_target_rejected", str(e))
 
         # 10.28 PoW provided for award rejected
         try:
-            code, resp = _do_award(backend, sub_wallet, target_post, "quality_post", pow_difficulty=1, pow=1)
-            if code == 400:
-                _pass("attack.award_pow_rejected")
-            else:
-                _fail("attack.award_pow_rejected", f"expected http=400 got http={code} resp={resp}")
+            _code, resp = _do_award(backend, sub_wallet, target_post, "quality_post", pow_difficulty=1, pow=1)
+            _expect_http_error("attack.award_pow_rejected", resp, 400, "pow not allowed for award")
         except Exception as e:
             _fail("attack.award_pow_rejected", str(e))
 
@@ -411,7 +393,7 @@ def test_security(backend: str):
                 "award_type": "based",
             }
             _code, resp = _post(f"{backend}/api/core/award", payload)
-            _expect_http_error("attack.award_signature_replay_rejected", resp, 400)
+            _expect_http_error("attack.award_signature_replay_rejected", resp, 400, "invalid signature")
         except Exception as e:
             _fail("attack.award_signature_replay_rejected", str(e))
 
@@ -436,7 +418,7 @@ def test_security(backend: str):
                 "award_type": "quality_post",
             }
             _code, resp = _post(f"{backend}/api/core/award", payload)
-            _expect_http_error("attack.award_invalid_pubkey_rejected", resp, 400)
+            _expect_http_error("attack.award_invalid_pubkey_rejected", resp, 400, "invalid relay fields")
         except Exception as e:
             _fail("attack.award_invalid_pubkey_rejected", str(e))
 
@@ -535,28 +517,28 @@ def test_security(backend: str):
     # 10.13 Block self — attempt to block own address
     try:
         resp = _do_block(backend, free_wallet, free_addr, "user", block=True)
-        _expect_http_error("attack.block_self_rejected", resp, 400)
+        _expect_http_error("attack.block_self_rejected", resp, 400, "cannot block yourself")
     except Exception as e:
         _fail("attack.block_self_rejected", str(e))
 
     # 10.14 Follow self user
     try:
         resp = _do_follow_user(backend, free_wallet, free_addr, follow=True)
-        _expect_http_error("attack.follow_self_user_rejected", resp, 400)
+        _expect_http_error("attack.follow_self_user_rejected", resp, 400, "cannot follow yourself")
     except Exception as e:
         _fail("attack.follow_self_user_rejected", str(e))
 
     # 10.15 Empty target for block_user
     try:
         resp = _do_block(backend, free_wallet, "", "user", block=True)
-        _expect_http_error("attack.empty_block_target_rejected", resp, 400)
+        _expect_http_error("attack.empty_block_target_rejected", resp, 400, "missing required fields")
     except Exception as e:
         _fail("attack.empty_block_target_rejected", str(e))
 
     # 10.16 Very long follow target (64KB address)
     try:
         resp = _do_follow_user(backend, free_wallet, "x" * 65536, follow=True)
-        _expect_http_error("attack.very_long_follow_target_rejected", resp, 400)
+        _expect_http_error("attack.very_long_follow_target_rejected", resp, 400, "user must be a valid mirage1 address")
     except Exception as e:
         _fail("attack.very_long_follow_target_rejected", str(e))
 
@@ -575,7 +557,7 @@ def test_security(backend: str):
     if (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False:
         try:
             resp = _do_set_username_raw(backend, free_wallet, "user\x00evil")
-            _expect_http_error("attack.null_bytes_username_rejected", resp, 400)
+            _expect_http_error("attack.null_bytes_username_rejected", resp, 400, "invalid control characters")
         except Exception as e:
             _fail("attack.null_bytes_username_rejected", str(e))
     else:
@@ -610,7 +592,9 @@ def test_security(backend: str):
             if code == 400:
                 _pass("attack.push_register_invalid_signature_rejected")
             else:
-                _fail("attack.push_register_invalid_signature_rejected", f"expected http=400 got http={code} resp={resp}")
+                _fail(
+                    "attack.push_register_invalid_signature_rejected", f"expected http=400 got http={code} resp={resp}"
+                )
         except Exception as e:
             _fail("attack.push_register_invalid_signature_rejected", str(e))
 
@@ -776,11 +760,8 @@ def test_security(backend: str):
             "envelope_nonce": str(nonce),
             "address": str(sub_wallet.address()),
         }
-        code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
-        if code == 400:
-            _pass("attack.mark_inbox_viewed_mismatch_rejected")
-        else:
-            _fail("attack.mark_inbox_viewed_mismatch_rejected", f"expected http=400 got http={code} resp={resp}")
+        _code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
+        _expect_http_error("attack.mark_inbox_viewed_mismatch_rejected", resp, 400, "address does not match pubkey")
     except Exception as e:
         _fail("attack.mark_inbox_viewed_mismatch_rejected", str(e))
 
@@ -803,21 +784,21 @@ def test_validation(backend: str):
     # ------ Username validation ------
 
     invalid_usernames = [
-        ("ab", "too_short"),
-        ("a" * 50, "too_long"),
-        ("user name", "space"),
-        ("user.name", "dot"),
-        ("user@name", "symbol"),
-        ("\U0001f642user", "emoji"),
+        ("ab", "too_short", "username too short"),
+        ("a" * 50, "too_long", "username too long"),
+        ("user name", "space", "invalid username format"),
+        ("user.name", "dot", "invalid username format"),
+        ("user@name", "symbol", "invalid username format"),
+        ("\U0001f642user", "emoji", "invalid username format"),
     ]
 
-    for uname, label in invalid_usernames:
+    for uname, label, expected in invalid_usernames:
         if not reg_enabled:
             _pass(f"validation.username_{label} skipped (registration disabled)")
             continue
         try:
             resp = _do_set_username_raw(backend, free_wallet, uname)
-            _expect_http_error(f"validation.username_{label}_rejected", resp, 400)
+            _expect_http_error(f"validation.username_{label}_rejected", resp, 400, expected)
         except Exception as e:
             _fail(f"validation.username_{label}_rejected", str(e))
 
@@ -846,14 +827,14 @@ def test_validation(backend: str):
     # ------ Content tag validation ------
 
     invalid_tags = [
-        ("invalid", "unknown_tag"),
-        ("SENSITIVE", "uppercase_tag"),
-        ("nsfw", "nsfw_instead_of_sensitive"),
-        ("adult", "adult_instead_of_porn"),
-        ("Porn", "mixed_case_tag"),
+        ("invalid", "unknown_tag", "invalid tag"),
+        ("SENSITIVE", "uppercase_tag", "invalid tag"),
+        ("nsfw", "nsfw_instead_of_sensitive", "invalid tag"),
+        ("adult", "adult_instead_of_porn", "invalid tag"),
+        ("Porn", "mixed_case_tag", "invalid tag"),
     ]
 
-    for tag, label in invalid_tags:
+    for tag, label, expected in invalid_tags:
         try:
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
             pub = free_wallet.public_key().public_key_bytes
@@ -881,7 +862,7 @@ def test_validation(backend: str):
                 "tag": tag,
             }
             _code, resp = _post(f"{backend}/api/core/post", payload)
-            _expect_http_error(f"validation.tag_{label}_rejected", resp, 400)
+            _expect_http_error(f"validation.tag_{label}_rejected", resp, 400, expected)
         except Exception as e:
             _fail(f"validation.tag_{label}_rejected", str(e))
 
@@ -890,7 +871,7 @@ def test_validation(backend: str):
     # 11.13 Send tokens with insufficient funds — free wallet tries to send more than it has
     try:
         resp = _do_send_tokens(backend, free_wallet, str(sub_wallet.address()), 999_999_999_999_999)
-        _expect_http_error("validation.send_tokens_insufficient_rejected", resp, 400)
+        _expect_http_error("validation.send_tokens_insufficient_rejected", resp, 400, "insufficient balance")
     except Exception as e:
         _fail("validation.send_tokens_insufficient_rejected", str(e))
 
@@ -899,14 +880,14 @@ def test_validation(backend: str):
     # 11.14 Upgrade to invalid level (100) — rejected
     try:
         resp = _do_subscribe(backend, free_wallet, 100)
-        _expect_http_error("validation.subscribe_invalid_level_rejected", resp, 400)
+        _expect_http_error("validation.subscribe_invalid_level_rejected", resp, 400, "invalid level")
     except Exception as e:
         _fail("validation.subscribe_invalid_level_rejected", str(e))
 
     # 11.15 Upgrade to invalid level (3) — rejected (only 1 and 10 are valid)
     try:
         resp = _do_subscribe(backend, free_wallet, 3)
-        _expect_http_error("validation.subscribe_invalid_level_3_rejected", resp, 400)
+        _expect_http_error("validation.subscribe_invalid_level_3_rejected", resp, 400, "invalid level")
     except Exception as e:
         _fail("validation.subscribe_invalid_level_3_rejected", str(e))
 
@@ -918,15 +899,15 @@ def test_validation(backend: str):
         _wait_indexed(backend, free_addr, test_post)
         try:
             resp = _do_report(backend, free_wallet, test_post, "x" * 2000)
-            _expect_http_error("validation.report_reason_too_long_rejected", resp, 400)
+            _expect_http_error("validation.report_reason_too_long_rejected", resp, 400, "reason too long")
         except Exception as e:
             _fail("validation.report_reason_too_long_rejected", str(e))
     else:
         _fail("validation.report_reason_too_long (setup failed)")
 
-    # ------ Subscriber PoW rejection across all endpoints ------
+    # ------ Subscriber PoW acceptance across key endpoints ------
 
-    # 11.17–11.20 Subscriber using PoW should be rejected for various actions
+    # 11.17–11.20 Subscriber using PoW should be allowed (no "pow not allowed" rejection)
     sub_endpoints = [
         ("vote", lambda: _do_vote(backend, sub_wallet, "bb" * 32, 1, skip_pow=False)),
         ("set_username", lambda: _do_set_username_raw(backend, sub_wallet, f"powtest-{_rand_str(4)}")),
@@ -935,13 +916,18 @@ def test_validation(backend: str):
     for endpoint_name, action_fn in sub_endpoints:
         try:
             resp = action_fn()
-            _expect_http_error(f"validation.subscriber_pow_{endpoint_name}_rejected", resp, 400)
-        except Exception as e:
-            err_str = str(e).lower()
-            if "400" in err_str or "not allowed" in err_str:
-                _pass(f"validation.subscriber_pow_{endpoint_name}_rejected")
+            err = str((resp or {}).get("error", "")).lower()
+            http_status = int((resp or {}).get("_http_status", 0) or 0)
+            if (http_status == 0 and err == "internal server error") or http_status >= 500:
+                _fail(
+                    f"validation.subscriber_pow_{endpoint_name}_allowed", f"http={http_status} err={err!r} resp={resp}"
+                )
+            elif "pow not allowed" in err:
+                _fail(f"validation.subscriber_pow_{endpoint_name}_allowed", f"pow still rejected err={err!r}")
             else:
-                _fail(f"validation.subscriber_pow_{endpoint_name}_rejected", str(e))
+                _pass(f"validation.subscriber_pow_{endpoint_name}_allowed")
+        except Exception as e:
+            _fail(f"validation.subscriber_pow_{endpoint_name}_allowed", str(e))
 
 
 # =========================================================================

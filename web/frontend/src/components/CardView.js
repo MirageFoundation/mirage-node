@@ -1369,7 +1369,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             if (result.success) {
                 const isAgent = giftLevel === 10;
                 let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
-                msg += ` Active until ${expiryLabel}`;
+                msg += ` Extended until ${expiryLabel}`;
                 setGiftSubMessage({ type: 'success', message: msg });
             } else {
                 const raw = String(result.error || 'Transaction failed');
@@ -2741,7 +2741,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
                                     )}
                                     {confirmGiftSub.expiryLabel && (
-                                        <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Active until {confirmGiftSub.expiryLabel}</span>
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Extended until {confirmGiftSub.expiryLabel}</span>
                                     )}
                                     {confirmGiftSub.error && (
                                         <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>

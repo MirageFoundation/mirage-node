@@ -109,11 +109,14 @@ const ERROR_MAP = {
     biography_too_long: "Your biography exceeds the maximum length.",
 
     // Blocks / follows
+    cannot_block_self: "You cannot block yourself.",
+    cannot_follow_self: "You cannot follow yourself.",
     post_already_blocked: "You already blocked this post.",
     user_already_blocked: "You already blocked this user.",
     topic_already_blocked: "You already blocked this topic.",
     user_already_followed: "You already follow this user.",
     topic_already_followed: "You already follow this topic.",
+    user_must_be_mirage1: "User must be a valid mirage1 address.",
     block_post_in_progress: "Block post request already in progress.",
     unblock_post_in_progress: "Unblock post request already in progress.",
     block_user_in_progress: "Block user request already in progress.",
