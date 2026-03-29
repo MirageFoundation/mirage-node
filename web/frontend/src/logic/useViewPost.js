@@ -13,15 +13,10 @@ import { uploadImage } from "../utils/ImageUpload";
 import { sortComments } from "../utils/SortComments";
 import { getCollapseThreshold, shouldAutoCollapse } from "../utils/Comments";
 import { updateNotification } from "../utils/notifications";
-import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
-import { lightColors as fallbackLightColors } from "../styled/colors/light";
+import { requireThemeColor } from "../utils/themeColor";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
-export const pickCard = (theme, key) => {
-    if (theme.colors[key]) return theme.colors[key];
-    const isLight = theme.name === 'light';
-    return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
-};
+export const pickCard = requireThemeColor;
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
 // Supports $size prop ('compact' or 'large') to match feed view mode

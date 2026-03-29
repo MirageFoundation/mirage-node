@@ -110,7 +110,6 @@ export default function ReportsView({
   state
 }) {
   const {
-    location,
     reports,
     loading,
     error,

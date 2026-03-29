@@ -458,7 +458,6 @@ export default function SubscriptionView({
     state
 }) {
     const {
-        location,
         address,
         userLevel,
         subscriptionExpiry,

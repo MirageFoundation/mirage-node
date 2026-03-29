@@ -175,7 +175,6 @@ function ChangeUsernameView({
   state
 }) {
   const {
-    location,
     currentUsername,
     usernameInput,
     setUsernameInput,

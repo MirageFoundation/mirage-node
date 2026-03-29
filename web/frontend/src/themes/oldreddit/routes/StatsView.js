@@ -301,7 +301,6 @@ const TierCount = styled.span`
 `;
 export default function StatsView() {
   const {
-    location,
     activeTab,
     setActiveTab,
     signupsData,

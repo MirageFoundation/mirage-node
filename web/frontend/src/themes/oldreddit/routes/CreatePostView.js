@@ -253,7 +253,6 @@ function CreatePostView({
     updatePost
 }) {
     const {
-        location,
         isEditMode,
         overrideId,
         topicValue,

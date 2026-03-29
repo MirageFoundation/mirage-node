@@ -71,7 +71,6 @@ function LoginView({
 }) {
   const {
     navigate,
-    location,
     seedPhrase,
     setSeedPhrase,
     error,

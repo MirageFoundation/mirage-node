@@ -1595,7 +1595,6 @@ export default function BridgeView({
     state
 }) {
     const {
-        location,
         theme,
         address,
         valoperAddress,

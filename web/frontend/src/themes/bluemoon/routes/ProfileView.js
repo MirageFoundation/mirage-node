@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
@@ -311,6 +311,9 @@ const LoadingRow = styled.div`
 export default function ProfileView({
     state
 }) {
+    const { caps } = useTheme();
+    const profileHideFilterSelect = caps.profileHideFilterSelect;
+    const profilePostsFullWidth = caps.profilePostsFullWidth;
     const {
         navigate,
         location,
@@ -325,8 +328,6 @@ export default function ProfileView({
         activeTab,
         setActiveTab,
         profileUsesListFeed,
-        profileHideFilterSelect,
-        profilePostsFullWidth,
         FeedComponent,
         isPostsTab,
         profileUsername,

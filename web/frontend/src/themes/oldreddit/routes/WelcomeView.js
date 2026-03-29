@@ -158,7 +158,6 @@ function WelcomeView({
 }) {
   const {
     navigate,
-    location,
     copied,
     setCopied,
     username,

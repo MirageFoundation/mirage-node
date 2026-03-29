@@ -139,7 +139,6 @@ export default function FollowsView({
 }) {
   const {
     navigate,
-    location,
     followedUsers,
     followedTopics,
     followedUsernames,

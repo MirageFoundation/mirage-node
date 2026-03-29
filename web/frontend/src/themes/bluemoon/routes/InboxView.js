@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Navigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
@@ -241,9 +241,10 @@ const QuoteBlock = styled.blockquote`
 export default function InboxView({
     state
 }) {
+    const theme = useTheme();
+    const inboxFullWidth = theme.caps.inboxFullWidth;
     const {
         location,
-        inboxFullWidth,
         replies,
         loading,
         error,

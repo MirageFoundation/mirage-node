@@ -8,6 +8,7 @@
  *
  * Order: THEME_MANIFESTS[0] is the default when storage is missing or invalid.
  * Themes own all visuals; shared app code lives in logic/, utils/, lib API — not under themes/.
+ * Required `components` keys for App-level facades: see REQUIRED_THEME_COMPONENT_KEYS in src/registry/theme.js.
  */
 
 import bluemoonManifest from './bluemoon/index';

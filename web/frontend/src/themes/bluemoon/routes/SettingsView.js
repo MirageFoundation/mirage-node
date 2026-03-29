@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Navigate } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
-import { THEMES } from "../../../styled/theme";
+import { THEMES } from "../../../registry/theme";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
@@ -12,16 +12,16 @@ import { useSettings, CheckboxInput, RadioInput } from "../../../logic/useSettin
 const Row = styled.div`
     display: grid;
     grid-template-columns: ${({
-  theme
+    theme
 }) => theme.layout.formRowColumns};
     gap: ${({
-  theme
+    theme
 }) => theme.layout.formRowGap};
     align-items: ${({
-  theme
+    theme
 }) => theme.layout.formRowAlign};
     margin: ${({
-  theme
+    theme
 }) => theme.layout.formRowMargin};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
@@ -31,17 +31,17 @@ const Row = styled.div`
 `;
 const Label = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-weight: ${({
-  theme
+    theme
 }) => theme.layout.labelWeight};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.labelSize};
     white-space: nowrap;
     padding-top: ${({
-  theme
+    theme
 }) => theme.layout.labelPaddingTop};
     @media (max-width: 1000px) {
         padding-top: 0;
@@ -50,19 +50,19 @@ const Label = styled.div`
 `;
 const ValueBox = styled.div`
     background-color: ${({
-  theme
+    theme
 }) => theme.layout.containerBg};
     border: ${({
-  theme
+    theme
 }) => theme.layout.containerBorder};
     border-bottom: ${({
-  theme
+    theme
 }) => theme.layout.containerBorderBottom};
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.containerRadius};
     padding: ${({
-  theme
+    theme
 }) => theme.layout.containerPadding};
     width: 100%;
     box-sizing: border-box;
@@ -70,22 +70,22 @@ const ValueBox = styled.div`
 `;
 const ThemeSelect = styled.select`
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.inputRadius};
     padding: ${({
-  theme
+    theme
 }) => theme.layout.inputPadding};
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.inputSize};
     width: 100%;
     cursor: pointer;
@@ -95,16 +95,16 @@ const ThemeSelect = styled.select`
         outline: none;
         border-color: #667eea;
         box-shadow: ${({
-  theme
+    theme
 }) => theme.layout.focusRing};
     }
 `;
 const ExplanationText = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.smallSize};
     margin-top: 0.25rem;
     font-style: italic;
@@ -114,14 +114,14 @@ const CheckboxLabel = styled.label`
     display: inline-grid;
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: ${({
-  theme
+    theme
 }) => theme.layout.formRowGap};
     align-items: flex-start;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.bodySize};
     line-height: 1.25;
     white-space: normal;
@@ -131,77 +131,77 @@ const CheckboxLabel = styled.label`
 
     &:hover input[type="checkbox"] {
         border-color: ${({
-  theme
+    theme
 }) => theme.colors.borderStrong};
         box-shadow: ${({
-  theme
+    theme
 }) => theme.layout.focusRing};
     }
 `;
 const HelperText = styled.span`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.smallSize};
 `;
 const SecurityBanner = styled.div`
     background-color: rgba(245, 158, 11, 0.1);
     border: 1px solid #f59e0b;
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.bannerRadius};
     padding: ${({
-  theme
+    theme
 }) => theme.layout.bannerPadding};
     margin-bottom: ${({
-  theme
+    theme
 }) => theme.layout.sectionMarginBottom};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.bannerSize};
     line-height: 1.4;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
 `;
 const RadioGroup = styled.div`
     display: flex;
     flex-direction: column;
     gap: ${({
-  theme
+    theme
 }) => theme.layout.formRowGap};
 `;
 const RadioLabel = styled.label`
     display: inline-grid;
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: ${({
-  theme
+    theme
 }) => theme.layout.formRowGap};
     align-items: flex-start;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.bodySize};
     line-height: 1.25;
     cursor: ${({
-  $disabled
+    $disabled
 }) => $disabled ? 'not-allowed' : 'pointer'};
     opacity: ${({
-  $disabled
+    $disabled
 }) => $disabled ? 0.45 : 1};
     user-select: none;
 `;
 const RadioDescription = styled.span`
     display: block;
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.smallSize};
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-style: italic;
     margin-top: 0.1rem;
@@ -218,22 +218,22 @@ const PasswordInput = styled.input`
     min-width: 120px;
     max-width: 220px;
     padding: ${({
-  theme
+    theme
 }) => theme.layout.inputPadding};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.inputSize};
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.inputRadius};
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     box-sizing: border-box;
 
@@ -241,22 +241,22 @@ const PasswordInput = styled.input`
         outline: none;
         border-color: #667eea;
         box-shadow: ${({
-  theme
+    theme
 }) => theme.layout.focusRing};
     }
 `;
 const SmallButton = styled.button`
     padding: ${({
-  theme
+    theme
 }) => theme.layout.buttonPadding};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.buttonSize};
     font-weight: 600;
     cursor: pointer;
     border: none;
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.buttonRadius};
     background: #3b82f6;
     color: #fff;
@@ -283,22 +283,22 @@ const DangerInput = styled.input`
     flex: 1;
     min-width: 160px;
     padding: ${({
-  theme
+    theme
 }) => theme.layout.inputPadding};
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.inputSize};
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.inputRadius};
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     box-sizing: border-box;
 
@@ -306,7 +306,7 @@ const DangerInput = styled.input`
         outline: none;
         border-color: #ef4444;
         box-shadow: ${({
-  theme
+    theme
 }) => theme.layout.focusRing};
     }
 `;
@@ -319,11 +319,11 @@ const DangerRow = styled.div`
 const DangerNotice = styled.div`
     color: #fca5a5;
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.smallSize};
     line-height: 1.4;
     margin-bottom: ${({
-  theme
+    theme
 }) => theme.layout.sectionMarginBottom};
 `;
 const SecurityError = styled.div`
@@ -335,17 +335,17 @@ const SecuritySuccess = styled.div`
     background-color: rgba(34, 197, 94, 0.1);
     border: 1px solid #22c55e;
     border-radius: ${({
-  theme
+    theme
 }) => theme.layout.bannerRadius};
     padding: ${({
-  theme
+    theme
 }) => theme.layout.bannerPadding};
     margin-top: ${({
-  theme
+    theme
 }) => theme.layout.sectionMarginBottom};
     color: #22c55e;
     font-size: ${({
-  theme
+    theme
 }) => theme.layout.bannerSize};
     display: flex;
     align-items: center;
@@ -359,10 +359,10 @@ const SeedGrid = styled.div`
     margin: 0.5rem 0;
     padding: 0.75rem;
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.panel};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: 4px;
     position: relative;
@@ -376,17 +376,17 @@ const SeedGrid = styled.div`
 `;
 const SeedWord = styled.div`
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: 3px;
     padding: 0.3rem 0.2rem;
     text-align: left;
     font-size: 0.75rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     display: flex;
@@ -399,7 +399,7 @@ const SeedWord = styled.div`
     &:before {
         content: attr(data-index);
         color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
         font-size: 0.5rem;
         min-width: 12px;
@@ -425,532 +425,516 @@ const SeedWarning = styled.div`
 const Divider = styled.hr`
     border: none;
     border-top: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     margin: ${({
-  theme
+    theme
 }) => theme.layout.dividerMargin};
 `;
 export default function SettingsView({
-  state
-}) {
-  const {
-    location,
-    themeId,
-    themeMode,
-    collapseThreshold,
-    sidebarTopicsLimit,
-    sidebarPeopleLimit,
-    hideDownvotedPosts,
-    setHideDownvotedPosts,
-    blurSensitiveMedia,
-    setBlurSensitiveMedia,
-    showTagSensitive,
-    setShowTagSensitive,
-    showTagPorn,
-    setShowTagPorn,
-    showTagViolence,
-    setShowTagViolence,
-    showTagGore,
-    setShowTagGore,
-    showTagDeath,
-    setShowTagDeath,
-    fullWidthMode,
-    setFullWidthMode,
-    referralPrecheckEnabled,
-    referralPrecheckBusy,
-    referralPrecheckError,
-    referralPrecheckSuccess,
-    inviteCodesRequired,
-    seedMode,
-    prfSupported,
-    secPassword,
-    setSecPassword,
-    secPasswordConfirm,
-    setSecPasswordConfirm,
-    secPending,
-    secError,
-    setSecError,
-    secSuccess,
-    secBusy,
-    deleteConfirmText,
-    setDeleteConfirmText,
-    deleteError,
-    setDeleteError,
-    deleteSuccess,
-    setDeleteSuccess,
-    deleteStatus,
-    deleteBusy,
-    deleteConfirmReady,
-    seedRevealed,
-    setSeedRevealed,
-    seedCopied,
-    setSeedCopied,
-    commitModeSwitch,
-    handleModeSelect,
-    handleThemeIdChange,
-    handleThemeModeChange,
-    handleReferralPrecheckToggle,
-    handleCollapseThresholdChange,
-    handleSidebarTopicsLimitChange,
-    handleSidebarPeopleLimitChange,
-    getThemeExplanation,
-    handleDeleteAccount
-  } = useSettings({
     state
-  });
-  if (!state.publicKey) {
-    return <Navigate to="/login" replace />;
-  }
-  return <ContentGrid>
-            <Helmet>
-                <title>Settings | Mirage</title>
-            </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
-            <div>
-                <TopBar state={state} />
-                <ModernPostFeed>
-                    <MobileHeader />
-                    <TabbedContainer>
-                        <ContainerTab>Settings</ContainerTab>
-                        <ContainerBody>
-                            {/* ── Security rows (top of settings) ──────────── */}
-                            {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
-                                    Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
-                                </SecurityBanner>}
+}) {
+    const {
+        location,
+        themeId,
+        themeMode,
+        collapseThreshold,
+        sidebarTopicsLimit,
+        sidebarPeopleLimit,
+        hideDownvotedPosts,
+        setHideDownvotedPosts,
+        blurSensitiveMedia,
+        setBlurSensitiveMedia,
+        showTagSensitive,
+        setShowTagSensitive,
+        showTagPorn,
+        setShowTagPorn,
+        showTagViolence,
+        setShowTagViolence,
+        showTagGore,
+        setShowTagGore,
+        showTagDeath,
+        setShowTagDeath,
+        referralPrecheckEnabled,
+        referralPrecheckBusy,
+        referralPrecheckError,
+        referralPrecheckSuccess,
+        inviteCodesRequired,
+        seedMode,
+        prfSupported,
+        secPassword,
+        setSecPassword,
+        secPasswordConfirm,
+        setSecPasswordConfirm,
+        secPending,
+        secError,
+        setSecError,
+        secSuccess,
+        secBusy,
+        deleteConfirmText,
+        setDeleteConfirmText,
+        deleteError,
+        setDeleteError,
+        deleteSuccess,
+        setDeleteSuccess,
+        deleteStatus,
+        deleteBusy,
+        deleteConfirmReady,
+        seedRevealed,
+        setSeedRevealed,
+        seedCopied,
+        setSeedCopied,
+        commitModeSwitch,
+        handleModeSelect,
+        handleThemeIdChange,
+        handleThemeModeChange,
+        handleReferralPrecheckToggle,
+        handleCollapseThresholdChange,
+        handleSidebarTopicsLimitChange,
+        handleSidebarPeopleLimitChange,
+        getThemeExplanation,
+        handleDeleteAccount
+    } = useSettings({
+        state
+    });
+    if (!state.publicKey) {
+        return <Navigate to="/login" replace />;
+    }
+    return <ContentGrid>
+        <Helmet>
+            <title>Settings | Mirage</title>
+        </Helmet>
+        <Sidebar currentPath={location.pathname} state={state} />
+        <div>
+            <TopBar state={state} />
+            <ModernPostFeed>
+                <MobileHeader />
+                <TabbedContainer>
+                    <ContainerTab>Settings</ContainerTab>
+                    <ContainerBody>
+                        {/* ── Security rows (top of settings) ──────────── */}
+                        {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
+                            Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
+                        </SecurityBanner>}
 
-                            <Row>
-                                <Label style={{
-                whiteSpace: 'normal'
-              }}>Seed phrase storage:</Label>
-                                <ValueBox>
-                                    <RadioGroup>
-                                        <RadioLabel>
-                                            <RadioInput name="seed_mode" value="insecure" checked={seedMode === 'insecure' && secPending !== 'password'} onChange={() => handleModeSelect('insecure')} disabled={secBusy} />
-                                            <span>
-                                                Unencrypted (default)
-                                                <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
-                                            </span>
-                                        </RadioLabel>
-                                        {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Seed phrase storage:</Label>
+                            <ValueBox>
+                                <RadioGroup>
+                                    <RadioLabel>
+                                        <RadioInput name="seed_mode" value="insecure" checked={seedMode === 'insecure' && secPending !== 'password'} onChange={() => handleModeSelect('insecure')} disabled={secBusy} />
+                                        <span>
+                                            Unencrypted (default)
+                                            <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+                                    {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
 
-                                        <RadioLabel>
-                                            <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
-                                            <span>
-                                                Password encrypted
-                                                <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
-                                            </span>
-                                        </RadioLabel>
+                                    <RadioLabel>
+                                        <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
+                                        <span>
+                                            Password encrypted
+                                            <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
+                                        </span>
+                                    </RadioLabel>
 
-                                        {secPending === 'password' && <div style={{
-                    paddingLeft: '1.3rem'
-                  }}>
-                                                <InlinePasswordRow>
-                                                    <PasswordInput type="password" placeholder="Password" value={secPassword} onChange={e => {
-                        setSecPassword(e.target.value);
-                        setSecError('');
-                      }} disabled={secBusy} autoFocus />
-                                                </InlinePasswordRow>
-                                                <InlinePasswordRow>
-                                                    <PasswordInput type="password" placeholder="Confirm password" value={secPasswordConfirm} onChange={e => {
-                        setSecPasswordConfirm(e.target.value);
-                        setSecError('');
-                      }} disabled={secBusy} onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (secPassword !== secPasswordConfirm) {
-                            setSecError('Passwords do not match.');
-                          } else {
-                            commitModeSwitch('password', secPassword);
-                          }
-                        }
-                      }} />
-                                                    <SmallButton disabled={secBusy || !secPassword.trim()} onClick={() => {
-                        if (secPassword !== secPasswordConfirm) {
-                          setSecError('Passwords do not match.');
-                        } else {
-                          commitModeSwitch('password', secPassword);
-                        }
-                      }}>
-                                                        {secBusy ? 'Encrypting...' : 'Set Password'}
-                                                    </SmallButton>
-                                                </InlinePasswordRow>
-                                                {secError && <SecurityError>{secError}</SecurityError>}
-                                            </div>}
-                                        {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    {secPending === 'password' && <div style={{
+                                        paddingLeft: '1.3rem'
+                                    }}>
+                                        <InlinePasswordRow>
+                                            <PasswordInput type="password" placeholder="Password" value={secPassword} onChange={e => {
+                                                setSecPassword(e.target.value);
+                                                setSecError('');
+                                            }} disabled={secBusy} autoFocus />
+                                        </InlinePasswordRow>
+                                        <InlinePasswordRow>
+                                            <PasswordInput type="password" placeholder="Confirm password" value={secPasswordConfirm} onChange={e => {
+                                                setSecPasswordConfirm(e.target.value);
+                                                setSecError('');
+                                            }} disabled={secBusy} onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    if (secPassword !== secPasswordConfirm) {
+                                                        setSecError('Passwords do not match.');
+                                                    } else {
+                                                        commitModeSwitch('password', secPassword);
+                                                    }
+                                                }
+                                            }} />
+                                            <SmallButton disabled={secBusy || !secPassword.trim()} onClick={() => {
+                                                if (secPassword !== secPasswordConfirm) {
+                                                    setSecError('Passwords do not match.');
+                                                } else {
+                                                    commitModeSwitch('password', secPassword);
+                                                }
+                                            }}>
+                                                {secBusy ? 'Encrypting...' : 'Set Password'}
+                                            </SmallButton>
+                                        </InlinePasswordRow>
+                                        {secError && <SecurityError>{secError}</SecurityError>}
+                                    </div>}
+                                    {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
 
-                                        <RadioLabel>
-                                            <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
-                                            <span>
-                                                Memory only
-                                                <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
-                                            </span>
-                                        </RadioLabel>
-                                        {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    <RadioLabel>
+                                        <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
+                                        <span>
+                                            Memory only
+                                            <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+                                    {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
 
-                                        <RadioLabel $disabled={!prfSupported}>
-                                            <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
-                                            <span>
-                                                Passkey (Touch ID / Face ID / Security Key)
-                                                <RadioDescription>
-                                                    {prfSupported ? 'Seed encrypted with your passkey. Authenticate to unlock each session.' : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
-                                                </RadioDescription>
-                                            </span>
-                                        </RadioLabel>
-                                        {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
-                                    </RadioGroup>
+                                    <RadioLabel $disabled={!prfSupported}>
+                                        <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
+                                        <span>
+                                            Passkey (Touch ID / Face ID / Security Key)
+                                            <RadioDescription>
+                                                {prfSupported ? 'Seed encrypted with your passkey. Authenticate to unlock each session.' : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
+                                            </RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+                                    {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                </RadioGroup>
 
-                                    {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
-                                </ValueBox>
-                            </Row>
+                                {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
+                            </ValueBox>
+                        </Row>
 
-                            {state.publicKey && <Row>
-                                    <Label style={{
-                whiteSpace: 'normal'
-              }}>Recovery phrase:</Label>
-                                    <ValueBox>
-                                        {!seedRevealed ? <>
-                                                <SmallButton onClick={() => {
-                    const s = seedVault.getSeed();
-                    if (!s) {
-                      setSecError('No seed phrase available. Please sign in first.');
-                      return;
-                    }
-                    setSeedRevealed(true);
-                    setSeedCopied(false);
-                  }}>
-                                                    Reveal Recovery Phrase
-                                                </SmallButton>
-                                                <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
-                                            </> : <>
-                                                <SeedWarning>
-                                                    Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.
-                                                </SeedWarning>
-                                                <SeedGrid>
-                                                    {(seedVault.getSeed() || '').split(' ').map((word, i) => <SeedWord key={i} data-index={i + 1}>
-                                                            {word}
-                                                        </SeedWord>)}
-                                                </SeedGrid>
-                                                <div style={{
-                    display: 'flex',
-                    gap: '0.5rem',
-                    marginTop: '0.35rem'
-                  }}>
-                                                    <SmallButton onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(seedVault.getSeed() || '');
-                        setSeedCopied(true);
-                        setTimeout(() => setSeedCopied(false), 2000);
-                      } catch (_) {}
-                    }}>
-                                                        {seedCopied ? 'Copied!' : 'Copy'}
-                                                    </SmallButton>
-                                                    <SmallButton onClick={() => {
-                      setSeedRevealed(false);
-                      setSeedCopied(false);
-                    }} style={{
-                      background: 'transparent',
-                      border: '1px solid #555',
-                      color: '#ccc'
-                    }}>
-                                                        Hide
-                                                    </SmallButton>
-                                                </div>
-                                            </>}
-                                    </ValueBox>
-                                </Row>}
+                        {state.publicKey && <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Recovery phrase:</Label>
+                            <ValueBox>
+                                {!seedRevealed ? <>
+                                    <SmallButton onClick={() => {
+                                        const s = seedVault.getSeed();
+                                        if (!s) {
+                                            setSecError('No seed phrase available. Please sign in first.');
+                                            return;
+                                        }
+                                        setSeedRevealed(true);
+                                        setSeedCopied(false);
+                                    }}>
+                                        Reveal Recovery Phrase
+                                    </SmallButton>
+                                    <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
+                                </> : <>
+                                    <SeedWarning>
+                                        Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.
+                                    </SeedWarning>
+                                    <SeedGrid>
+                                        {(seedVault.getSeed() || '').split(' ').map((word, i) => <SeedWord key={i} data-index={i + 1}>
+                                            {word}
+                                        </SeedWord>)}
+                                    </SeedGrid>
+                                    <div style={{
+                                        display: 'flex',
+                                        gap: '0.5rem',
+                                        marginTop: '0.35rem'
+                                    }}>
+                                        <SmallButton onClick={async () => {
+                                            try {
+                                                await navigator.clipboard.writeText(seedVault.getSeed() || '');
+                                                setSeedCopied(true);
+                                                setTimeout(() => setSeedCopied(false), 2000);
+                                            } catch (_) { }
+                                        }}>
+                                            {seedCopied ? 'Copied!' : 'Copy'}
+                                        </SmallButton>
+                                        <SmallButton onClick={() => {
+                                            setSeedRevealed(false);
+                                            setSeedCopied(false);
+                                        }} style={{
+                                            background: 'transparent',
+                                            border: '1px solid #555',
+                                            color: '#ccc'
+                                        }}>
+                                            Hide
+                                        </SmallButton>
+                                    </div>
+                                </>}
+                            </ValueBox>
+                        </Row>}
 
-                            <Divider />
+                        <Divider />
 
-                            <Row>
-                                <Label>Theme:</Label>
-                                <ValueBox>
-                                    <ThemeSelect value={themeId} onChange={handleThemeIdChange}>
-                                        {Object.values(THEMES).map(t => <option key={t.id} value={t.id}>{t.label} — {t.description}</option>)}
+                        <Row>
+                            <Label>Theme:</Label>
+                            <ValueBox>
+                                <ThemeSelect value={themeId} onChange={handleThemeIdChange}>
+                                    {Object.values(THEMES).map(t => <option key={t.id} value={t.id}>{t.label} — {t.description}</option>)}
+                                </ThemeSelect>
+                            </ValueBox>
+                        </Row>
+
+                        <Row>
+                            <Label>Theme mode:</Label>
+                            <ValueBox>
+                                <ThemeSelect value={themeMode} onChange={handleThemeModeChange}>
+                                    <option value="time">Time-based</option>
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                    <option value="system">System</option>
+                                </ThemeSelect>
+                                <ExplanationText>{getThemeExplanation(themeMode)}</ExplanationText>
+                            </ValueBox>
+                        </Row>
+
+                        {inviteCodesRequired && <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Referral links:</Label>
+                            <ValueBox>
+                                <CheckboxLabel>
+                                    <CheckboxInput checked={referralPrecheckEnabled} disabled={referralPrecheckBusy} onChange={e => handleReferralPrecheckToggle(!!e.target.checked)} />
+                                    Enable referral links for my account
+                                </CheckboxLabel>
+                                <ExplanationText>
+                                    Lets people sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
+                                </ExplanationText>
+                                {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
+                                {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
+                            </ValueBox>
+                        </Row>}
+
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Show content with tags:</Label>
+                            <ValueBox>
+                                <div style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.5rem'
+                                }}>
+                                    <CheckboxLabel>
+                                        <CheckboxInput checked={showTagSensitive} onChange={e => {
+                                            const val = !!e.target.checked;
+                                            setShowTagSensitive(val);
+                                            Storage.save('show_tag_sensitive', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                                detail: {
+                                                    showTagSensitive: val
+                                                }
+                                            }));
+                                        }} />
+                                        Sensitive
+                                    </CheckboxLabel>
+                                    <CheckboxLabel>
+                                        <CheckboxInput checked={showTagPorn} onChange={e => {
+                                            const val = !!e.target.checked;
+                                            setShowTagPorn(val);
+                                            Storage.save('show_tag_porn', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                                detail: {
+                                                    showTagPorn: val
+                                                }
+                                            }));
+                                        }} />
+                                        Porn
+                                    </CheckboxLabel>
+                                    <CheckboxLabel>
+                                        <CheckboxInput checked={showTagViolence} onChange={e => {
+                                            const val = !!e.target.checked;
+                                            setShowTagViolence(val);
+                                            Storage.save('show_tag_violence', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                                detail: {
+                                                    showTagViolence: val
+                                                }
+                                            }));
+                                        }} />
+                                        Violence
+                                    </CheckboxLabel>
+                                    <CheckboxLabel>
+                                        <CheckboxInput checked={showTagGore} onChange={e => {
+                                            const val = !!e.target.checked;
+                                            setShowTagGore(val);
+                                            Storage.save('show_tag_gore', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                                detail: {
+                                                    showTagGore: val
+                                                }
+                                            }));
+                                        }} />
+                                        Gore
+                                    </CheckboxLabel>
+                                    <CheckboxLabel>
+                                        <CheckboxInput checked={showTagDeath} onChange={e => {
+                                            const val = !!e.target.checked;
+                                            setShowTagDeath(val);
+                                            Storage.save('show_tag_death', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                                detail: {
+                                                    showTagDeath: val
+                                                }
+                                            }));
+                                        }} />
+                                        Death
+                                    </CheckboxLabel>
+                                </div>
+                            </ValueBox>
+                        </Row>
+
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Blur sensitive media:</Label>
+                            <ValueBox>
+                                <CheckboxLabel>
+                                    <CheckboxInput checked={blurSensitiveMedia} onChange={e => {
+                                        const val = !!e.target.checked;
+                                        setBlurSensitiveMedia(val);
+                                        Storage.save('blur_sensitive_media', val);
+                                        window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                            detail: {
+                                                blurSensitiveMedia: val
+                                            }
+                                        }));
+                                    }} />
+                                    Blur tagged sensitive media (images/videos)
+                                </CheckboxLabel>
+                            </ValueBox>
+                        </Row>
+
+                        <Row>
+                            <Label>Auto-collapse:</Label>
+                            <ValueBox>
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '0.5rem',
+                                    alignItems: 'center'
+                                }}>
+                                    <ThemeSelect value={Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'} onChange={e => handleCollapseThresholdChange({
+                                        target: {
+                                            value: e.target.value
+                                        }
+                                    })} style={{
+                                        width: 'auto',
+                                        minWidth: '5rem'
+                                    }}>
+                                        <option value="-3">-3</option>
+                                        <option value="-5">-5</option>
+                                        <option value="-10">-10</option>
+                                        <option value="-25">-25</option>
+                                        <option value="-50">-50</option>
+                                        <option value="0">Never</option>
                                     </ThemeSelect>
-                                </ValueBox>
-                            </Row>
+                                    <HelperText>
+                                        Collapse comments at or below this score
+                                    </HelperText>
+                                </div>
+                            </ValueBox>
+                        </Row>
 
-                            <Row>
-                                <Label>Theme mode:</Label>
-                                <ValueBox>
-                                    <ThemeSelect value={themeMode} onChange={handleThemeModeChange}>
-                                        <option value="time">Time-based</option>
-                                        <option value="dark">Dark</option>
-                                        <option value="light">Light</option>
-                                        <option value="system">System</option>
+                        <Row>
+                            <Label>Sidebar topics:</Label>
+                            <ValueBox>
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '0.5rem',
+                                    alignItems: 'center'
+                                }}>
+                                    <ThemeSelect value={String(sidebarTopicsLimit)} onChange={handleSidebarTopicsLimitChange} style={{
+                                        width: 'auto',
+                                        minWidth: '5rem'
+                                    }}>
+                                        <option value="5">5</option>
+                                        <option value="10">10</option>
+                                        <option value="15">15</option>
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
                                     </ThemeSelect>
-                                    <ExplanationText>{getThemeExplanation(themeMode)}</ExplanationText>
-                                </ValueBox>
-                            </Row>
+                                    <HelperText>
+                                        Topics shown in sidebar before "show more"
+                                    </HelperText>
+                                </div>
+                            </ValueBox>
+                        </Row>
 
-                            <Row>
-                                <Label>Full width:</Label>
-                                <ValueBox>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={fullWidthMode} onChange={e => {
-                    const val = !!e.target.checked;
-                    setFullWidthMode(val);
-                    Storage.save('full_width_mode', val);
-                  }} />
-                                        Expand cards to full screen width
-                                    </CheckboxLabel>
-                                </ValueBox>
-                            </Row>
+                        <Row>
+                            <Label>Sidebar people:</Label>
+                            <ValueBox>
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '0.5rem',
+                                    alignItems: 'center'
+                                }}>
+                                    <ThemeSelect value={String(sidebarPeopleLimit)} onChange={handleSidebarPeopleLimitChange} style={{
+                                        width: 'auto',
+                                        minWidth: '5rem'
+                                    }}>
+                                        <option value="5">5</option>
+                                        <option value="10">10</option>
+                                        <option value="15">15</option>
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </ThemeSelect>
+                                    <HelperText>
+                                        People shown in sidebar before "show more"
+                                    </HelperText>
+                                </div>
+                            </ValueBox>
+                        </Row>
 
-                            {inviteCodesRequired && <Row>
-                                    <Label style={{
-                whiteSpace: 'normal'
-              }}>Referral links:</Label>
-                                    <ValueBox>
-                                        <CheckboxLabel>
-                                            <CheckboxInput checked={referralPrecheckEnabled} disabled={referralPrecheckBusy} onChange={e => handleReferralPrecheckToggle(!!e.target.checked)} />
-                                            Enable referral links for my account
-                                        </CheckboxLabel>
-                                        <ExplanationText>
-                                            Lets people sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
-                                        </ExplanationText>
-                                        {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
-                                        {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
-                                    </ValueBox>
-                                </Row>}
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Hide posts you downvote:</Label>
+                            <ValueBox>
+                                <CheckboxLabel>
+                                    <CheckboxInput checked={hideDownvotedPosts} onChange={e => {
+                                        const val = !!e.target.checked;
+                                        setHideDownvotedPosts(val);
+                                        Storage.save('hide_downvoted_posts', val);
+                                        window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                            detail: {
+                                                hideDownvotedPosts: val
+                                            }
+                                        }));
+                                    }} />
+                                    Immediately hide downvoted posts
+                                </CheckboxLabel>
+                            </ValueBox>
+                        </Row>
 
-                            <Row>
-                                <Label style={{
-                whiteSpace: 'normal'
-              }}>Show content with tags:</Label>
-                                <ValueBox>
-                                    <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem'
-                }}>
-                                        <CheckboxLabel>
-                                            <CheckboxInput checked={showTagSensitive} onChange={e => {
-                      const val = !!e.target.checked;
-                      setShowTagSensitive(val);
-                      Storage.save('show_tag_sensitive', val);
-                      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                        detail: {
-                          showTagSensitive: val
-                        }
-                      }));
-                    }} />
-                                            Sensitive
-                                        </CheckboxLabel>
-                                        <CheckboxLabel>
-                                            <CheckboxInput checked={showTagPorn} onChange={e => {
-                      const val = !!e.target.checked;
-                      setShowTagPorn(val);
-                      Storage.save('show_tag_porn', val);
-                      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                        detail: {
-                          showTagPorn: val
-                        }
-                      }));
-                    }} />
-                                            Porn
-                                        </CheckboxLabel>
-                                        <CheckboxLabel>
-                                            <CheckboxInput checked={showTagViolence} onChange={e => {
-                      const val = !!e.target.checked;
-                      setShowTagViolence(val);
-                      Storage.save('show_tag_violence', val);
-                      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                        detail: {
-                          showTagViolence: val
-                        }
-                      }));
-                    }} />
-                                            Violence
-                                        </CheckboxLabel>
-                                        <CheckboxLabel>
-                                            <CheckboxInput checked={showTagGore} onChange={e => {
-                      const val = !!e.target.checked;
-                      setShowTagGore(val);
-                      Storage.save('show_tag_gore', val);
-                      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                        detail: {
-                          showTagGore: val
-                        }
-                      }));
-                    }} />
-                                            Gore
-                                        </CheckboxLabel>
-                                        <CheckboxLabel>
-                                            <CheckboxInput checked={showTagDeath} onChange={e => {
-                      const val = !!e.target.checked;
-                      setShowTagDeath(val);
-                      Storage.save('show_tag_death', val);
-                      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                        detail: {
-                          showTagDeath: val
-                        }
-                      }));
-                    }} />
-                                            Death
-                                        </CheckboxLabel>
-                                    </div>
-                                </ValueBox>
-                            </Row>
+                        <Divider />
 
-                            <Row>
-                                <Label style={{
-                whiteSpace: 'normal'
-              }}>Blur sensitive media:</Label>
-                                <ValueBox>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={blurSensitiveMedia} onChange={e => {
-                    const val = !!e.target.checked;
-                    setBlurSensitiveMedia(val);
-                    Storage.save('blur_sensitive_media', val);
-                    window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                      detail: {
-                        blurSensitiveMedia: val
-                      }
-                    }));
-                  }} />
-                                        Blur tagged sensitive media (images/videos)
-                                    </CheckboxLabel>
-                                </ValueBox>
-                            </Row>
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Delete account:</Label>
+                            <ValueBox>
+                                <DangerNotice>
+                                    This submits an account deletion request to the network. Most nodes will honor it, but some may not — full removal cannot be guaranteed.
+                                </DangerNotice>
+                                <DangerRow>
+                                    <DangerInput value={deleteConfirmText} onChange={e => {
+                                        setDeleteConfirmText(e.target.value);
+                                        if (deleteError) setDeleteError('');
+                                        if (deleteSuccess) setDeleteSuccess('');
+                                    }} onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleDeleteAccount();
+                                        }
+                                    }} placeholder="Type DELETE to confirm" disabled={deleteBusy} />
+                                    <DangerButton disabled={!deleteConfirmReady || deleteBusy} onClick={handleDeleteAccount}>
+                                        {deleteStatus || (deleteBusy ? 'Deleting...' : 'Delete account')}
+                                    </DangerButton>
+                                </DangerRow>
+                                {deleteError && <SecurityError>{deleteError}</SecurityError>}
+                                {deleteSuccess && <SecuritySuccess><span>✓</span>{deleteSuccess}</SecuritySuccess>}
+                            </ValueBox>
+                        </Row>
 
-                            <Row>
-                                <Label>Auto-collapse:</Label>
-                                <ValueBox>
-                                    <div style={{
-                  display: 'flex',
-                  gap: '0.5rem',
-                  alignItems: 'center'
-                }}>
-                                        <ThemeSelect value={Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'} onChange={e => handleCollapseThresholdChange({
-                    target: {
-                      value: e.target.value
-                    }
-                  })} style={{
-                    width: 'auto',
-                    minWidth: '5rem'
-                  }}>
-                                            <option value="-3">-3</option>
-                                            <option value="-5">-5</option>
-                                            <option value="-10">-10</option>
-                                            <option value="-25">-25</option>
-                                            <option value="-50">-50</option>
-                                            <option value="0">Never</option>
-                                        </ThemeSelect>
-                                        <HelperText>
-                                            Collapse comments at or below this score
-                                        </HelperText>
-                                    </div>
-                                </ValueBox>
-                            </Row>
-
-                            <Row>
-                                <Label>Sidebar topics:</Label>
-                                <ValueBox>
-                                    <div style={{
-                  display: 'flex',
-                  gap: '0.5rem',
-                  alignItems: 'center'
-                }}>
-                                        <ThemeSelect value={String(sidebarTopicsLimit)} onChange={handleSidebarTopicsLimitChange} style={{
-                    width: 'auto',
-                    minWidth: '5rem'
-                  }}>
-                                            <option value="5">5</option>
-                                            <option value="10">10</option>
-                                            <option value="15">15</option>
-                                            <option value="20">20</option>
-                                            <option value="50">50</option>
-                                            <option value="100">100</option>
-                                        </ThemeSelect>
-                                        <HelperText>
-                                            Topics shown in sidebar before "show more"
-                                        </HelperText>
-                                    </div>
-                                </ValueBox>
-                            </Row>
-
-                            <Row>
-                                <Label>Sidebar people:</Label>
-                                <ValueBox>
-                                    <div style={{
-                  display: 'flex',
-                  gap: '0.5rem',
-                  alignItems: 'center'
-                }}>
-                                        <ThemeSelect value={String(sidebarPeopleLimit)} onChange={handleSidebarPeopleLimitChange} style={{
-                    width: 'auto',
-                    minWidth: '5rem'
-                  }}>
-                                            <option value="5">5</option>
-                                            <option value="10">10</option>
-                                            <option value="15">15</option>
-                                            <option value="20">20</option>
-                                            <option value="50">50</option>
-                                            <option value="100">100</option>
-                                        </ThemeSelect>
-                                        <HelperText>
-                                            People shown in sidebar before "show more"
-                                        </HelperText>
-                                    </div>
-                                </ValueBox>
-                            </Row>
-
-                            <Row>
-                                <Label style={{
-                whiteSpace: 'normal'
-              }}>Hide posts you downvote:</Label>
-                                <ValueBox>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={hideDownvotedPosts} onChange={e => {
-                    const val = !!e.target.checked;
-                    setHideDownvotedPosts(val);
-                    Storage.save('hide_downvoted_posts', val);
-                    window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                      detail: {
-                        hideDownvotedPosts: val
-                      }
-                    }));
-                  }} />
-                                        Immediately hide downvoted posts
-                                    </CheckboxLabel>
-                                </ValueBox>
-                            </Row>
-
-                            <Divider />
-
-                            <Row>
-                                <Label style={{
-                whiteSpace: 'normal'
-              }}>Delete account:</Label>
-                                <ValueBox>
-                                    <DangerNotice>
-                                        This submits an account deletion request to the network. Most nodes will honor it, but some may not — full removal cannot be guaranteed.
-                                    </DangerNotice>
-                                    <DangerRow>
-                                        <DangerInput value={deleteConfirmText} onChange={e => {
-                    setDeleteConfirmText(e.target.value);
-                    if (deleteError) setDeleteError('');
-                    if (deleteSuccess) setDeleteSuccess('');
-                  }} onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleDeleteAccount();
-                    }
-                  }} placeholder="Type DELETE to confirm" disabled={deleteBusy} />
-                                        <DangerButton disabled={!deleteConfirmReady || deleteBusy} onClick={handleDeleteAccount}>
-                                            {deleteStatus || (deleteBusy ? 'Deleting...' : 'Delete account')}
-                                        </DangerButton>
-                                    </DangerRow>
-                                    {deleteError && <SecurityError>{deleteError}</SecurityError>}
-                                    {deleteSuccess && <SecuritySuccess><span>✓</span>{deleteSuccess}</SecuritySuccess>}
-                                </ValueBox>
-                            </Row>
-
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
-        </ContentGrid>;
+                    </ContainerBody>
+                </TabbedContainer>
+            </ModernPostFeed>
+        </div>
+    </ContentGrid>;
 }

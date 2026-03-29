@@ -5,16 +5,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { useRewards } from '../../../logic/useQuests';
-import { darkColors as fallbackDarkColors } from "../../../styled/colors/dark";
-import { lightColors as fallbackLightColors } from "../../../styled/colors/light";
 import Api from '../../../utils/api';
 import Storage from '../../../utils/Storage';
-
-const pickThemeColor = (theme, key) => {
-    if (theme.colors[key]) return theme.colors[key];
-    const isLight = theme.name === 'light';
-    return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
-};
+import { requireThemeColor } from '../../../utils/themeColor';
 
 // Container styling matching invite codes card (blue/indigo theme)
 const QuestCardContainer = styled.div`
@@ -55,7 +48,7 @@ const QuestHeader = styled.div`
 const QuestTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -68,7 +61,7 @@ const QuestTitle = styled.div`
 
 const ResetTimer = styled.div`
     font-size: 0.6rem;
-    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.08)'};
@@ -137,7 +130,7 @@ const QuestName = styled.div`
     font-weight: 600;
     color: ${({ theme, $completed }) => $completed
         ? '#22c55e'
-        : pickThemeColor(theme, 'text')};
+        : requireThemeColor(theme, 'text')};
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -151,7 +144,7 @@ const QuestName = styled.div`
 
 const QuestDescription = styled.div`
     font-size: 0.6rem;
-    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -175,7 +168,7 @@ const QuestReward = styled.div`
 
 const QuestRequirements = styled.ul`
     font-size: 0.5rem;
-    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     margin: 0.2rem 0 0 0;
     padding-left: 1rem;
     list-style-type: disc;
@@ -240,7 +233,7 @@ const ProgressFill = styled.div`
 
 const ProgressText = styled.div`
     font-size: 0.5rem;
-    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-variant-numeric: tabular-nums;
 `;
 
@@ -259,7 +252,7 @@ const BalancedProgressRow = styled.span`
     gap: 2px;
     color: ${({ $met, theme }) => $met
         ? '#22c55e'
-        : pickThemeColor(theme, 'subtleText')};
+        : requireThemeColor(theme, 'subtleText')};
     font-weight: ${({ $met }) => $met ? '600' : '400'};
 `;
 
@@ -319,7 +312,7 @@ const ClaimButton = styled.button`
         background: ${({ theme }) => theme.name === 'light'
             ? 'rgba(0, 0, 0, 0.08)'
             : 'rgba(255, 255, 255, 0.1)'};
-        color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+        color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
         cursor: not-allowed;
     `}
 
@@ -445,7 +438,7 @@ const SuspendedBanner = styled.div`
 `;
 
 const EmptyState = styled.div`
-    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.65rem;
     line-height: 1.5;
 
@@ -566,7 +559,7 @@ const DebugRow = styled.div`
     justify-content: space-between;
     align-items: center;
     padding: 0.15rem 0;
-    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
 `;
 
 const DebugLabel = styled.span`
@@ -623,7 +616,7 @@ const DebugInput = styled.input`
     border: 1px solid rgba(59, 130, 246, 0.5);
     border-radius: 4px;
     background: ${({ theme }) => theme.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
-    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
     text-align: center;
 
     &:focus {
@@ -648,7 +641,7 @@ const DebugQuestRow = styled.div`
 const CollapseButton = styled.button`
     background: transparent;
     border: none;
-    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.65rem;
     font-weight: 600;
     cursor: pointer;
@@ -660,7 +653,7 @@ const CollapseButton = styled.button`
     gap: 4px;
 
     &:hover {
-        color: ${({ theme }) => pickThemeColor(theme, 'text')};
+        color: ${({ theme }) => requireThemeColor(theme, 'text')};
         background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.05)'};

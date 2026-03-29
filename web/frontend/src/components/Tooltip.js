@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import { useTheme, css } from 'styled-components';
-import { getThemeComponent, getThemeComponentFromTheme } from '../styled/theme';
+import { getThemeComponent, getThemeComponentFromTheme } from '../registry/theme';
 
 export const tooltipStyles = () => css`
     ${({ theme }) => {

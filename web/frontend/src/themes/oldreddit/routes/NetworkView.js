@@ -638,7 +638,6 @@ export default function NetworkView({
   state
 }) {
   const {
-    location,
     navigate,
     activeTab,
     cfg,

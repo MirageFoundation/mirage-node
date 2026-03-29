@@ -217,7 +217,6 @@ export default function SearchResultsView({
   state
 }) {
   const {
-    location,
     query,
     loading,
     error,

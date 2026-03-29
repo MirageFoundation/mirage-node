@@ -1,5 +1,5 @@
 import { useTheme } from 'styled-components';
-import { getThemeRoute } from '../styled/theme';
+import { getThemeRoute } from '../registry/theme';
 
 export function useThemeRoute(key) {
     const theme = useTheme();

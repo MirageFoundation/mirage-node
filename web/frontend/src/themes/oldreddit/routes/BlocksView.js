@@ -139,7 +139,6 @@ export default function BlocksView({
 }) {
   const {
     navigate,
-    location,
     blockedUsers,
     blockedPosts,
     blockedTopics,

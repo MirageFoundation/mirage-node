@@ -6,7 +6,7 @@ import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
 import Api from './utils/api';
 import * as tx from './utils/tx';
-import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './styled/theme';
+import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
@@ -346,19 +346,6 @@ class App extends Component {
         const buildId = APP_BUILD_ID || '';
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
         try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
-
-        // Initialize full width mode CSS custom properties
-        try {
-            const fullWidthMode = Storage.load('full_width_mode', false) === true;
-            const root = document.documentElement;
-            if (fullWidthMode) {
-                root.style.setProperty('--content-max-width', 'none');
-                root.style.setProperty('--feed-max-width', 'none');
-            } else {
-                root.style.setProperty('--content-max-width', '1240px');
-                root.style.setProperty('--feed-max-width', '1000px');
-            }
-        } catch (_) { }
 
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {

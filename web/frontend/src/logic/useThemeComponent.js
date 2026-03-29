@@ -7,13 +7,13 @@
  * registered on that theme's manifest under `components[key]` (manifests listed in `themes/manifests.js`).
  *
  * @see ../components/README.md
- * @see ../styled/theme.js — getThemeComponent
+ * @see ../registry/theme.js — getThemeComponent
  */
 import { useTheme } from 'styled-components';
-import { getThemeComponent } from '../styled/theme';
+import { getThemeComponent } from '../registry/theme';
 
 /**
- * @param {string} key — must match a key on `family.components` in the active theme manifest
+ * @param {string} key — must be registered on the manifest when used (see REQUIRED_THEME_COMPONENT_KEYS in registry/theme.js for App-level globals)
  * @returns {React.ComponentType}
  */
 export function useThemeComponent(key) {

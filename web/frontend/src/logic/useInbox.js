@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTheme } from "styled-components";
 import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
@@ -25,8 +24,6 @@ export function useInbox({
 }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const theme = useTheme();
-    const inboxFullWidth = theme.caps.inboxFullWidth;
     const [replies, setReplies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -203,7 +200,6 @@ export function useInbox({
     const titleText = unreadCount > 0 ? `Inbox (${unreadCount} unread)` : 'Inbox';
     return {
         location,
-        inboxFullWidth,
         replies,
         loading,
         error,

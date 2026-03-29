@@ -53,7 +53,6 @@ function NotFoundView({
   state
 }) {
   const {
-    location,
     navigate,
     path
   } = useNotFound({

@@ -208,7 +208,6 @@ export default function AgentsView({
     setHoverAgent,
     isPending,
     formatStatus,
-    location,
     isEnabled,
     handleToggle,
     hasDraftChanges,

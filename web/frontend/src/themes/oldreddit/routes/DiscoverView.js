@@ -172,8 +172,7 @@ export default function DiscoverView({
     isTopicPending,
     formatTopicStatus,
     isSubscribedTopic,
-    handleSubscribeToggle,
-    location
+    handleSubscribeToggle
   } = useDiscover({
     state
   });

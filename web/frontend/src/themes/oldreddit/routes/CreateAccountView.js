@@ -112,7 +112,6 @@ function CreateAccountView({
   setCredentials
 }) {
   const {
-    location,
     nodeConfig,
     registrationEnabled,
     inviteCodeRequired,

@@ -1,5 +1,5 @@
 /**
- * Theme Registry (resolve components, routes, tokens from manifest id)
+ * Theme registry — resolve manifests, routes, components, tokens by theme id.
  *
  * @see ../themes/manifests.js — import manifests there only; this file builds lookups + helpers.
  */
@@ -8,6 +8,26 @@ import { THEME_MANIFESTS, LEGACY_THEME_IDS } from '../themes/manifests';
 
 export const THEMES = {};
 THEME_MANIFESTS.forEach((m) => { THEMES[m.id] = m; });
+
+/** Cross-app entrypoints resolved via `useThemeComponent` from `App` / `Tooltip` facades only. */
+export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
+    'Toast',
+    'UnlockPrompt',
+    'Tooltip',
+    'InfoIcon',
+    'tooltipStyles',
+]);
+
+(function assertRequiredThemeComponents() {
+    for (const m of THEME_MANIFESTS) {
+        const map = m.components || {};
+        for (const key of REQUIRED_THEME_COMPONENT_KEYS) {
+            if (!map[key]) {
+                throw new Error(`Theme "${m.id}" manifest must register components["${key}"]`);
+            }
+        }
+    }
+}());
 
 /** Default when storage is missing, invalid, or an unknown id (first entry in THEME_MANIFESTS). */
 export const DEFAULT_THEME_ID = THEME_MANIFESTS[0].id;
@@ -74,7 +94,7 @@ export function getThemeFamily(themeId) {
  * This registry function is shared logic; it does not render or style anything.
  *
  * @param {string} themeId — registered manifest id
- * @param {string} key — e.g. 'Button', 'Toast' (must exist on that theme's manifest)
+ * @param {string} key — logical name; must exist if registered (see REQUIRED_THEME_COMPONENT_KEYS for globals).
  */
 export function getThemeComponent(themeId, key) {
     const family = THEMES[themeId];

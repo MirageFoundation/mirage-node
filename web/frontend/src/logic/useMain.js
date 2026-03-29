@@ -7,16 +7,6 @@ import Api from "../utils/api";
 import { fetchFollowedTopics } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { usePendingFollows } from "./useFollowState.js";
-import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
-import { lightColors as fallbackLightColors } from "../styled/colors/light";
-export const pickThemeColor = (theme, key) => {
-    if (theme.colors[key]) return theme.colors[key];
-    const isLight = theme.name === 'light';
-    return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
-};
-
-// Welcome card that appears for first-time visitors on the front page
-// eslint-disable-next-line no-unused-vars
 
 // Session storage key helpers for feed state preservation (keyed by topic)
 export const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
@@ -191,7 +181,6 @@ export function useMain({
     const navigationType = useNavigationType(); // 'POP' = back/forward, 'PUSH'/'REPLACE' = direct nav
     const isBackNavigation = getIsBackNavigation(navigationType);
     const theme = useTheme();
-    const showHero = theme.caps.showHeroCards;
     const mapHomeSortMode = theme.caps.mapHomeSortMode;
     const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
@@ -389,23 +378,6 @@ export function useMain({
     const topicsLoadedRef = useRef(false); // Track if we've attempted to load topics from API
     const isMountedRef = useRef(true); // Track if component is mounted
     const forceHardRefreshRef = useRef(isInitialPageLoad()); // Bypass debounce on initial page load
-
-    // First-visit welcome card: show on front page until dismissed (only for guests)
-    // eslint-disable-next-line no-unused-vars
-    const [showWelcomeCard, setShowWelcomeCard] = useState(() => {
-        try {
-            return !Storage.load('welcome_card_dismissed_v1', false);
-        } catch (_) {
-            return true;
-        }
-    });
-    // eslint-disable-next-line no-unused-vars
-    const dismissWelcomeCard = () => {
-        try {
-            Storage.save('welcome_card_dismissed_v1', true);
-        } catch (_) { }
-        setShowWelcomeCard(false);
-    };
 
     // Android app banner: show once for Android users until dismissed
     const isAndroid = (() => {
@@ -1555,7 +1527,6 @@ export function useMain({
     }, [getPosts, urlTopic]);
     return {
         urlTopic,
-        showHero,
         currentTopicRef,
         error,
         stableOrder,

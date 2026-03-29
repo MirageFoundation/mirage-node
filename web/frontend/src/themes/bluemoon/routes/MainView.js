@@ -1,82 +1,26 @@
 import { Helmet } from "react-helmet-async";
-import { getThemeFamily } from "../../../styled/theme";
+import { getThemeFamily } from "../../../registry/theme";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
 import QuestHeroCard from "../components/QuestHeroCard.js";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
 import { ContentGrid, ModernPostFeed, StyledError } from "../Layout";
-import { useMain, pickThemeColor } from "../../../logic/useMain";
-// Welcome card that appears for first-time visitors on the front page
-// eslint-disable-next-line no-unused-vars
-const WelcomeCard = styled.div`
-    margin-top: 1rem;
-    background-color: rgba(251, 191, 36, 0.1);
-    border: 1px solid #f59e0b;
-    color: #f59e0b;
-    border-radius: 16px;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-
-    @media (max-width: 1000px) {
-        border-radius: 12px;
-        padding: 1rem;
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 8px;
-        padding: 0.75rem;
-    }
-`;
-
-// eslint-disable-next-line no-unused-vars
-const WelcomeDescription = styled.div`
-    color: #f59e0b;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    @media (max-width: 1000px) {
-        font-size: 0.55rem;
-    }
-`;
-
-// eslint-disable-next-line no-unused-vars
-const WelcomeFooter = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-`;
-
-// eslint-disable-next-line no-unused-vars
-const WelcomeText = styled.a`
-    color: #f59e0b;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.8rem;
-    flex: 1 1 auto;
-    &:hover {
-        color: #d97706;
-        text-decoration: underline;
-        text-decoration-color: #f59e0b;
-    }
-`;
+import { useMain } from "../../../logic/useMain";
+import { requireThemeColor } from "../../../utils/themeColor";
 
 // Invite-only hero for logged-out users on the front page
 const InviteOnlyHero = styled.div`
     margin-top: 1rem;
     background: ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)' : 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)'};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.3)' : 'rgba(102, 126, 234, 0.35)'};
     border-radius: 16px;
     padding: 2rem 2.5rem;
@@ -111,7 +55,7 @@ const InviteOnlyHeroTitle = styled.h1`
     font-size: 1.5rem;
     font-weight: 700;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     margin: 0;
     line-height: 1.2;
@@ -141,7 +85,7 @@ const InviteOnlyHeroSubtitle = styled.div`
 const InviteOnlyHeroDescription = styled.p`
     font-size: 0.85rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     line-height: 1.6;
     margin: 0;
@@ -178,10 +122,10 @@ const WelcomeStatsGrid = styled.div`
     margin: 0.5rem 0;
     padding: 0.75rem 0;
     border-top: 1px solid ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.2)' : 'rgba(102, 126, 234, 0.25)'};
     border-bottom: 1px solid ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.2)' : 'rgba(102, 126, 234, 0.25)'};
     width: 100%;
 
@@ -202,7 +146,7 @@ const WelcomeStatValue = styled.div`
     font-size: 1.25rem;
     font-weight: 700;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     font-variant-numeric: tabular-nums;
 
@@ -218,7 +162,7 @@ const WelcomeStatLabel = styled.div`
     font-size: 0.65rem;
     font-weight: 500;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -237,32 +181,32 @@ const WelcomeStatLabel = styled.div`
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
 const InviteOnlyBanner = styled.div`
     background: ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)' : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
     border: 2px solid ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'rgba(59, 130, 246, 0.5)' : 'rgba(96, 165, 250, 0.6)'};
     border-radius: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '8px' : '10px'};
     padding: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
     gap: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
     box-shadow: ${({
-  theme
+    theme
 }) => theme.name === 'light' ? '0 0 12px rgba(59, 130, 246, 0.2)' : '0 0 15px rgba(96, 165, 250, 0.25)'};
 
     @media (max-width: 1000px) {
         border-radius: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '6px' : '8px'};
         padding: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
@@ -355,8 +299,8 @@ const CollapseButton = styled.button`
     background: transparent;
     border: none;
     color: ${({
-  theme
-}) => pickThemeColor(theme, 'subtleText')};
+    theme
+}) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.65rem;
     font-weight: 600;
     cursor: pointer;
@@ -369,10 +313,10 @@ const CollapseButton = styled.button`
 
     &:hover {
         color: ${({
-  theme
-}) => pickThemeColor(theme, 'text')};
+    theme
+}) => requireThemeColor(theme, 'text')};
         background: ${({
-  theme
+    theme
 }) => theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
@@ -393,10 +337,10 @@ const InviteModalOverlay = styled.div`
 `;
 const InviteModalContent = styled.div`
     background: ${({
-  theme
+    theme
 }) => theme.colors.panel};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: 16px;
     padding: 1.5rem;
@@ -419,7 +363,7 @@ const InviteModalTitle = styled.h2`
     font-size: 1.1rem;
     font-weight: 600;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     margin: 0;
     display: flex;
@@ -430,7 +374,7 @@ const InviteModalClose = styled.button`
     background: none;
     border: none;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     cursor: pointer;
     font-size: 1.5rem;
@@ -438,7 +382,7 @@ const InviteModalClose = styled.button`
     padding: 0;
     &:hover {
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     }
 `;
@@ -455,7 +399,7 @@ const InviteCodeText = styled.div`
     font-weight: 700;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     letter-spacing: 0.1em;
     margin-bottom: 0.5rem;
@@ -467,7 +411,7 @@ const InviteCodeText = styled.div`
 const InviteCodeSubtext = styled.div`
     font-size: 0.75rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
 `;
 const InviteShareButtons = styled.div`
@@ -490,13 +434,13 @@ const InviteShareButton = styled.button`
     font-weight: 500;
     font-family: inherit;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     background: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-radius: 8px;
     cursor: pointer;
@@ -504,10 +448,10 @@ const InviteShareButton = styled.button`
 
     &:hover {
         background: ${({
-  theme
+    theme
 }) => theme.colors.accent};
         border-color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     }
 `;
@@ -551,14 +495,14 @@ const InviteRemainingText = styled.div`
     text-align: center;
     font-size: 0.7rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
 `;
 const InviteNoCodesText = styled.div`
     text-align: center;
     padding: 1rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.85rem;
 `;
@@ -568,23 +512,23 @@ const HomeFeedInfoCard = styled.div`
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
     border: 1px solid rgba(99, 102, 241, 0.2);
     border-radius: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '8px' : '10px'};
     padding: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
     gap: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
 
     @media (max-width: 1000px) {
         border-radius: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '6px' : '8px'};
         padding: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
@@ -618,7 +562,7 @@ const NsfwHeroTitle = styled.div`
     font-size: 1rem;
     font-weight: 700;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     display: flex;
     align-items: center;
@@ -635,7 +579,7 @@ const NsfwHeroEmoji = styled.span`
 `;
 const NsfwHeroDescription = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.8rem;
     line-height: 1.6;
@@ -646,7 +590,7 @@ const NsfwHeroDescription = styled.div`
 
     strong {
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
         font-weight: 600;
     }
@@ -678,7 +622,7 @@ const NsfwHeroButton = styled.button`
     }
 
     ${({
-  $variant
+    $variant
 }) => $variant === 'yes' ? `
         background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
         color: #fff;
@@ -698,7 +642,7 @@ const NsfwHeroButton = styled.button`
 `;
 const NsfwHeroNote = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.mutedText};
     font-size: 0.7rem;
     font-style: italic;
@@ -706,7 +650,7 @@ const NsfwHeroNote = styled.div`
 
     a {
         color: ${({
-  theme
+    theme
 }) => theme.colors.link};
         text-decoration: none;
         &:hover {
@@ -739,7 +683,7 @@ const AndroidHeroTitle = styled.div`
     font-size: 1rem;
     font-weight: 700;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     display: flex;
     align-items: center;
@@ -756,7 +700,7 @@ const AndroidHeroEmoji = styled.span`
 `;
 const AndroidHeroDescription = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.8rem;
     line-height: 1.6;
@@ -871,7 +815,7 @@ const HomeFeedInfoTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     display: flex;
     align-items: center;
@@ -907,7 +851,7 @@ const HomeFeedInfoEmoji = styled.span`
 `;
 const HomeFeedInfoDescription = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.65rem;
     line-height: 1.5;
@@ -918,7 +862,7 @@ const HomeFeedInfoDescription = styled.div`
 
     strong {
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
         font-weight: 600;
     }
@@ -928,17 +872,17 @@ const HomeFeedModeSelect = styled.select`
     padding: 0.15rem 0.35rem;
     border-radius: 6px;
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     background: ${({
-  theme
+    theme
 }) => theme.colors.inputBackground};
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     outline: none;
     box-shadow: ${({
-  theme
+    theme
 }) => theme.name === 'light' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'};
 `;
 
@@ -948,13 +892,13 @@ const PostHeaderCard = styled.div`
     margin-left: 1rem;
     margin-right: 1rem;
     background-color: ${({
-  theme
-}) => pickThemeColor(theme, 'card') || '#23272C'};
+    theme
+}) => requireThemeColor(theme, 'card')};
     border: 1px solid ${({
-  theme
-}) => pickThemeColor(theme, 'cardBorder') || '#333'};
+    theme
+}) => requireThemeColor(theme, 'cardBorder')};
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     border-radius: 6px;
     padding: 0.2rem 0.6rem 0.4rem 0.6rem;
@@ -969,30 +913,30 @@ const PostHeaderCard = styled.div`
 `;
 const PostHeaderText = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.6rem;
     line-height: 1.5;
 `;
 const TopicLinkInHeader = styled(Link)`
     color: ${({
-  theme
+    theme
 }) => theme.colors.link};
     text-decoration: none;
     font-weight: 700;
     &:hover {
         color: ${({
-  theme
+    theme
 }) => theme.colors.linkHover};
         text-decoration: underline;
         text-decoration-color: ${({
-  theme
+    theme
 }) => theme.colors.link};
     }
 `;
 const PostHeaderTitle = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     font-size: 0.9rem;
     font-weight: bold;
@@ -1003,7 +947,7 @@ const HeaderInlineLink = styled.a`
     padding: 0;
     margin: 0;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-weight: 700;
     font-size: 0.6rem;
@@ -1012,7 +956,7 @@ const HeaderInlineLink = styled.a`
     text-decoration: none;
     &:hover {
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
         text-decoration: none;
     }
@@ -1027,7 +971,7 @@ const LoadingMoreIndicator = styled.div`
     padding: 0.5rem 1rem;
     text-align: center;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.8rem;
     font-style: italic;
@@ -1040,14 +984,14 @@ const LoadMoreButton = styled.button`
     border: none;
     background: transparent;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.85rem;
     cursor: pointer;
     text-align: center;
     &:hover {
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     }
 `;
@@ -1060,31 +1004,31 @@ const LoadMoreButton = styled.button`
  */
 const LoadingCard = styled.div`
     margin: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.5rem 0 0 0' : '1rem 0 0 0'};
     padding: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '1rem 0.6rem' : '2rem 1rem'};
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.cardAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.cardBorder};
     border-radius: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '8px' : '12px'};
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.5rem' : '0.75rem'};
 
     @media (max-width: 1000px) {
         padding: ${({
-  $size
+    $size
 }) => $size === 'compact' ? '0.75rem 0.5rem' : '1.5rem 0.75rem'};
     }
 `;
@@ -1092,10 +1036,10 @@ const LoadingSpinner = styled.div`
     width: 24px;
     height: 24px;
     border: 3px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     border-top: 3px solid ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -1107,7 +1051,7 @@ const LoadingSpinner = styled.div`
 `;
 const LoadingText = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.85rem;
     font-weight: 500;
@@ -1117,17 +1061,17 @@ const LoadingText = styled.div`
 
 const InlineLink = styled(Link)`
     color: ${({
-  theme
+    theme
 }) => theme.colors.link};
     text-decoration: none;
     font-weight: 700;
     &:hover {
         color: ${({
-  theme
+    theme
 }) => theme.colors.linkHover};
         text-decoration: underline;
         text-decoration-color: ${({
-  theme
+    theme
 }) => theme.colors.link};
     }
 `;
@@ -1158,7 +1102,7 @@ const TopicHeroTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     display: flex;
     align-items: center;
@@ -1178,7 +1122,7 @@ const TopicHeroHeader = styled.div`
 `;
 const TopicHeroDescription = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.65rem;
     line-height: 1.5;
@@ -1190,7 +1134,7 @@ const TopicHeroDescription = styled.div`
 
     strong {
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
         font-weight: 600;
     }
@@ -1206,10 +1150,10 @@ const EmptyHomeCard = styled.div`
     margin: 1rem 0 0 0;
     padding: 1.5rem 1.25rem;
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.cardAlt};
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.cardBorder};
     border-radius: 12px;
     text-align: center;
@@ -1223,578 +1167,579 @@ const EmptyHomeTitle = styled.div`
     font-weight: 600;
     margin-bottom: 0.5rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
 `;
 const EmptyHomeBody = styled.div`
     font-size: 0.8rem;
     line-height: 1.5;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
 `;
 const EmptyHomeMessage = () => <EmptyHomeCard role="region" aria-label="Empty home feed">
-        <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
-        <EmptyHomeBody>
-            Follow a few topics to personalize your feed. If this node is new, be the first to post. Browse <InlineLink to="/topics">topics</InlineLink> to get started.
-        </EmptyHomeBody>
-    </EmptyHomeCard>;
+    <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
+    <EmptyHomeBody>
+        Follow a few topics to personalize your feed. If this node is new, be the first to post. Browse <InlineLink to="/topics">topics</InlineLink> to get started.
+    </EmptyHomeBody>
+</EmptyHomeCard>;
 
 // Session storage key helpers for feed state preservation (keyed by topic)
 
 const MainView = ({
-  state,
-  setPosts,
-  updatePost,
-  setTopic,
-  routeTopic
-}) => {
-  const {
-    urlTopic,
-    showHero,
-    currentTopicRef,
-    error,
-    stableOrder,
-    setStableOrder,
-    isLoading,
-    hasMorePosts,
-    homeSortMode,
-    setHomeSortMode,
-    oldRedditSort,
-    handleOldRedditSortChange,
-    cardSize,
-    handleCardSizeChange,
-    hideDownvotedPosts,
-    hidingPostsSet,
-    flashingPostsSet,
-    isLoadingMore,
-    isMobile,
-    isTopicBlockedLocal,
-    location,
-    viewerAddress,
-    followedTopicsSet,
-    setFollowedTopicsSet,
-    topicFollowHover,
-    setTopicFollowHover,
-    isTopicPending,
-    formatTopicStatus,
-    forceHardRefreshRef,
-    dismissAndroidBanner,
-    dismissIPhoneBanner,
-    showNsfwHero,
-    isLoggedIn,
-    inviteCodesEnabled,
-    questsEnabled,
-    showAndroidBanner,
-    showIPhoneBanner,
-    inviteModalOpen,
-    setInviteModalOpen,
-    inviteCodeCopied,
-    welcomeStats,
-    welcomeStatsStale,
-    inviteBannerCollapsed,
-    questCardCollapsed,
-    toggleInviteBanner,
-    toggleQuestCard,
-    nextAvailableCode,
-    availableCodeCount,
-    handleOpenInviteModal,
-    handleCopyInviteCode,
-    handleNativeShare,
-    canNativeShare,
-    getShareUrl,
-    getShareText,
-    handleNsfwChoice,
-    bottomSentinelRef,
-    loadMore
-  } = useMain({
     state,
     setPosts,
     updatePost,
     setTopic,
     routeTopic
-  });
-  if (error) {
-    return <StyledError>{error}</StyledError>;
-  }
-  const isPostView = location.pathname.startsWith('/p/');
-  let header = null;
-  if (isPostView) {
-    const pid = (() => {
-      if (location.pathname.startsWith('/p/')) {
-        const raw = location.pathname.slice(3);
-        return raw ? decodeURIComponent(raw) : null;
-      }
-      return null;
-    })();
-    const p = pid ? state.posts[pid] : null;
-    if (p) {
-      const topicKey = String(p.topic || '').trim().toLowerCase();
-      const isTopicFollowing = topicKey && (followedTopicsSet.has(topicKey) || isSubscribed(viewerAddress || 'guest', p.topic));
-      const isTopicInProgress = isTopicPending(topicKey);
-      header = <PostHeaderCard role="region" aria-label="Post context">
-                    <PostHeaderText>
-                        Posted in{' '}
-                        <TopicLinkInHeader to={`/t/${p.topic}`} title={`View #${p.topic}`}>
-                            #{p.topic}
-                        </TopicLinkInHeader>{' '}
-                        (
-                        <HeaderInlineLink href="#" onClick={async e => {
-            e.preventDefault();
-            const key = topicKey;
-            if (!key) return;
-            if (isTopicPending(key)) return;
-            try {
-              const isCurrentlyFollowing = key && (followedTopicsSet.has(key) || isSubscribed(viewerAddress || 'guest', p.topic));
-              if (isCurrentlyFollowing) {
-                await unsubscribe(viewerAddress || 'guest', p.topic);
-                setFollowedTopicsSet(prev => {
-                  const next = new Set(prev);
-                  next.delete(key);
-                  return next;
-                });
-              } else {
-                await subscribe(viewerAddress || 'guest', p.topic);
-                setFollowedTopicsSet(prev => new Set([...prev, key]));
-              }
-              invalidateTopicsCache();
-              setStableOrder(s => s.slice());
-            } catch (_) {/* noop */}
-          }}>
-                            {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'unfollow' : 'follow'}
-                        </HeaderInlineLink>
-                        )
-                    </PostHeaderText>
-                    <PostHeaderTitle>{p.title}</PostHeaderTitle>
-                </PostHeaderCard>;
+}) => {
+    const theme = useTheme();
+    const showHero = theme.caps.showHeroCards;
+    const {
+        urlTopic,
+        currentTopicRef,
+        error,
+        stableOrder,
+        setStableOrder,
+        isLoading,
+        hasMorePosts,
+        homeSortMode,
+        setHomeSortMode,
+        oldRedditSort,
+        handleOldRedditSortChange,
+        cardSize,
+        handleCardSizeChange,
+        hideDownvotedPosts,
+        hidingPostsSet,
+        flashingPostsSet,
+        isLoadingMore,
+        isMobile,
+        isTopicBlockedLocal,
+        location,
+        viewerAddress,
+        followedTopicsSet,
+        setFollowedTopicsSet,
+        topicFollowHover,
+        setTopicFollowHover,
+        isTopicPending,
+        formatTopicStatus,
+        forceHardRefreshRef,
+        dismissAndroidBanner,
+        dismissIPhoneBanner,
+        showNsfwHero,
+        isLoggedIn,
+        inviteCodesEnabled,
+        questsEnabled,
+        showAndroidBanner,
+        showIPhoneBanner,
+        inviteModalOpen,
+        setInviteModalOpen,
+        inviteCodeCopied,
+        welcomeStats,
+        welcomeStatsStale,
+        inviteBannerCollapsed,
+        questCardCollapsed,
+        toggleInviteBanner,
+        toggleQuestCard,
+        nextAvailableCode,
+        availableCodeCount,
+        handleOpenInviteModal,
+        handleCopyInviteCode,
+        handleNativeShare,
+        canNativeShare,
+        getShareUrl,
+        getShareText,
+        handleNsfwChoice,
+        bottomSentinelRef,
+        loadMore
+    } = useMain({
+        state,
+        setPosts,
+        updatePost,
+        setTopic,
+        routeTopic
+    });
+    if (error) {
+        return <StyledError>{error}</StyledError>;
     }
-  }
-  const showPosts = () => {
-    // Compute display state
-    const displayTopic = currentTopicRef.current || urlTopic;
-    const routeTopicLower = urlTopic ? String(urlTopic).toLowerCase() : '';
-    const topicKeyLower = routeTopicLower || (displayTopic ? String(displayTopic).toLowerCase() : '');
-    const isCurrentTopic = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
-    const isTopicFollowing = isCurrentTopic && (followedTopicsSet.has(routeTopicLower) || isSubscribed(viewerAddress || 'guest', urlTopic));
-    const isTopicInProgress = isCurrentTopic && isTopicPending(routeTopicLower);
-
-    // Determine what content to show
-    let showEmptyHome = false;
-    let showNoPostsAvailable = false;
-    let showLoadingPosts = false;
-    let orderedPosts = [];
-
-    // Show loading when switching to a different topic
-    const isTopicSwitching = isLoading && displayTopic !== urlTopic;
-    // Force loading overlay even when posts exist (e.g., mode toggle / hard refresh)
-    const isHardRefreshLoading = isLoading && forceHardRefreshRef.current;
-
-    // Check loading states
-    if (isHardRefreshLoading) {
-      showLoadingPosts = true;
-    } else if (isTopicSwitching) {
-      // Switching topics - show loading immediately
-      showLoadingPosts = true;
-    } else if (!state.posts || Object.keys(state.posts).length === 0) {
-      if (isLoading) {
-        showLoadingPosts = true;
-      } else if (displayTopic === 'home') {
-        showEmptyHome = true;
-      } else {
-        showNoPostsAvailable = true;
-      }
-    } else if (isLoading && stableOrder.length === 0) {
-      showLoadingPosts = true;
-    } else {
-      // Convert the posts object to an array once
-      const postsArray = Object.values(state.posts || {});
-
-      // Only include top-level posts (exclude comments or partial objects, deleted, and optimistically blocked topics)
-      const isTopLevelPost = p => {
-        if (!p || p.deleted) return false;
-        if (p.hidden_client) return false;
-        const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
-        const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
-        const topicVal = String(p.topic || '').trim().toLowerCase();
-        const isReserved = ['all', 'home', 'following'].includes(topicVal);
-        if (isTopicBlockedLocal(topicVal)) return false;
-        return hasTitle && hasTopic && !isReserved;
-      };
-      const topLevelPosts = postsArray.filter(isTopLevelPost);
-      const filteredPosts = displayTopic === "all" || displayTopic === "home" || displayTopic === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(displayTopic || '').toLowerCase());
-      if (filteredPosts.length === 0 && !isLoading) {
-        if (displayTopic === 'home') {
-          showEmptyHome = true;
-        } else {
-          showNoPostsAvailable = true;
+    const isPostView = location.pathname.startsWith('/p/');
+    let header = null;
+    if (isPostView) {
+        const pid = (() => {
+            if (location.pathname.startsWith('/p/')) {
+                const raw = location.pathname.slice(3);
+                return raw ? decodeURIComponent(raw) : null;
+            }
+            return null;
+        })();
+        const p = pid ? state.posts[pid] : null;
+        if (p) {
+            const topicKey = String(p.topic || '').trim().toLowerCase();
+            const isTopicFollowing = topicKey && (followedTopicsSet.has(topicKey) || isSubscribed(viewerAddress || 'guest', p.topic));
+            const isTopicInProgress = isTopicPending(topicKey);
+            header = <PostHeaderCard role="region" aria-label="Post context">
+                <PostHeaderText>
+                    Posted in{' '}
+                    <TopicLinkInHeader to={`/t/${p.topic}`} title={`View #${p.topic}`}>
+                        #{p.topic}
+                    </TopicLinkInHeader>{' '}
+                    (
+                    <HeaderInlineLink href="#" onClick={async e => {
+                        e.preventDefault();
+                        const key = topicKey;
+                        if (!key) return;
+                        if (isTopicPending(key)) return;
+                        try {
+                            const isCurrentlyFollowing = key && (followedTopicsSet.has(key) || isSubscribed(viewerAddress || 'guest', p.topic));
+                            if (isCurrentlyFollowing) {
+                                await unsubscribe(viewerAddress || 'guest', p.topic);
+                                setFollowedTopicsSet(prev => {
+                                    const next = new Set(prev);
+                                    next.delete(key);
+                                    return next;
+                                });
+                            } else {
+                                await subscribe(viewerAddress || 'guest', p.topic);
+                                setFollowedTopicsSet(prev => new Set([...prev, key]));
+                            }
+                            invalidateTopicsCache();
+                            setStableOrder(s => s.slice());
+                        } catch (_) {/* noop */ }
+                    }}>
+                        {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'unfollow' : 'follow'}
+                    </HeaderInlineLink>
+                    )
+                </PostHeaderText>
+                <PostHeaderTitle>{p.title}</PostHeaderTitle>
+            </PostHeaderCard>;
         }
-      } else {
-        // Build a stable ordered list of posts
-        const postsById = {};
-        for (const p of filteredPosts) {
-          if (p && p.post_id && !p.deleted && !p.hidden_client) {
-            postsById[p.post_id] = p;
-          }
-        }
-        if (stableOrder.length > 0) {
-          orderedPosts = stableOrder.map(id => postsById[id]).filter(Boolean);
-        } else {
-          orderedPosts = filteredPosts.filter(p => p && !p.deleted);
-        }
-
-        // Hide posts the viewer downvoted (Home only, client-side)
-        if (displayTopic === 'home' && hideDownvotedPosts) {
-          orderedPosts = orderedPosts.filter(p => {
-            const postKey = String(p?.post_id || '').toLowerCase();
-            // If post is animating out, keep it in the list for now
-            if (hidingPostsSet.has(postKey)) return true;
-            // Prefer in-memory/state direction; backend provides user_vote on fetch.
-            const dir = Number(p?.direction ?? p?.user_vote ?? p?.my_vote ?? p?.myVote ?? p?.userVote ?? 0);
-            if (Number.isFinite(dir) && dir < 0) return false;
-            return true;
-          });
-        }
-      }
     }
+    const showPosts = () => {
+        // Compute display state
+        const displayTopic = currentTopicRef.current || urlTopic;
+        const routeTopicLower = urlTopic ? String(urlTopic).toLowerCase() : '';
+        const topicKeyLower = routeTopicLower || (displayTopic ? String(displayTopic).toLowerCase() : '');
+        const isCurrentTopic = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
+        const isTopicFollowing = isCurrentTopic && (followedTopicsSet.has(routeTopicLower) || isSubscribed(viewerAddress || 'guest', urlTopic));
+        const isTopicInProgress = isCurrentTopic && isTopicPending(routeTopicLower);
 
-    // Always render the full layout with sidebar and header
-    const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : `#${urlTopic}`;
-    return <ContentGrid>
-                <Helmet>
-                    <title>{pageTitle} | Mirage</title>
-                </Helmet>
-                <Sidebar currentPath={location.pathname} state={state} />
-                <div>
-                    {header}
-                    <TopBar state={state} />
+        // Determine what content to show
+        let showEmptyHome = false;
+        let showNoPostsAvailable = false;
+        let showLoadingPosts = false;
+        let orderedPosts = [];
 
-                    <ModernPostFeed>
-                        <MobileHeader />
+        // Show loading when switching to a different topic
+        const isTopicSwitching = isLoading && displayTopic !== urlTopic;
+        // Force loading overlay even when posts exist (e.g., mode toggle / hard refresh)
+        const isHardRefreshLoading = isLoading && forceHardRefreshRef.current;
 
-                        {isLoggedIn && isCurrentTopic && showHero && <TopicHeroCard>
-                                <TopicHeroHeader>
-                                    <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
-                                    <HomeFeedModeInline>
-                                        <HomeFeedModeSelect value={homeSortMode} onChange={e => {
-                  const mode = e.target.value;
-                  setHomeSortMode(mode);
-                  Storage.save('home_sort_mode', mode);
-                }}>
-                                            <option value="magic">Magic</option>
-                                            <option value="newest">Newest</option>
-                                        </HomeFeedModeSelect>
-                                        <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                            <option value="large">Large</option>
-                                            {!isMobile && <option value="compact">Compact</option>}
-                                            <option value="media">Media</option>
-                                        </HomeFeedModeSelect>
-                                        <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" minWidth="5.5rem" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
-                  const topicName = urlTopic;
-                  if (!topicName) return;
-                  const key = topicKeyLower;
-                  if (!key) return;
-                  if (isTopicPending(key)) return;
-                  try {
-                    if (isTopicFollowing) {
-                      await unsubscribe(viewerAddress || 'guest', topicName);
-                      setFollowedTopicsSet(prev => {
-                        const next = new Set(prev);
-                        next.delete(key);
-                        return next;
-                      });
-                    } else {
-                      await subscribe(viewerAddress || 'guest', topicName);
-                      setFollowedTopicsSet(prev => new Set([...prev, key]));
+        // Check loading states
+        if (isHardRefreshLoading) {
+            showLoadingPosts = true;
+        } else if (isTopicSwitching) {
+            // Switching topics - show loading immediately
+            showLoadingPosts = true;
+        } else if (!state.posts || Object.keys(state.posts).length === 0) {
+            if (isLoading) {
+                showLoadingPosts = true;
+            } else if (displayTopic === 'home') {
+                showEmptyHome = true;
+            } else {
+                showNoPostsAvailable = true;
+            }
+        } else if (isLoading && stableOrder.length === 0) {
+            showLoadingPosts = true;
+        } else {
+            // Convert the posts object to an array once
+            const postsArray = Object.values(state.posts || {});
+
+            // Only include top-level posts (exclude comments or partial objects, deleted, and optimistically blocked topics)
+            const isTopLevelPost = p => {
+                if (!p || p.deleted) return false;
+                if (p.hidden_client) return false;
+                const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
+                const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
+                const topicVal = String(p.topic || '').trim().toLowerCase();
+                const isReserved = ['all', 'home', 'following'].includes(topicVal);
+                if (isTopicBlockedLocal(topicVal)) return false;
+                return hasTitle && hasTopic && !isReserved;
+            };
+            const topLevelPosts = postsArray.filter(isTopLevelPost);
+            const filteredPosts = displayTopic === "all" || displayTopic === "home" || displayTopic === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(displayTopic || '').toLowerCase());
+            if (filteredPosts.length === 0 && !isLoading) {
+                if (displayTopic === 'home') {
+                    showEmptyHome = true;
+                } else {
+                    showNoPostsAvailable = true;
+                }
+            } else {
+                // Build a stable ordered list of posts
+                const postsById = {};
+                for (const p of filteredPosts) {
+                    if (p && p.post_id && !p.deleted && !p.hidden_client) {
+                        postsById[p.post_id] = p;
                     }
-                    invalidateTopicsCache();
-                  } catch (_) {/* noop */}
-                }}>
-                                            {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Unfollow' : 'Following' : 'Follow'}
-                                        </Button>
-                                    </HomeFeedModeInline>
-                                </TopicHeroHeader>
-                                <TopicHeroDescription>
-                                    Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
-                                </TopicHeroDescription>
-                            </TopicHeroCard>}
+                }
+                if (stableOrder.length > 0) {
+                    orderedPosts = stableOrder.map(id => postsById[id]).filter(Boolean);
+                } else {
+                    orderedPosts = filteredPosts.filter(p => p && !p.deleted);
+                }
 
-                        {/* Invite-only banner - shown only when invite codes are enabled on this node */}
-                        {isLoggedIn && showHero && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
-                                <HomeFeedHeaderRow>
-                                    <HomeFeedInfoTitle>
-                                        <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Invite Codes
-                                        {inviteBannerCollapsed && <span style={{
-                  fontWeight: 'normal'
-                }}>
-                                                {' '}{availableCodeCount === 0 ? '— None available' : `— ${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} left`}
-                                            </span>}
-                                    </HomeFeedInfoTitle>
-                                    <CollapseButton onClick={toggleInviteBanner}>
-                                        {inviteBannerCollapsed ? 'Show' : 'Hide'}
-                                    </CollapseButton>
-                                </HomeFeedHeaderRow>
-                                {!inviteBannerCollapsed && <InviteBannerContentWrapper>
-                                        <InviteBannerTextContent>
-                                            <HomeFeedInfoDescription>
-                                                Mirage is now invite-only — because great conversations require great people!
-                                                {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
-                                            </HomeFeedInfoDescription>
-                                        </InviteBannerTextContent>
-                                        <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
-                                            {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
-                                        </InviteBannerButton>
-                                    </InviteBannerContentWrapper>}
-                            </InviteOnlyBanner>}
+                // Hide posts the viewer downvoted (Home only, client-side)
+                if (displayTopic === 'home' && hideDownvotedPosts) {
+                    orderedPosts = orderedPosts.filter(p => {
+                        const postKey = String(p?.post_id || '').toLowerCase();
+                        // If post is animating out, keep it in the list for now
+                        if (hidingPostsSet.has(postKey)) return true;
+                        // Prefer in-memory/state direction; backend provides user_vote on fetch.
+                        const dir = Number(p?.direction ?? p?.user_vote ?? p?.my_vote ?? p?.myVote ?? p?.userVote ?? 0);
+                        if (Number.isFinite(dir) && dir < 0) return false;
+                        return true;
+                    });
+                }
+            }
+        }
 
-                        {/* Quest hero card - only when quests are enabled on this node */}
-                        {isLoggedIn && questsEnabled && (urlTopic === 'home' || urlTopic === 'following') && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} size={cardSize} />}
+        // Always render the full layout with sidebar and header
+        const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : `#${urlTopic}`;
+        return <ContentGrid>
+            <Helmet>
+                <title>{pageTitle} | Mirage</title>
+            </Helmet>
+            <Sidebar currentPath={location.pathname} state={state} />
+            <div>
+                {header}
+                <TopBar state={state} />
 
-                        {/* Android app banner - shown once for Android users until dismissed */}
-                        {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
-                                <AndroidHeroTitle>
-                                    <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
-                                </AndroidHeroTitle>
-                                <AndroidHeroDescription>
-                                    Get the native Android app for a faster, smoother experience with push notifications and offline support.
-                                </AndroidHeroDescription>
-                                <AndroidHeroButtons>
-                                    <AndroidHeroButton href="https://play.google.com/store/apps/details?id=talk.mirage.mobile" target="_blank" rel="noopener noreferrer">
-                                        Get the app
-                                    </AndroidHeroButton>
-                                    <AndroidHeroDismiss onClick={dismissAndroidBanner}>
-                                        No thanks
-                                    </AndroidHeroDismiss>
-                                </AndroidHeroButtons>
-                            </AndroidAppHero>}
+                <ModernPostFeed>
+                    <MobileHeader />
 
-                        {showHero && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
-                                <AndroidHeroTitle>
-                                    <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
-                                </AndroidHeroTitle>
-                                <AndroidHeroDescription>
-                                    Get the native iOS app for a faster, smoother experience with push notifications and offline support.
-                                </AndroidHeroDescription>
-                                <AndroidHeroButtons>
-                                    <IPhoneHeroButton href="https://apps.apple.com/us/app/mirage-speak-your-mind/id6757619038" target="_blank" rel="noopener noreferrer">
-                                        Get the app
-                                    </IPhoneHeroButton>
-                                    <AndroidHeroDismiss onClick={dismissIPhoneBanner}>
-                                        No thanks
-                                    </AndroidHeroDismiss>
-                                </AndroidHeroButtons>
-                            </IPhoneAppHero>}
+                    {isLoggedIn && isCurrentTopic && showHero && <TopicHeroCard>
+                        <TopicHeroHeader>
+                            <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
+                            <HomeFeedModeInline>
+                                <HomeFeedModeSelect value={homeSortMode} onChange={e => {
+                                    const mode = e.target.value;
+                                    setHomeSortMode(mode);
+                                    Storage.save('home_sort_mode', mode);
+                                }}>
+                                    <option value="magic">Magic</option>
+                                    <option value="newest">Newest</option>
+                                </HomeFeedModeSelect>
+                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
+                                    <option value="large">Large</option>
+                                    {!isMobile && <option value="compact">Compact</option>}
+                                    <option value="media">Media</option>
+                                </HomeFeedModeSelect>
+                                <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" minWidth="5.5rem" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
+                                    const topicName = urlTopic;
+                                    if (!topicName) return;
+                                    const key = topicKeyLower;
+                                    if (!key) return;
+                                    if (isTopicPending(key)) return;
+                                    try {
+                                        if (isTopicFollowing) {
+                                            await unsubscribe(viewerAddress || 'guest', topicName);
+                                            setFollowedTopicsSet(prev => {
+                                                const next = new Set(prev);
+                                                next.delete(key);
+                                                return next;
+                                            });
+                                        } else {
+                                            await subscribe(viewerAddress || 'guest', topicName);
+                                            setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                        }
+                                        invalidateTopicsCache();
+                                    } catch (_) {/* noop */ }
+                                }}>
+                                    {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Unfollow' : 'Following' : 'Follow'}
+                                </Button>
+                            </HomeFeedModeInline>
+                        </TopicHeroHeader>
+                        <TopicHeroDescription>
+                            Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
+                        </TopicHeroDescription>
+                    </TopicHeroCard>}
 
-                        {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
-                        {isLoggedIn && showHero && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero role="region" aria-label="Content preferences">
-                                <NsfwHeroTitle>
-                                    <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
-                                </NsfwHeroTitle>
-                                <NsfwHeroDescription>
-                                    Mirage is uncensored and includes adult content like <strong>pornography</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
-                                </NsfwHeroDescription>
-                                <NsfwHeroButtons>
-                                    <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>
-                                        Yes, show everything
-                                    </NsfwHeroButton>
-                                    <NsfwHeroButton $variant="no" onClick={() => handleNsfwChoice(false)}>
-                                        No, keep it clean
-                                    </NsfwHeroButton>
-                                </NsfwHeroButtons>
-                                <NsfwHeroNote>
-                                    You can change this anytime in <Link to="/settings" style={{
-                color: 'inherit',
-                textDecoration: 'underline'
-              }}>Settings</Link>.
-                                </NsfwHeroNote>
-                            </NsfwWelcomeHero>}
-
-                        {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
-                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
-                                <HomeFeedHeaderRow>
-                                    <HomeFeedInfoTitle>
-                                        <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
-                                    </HomeFeedInfoTitle>
-                                    <HomeFeedModeInline>
-                                        <HomeFeedModeSelect value={homeSortMode} onChange={e => {
-                  const mode = e.target.value;
-                  setHomeSortMode(mode);
-                  Storage.save('home_sort_mode', mode);
-                }}>
-                                            <option value="magic">Magic</option>
-                                            <option value="newest">Newest</option>
-                                        </HomeFeedModeSelect>
-                                        <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                            <option value="large">Large</option>
-                                            {!isMobile && <option value="compact">Compact</option>}
-                                            <option value="media">Media</option>
-                                        </HomeFeedModeSelect>
-                                    </HomeFeedModeInline>
-                                </HomeFeedHeaderRow>
+                    {/* Invite-only banner - shown only when invite codes are enabled on this node */}
+                    {isLoggedIn && showHero && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
+                        <HomeFeedHeaderRow>
+                            <HomeFeedInfoTitle>
+                                <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Invite Codes
+                                {inviteBannerCollapsed && <span style={{
+                                    fontWeight: 'normal'
+                                }}>
+                                    {' '}{availableCodeCount === 0 ? '— None available' : `— ${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} left`}
+                                </span>}
+                            </HomeFeedInfoTitle>
+                            <CollapseButton onClick={toggleInviteBanner}>
+                                {inviteBannerCollapsed ? 'Show' : 'Hide'}
+                            </CollapseButton>
+                        </HomeFeedHeaderRow>
+                        {!inviteBannerCollapsed && <InviteBannerContentWrapper>
+                            <InviteBannerTextContent>
                                 <HomeFeedInfoDescription>
-                                    Your followed topics plus fresh content to discover. <strong>The more you vote, the more your feed reflects your preferences.</strong>
+                                    Mirage is now invite-only — because great conversations require great people!
+                                    {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
                                 </HomeFeedInfoDescription>
-                            </HomeFeedInfoCard>}
+                            </InviteBannerTextContent>
+                            <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
+                                {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
+                            </InviteBannerButton>
+                        </InviteBannerContentWrapper>}
+                    </InviteOnlyBanner>}
 
-                        {/* Following feed info card - permanent for logged-in users */}
-                        {isLoggedIn && urlTopic === 'following' && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
-                                <HomeFeedHeaderRow>
-                                    <HomeFeedInfoTitle>
-                                        <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
-                                    </HomeFeedInfoTitle>
-                                    <HomeFeedModeInline>
-                                        <HomeFeedModeSelect value={homeSortMode} onChange={e => {
-                  const mode = e.target.value;
-                  setHomeSortMode(mode);
-                  Storage.save('home_sort_mode', mode);
-                }}>
-                                            <option value="magic">Magic</option>
-                                            <option value="newest">Newest</option>
-                                        </HomeFeedModeSelect>
-                                        <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                            <option value="large">Large</option>
-                                            {!isMobile && <option value="compact">Compact</option>}
-                                            <option value="media">Media</option>
-                                        </HomeFeedModeSelect>
-                                    </HomeFeedModeInline>
-                                </HomeFeedHeaderRow>
-                                <HomeFeedInfoDescription>
-                                    <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
-                                </HomeFeedInfoDescription>
-                            </HomeFeedInfoCard>}
+                    {/* Quest hero card - only when quests are enabled on this node */}
+                    {isLoggedIn && questsEnabled && (urlTopic === 'home' || urlTopic === 'following') && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} size={cardSize} />}
 
-                        {/* Loading state - only show to logged-in users */}
-                        {isLoggedIn && showLoadingPosts && <LoadingCard $size={cardSize}>
-                                <LoadingSpinner />
-                                <LoadingText>Loading posts...</LoadingText>
-                            </LoadingCard>}
+                    {/* Android app banner - shown once for Android users until dismissed */}
+                    {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
+                        <AndroidHeroTitle>
+                            <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
+                        </AndroidHeroTitle>
+                        <AndroidHeroDescription>
+                            Get the native Android app for a faster, smoother experience with push notifications and offline support.
+                        </AndroidHeroDescription>
+                        <AndroidHeroButtons>
+                            <AndroidHeroButton href="https://play.google.com/store/apps/details?id=talk.mirage.mobile" target="_blank" rel="noopener noreferrer">
+                                Get the app
+                            </AndroidHeroButton>
+                            <AndroidHeroDismiss onClick={dismissAndroidBanner}>
+                                No thanks
+                            </AndroidHeroDismiss>
+                        </AndroidHeroButtons>
+                    </AndroidAppHero>}
 
-                        {/* Empty home feed - only show to logged-in users */}
-                        {isLoggedIn && showEmptyHome && <EmptyHomeMessage />}
+                    {showHero && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
+                        <AndroidHeroTitle>
+                            <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
+                        </AndroidHeroTitle>
+                        <AndroidHeroDescription>
+                            Get the native iOS app for a faster, smoother experience with push notifications and offline support.
+                        </AndroidHeroDescription>
+                        <AndroidHeroButtons>
+                            <IPhoneHeroButton href="https://apps.apple.com/us/app/mirage-speak-your-mind/id6757619038" target="_blank" rel="noopener noreferrer">
+                                Get the app
+                            </IPhoneHeroButton>
+                            <AndroidHeroDismiss onClick={dismissIPhoneBanner}>
+                                No thanks
+                            </AndroidHeroDismiss>
+                        </AndroidHeroButtons>
+                    </IPhoneAppHero>}
 
-                        {/* No posts available - only show to logged-in users */}
-                        {isLoggedIn && showNoPostsAvailable && <LoadingCard $size={cardSize}>
-                                <LoadingText>No posts available</LoadingText>
-                            </LoadingCard>}
+                    {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
+                    {isLoggedIn && showHero && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero role="region" aria-label="Content preferences">
+                        <NsfwHeroTitle>
+                            <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
+                        </NsfwHeroTitle>
+                        <NsfwHeroDescription>
+                            Mirage is uncensored and includes adult content like <strong>pornography</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
+                        </NsfwHeroDescription>
+                        <NsfwHeroButtons>
+                            <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>
+                                Yes, show everything
+                            </NsfwHeroButton>
+                            <NsfwHeroButton $variant="no" onClick={() => handleNsfwChoice(false)}>
+                                No, keep it clean
+                            </NsfwHeroButton>
+                        </NsfwHeroButtons>
+                        <NsfwHeroNote>
+                            You can change this anytime in <Link to="/settings" style={{
+                                color: 'inherit',
+                                textDecoration: 'underline'
+                            }}>Settings</Link>.
+                        </NsfwHeroNote>
+                    </NsfwWelcomeHero>}
 
-                        {/* Invite-only hero - shown to logged-out users on all feeds */}
-                        {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
-                                <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
-                                <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
-                fontSize: '0.5em',
-                marginLeft: '0.3em',
-                verticalAlign: 'super',
-                opacity: 0.8
-              }}>BETA</sup></InviteOnlyHeroTitle>
-                                <InviteOnlyHeroSubtitle>Currently in Private Beta — Invite Only</InviteOnlyHeroSubtitle>
-                                <InviteOnlyHeroDescription>
-                                    Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
-                                </InviteOnlyHeroDescription>
-                                <InviteOnlyHeroDescription>
-                                    <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{
-                color: 'inherit',
-                textDecoration: 'underline'
-              }}>Learn more about our mission</a>
-                                </InviteOnlyHeroDescription>
-                                {welcomeStats && welcomeStats.userCount > 0 && <WelcomeStatsGrid>
-                                        <WelcomeStatItem>
-                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
-                                            <WelcomeStatLabel>Users</WelcomeStatLabel>
-                                        </WelcomeStatItem>
-                                        <WelcomeStatItem>
-                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
-                                            <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
-                                        </WelcomeStatItem>
-                                        <WelcomeStatItem>
-                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
-                                            <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
-                                        </WelcomeStatItem>
-                                    </WelcomeStatsGrid>}
-                                <InviteOnlyHeroDescription>
-                                    Have an invite code? Join the community today.
-                                </InviteOnlyHeroDescription>
-                                <InviteOnlyHeroButtons>
-                                    <Button to="/signup" size="md">
-                                        Create Account
-                                    </Button>
-                                    <Button to="/login" variant="ghost" size="md">
-                                        Sign In
-                                    </Button>
-                                </InviteOnlyHeroButtons>
-                            </InviteOnlyHero>}
+                    {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
+                    {isLoggedIn && urlTopic === 'home' && !showNsfwHero && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
+                        <HomeFeedHeaderRow>
+                            <HomeFeedInfoTitle>
+                                <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
+                            </HomeFeedInfoTitle>
+                            <HomeFeedModeInline>
+                                <HomeFeedModeSelect value={homeSortMode} onChange={e => {
+                                    const mode = e.target.value;
+                                    setHomeSortMode(mode);
+                                    Storage.save('home_sort_mode', mode);
+                                }}>
+                                    <option value="magic">Magic</option>
+                                    <option value="newest">Newest</option>
+                                </HomeFeedModeSelect>
+                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
+                                    <option value="large">Large</option>
+                                    {!isMobile && <option value="compact">Compact</option>}
+                                    <option value="media">Media</option>
+                                </HomeFeedModeSelect>
+                            </HomeFeedModeInline>
+                        </HomeFeedHeaderRow>
+                        <HomeFeedInfoDescription>
+                            Your followed topics plus fresh content to discover. <strong>The more you vote, the more your feed reflects your preferences.</strong>
+                        </HomeFeedInfoDescription>
+                    </HomeFeedInfoCard>}
 
-                        {/* Posts grid - only show to logged-in users */}
-                        {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
-            const family = getThemeFamily(state?.themeId);
-            const FeedComponent = family.Feed;
-            const visiblePosts = orderedPosts.filter(p => {
-              const hasValidTitle = p && typeof p.title === 'string' && p.title.trim().length > 0;
-              const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
-              return hasValidTitle && hasValidTopic && !p.deleted;
-            });
-            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} />;
-          })()}
+                    {/* Following feed info card - permanent for logged-in users */}
+                    {isLoggedIn && urlTopic === 'following' && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
+                        <HomeFeedHeaderRow>
+                            <HomeFeedInfoTitle>
+                                <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
+                            </HomeFeedInfoTitle>
+                            <HomeFeedModeInline>
+                                <HomeFeedModeSelect value={homeSortMode} onChange={e => {
+                                    const mode = e.target.value;
+                                    setHomeSortMode(mode);
+                                    Storage.save('home_sort_mode', mode);
+                                }}>
+                                    <option value="magic">Magic</option>
+                                    <option value="newest">Newest</option>
+                                </HomeFeedModeSelect>
+                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
+                                    <option value="large">Large</option>
+                                    {!isMobile && <option value="compact">Compact</option>}
+                                    <option value="media">Media</option>
+                                </HomeFeedModeSelect>
+                            </HomeFeedModeInline>
+                        </HomeFeedHeaderRow>
+                        <HomeFeedInfoDescription>
+                            <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
+                        </HomeFeedInfoDescription>
+                    </HomeFeedInfoCard>}
 
-                        {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
-                        {isLoggedIn && <div ref={bottomSentinelRef} style={{
-            width: '100%',
-            minHeight: '1px'
-          }}>
-                                {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && <LoadMoreButton type="button" onClick={loadMore}>
-                                        Load more
-                                    </LoadMoreButton>}
-                            </div>}
-                    </ModernPostFeed>
-                </div>
+                    {/* Loading state - only show to logged-in users */}
+                    {isLoggedIn && showLoadingPosts && <LoadingCard $size={cardSize}>
+                        <LoadingSpinner />
+                        <LoadingText>Loading posts...</LoadingText>
+                    </LoadingCard>}
 
-                {/* Invite Code Modal */}
-                {inviteModalOpen && <InviteModalOverlay onClick={() => setInviteModalOpen(false)}>
-                        <InviteModalContent onClick={e => e.stopPropagation()}>
-                            <InviteModalHeader>
-                                <InviteModalTitle>
-                                    <span role="img" aria-label="sparkles">✨</span> Share Your Invite Code
-                                </InviteModalTitle>
-                                <InviteModalClose onClick={() => setInviteModalOpen(false)}>&times;</InviteModalClose>
-                            </InviteModalHeader>
+                    {/* Empty home feed - only show to logged-in users */}
+                    {isLoggedIn && showEmptyHome && <EmptyHomeMessage />}
 
-                            {nextAvailableCode ? <>
-                                    <InviteCodeDisplay>
-                                        <InviteCodeText>{nextAvailableCode.code}</InviteCodeText>
-                                        <InviteCodeSubtext>Share this code with a friend to invite them</InviteCodeSubtext>
-                                    </InviteCodeDisplay>
+                    {/* No posts available - only show to logged-in users */}
+                    {isLoggedIn && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                        <LoadingText>No posts available</LoadingText>
+                    </LoadingCard>}
 
-                                    <InviteShareButtons>
-                                        <InviteCopyButton onClick={handleCopyInviteCode}>
-                                            {inviteCodeCopied ? '✓ Copied!' : 'Copy Invite Link'}
-                                        </InviteCopyButton>
-                                        {canNativeShare && <InviteNativeShareButton onClick={handleNativeShare}>
-                                                <span role="img" aria-label="share">📤</span> Share via...
-                                            </InviteNativeShareButton>}
-                                    </InviteShareButtons>
-                                    <InviteDesktopShareButtons>
-                                        <InviteShareButton as="a" href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText())}&url=${encodeURIComponent(getShareUrl())}`} target="_blank" rel="noopener noreferrer">
-                                            <span role="img" aria-label="X">𝕏</span> Twitter/X
-                                        </InviteShareButton>
-                                        <InviteShareButton as="a" href={`https://t.me/share/url?url=${encodeURIComponent(getShareUrl())}&text=${encodeURIComponent(getShareText())}`} target="_blank" rel="noopener noreferrer">
-                                            <span role="img" aria-label="telegram">📨</span> Telegram
-                                        </InviteShareButton>
-                                        <InviteShareButton as="a" href={`https://wa.me/?text=${encodeURIComponent(getShareText() + ' ' + getShareUrl())}`} target="_blank" rel="noopener noreferrer">
-                                            <span role="img" aria-label="whatsapp">💬</span> WhatsApp
-                                        </InviteShareButton>
-                                        <InviteShareButton as="a" href={`mailto:?subject=${encodeURIComponent('Join me on Mirage!')}&body=${encodeURIComponent(getShareText() + '\n\n' + getShareUrl())}`}>
-                                            <span role="img" aria-label="email">📧</span> Email
-                                        </InviteShareButton>
-                                    </InviteDesktopShareButtons>
+                    {/* Invite-only hero - shown to logged-out users on all feeds */}
+                    {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
+                        <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
+                        <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
+                            fontSize: '0.5em',
+                            marginLeft: '0.3em',
+                            verticalAlign: 'super',
+                            opacity: 0.8
+                        }}>BETA</sup></InviteOnlyHeroTitle>
+                        <InviteOnlyHeroSubtitle>Currently in Private Beta — Invite Only</InviteOnlyHeroSubtitle>
+                        <InviteOnlyHeroDescription>
+                            Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
+                        </InviteOnlyHeroDescription>
+                        <InviteOnlyHeroDescription>
+                            <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{
+                                color: 'inherit',
+                                textDecoration: 'underline'
+                            }}>Learn more about our mission</a>
+                        </InviteOnlyHeroDescription>
+                        {welcomeStats && welcomeStats.userCount > 0 && <WelcomeStatsGrid>
+                            <WelcomeStatItem>
+                                <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
+                                <WelcomeStatLabel>Users</WelcomeStatLabel>
+                            </WelcomeStatItem>
+                            <WelcomeStatItem>
+                                <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
+                                <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
+                            </WelcomeStatItem>
+                            <WelcomeStatItem>
+                                <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
+                                <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
+                            </WelcomeStatItem>
+                        </WelcomeStatsGrid>}
+                        <InviteOnlyHeroDescription>
+                            Have an invite code? Join the community today.
+                        </InviteOnlyHeroDescription>
+                        <InviteOnlyHeroButtons>
+                            <Button to="/signup" size="md">
+                                Create Account
+                            </Button>
+                            <Button to="/login" variant="ghost" size="md">
+                                Sign In
+                            </Button>
+                        </InviteOnlyHeroButtons>
+                    </InviteOnlyHero>}
 
-                                    <InviteRemainingText>
-                                        You have {availableCodeCount} invite{availableCodeCount !== 1 ? 's' : ''} remaining
-                                    </InviteRemainingText>
-                                </> : <InviteNoCodesText>
-                                    You don't have any invite codes available. Check back later!
-                                </InviteNoCodesText>}
-                        </InviteModalContent>
-                    </InviteModalOverlay>}
-            </ContentGrid>;
-  };
-  return showPosts();
+                    {/* Posts grid - only show to logged-in users */}
+                    {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                        const family = getThemeFamily(state?.themeId);
+                        const FeedComponent = family.Feed;
+                        const visiblePosts = orderedPosts.filter(p => {
+                            const hasValidTitle = p && typeof p.title === 'string' && p.title.trim().length > 0;
+                            const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
+                            return hasValidTitle && hasValidTopic && !p.deleted;
+                        });
+                        return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} />;
+                    })()}
+
+                    {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
+                    {isLoggedIn && <div ref={bottomSentinelRef} style={{
+                        width: '100%',
+                        minHeight: '1px'
+                    }}>
+                        {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && <LoadMoreButton type="button" onClick={loadMore}>
+                            Load more
+                        </LoadMoreButton>}
+                    </div>}
+                </ModernPostFeed>
+            </div>
+
+            {/* Invite Code Modal */}
+            {inviteModalOpen && <InviteModalOverlay onClick={() => setInviteModalOpen(false)}>
+                <InviteModalContent onClick={e => e.stopPropagation()}>
+                    <InviteModalHeader>
+                        <InviteModalTitle>
+                            <span role="img" aria-label="sparkles">✨</span> Share Your Invite Code
+                        </InviteModalTitle>
+                        <InviteModalClose onClick={() => setInviteModalOpen(false)}>&times;</InviteModalClose>
+                    </InviteModalHeader>
+
+                    {nextAvailableCode ? <>
+                        <InviteCodeDisplay>
+                            <InviteCodeText>{nextAvailableCode.code}</InviteCodeText>
+                            <InviteCodeSubtext>Share this code with a friend to invite them</InviteCodeSubtext>
+                        </InviteCodeDisplay>
+
+                        <InviteShareButtons>
+                            <InviteCopyButton onClick={handleCopyInviteCode}>
+                                {inviteCodeCopied ? '✓ Copied!' : 'Copy Invite Link'}
+                            </InviteCopyButton>
+                            {canNativeShare && <InviteNativeShareButton onClick={handleNativeShare}>
+                                <span role="img" aria-label="share">📤</span> Share via...
+                            </InviteNativeShareButton>}
+                        </InviteShareButtons>
+                        <InviteDesktopShareButtons>
+                            <InviteShareButton as="a" href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText())}&url=${encodeURIComponent(getShareUrl())}`} target="_blank" rel="noopener noreferrer">
+                                <span role="img" aria-label="X">𝕏</span> Twitter/X
+                            </InviteShareButton>
+                            <InviteShareButton as="a" href={`https://t.me/share/url?url=${encodeURIComponent(getShareUrl())}&text=${encodeURIComponent(getShareText())}`} target="_blank" rel="noopener noreferrer">
+                                <span role="img" aria-label="telegram">📨</span> Telegram
+                            </InviteShareButton>
+                            <InviteShareButton as="a" href={`https://wa.me/?text=${encodeURIComponent(getShareText() + ' ' + getShareUrl())}`} target="_blank" rel="noopener noreferrer">
+                                <span role="img" aria-label="whatsapp">💬</span> WhatsApp
+                            </InviteShareButton>
+                            <InviteShareButton as="a" href={`mailto:?subject=${encodeURIComponent('Join me on Mirage!')}&body=${encodeURIComponent(getShareText() + '\n\n' + getShareUrl())}`}>
+                                <span role="img" aria-label="email">📧</span> Email
+                            </InviteShareButton>
+                        </InviteDesktopShareButtons>
+
+                        <InviteRemainingText>
+                            You have {availableCodeCount} invite{availableCodeCount !== 1 ? 's' : ''} remaining
+                        </InviteRemainingText>
+                    </> : <InviteNoCodesText>
+                        You don't have any invite codes available. Check back later!
+                    </InviteNoCodesText>}
+                </InviteModalContent>
+            </InviteModalOverlay>}
+        </ContentGrid>;
+    };
+    return showPosts();
 };
 export default MainView;

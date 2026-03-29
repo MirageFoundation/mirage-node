@@ -6,7 +6,7 @@ import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
 import * as tx from "../utils/tx";
-import { getThemeFamily } from "../styled/theme";
+import { getThemeFamily } from "../registry/theme";
 import { useTabs } from "./useTabs.js";
 import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { useTxStatus } from "./useTxStatus.js";
@@ -92,8 +92,6 @@ export function useProfile({
     const VALID_TABS = theme.caps.profileTabs;
     const [activeTab, setActiveTab] = useTabs(theme.caps.profileDefaultTab, VALID_TABS);
     const profileUsesListFeed = theme.caps.profileUsesListFeed;
-    const profileHideFilterSelect = theme.caps.profileHideFilterSelect;
-    const profilePostsFullWidth = theme.caps.profilePostsFullWidth;
     const FeedComponent = useMemo(() => getThemeFamily(theme.themeId).Feed, [theme.themeId]);
     const isPostsTab = activeTab === 'posts' || activeTab === 'overview' || activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => isOwnProfile ? username || '' : '');
@@ -759,8 +757,6 @@ export function useProfile({
         activeTab,
         setActiveTab,
         profileUsesListFeed,
-        profileHideFilterSelect,
-        profilePostsFullWidth,
         FeedComponent,
         isPostsTab,
         profileUsername,

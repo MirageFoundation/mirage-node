@@ -1,71 +1,15 @@
 import { Helmet } from "react-helmet-async";
-import { getThemeFamily } from "../../../styled/theme";
+import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
 import QuestHeroCard from "../components/QuestHeroCard.js";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
 import { ContentGrid, ModernPostFeed, StyledError } from "../Layout";
-import { useMain, pickThemeColor } from "../../../logic/useMain";
-// Welcome card that appears for first-time visitors on the front page
-// eslint-disable-next-line no-unused-vars
-const WelcomeCard = styled.div`
-    margin-top: 1rem;
-    background-color: rgba(251, 191, 36, 0.1);
-    border: 1px solid #f59e0b;
-    color: #f59e0b;
-    border-radius: 16px;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-
-    @media (max-width: 1000px) {
-        border-radius: 12px;
-        padding: 1rem;
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 8px;
-        padding: 0.75rem;
-    }
-`;
-
-// eslint-disable-next-line no-unused-vars
-const WelcomeDescription = styled.div`
-    color: #f59e0b;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    @media (max-width: 1000px) {
-        font-size: 0.55rem;
-    }
-`;
-
-// eslint-disable-next-line no-unused-vars
-const WelcomeFooter = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-`;
-
-// eslint-disable-next-line no-unused-vars
-const WelcomeText = styled.a`
-    color: #f59e0b;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.8rem;
-    flex: 1 1 auto;
-    &:hover {
-        color: #d97706;
-        text-decoration: underline;
-        text-decoration-color: #f59e0b;
-    }
-`;
+import { useMain } from "../../../logic/useMain";
+import { requireThemeColor } from "../../../utils/themeColor";
 
 // Invite-only hero for logged-out users on the front page
 const InviteOnlyHero = styled.div`
@@ -354,7 +298,7 @@ const CollapseButton = styled.button`
     border: none;
     color: ${({
     theme
-}) => pickThemeColor(theme, 'subtleText')};
+}) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.65rem;
     font-weight: 600;
     cursor: pointer;
@@ -368,7 +312,7 @@ const CollapseButton = styled.button`
     &:hover {
         color: ${({
     theme
-}) => pickThemeColor(theme, 'text')};
+}) => requireThemeColor(theme, 'text')};
         background: ${({
     theme
 }) => theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)'};
@@ -947,10 +891,10 @@ const PostHeaderCard = styled.div`
     margin-right: 1rem;
     background-color: ${({
     theme
-}) => pickThemeColor(theme, 'card') || '#23272C'};
+}) => requireThemeColor(theme, 'card')};
     border: 1px solid ${({
     theme
-}) => pickThemeColor(theme, 'cardBorder') || '#333'};
+}) => requireThemeColor(theme, 'cardBorder')};
     color: ${({
     theme
 }) => theme.colors.text};
@@ -1240,9 +1184,10 @@ const MainView = ({
     setTopic,
     routeTopic
 }) => {
+    const theme = useTheme();
+    const showHero = theme.caps.showHeroCards;
     const {
         urlTopic,
-        showHero,
         currentTopicRef,
         error,
         stableOrder,

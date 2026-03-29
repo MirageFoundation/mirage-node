@@ -2,6 +2,7 @@ const bluemoonDarkColors = {
     bg: '#1A1A1A',
     text: '#FFFFFF',
     subtleText: '#CCCCCC',
+    card: '#23272C',
     panel: '#23272C',
     panelAlt: '#33373C',
     border: '#444',
@@ -46,6 +47,7 @@ const bluemoonLightColors = {
     bg: '#FFFFFF',
     text: '#111827',
     subtleText: '#4B5563',
+    card: '#FFFFFF',
     panel: '#F7F7F8',
     panelAlt: '#EFEFF1',
     border: '#D1D5DB',
@@ -152,13 +154,13 @@ function buildLayout(colors) {
         // Content grid (sidebar + main area)
         contentGridCols: '200px minmax(0, 1fr)',
         contentGridGap: '0.5rem',
-        contentMaxWidth: 'var(--content-max-width, 1240px)',
+        contentMaxWidth: '1240px',
         contentMargin: '0 auto',
         contentPadding: '0 0.5rem',
         contentPaddingTablet: '0 0.25rem',
 
         // Feed container
-        feedMaxWidth: 'var(--feed-max-width, 1000px)',
+        feedMaxWidth: '1000px',
         feedMargin: '0 auto',
         feedPadding: '0 0.75rem',
         feedGap: 'var(--card-gap, 0.5rem)',
@@ -178,7 +180,7 @@ function buildLayout(colors) {
         containerBodyPaddingMobile: '1rem',
 
         // Search
-        searchMaxWidth: 'var(--feed-max-width, 1000px)',
+        searchMaxWidth: '1000px',
         searchMargin: '0.75rem auto',
         searchPadding: '0 0.75rem',
         searchMarginTablet: '0.5rem auto',

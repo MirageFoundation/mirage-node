@@ -179,7 +179,6 @@ function ReferralsView({
   state
 }) {
   const {
-    location,
     publicKey,
     username,
     period,

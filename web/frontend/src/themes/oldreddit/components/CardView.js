@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, memo, useMemo } from "react";
 import ReactDOM from "react-dom";
 import styled, { useTheme } from "styled-components"
 import { Link, useNavigate } from 'react-router-dom';
-import { getThemeFamily } from "../../../styled/theme";
+import { getThemeFamily } from "../../../registry/theme";
 import InlineMedia from "./InlineMedia";
 import Button from "./Button";
 import Storage from '../../../utils/Storage';
@@ -10,8 +10,7 @@ import * as tx from "../../../utils/tx.js";
 import Api from '../../../utils/api';
 import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
-import { darkColors as fallbackDarkColors } from "../../../styled/colors/dark";
-import { lightColors as fallbackLightColors } from "../../../styled/colors/light";
+import { requireThemeColor } from "../../../utils/themeColor";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../../../utils/media";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import useBalance from "../../../logic/useBalance";
@@ -21,16 +20,9 @@ import { formatMirageCompact } from "../../../utils/formatters";
 
 import { Tooltip, tooltipStyles } from "./Tooltip";
 
-const pickCard = (theme, key) => {
-    if (theme.colors[key]) return theme.colors[key];
-    const isLight = theme.name === 'light';
-    return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
-};
-
-
 const StyledMainContainer = styled.div`
-    background: ${({ theme }) => pickCard(theme, 'card')};
-    border: 1px solid ${({ theme }) => pickCard(theme, 'cardBorder')};
+    background: ${({ theme }) => requireThemeColor(theme, 'card')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'cardBorder')};
     border-radius: 12px;
     display: flex;    
     min-height: auto;
@@ -44,7 +36,7 @@ const StyledMainContainer = styled.div`
     box-shadow: ${({ theme }) => theme.colors.cardShadow};
 
     &:hover {
-        background: ${({ theme }) => pickCard(theme, 'cardAlt')};
+        background: ${({ theme }) => requireThemeColor(theme, 'cardAlt')};
         box-shadow: ${({ theme }) => theme.colors.cardShadowHover};
     }
 
@@ -133,8 +125,8 @@ const MobileCardWrapper = styled.div`
         margin: 0.5rem 0 0.5rem 0;
         border-radius: 12px;
         overflow: hidden;
-        border: 1px solid ${({ theme }) => pickCard(theme, 'cardBorder')};
-        background: ${({ theme }) => pickCard(theme, 'cardAlt')};
+        border: 1px solid ${({ theme }) => requireThemeColor(theme, 'cardBorder')};
+        background: ${({ theme }) => requireThemeColor(theme, 'cardAlt')};
         position: relative;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     }
@@ -423,13 +415,13 @@ const StyledLink = styled(Link)`
 
 const StyledProfileLink = styled(Link)`
     font-size: inherit;
-    color: ${({ $tierColor, theme }) => $tierColor } !important;
+    color: ${({ $tierColor, theme }) => $tierColor} !important;
     text-decoration: none;
     font-weight: bold;
     ${() => tooltipStyles()}
 
     &:hover {
-        color: ${({ $tierColor, theme }) => $tierColor } !important;
+        color: ${({ $tierColor, theme }) => $tierColor} !important;
     }
 `
 
@@ -2634,7 +2626,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.35rem',
-                                    background: theme.colors.surface2 ,
+                                    background: theme.colors.surface2,
                                     border: `1px solid ${theme.colors.borderSubtle}`,
                                     borderRadius: '8px',
                                     padding: '0.2rem 0.5rem',
@@ -2764,7 +2756,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     alignItems: 'center',
                                                     gap: '0.4rem',
                                                     padding: '0.45rem 0.6rem',
-                                                    background: theme.colors.surface2 ,
+                                                    background: theme.colors.surface2,
                                                     border: `1px solid ${theme.colors.borderSubtle}`,
                                                     borderRadius: '8px',
                                                     color: theme.colors.text,
@@ -2774,7 +2766,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     transition: 'background 0.15s, opacity 0.15s',
                                                 }}
                                                 onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme.colors.hover; }}
-                                                onMouseLeave={e => { e.currentTarget.style.background = theme.colors.surface2 ; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = theme.colors.surface2; }}
                                             >
                                                 <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
                                                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
