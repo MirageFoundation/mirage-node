@@ -1317,8 +1317,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 cfg = raw ? JSON.parse(raw) : null;
             } catch (e) {
                 console.debug('[CardView] gift-subscribe.config-error', e);
-                setConfirmGiftSub((prev) => (prev && prev.target === target ? { ...prev, loading: false, error: 'Failed to read chain config' } : prev));
-                return;
+            }
+            if (!cfg || !Number(cfg.subscription_period || 0)) {
+                try {
+                    const fetched = await Api.get('get_chain_config', undefined);
+                    if (fetched && typeof fetched === 'object') {
+                        try { tx.cacheChainConfig(fetched); } catch (_) { }
+                        cfg = fetched;
+                    }
+                } catch (e) {
+                    console.debug('[CardView] gift-subscribe.config-fetch-error', e);
+                }
             }
             const periodMinutes = Number(cfg?.subscription_period || 0);
             if (!periodMinutes || periodMinutes <= 0) {
