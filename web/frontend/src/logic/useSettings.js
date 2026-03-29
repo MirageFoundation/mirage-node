@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import styled from "styled-components";
 import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
@@ -247,6 +247,7 @@ export function useSettings({
     const [secError, setSecError] = useState('');
     const [secSuccess, setSecSuccess] = useState('');
     const [secBusy, setSecBusy] = useState(false);
+    const secSuccessTimeoutRef = useRef(null);
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
     const [deleteError, setDeleteError] = useState('');
     const [deleteSuccess, setDeleteSuccess] = useState('');
@@ -265,6 +266,12 @@ export function useSettings({
         const timer = setTimeout(() => setSeedRevealed(false), 60_000);
         return () => clearTimeout(timer);
     }, [seedRevealed]);
+    useEffect(() => () => {
+        if (secSuccessTimeoutRef.current) {
+            clearTimeout(secSuccessTimeoutRef.current);
+            secSuccessTimeoutRef.current = null;
+        }
+    }, []);
     const commitModeSwitch = useCallback(async (newMode, password) => {
         setSecBusy(true);
         setSecError('');
@@ -305,7 +312,11 @@ export function useSettings({
                 passkey: 'Passkey'
             };
             setSecSuccess(`${modeLabels[newMode] || 'Storage'} storage updated.`);
-            setTimeout(() => setSecSuccess(''), 5000);
+            if (secSuccessTimeoutRef.current) clearTimeout(secSuccessTimeoutRef.current);
+            secSuccessTimeoutRef.current = setTimeout(() => {
+                setSecSuccess('');
+                secSuccessTimeoutRef.current = null;
+            }, 5000);
         } catch (e) {
             const msg = String(e?.message || e || '');
             // Don't show raw browser WebAuthn errors (e.g. "FallbackRequested",

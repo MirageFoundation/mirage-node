@@ -5,7 +5,7 @@ const NO_CACHE_UNTIL_KEY = 'profile_no_cache_until';
 const CACHE_TTL_MS = 86400000; // 24 hours
 const NO_CACHE_WINDOW_MS = 30000; // 30 seconds after follow/unfollow
 
-let pendingRequest = null;
+const pendingRequests = new Map();
 
 function isInNoCacheWindow() {
     try {
@@ -75,28 +75,31 @@ export async function fetchProfile(viewerAddress, force = false) {
         }
     }
 
-    // If there's already a pending request for the same address, wait for it
-    if (pendingRequest) {
-        return pendingRequest;
+    // If there's already a pending request for this address, reuse it.
+    const pending = pendingRequests.get(addr);
+    if (pending) {
+        return pending;
     }
 
     // Make the request
-    pendingRequest = Api.get('get_user_followed', { address: addr })
+    const request = Api.get('get_user_followed', { address: addr })
         .then(data => {
             // Only save to cache if we're outside the no-cache window
             if (!isInNoCacheWindow()) {
                 saveToStorage(addr, data);
             }
-            pendingRequest = null;
             return data;
         })
         .catch(e => {
             console.error('[ProfileCache] Failed to fetch followed data:', e);
-            pendingRequest = null;
             throw e;
+        })
+        .finally(() => {
+            pendingRequests.delete(addr);
         });
 
-    return pendingRequest;
+    pendingRequests.set(addr, request);
+    return request;
 }
 
 export function getFollowedTopics() {
@@ -121,7 +124,7 @@ export function invalidateCache() {
     // This way, callers that just performed follow/unfollow and then manually
     // invalidate the cache will STILL be in the 60s "always refetch" window.
     localStorage.removeItem(CACHE_KEY);
-    pendingRequest = null;
+    pendingRequests.clear();
 }
 
 export function isCacheValid(addr) {
@@ -175,7 +178,7 @@ export function updateCacheUsers(users, address = null) {
     } catch (_) { }
 }
 
-// Clear cache and don't allow caching for 60s (ensures blockchain propagation)
+// Clear cache and don't allow caching for 30s (ensures blockchain propagation)
 export function scheduleRefresh(address) {
     startNoCacheWindow();
 }

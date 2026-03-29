@@ -5,17 +5,23 @@ import VoteSection from './components/VoteSection';
 import { buildPhotonUrl, isLikelyImageUrl } from '../../utils/media';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
+import { OLDREDDIT_SHELL_INSET_X } from './Layout';
 
 const ListContainer = styled.div`
     display: flex;
     flex-direction: column;
     background: ${({ theme }) => theme.colors.panel};
+    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    max-width: none;
+    box-sizing: border-box;
 `;
 
 const Row = styled.div`
     display: flex;
     align-items: center;
-    padding: 0.4rem 0;
+    padding: 0.15rem  1rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.4rem;
     min-height: 52px;
@@ -30,8 +36,10 @@ const Row = styled.div`
 `;
 
 const Rank = styled.span`
-    flex: 0 0 1.8rem;
-    text-align: right;
+    flex: 0 0 auto;
+    min-width: 1rem;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
     font-size: 0.75rem;
     font-weight: 500;
     color: ${({ theme }) => theme.colors.subtleText};
@@ -169,7 +177,7 @@ const ActionButton = styled.button`
 const SortTabs = styled.div`
     display: flex;
     gap: 0.5rem;
-    padding: 0.4rem 0;
+    padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
 `;

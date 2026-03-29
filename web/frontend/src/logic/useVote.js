@@ -9,6 +9,7 @@ export function usePendingVotes() {
     useEffect(() => {
         let unsubscribe = null;
         let mounted = true;
+        let disposed = false;
 
         const setup = async () => {
             try {
@@ -16,15 +17,23 @@ export function usePendingVotes() {
                 if (mounted) setPendingVotes(initial);
             } catch (_) { }
 
-            unsubscribe = await tx.addVoteListener((votes) => {
+            const listenerCleanup = await tx.addVoteListener((votes) => {
                 if (mounted) setPendingVotes(votes);
             });
+            if (disposed) {
+                try {
+                    if (listenerCleanup) listenerCleanup();
+                } catch (_) { }
+                return;
+            }
+            unsubscribe = listenerCleanup;
         };
 
         setup();
 
         return () => {
             mounted = false;
+            disposed = true;
             if (unsubscribe) unsubscribe();
         };
     }, []);

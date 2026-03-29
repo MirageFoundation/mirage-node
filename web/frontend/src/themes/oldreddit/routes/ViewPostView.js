@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
@@ -1035,14 +1035,21 @@ function ViewPostView({
         state,
         updatePost
     });
+    const commentsRequestRef = useRef(0);
+    const commentsAutoOpenTimersRef = useRef(new Set());
     useEffect(() => {
+        const autoOpenTimeouts = commentsAutoOpenTimersRef.current;
         const post_id = postId;
+        const requestId = commentsRequestRef.current + 1;
+        commentsRequestRef.current = requestId;
+        let cancelled = false;
         if (post_id) {
             const viewerAddress = Storage.load("publicKey", "");
             Api.get('get_comments', {
                 post_id,
                 address: viewerAddress
             }).then(data => {
+                if (cancelled || commentsRequestRef.current !== requestId) return;
                 setLoading(false);
                 setRoot(data.root);
                 setChildren(data.children);
@@ -1077,20 +1084,27 @@ function ViewPostView({
                     const isAuthor = currentUserAddress && postAuthorAddress && currentUserAddress === postAuthorAddress;
                     if (isAuthor) {
                         // Small delay to ensure state is updated
-                        setTimeout(() => {
+                        const timeoutId = setTimeout(() => {
+                            autoOpenTimeouts.delete(timeoutId);
+                            if (cancelled || commentsRequestRef.current !== requestId) return;
                             openEdit(data.root);
                         }, 100);
+                        autoOpenTimeouts.add(timeoutId);
                     }
                 }
                 // Auto-open donate dialog if donate query parameter is present
                 const shouldDonate = params.get('donate') === 'true';
                 if (shouldDonate && data.root && data.root.user_id) {
-                    setTimeout(() => {
+                    const timeoutId = setTimeout(() => {
+                        autoOpenTimeouts.delete(timeoutId);
+                        if (cancelled || commentsRequestRef.current !== requestId) return;
                         setConfirmDonate(data.root.user_id);
                     }, 100);
+                    autoOpenTimeouts.add(timeoutId);
                 }
                 // Do not auto-open reply; user explicitly opens when needed
             }).catch(error => {
+                if (cancelled || commentsRequestRef.current !== requestId) return;
                 setLoading(false);
                 let errorMessage = "An unknown error occurred";
                 const msg = error && error.message ? String(error.message) : "";
@@ -1116,6 +1130,11 @@ function ViewPostView({
                 setError(errorMessage);
             });
         }
+        return () => {
+            cancelled = true;
+            autoOpenTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+            autoOpenTimeouts.clear();
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [postId]);
 

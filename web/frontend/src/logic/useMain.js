@@ -226,7 +226,8 @@ export function useMain({
         try {
             const savedOrder = sessionStorage.getItem(getFeedKey(urlTopic, 'order'));
             if (savedOrder) {
-                return JSON.parse(savedOrder);
+                const parsed = JSON.parse(savedOrder);
+                return Array.isArray(parsed) ? parsed : [];
             }
         } catch (_) { }
         return [];
@@ -378,6 +379,8 @@ export function useMain({
     const topicsLoadedRef = useRef(false); // Track if we've attempted to load topics from API
     const isMountedRef = useRef(true); // Track if component is mounted
     const forceHardRefreshRef = useRef(isInitialPageLoad()); // Bypass debounce on initial page load
+    const downvoteTimeoutsRef = useRef(new Set());
+    const latestFeedRequestRef = useRef(0);
 
     // Android app banner: show once for Android users until dismissed
     const isAndroid = (() => {
@@ -714,6 +717,7 @@ export function useMain({
 
     // Track posts the viewer downvoted to hide with animation on Home
     useEffect(() => {
+        const timeoutSet = downvoteTimeoutsRef.current;
         const handler = e => {
             const detail = e?.detail || {};
             const pid = String(detail?.postId || '').toLowerCase();
@@ -735,7 +739,7 @@ export function useMain({
             });
 
             // After fade animation completes, permanently hide for this session
-            setTimeout(() => {
+            const timeoutId = setTimeout(() => {
                 try {
                     if (typeof updatePost === 'function') {
                         updatePost(pid, {
@@ -752,10 +756,16 @@ export function useMain({
                     next.delete(pid);
                     return next;
                 });
+                timeoutSet.delete(timeoutId);
             }, 250);
+            timeoutSet.add(timeoutId);
         };
         window.addEventListener('postDownvoted', handler);
-        return () => window.removeEventListener('postDownvoted', handler);
+        return () => {
+            window.removeEventListener('postDownvoted', handler);
+            timeoutSet.forEach((timeoutId) => clearTimeout(timeoutId));
+            timeoutSet.clear();
+        };
     }, [updatePost]);
 
     // Clear flash animation after it completes
@@ -790,6 +800,9 @@ export function useMain({
         }
         const viewerAddress = Storage.load("publicKey", "");
         const page = effectivePage;
+        const requestId = latestFeedRequestRef.current + 1;
+        latestFeedRequestRef.current = requestId;
+        const isCurrentRequest = () => latestFeedRequestRef.current === requestId;
         const matchTopic = t => {
             if (topic === 'all') return true;
             if (topic === 'home' || topic === 'following') return true;
@@ -797,6 +810,7 @@ export function useMain({
         };
         const handleResponse = data => {
             if (!isMountedRef.current) return;
+            if (!isCurrentRequest()) return;
             const forcedHard = !!forceHardRefreshRef.current;
             const arr = data && Array.isArray(data.posts) ? data.posts : [];
             const hasMore = !!(data && data.has_more);
@@ -903,6 +917,7 @@ export function useMain({
         };
         const onError = error => {
             if (!isMountedRef.current) return;
+            if (!isCurrentRequest()) return;
             const errorMessage = error && error.message ? error.message : "An unknown error occurred";
             setError(errorMessage);
             try {

@@ -7,7 +7,7 @@ import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
-import { ContentGrid, ModernPostFeed, StyledError } from "../Layout";
+import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
 
@@ -1004,10 +1004,13 @@ const LoadMoreButton = styled.button`
  * LoadingCard — flat list row, same surface as ListFeedView (no inset card / no body bg gaps)
  */
 const LoadingCard = styled.div`
-    margin: 0;
+    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    max-width: none;
     padding: ${({
     $size
-}) => $size === 'compact' ? '0.75rem 0' : '1rem 0'};
+}) => ($size === 'compact' ? '0.75rem' : '1rem')} ${OLDREDDIT_SHELL_INSET_X};
     min-height: 5rem;
     background-color: ${({
     theme
@@ -1024,7 +1027,6 @@ const LoadingCard = styled.div`
     gap: ${({
     $size
 }) => $size === 'compact' ? '0.5rem' : '0.65rem'};
-    width: 100%;
     box-sizing: border-box;
 `;
 const LoadingSpinner = styled.div`
@@ -1139,8 +1141,11 @@ const TopicHeroDescription = styled.div`
  * EmptyHomeCard — flat full-width strip, aligned with list feed surface
  */
 const EmptyHomeCard = styled.div`
-    margin: 0;
-    padding: 1.25rem 0;
+    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    max-width: none;
+    padding: 1.25rem ${OLDREDDIT_SHELL_INSET_X};
     background-color: ${({
     theme
 }) => theme.colors.panel};
@@ -1150,7 +1155,6 @@ const EmptyHomeCard = styled.div`
     theme
 }) => theme.colors.border};
     text-align: center;
-    width: 100%;
     box-sizing: border-box;
 `;
 const EmptyHomeTitle = styled.div`

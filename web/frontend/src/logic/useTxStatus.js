@@ -13,6 +13,7 @@ export function useTxStatus() {
     useEffect(() => {
         let unsubscribe = null;
         let mounted = true;
+        let disposed = false;
 
         const setup = async () => {
             try {
@@ -20,15 +21,23 @@ export function useTxStatus() {
                 if (mounted) setStatus(initial);
             } catch (_) { }
 
-            unsubscribe = await addStatusListener((newStatus) => {
+            const listenerCleanup = await addStatusListener((newStatus) => {
                 if (mounted) setStatus(newStatus);
             });
+            if (disposed) {
+                try {
+                    if (listenerCleanup) listenerCleanup();
+                } catch (_) { }
+                return;
+            }
+            unsubscribe = listenerCleanup;
         };
 
         setup();
 
         return () => {
             mounted = false;
+            disposed = true;
             if (unsubscribe) unsubscribe();
         };
     }, []);

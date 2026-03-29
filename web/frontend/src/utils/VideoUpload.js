@@ -1,5 +1,19 @@
 import Api from './api';
 
+function assertAllowedUploadUrl(uploadUrl) {
+    let parsed;
+    try {
+        parsed = new URL(String(uploadUrl || ''));
+    } catch (_) {
+        throw new Error('Invalid upload URL');
+    }
+    const host = parsed.hostname.toLowerCase();
+    const isAllowedHost = host.endsWith('videodelivery.net') || host.endsWith('cloudflarestream.com');
+    if (parsed.protocol !== 'https:' || !isAllowedHost) {
+        throw new Error('Upload URL host is not allowed');
+    }
+}
+
 /**
  * Get a Stream direct upload URL
  */
@@ -21,6 +35,12 @@ export async function getUploadUrlVideo() {
  */
 export async function uploadToStreamCancellable(file, uploadUrl, onProgress, xhrRef) {
     return new Promise((resolve, reject) => {
+        try {
+            assertAllowedUploadUrl(uploadUrl);
+        } catch (e) {
+            reject(e);
+            return;
+        }
         const xhr = new XMLHttpRequest();
         if (xhrRef) {
             try { xhrRef.current = xhr; } catch (_) { }

@@ -4,7 +4,7 @@
  * All data is fetched via a single GET /api/rewards/summary call.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Api from '../utils/api';
 import Storage from '../utils/Storage';
 
@@ -37,6 +37,9 @@ export function useRewards() {
     const [loading, setLoading] = useState(true);
     const [claiming, setClaiming] = useState(false);
     const [error, setError] = useState(null);
+    const questActionTimeoutsRef = useRef(new Set());
+    const flashQuestId = flashQuest ? flashQuest.id : null;
+    const flashQuestHasRemaining = !!(flashQuest && flashQuest.seconds_remaining > 0);
 
     const userAddress = Storage.load('publicKey', '');
 
@@ -202,6 +205,7 @@ export function useRewards() {
 
     // ---- polling & event listeners ----
     useEffect(() => {
+        const timeoutSet = questActionTimeoutsRef.current;
         fetchAll(false);
 
         // Refresh every 2 minutes
@@ -209,17 +213,21 @@ export function useRewards() {
 
         const handleQuestAction = (e) => {
             console.log('[useRewards] questActionCompleted event received:', e?.detail);
-            setTimeout(async () => {
+            const timeoutId = setTimeout(async () => {
+                timeoutSet.delete(timeoutId);
                 console.log('[useRewards] Refreshing after action...');
                 await fetchAll(true);
                 console.log('[useRewards] Refresh complete');
             }, 5000);
+            timeoutSet.add(timeoutId);
         };
         window.addEventListener('questActionCompleted', handleQuestAction);
 
         return () => {
             clearInterval(interval);
             window.removeEventListener('questActionCompleted', handleQuestAction);
+            timeoutSet.forEach((timeoutId) => clearTimeout(timeoutId));
+            timeoutSet.clear();
         };
     }, [fetchAll]);
 
@@ -234,7 +242,7 @@ export function useRewards() {
 
     // ---- countdown: flash quest ----
     useEffect(() => {
-        if (!flashQuest || flashQuest.seconds_remaining <= 0) return;
+        if (!flashQuestHasRemaining) return;
         const interval = setInterval(() => {
             setFlashQuest(prev => {
                 if (!prev) return prev;
@@ -244,7 +252,7 @@ export function useRewards() {
             });
         }, 1000);
         return () => clearInterval(interval);
-    }, [flashQuest]);
+    }, [flashQuestId, flashQuestHasRemaining]);
 
     return {
         // quest data

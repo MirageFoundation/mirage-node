@@ -105,6 +105,7 @@ export function useSubscription({
     const txInFlightRef = useRef(false);
     const autoRenewDisplayRef = useRef(false);
     const detailsPanelRef = useRef(null);
+    const detailsScrollTimeoutRef = useRef(null);
     const theme = useTheme();
     const loadTierConfigFromStorage = () => {
         try {
@@ -200,14 +201,24 @@ export function useSubscription({
     }, [autoRenew, isUpgrading]);
     useEffect(() => {
         if (expandedTierLevel !== null) {
-            setTimeout(() => {
+            if (detailsScrollTimeoutRef.current) {
+                clearTimeout(detailsScrollTimeoutRef.current);
+            }
+            detailsScrollTimeoutRef.current = setTimeout(() => {
                 detailsPanelRef.current?.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start',
                     inline: 'nearest'
                 });
+                detailsScrollTimeoutRef.current = null;
             }, 50);
         }
+        return () => {
+            if (detailsScrollTimeoutRef.current) {
+                clearTimeout(detailsScrollTimeoutRef.current);
+                detailsScrollTimeoutRef.current = null;
+            }
+        };
     }, [expandedTierLevel]);
     useEffect(() => {
         const mediaQuery = window.matchMedia('(max-width: 599px)');

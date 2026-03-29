@@ -32,6 +32,8 @@ export function useInbox({
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const viewerAddress = Storage.load('publicKey', '');
     const [activeReplyId, setActiveReplyId] = useState('');
+    const isMountedRef = useRef(true);
+    const fetchRequestRef = useRef(0);
     const badgeCountRef = useRef((() => {
         try {
             return Math.max(0, parseInt(localStorage.getItem('inbox_count'), 10) || 0);
@@ -68,7 +70,10 @@ export function useInbox({
             if (typeof e.detail === 'number') badgeCountRef.current = Math.max(0, e.detail);
         };
         window.addEventListener('inboxCount', handler);
-        return () => window.removeEventListener('inboxCount', handler);
+        return () => {
+            isMountedRef.current = false;
+            window.removeEventListener('inboxCount', handler);
+        };
     }, []);
     const fetchInbox = useCallback(async (page = 1, append = false) => {
         if (!viewerAddress) {
@@ -77,6 +82,9 @@ export function useInbox({
             return;
         }
         try {
+            const requestId = fetchRequestRef.current + 1;
+            fetchRequestRef.current = requestId;
+            const requestAddress = viewerAddress;
             if (page === 1) {
                 setLoading(true);
             } else {
@@ -87,20 +95,23 @@ export function useInbox({
                 page,
                 limit: 25
             });
+            if (!isMountedRef.current || fetchRequestRef.current !== requestId) return;
             if (res && Array.isArray(res.replies)) {
                 if (append) {
                     setReplies(prev => [...prev, ...res.replies]);
                 } else {
                     setReplies(res.replies);
-                    signPlainPayload((ts, n) => `mark_inbox_viewed:${viewerAddress.toLowerCase()}:${ts}:${n}`).then(sig => {
+                    signPlainPayload((ts, n) => `mark_inbox_viewed:${requestAddress.toLowerCase()}:${ts}:${n}`).then(sig => {
                         console.debug("[Inbox] mark_inbox_viewed send", {
-                            address: viewerAddress
+                            address: requestAddress
                         });
+                        if (!isMountedRef.current || fetchRequestRef.current !== requestId) return null;
                         return Api.post('mark_inbox_viewed', {
-                            address: viewerAddress,
+                            address: requestAddress,
                             ...sig
                         });
                     }).then(res => {
+                        if (!isMountedRef.current || fetchRequestRef.current !== requestId) return;
                         if (res && typeof res.inbox_last_viewed_at === 'number') {
                             persistInboxLastViewed(res.inbox_last_viewed_at);
                         }
@@ -116,8 +127,10 @@ export function useInbox({
                 setError('Invalid response from server');
             }
         } catch (e) {
+            if (!isMountedRef.current) return;
             setError(String(e && e.message ? e.message : 'Failed to load inbox'));
         } finally {
+            if (!isMountedRef.current) return;
             setLoading(false);
             setIsLoadingMore(false);
         }

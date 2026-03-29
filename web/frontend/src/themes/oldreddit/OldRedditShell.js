@@ -2,15 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation } from 'react-router-dom';
 import Storage from '../../utils/Storage';
+import { getTierColor } from '../../utils/tierColors';
 import MobileBottomNav from './components/MobileBottomNav';
 import { ProfileMenuContent } from './components/TopBar';
-
-/** Same horizontal inset for nav row and all page content below */
-const SHELL_INSET_X = '0.75rem';
+import { OLDREDDIT_SHELL_INSET_X } from './Layout';
 
 const Container = styled.div`
     width: 100%;
-    padding: 0 ${SHELL_INSET_X};
+    padding: 0 ${OLDREDDIT_SHELL_INSET_X};
     padding-bottom: 3rem;
     @media (max-width: 600px) {
         padding-bottom: 80px;
@@ -20,7 +19,7 @@ const Container = styled.div`
 const TopBar = styled.div`
     display: flex;
     align-items: baseline;
-    padding: 0.5rem ${SHELL_INSET_X} 0.35rem;
+    padding: 0.5rem ${OLDREDDIT_SHELL_INSET_X} 0.35rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
     font-size: 0.7rem;
@@ -82,10 +81,13 @@ const UserMenuTrigger = styled.button`
     font: inherit;
     font-size: inherit;
     font-weight: 600;
-    color: ${({ theme, $active }) => ($active ? theme.colors.text : theme.colors.subtleText)};
+    color: ${({ theme, $active, $tierColor }) => {
+        if ($tierColor) return $tierColor;
+        return $active ? theme.colors.text : theme.colors.subtleText;
+    }};
     text-decoration: ${({ $active }) => ($active ? 'underline' : 'none')};
     &:hover {
-        color: ${({ theme }) => theme.colors.text};
+        color: ${({ theme, $tierColor }) => ($tierColor ? $tierColor : theme.colors.text)};
         text-decoration: underline;
     }
 `;
@@ -142,6 +144,7 @@ function getPageTitle(path) {
 
 function ShellUserMenu({ state }) {
     const [open, setOpen] = useState(false);
+    const [userLevel, setUserLevel] = useState(() => Number(Storage.load('user_level', '0')) || 0);
     const wrapRef = useRef(null);
     const location = useLocation();
     const username = (state && state.username) ? state.username : Storage.load('username', '');
@@ -183,6 +186,17 @@ function ShellUserMenu({ state }) {
         setOpen(false);
     }, [location.pathname]);
 
+    useEffect(() => {
+        const syncLevel = () => {
+            setUserLevel(Number(Storage.load('user_level', '0')) || 0);
+        };
+        syncLevel();
+        window.addEventListener('userStatusUpdated', syncLevel);
+        return () => window.removeEventListener('userStatusUpdated', syncLevel);
+    }, [state?.publicKey, location.pathname]);
+
+    const tierColor = getTierColor(userLevel);
+
     return (
         <UserMenuWrapper ref={wrapRef}>
             <NavSep aria-hidden="true">|</NavSep>
@@ -192,6 +206,7 @@ function ShellUserMenu({ state }) {
                 aria-expanded={open}
                 aria-haspopup="menu"
                 $active={open || isAccountSection}
+                $tierColor={tierColor || undefined}
             >
                 @{triggerLabel}
             </UserMenuTrigger>

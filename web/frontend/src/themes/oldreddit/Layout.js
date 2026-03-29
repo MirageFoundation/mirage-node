@@ -1,5 +1,8 @@
 import styled from "styled-components";
 
+/** Horizontal padding of `OldRedditShell` `Container` / top bar — list feeds negate this for full-bleed row borders; inner content uses the same inset to stay aligned with the logo. */
+export const OLDREDDIT_SHELL_INSET_X = '0.75rem';
+
 /** Classic theme only — styled layout primitives; not shared with other themes. */
 
 /**
