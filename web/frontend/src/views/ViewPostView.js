@@ -1776,7 +1776,7 @@ function ViewPostView({ state, updatePost }) {
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: 'Subscription gifted!' } }));
             } else {
                 const raw = String(result.error || 'Transaction failed');
-                const friendly = raw.replace(/^(HTTP \d+:\s*)/i, '').replace(/^Failed:\s*/i, '');
+                const friendly = raw.replace(/^HTTP \d+:\s*/i, '').replace(/^Failed:\s*/i, '');
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: friendly } }));
             }
         } catch (error) {
@@ -2005,6 +2005,7 @@ function ViewPostView({ state, updatePost }) {
                     });
                 }, 5000);
             }
+            setConfirmDonate(null);
             return;
         }
 

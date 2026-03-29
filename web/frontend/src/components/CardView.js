@@ -1321,7 +1321,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 setGiftSubMessage({ type: 'success', message: 'Subscription gifted!' });
             } else {
                 const raw = String(result.error || 'Transaction failed');
-                const friendly = raw.replace(/^(HTTP \d+:\s*)/i, '').replace(/^Failed:\s*/i, '');
+                const friendly = raw.replace(/^HTTP \d+:\s*/i, '').replace(/^Failed:\s*/i, '');
                 setGiftSubMessage({ type: 'error', message: friendly });
             }
             setTimeout(() => setGiftSubMessage(null), 5000);

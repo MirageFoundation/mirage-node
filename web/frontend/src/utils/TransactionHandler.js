@@ -2205,6 +2205,8 @@ class TransactionHandler {
             const queued = this.transactions.shift() || {};
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
             const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, _deleteKey: _ignored4, _agentKey: _ignored5, ...transaction } = queued;
+            const giftTarget = String(transaction.target || '').trim();
+            const isGiftSubscribe = transaction.action === 'subscribe' && giftTarget !== '';
             this.processedTransactions += 1;
             // Track quest-relevant actions
             if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {
@@ -2531,16 +2533,20 @@ class TransactionHandler {
             // Handle final failure (after all retries exhausted)
             if (lastError && (!result || !result.success)) {
                 const errMsg = String(lastError && lastError.message ? lastError.message : lastError);
-                if (/insufficient reserve/i.test(errMsg) || /subscription terminated/i.test(errMsg)) {
-                    const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
-                    const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
-                    updateNotification(cleanMsg, 10, true);
-                } else if (/admin insufficient balance/i.test(errMsg)) {
-                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
-                } else if (/insufficient funds/i.test(errMsg)) {
-                    updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
+                if (!isGiftSubscribe) {
+                    if (/insufficient reserve/i.test(errMsg) || /subscription terminated/i.test(errMsg)) {
+                        const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
+                        const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
+                        updateNotification(cleanMsg, 10, true);
+                    } else if (/admin insufficient balance/i.test(errMsg)) {
+                        updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
+                    } else if (/insufficient funds/i.test(errMsg)) {
+                        updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
+                    } else {
+                        updateNotification(errMsg || 'Transaction failed', 5, true);
+                    }
                 } else {
-                    updateNotification(errMsg || 'Transaction failed', 5, true);
+                    console.debug('[subscribe] gift failure toast suppressed', { target: giftTarget, error: errMsg });
                 }
                 if (_resolve) _resolve(this._fail("transaction failed", errMsg ? { details: errMsg } : undefined));
                 hadFailure = true;
@@ -2549,17 +2555,21 @@ class TransactionHandler {
             if (!result || !result.success) {
                 // Show a specific warning based on the failure reason
                 const msg = String(result && result.error ? result.error : 'Transaction failed');
-                // Check for subscription/reserve errors in the full error string
-                if (/insufficient reserve/i.test(msg) || /subscription terminated/i.test(msg)) {
-                    const grpcMatch = msg.match(/details\s*=\s*"([^"]+)"/);
-                    const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
-                    updateNotification(cleanMsg, 10, true);
-                } else if (/admin insufficient balance/i.test(msg)) {
-                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
-                } else if (/insufficient funds/i.test(msg)) {
-                    updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
+                if (!isGiftSubscribe) {
+                    // Check for subscription/reserve errors in the full error string
+                    if (/insufficient reserve/i.test(msg) || /subscription terminated/i.test(msg)) {
+                        const grpcMatch = msg.match(/details\s*=\s*"([^"]+)"/);
+                        const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
+                        updateNotification(cleanMsg, 10, true);
+                    } else if (/admin insufficient balance/i.test(msg)) {
+                        updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
+                    } else if (/insufficient funds/i.test(msg)) {
+                        updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
+                    } else {
+                        updateNotification(msg || 'Transaction failed', 5, true);
+                    }
                 } else {
-                    updateNotification(msg || 'Transaction failed', 5, true);
+                    console.debug('[subscribe] gift failure toast suppressed', { target: giftTarget, error: msg });
                 }
                 if (_resolve) {
                     if (result && result.error_code) {
