@@ -23,6 +23,8 @@ const NavContainer = styled.nav`
         box-sizing: border-box;
         border-top: 1px solid ${({ theme }) => theme.colors.border};
         padding: 0;
+        padding-left: ${({ theme }) => (theme.themeId === 'oldreddit' ? '0.75rem' : '0')};
+        padding-right: ${({ theme }) => (theme.themeId === 'oldreddit' ? '0.75rem' : '0')};
         padding-bottom: env(safe-area-inset-bottom, 0px);
         overflow: visible;
         

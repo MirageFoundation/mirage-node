@@ -1,13 +1,7 @@
 import { createGlobalStyle } from 'styled-components'
 
-//overscroll-behavior: contain; 
-//https://stackoverflow.com/questions/29008194/disabling-androids-chrome-pull-down-to-refresh-feature
-
-export const GlobalStyle = createGlobalStyle`
-
-  /* Base resets and responsive typography */
-  /* Root font-size scaled to ~90% of original (14px base instead of 16px) */
-  /* This makes the entire UI more compact without changing any component code */
+/** Moon theme — document-level CSS only for this theme (no shared global stylesheet). */
+export const ThemeGlobalStyle = createGlobalStyle`
   html {
     box-sizing: border-box;
     font-family: ${({ theme }) => theme.layout.fontFamily};
@@ -19,7 +13,6 @@ export const GlobalStyle = createGlobalStyle`
     background-color: ${({ theme }) => theme.colors.bg};
   }
 
-  /* Bump root size by ~10% on mobile/tablet without changing component code */
   @media (max-width: 1000px) {
     html { font-size: 130%; }
   }
@@ -34,33 +27,29 @@ export const GlobalStyle = createGlobalStyle`
     line-height: 1.35;
   }
 
-  body {    
+  body {
     min-height: 100vh;
     color: ${({ theme }) => theme.colors.text};
     background-color: ${({ theme }) => theme.colors.bg};
-    word-break: normal;      /* do not break words into pieces */
-    overflow-wrap: normal;   /* wrap only at normal break points (spaces) */
+    word-break: normal;
+    overflow-wrap: normal;
     text-indent: 0;
   }
 
-  /* Add bottom padding on mobile for bottom navigation bar */
   @media (max-width: 600px) {
     html, body {
-      /* 72px nav height (56px + extra buffer) + safe area inset for notched devices */
       padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-      /* Prevent horizontal scroll caused by fixed elements */
       overflow-x: hidden !important;
       max-width: 100vw;
     }
   }
-  
-  /* Media should never overflow */
+
   img, video {
     max-width: 100%;
     height: auto;
     display: block;
   }
-  
+
   &::-webkit-scrollbar {
     width: 0.25em;
     direction: rtl;
@@ -74,24 +63,10 @@ export const GlobalStyle = createGlobalStyle`
     background: ${({ theme }) => theme.colors.scrollbar};
   }
 
-  /* When switching theme, temporarily disable transitions to avoid mass flashing */
   html.theme-switching *,
   html.theme-switching *::before,
   html.theme-switching *::after {
     transition: none !important;
     animation: none !important;
   }
-
-  ${({ theme }) => theme.layout.flatMode ? `
-  div, section, article, aside, main,
-  button, input, select, textarea, a,
-  nav, header, footer, blockquote, pre,
-  form, fieldset, ul, ol, li, img, video {
-    border-radius: 0 !important;
-    box-shadow: none !important;
-  }
-  [data-round], span[role="status"] {
-    border-radius: 50% !important;
-  }
-  ` : ''}
 `

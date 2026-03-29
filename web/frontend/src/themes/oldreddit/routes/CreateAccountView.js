@@ -2,10 +2,8 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
 import AuthPageShell from "../components/AuthPageShell.js";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import { getMaxInputLength } from "../../../config/chainParams";
 import { formatError } from "../../../utils/errorMessages";
 import { useCreateAccount } from "../../../logic/useCreateAccount";
@@ -13,7 +11,7 @@ const Centered = styled.div`
     text-align: center;
     max-width: 800px;
     margin: 0 auto;
-    padding: 0 0.5rem;
+    padding: 0;
 `;
 const StyledInfo = styled.div`
     margin-top: 0.5rem;
@@ -144,9 +142,7 @@ function CreateAccountView({
                 <Helmet>
                     <title>Create Account | Mirage</title>
                 </Helmet>
-                <Sidebar currentPath={location.pathname} state={state} />
                 <div>
-                    <TopBar state={state} />
                     <ModernPostFeed>
                         <MobileHeader />
                         <AuthPageShell activeTab="create">
@@ -172,9 +168,7 @@ function CreateAccountView({
                 <Helmet>
                     <title>Create Account | Mirage</title>
                 </Helmet>
-                <Sidebar currentPath={location.pathname} state={state} />
                 <div>
-                    <TopBar state={state} />
                     <ModernPostFeed>
                         <MobileHeader />
                         <AuthPageShell activeTab="create">
@@ -195,9 +189,7 @@ function CreateAccountView({
             <Helmet>
                 <title>Create Account | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <AuthPageShell activeTab="create">

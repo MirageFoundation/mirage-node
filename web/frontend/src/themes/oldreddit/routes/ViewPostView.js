@@ -6,10 +6,8 @@ import Button from "../components/Button.js";
 import { Link, Navigate } from "react-router-dom";
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
@@ -1126,9 +1124,7 @@ function ViewPostView({
 
     if (loading || error || depthError) {
         return <ContentGrid>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <BackButton onClick={goBackToFeed}>
@@ -2359,9 +2355,7 @@ function ViewPostView({
         const postDescription = mergedRoot && mergedRoot.content ? String(mergedRoot.content).trim().substring(0, 200) : root && root.content ? String(root.content).trim().substring(0, 200) : 'Decentralized social network';
         const imageUrl = `${origin}/images/logo.webp`;
         return <ContentGrid>
-            <Sidebar currentPath={location.pathname} state={state} />
             <MainContentWrapper>
-                <TopBar state={state} />
                 <Helmet>
                     <title>{postTitle} | Mirage</title>
                     <meta name="description" content={postDescription} />
@@ -2726,9 +2720,7 @@ function ViewPostView({
         </ContentGrid>;
     } else {
         return <ContentGrid>
-            <Sidebar currentPath={location.pathname} state={state} />
             <MainContentWrapper>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <BackButton onClick={goBackToFeed}>

@@ -5,7 +5,7 @@ import AuthPageShell from "../components/AuthPageShell.js";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import { getMaxInputLength } from "../../../config/chainParams";
 import { formatError } from "../../../utils/errorMessages";
 import { useCreateAccount } from "../../../logic/useCreateAccount";

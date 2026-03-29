@@ -2,11 +2,9 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
@@ -305,9 +303,7 @@ function CreatePostView({
         <Helmet>
             <title>{isEditMode ? 'Edit Post' : 'Create Post'} | Mirage</title>
         </Helmet>
-        <Sidebar currentPath={location.pathname} state={state} />
         <div>
-            <TopBar state={state} />
             <ModernPostFeed>
                 <MobileHeader />
                 <TabbedContainer>

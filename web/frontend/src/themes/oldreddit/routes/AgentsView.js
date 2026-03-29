@@ -2,11 +2,9 @@ import React from "react";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { useAgents, MOBILE_ACTION_HEIGHT, formatTimeAgo } from "../../../logic/useAgents";
 const SectionSubtitle = styled.div`
     color: ${({
@@ -226,9 +224,7 @@ export default function AgentsView({
             <Helmet>
                 <title>Agents | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>

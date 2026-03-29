@@ -9,7 +9,7 @@ import styled from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
-import { ContentGrid, ModernPostFeed, StyledError } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, StyledError } from "../Layout";
 import { useMain, pickThemeColor } from "../../../logic/useMain";
 // Welcome card that appears for first-time visitors on the front page
 // eslint-disable-next-line no-unused-vars

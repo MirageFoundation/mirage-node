@@ -2,12 +2,15 @@
  * Theme Registry
  *
  * Each theme lives under src/themes/<name>/ and exports a manifest from
- * index.js containing: id, label, dark/light tokens, Shell, Feed,
- * VoteSection, and a config object for structural behavior.
+ * index.js. Visuals are theme-only: each manifest must export ThemeGlobalStyle
+ * (document-level CSS for that theme), Shell, Feed, VoteSection, dark/light
+ * tokens, and config. Shared code here is registry + getResolvedTheme only.
  *
  * HOW TO ADD A NEW THEME:
- * 1. Create src/themes/<name>/ with index.js, tokens.js, Shell, Feed, etc.
- * 2. index.js default-exports a manifest (see moon/index.js for shape)
+ * 1. Create src/themes/<name>/ with index.js, tokens.js, ThemeGlobalStyle.js,
+ *    Layout.js (styled primitives for that theme), Shell, Feed, etc.
+ * 2. index.js default-exports a manifest (see moon/index.js for shape);
+ *    ThemeGlobalStyle is required.
  * 3. Import the manifest below and add it to the manifests array
  * 4. Done -- no other files need changes
  */
@@ -54,6 +57,9 @@ export function getThemeFamily(themeId) {
     const family = THEMES[themeId];
     if (!family) {
         throw new Error(`Unknown theme: ${themeId}`);
+    }
+    if (!family.ThemeGlobalStyle) {
+        throw new Error(`Theme "${themeId}" manifest must export ThemeGlobalStyle`);
     }
     return family;
 }

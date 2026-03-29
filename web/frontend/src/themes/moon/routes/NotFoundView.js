@@ -4,7 +4,7 @@ import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useNotFound } from "../../../logic/useNotFound";
 const NotFoundCard = styled.div`
     background: ${({

@@ -5,7 +5,7 @@ import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from "../../../logic/useSubscription";
 const CurrentTierBanner = styled.div`

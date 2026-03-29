@@ -1,4 +1,5 @@
 import { dark, light } from './tokens';
+import { ThemeGlobalStyle } from './ThemeGlobalStyle';
 import OldRedditShell from './OldRedditShell';
 import ListFeedView from './ListFeedView';
 import OldRedditVoteSection from './components/VoteSection';
@@ -87,29 +88,29 @@ const components = {
 };
 
 const routes = {
-        AgentsView,
-        BlocksView,
-        BridgeView,
-        ChangeUsernameView,
-        CreateAccountView,
-        CreatePostView,
-        DiscoverView,
-        FollowsView,
-        InboxView,
-        LoginView,
-        MainView,
-        NetworkView,
-        NotFoundView,
-        ProfileView,
-        ReferralsView,
-        ReportsView,
-        SearchResultsView,
-        SettingsView,
-        SignOutView,
-        StatsView,
-        SubscriptionView,
-        ViewPostView,
-        WelcomeView,
+    AgentsView,
+    BlocksView,
+    BridgeView,
+    ChangeUsernameView,
+    CreateAccountView,
+    CreatePostView,
+    DiscoverView,
+    FollowsView,
+    InboxView,
+    LoginView,
+    MainView,
+    NetworkView,
+    NotFoundView,
+    ProfileView,
+    ReferralsView,
+    ReportsView,
+    SearchResultsView,
+    SettingsView,
+    SignOutView,
+    StatsView,
+    SubscriptionView,
+    ViewPostView,
+    WelcomeView,
 };
 
 const oldredditManifest = {
@@ -119,6 +120,7 @@ const oldredditManifest = {
     supportsDarkLight: true,
     dark,
     light,
+    ThemeGlobalStyle,
     Shell: OldRedditShell,
     Feed: ListFeedView,
     VoteSection: OldRedditVoteSection,

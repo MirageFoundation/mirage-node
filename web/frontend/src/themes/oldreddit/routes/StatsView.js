@@ -2,10 +2,8 @@ import React from "react";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
 import { useStats, TIER_NAMES, TIER_COLORS, InfoIcon } from "../../../logic/useStats";
 const Row = styled.div`
@@ -368,9 +366,7 @@ export default function StatsView() {
                 <Helmet>
                     <title>Stats | Mirage</title>
                 </Helmet>
-                <Sidebar currentPath={location.pathname} state={{}} />
                 <div>
-                    <TopBar state={{}} />
                     <ModernPostFeed>
                         <MobileHeader />
                         <TabbedContainer>
@@ -487,9 +483,7 @@ export default function StatsView() {
             <Helmet>
                 <title>Stats | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={{}} />
             <div>
-                <TopBar state={{}} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>

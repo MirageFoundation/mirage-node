@@ -2,10 +2,8 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
 import Button from "../components/Button.js";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { useReports } from "../../../logic/useReports";
 const Table = styled.table`
     width: 100%;
@@ -126,9 +124,7 @@ export default function ReportsView({
   });
   if (userLevel < 100) return <ContentGrid>
             <Helmet><title>Reports | Mirage</title></Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>
@@ -140,9 +136,7 @@ export default function ReportsView({
         </ContentGrid>;
   if (loading) return <ContentGrid>
             <Helmet><title>Reports | Mirage</title></Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>
@@ -154,9 +148,7 @@ export default function ReportsView({
         </ContentGrid>;
   if (error) return <ContentGrid>
             <Helmet><title>Reports | Mirage</title></Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>
@@ -185,9 +177,7 @@ export default function ReportsView({
   };
   return <ContentGrid>
             <Helmet><title>Reports | Mirage</title></Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>

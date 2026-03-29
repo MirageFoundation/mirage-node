@@ -103,9 +103,10 @@ const oldredditLightColors = {
 function buildLayout(colors) {
     return {
         // Form rows
-        
+
         fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
-formRowGap: '0.25rem',
+        formRowColumns: 'minmax(120px, 200px) minmax(0, 1fr)',
+        formRowGap: '0.25rem',
         formRowMargin: '0.15rem 0',
         formRowAlign: 'center',
 
@@ -169,7 +170,7 @@ formRowGap: '0.25rem',
         tabSize: '0.65rem',
         tabWeight: '700',
 
-        // Content grid
+        // Content grid — full width, no left sidebar (classic old.reddit list layout)
         contentGridCols: 'minmax(0, 1fr)',
         contentGridGap: '0',
         contentMaxWidth: 'none',
@@ -193,7 +194,7 @@ formRowGap: '0.25rem',
         containerBodyBorder: 'none',
         containerBodyRadius: '0',
         containerBodyPadding: '0.75rem 0',
-        containerBodyMaxWidth: '960px',
+        containerBodyMaxWidth: 'none',
         containerBodyRadiusMobile: '0',
         containerBodyPaddingMobile: '0.5rem 0',
 

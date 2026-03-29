@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import styled from "styled-components";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { SearchContainer, SearchRow, SearchInput } from "../../../styled/Layout";
+import { SearchContainer, SearchRow, SearchInput } from "../Layout";
 import Storage from "../../../utils/Storage";
 import Button from "./Button";
 import { formatMirageBalance } from "../../../utils/formatters";

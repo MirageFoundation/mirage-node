@@ -6,7 +6,7 @@ import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
 import CardView from "../components/CardView.js";
-import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { useSearchResults, tagColors } from "../../../logic/useSearchResults";
 const SectionHeader = styled.div`

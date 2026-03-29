@@ -1,5 +1,7 @@
 import styled from "styled-components";
 
+/** Classic theme only — styled layout primitives; not shared with other themes. */
+
 /**
  * RESPONSIVE BREAKPOINTS
  * 

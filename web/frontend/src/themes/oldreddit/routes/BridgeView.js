@@ -1,10 +1,8 @@
 import { Helmet } from "react-helmet-async";
 import styled, { keyframes, css } from "styled-components";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useSolanaBridgeInFlow, useBridgeInPanel, useBridge, NETWORKS, truncateAddress, SOURCE_NETWORKS } from "../../../logic/useBridge";
 // Responsive address component - shows truncated on mobile, full on desktop
@@ -1655,9 +1653,7 @@ export default function BridgeView({
         <Helmet>
             <title>Bridge | Mirage</title>
         </Helmet>
-        <Sidebar currentPath={location.pathname} state={state} />
         <div>
-            <TopBar state={state} />
             <ModernPostFeed>
                 <MobileHeader />
                 <TabbedContainer>

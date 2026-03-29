@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
 import { useReferrals, PERIODS } from "../../../logic/useReferrals";
 const ShareBox = styled.div`
     background: ${({

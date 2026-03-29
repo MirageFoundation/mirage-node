@@ -6,7 +6,7 @@ import AuthPageShell from "../components/AuthPageShell.js";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useLogin } from "../../../logic/useLogin";
 const Centered = styled.div`
     text-align: center;

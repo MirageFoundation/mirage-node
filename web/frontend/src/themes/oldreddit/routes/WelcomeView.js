@@ -1,10 +1,8 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, ContainerBody } from "../Layout";
 import { useWelcome } from "../../../logic/useWelcome";
 const Centered = styled.div`
     text-align: center;
@@ -182,9 +180,7 @@ function WelcomeView({
             <Helmet>
                 <title>Welcome | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <ContainerBody style={{

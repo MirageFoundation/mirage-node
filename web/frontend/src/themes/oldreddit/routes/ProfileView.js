@@ -1,10 +1,8 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useProfile } from "../../../logic/useProfile";
 const Row = styled.div`
@@ -414,9 +412,7 @@ export default function ProfileView({
             <Helmet>
                 <title>{routeIdentity ? `@${routeIdentity}` : 'Profile'} | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>
@@ -445,9 +441,7 @@ export default function ProfileView({
         <Helmet>
             <title>{profileTitle} | Mirage</title>
         </Helmet>
-        <Sidebar currentPath={location.pathname} state={state} />
         <div>
-            <TopBar state={state} />
             <ModernPostFeed>
                 <MobileHeader />
                 <TabbedContainer>

@@ -1,7 +1,6 @@
 import React, { Component } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
-import { GlobalStyle } from './styled/GlobalStyle';
 import { ThemeProvider } from 'styled-components';
 import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
@@ -782,11 +781,12 @@ class App extends Component {
         const themeObj = getResolvedTheme({ themeId: this.state.themeId, themeMode: this.state.theme });
         const family = getThemeFamily(this.state.themeId);
         const Shell = family.Shell;
+        const ThemeGlobalStyle = family.ThemeGlobalStyle;
         return (
             <HelmetProvider>
                 <ThemeProvider theme={themeObj}>
                     <div>
-                        <GlobalStyle state={this.state} />
+                        <ThemeGlobalStyle />
                         <Toast />
 
                         {this.state.vaultLocked && (

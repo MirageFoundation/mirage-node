@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../../../styled/Layout";
+import { TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
 
 function AuthPageShell({ activeTab, children }) {
     const navigate = useNavigate();

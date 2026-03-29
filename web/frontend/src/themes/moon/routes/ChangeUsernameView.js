@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getMaxInputLength } from "../../../config/chainParams";
 import { useChangeUsername } from "../../../logic/useChangeUsername";
 const BlockingOverlay = styled.div`

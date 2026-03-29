@@ -3,16 +3,14 @@ import styled from "styled-components";
 import Button from "../components/Button.js";
 import seedVault from "../../../utils/SeedVault";
 import AuthPageShell from "../components/AuthPageShell.js";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useLogin } from "../../../logic/useLogin";
 const Centered = styled.div`
     text-align: center;
     max-width: 800px;
     margin: 0 auto;
-    padding: 0 0.5rem;
+    padding: 0;
 `;
 const StyledTextArea = styled.textarea`    
     border: 1px solid ${({
@@ -88,9 +86,7 @@ function LoginView({
             <Helmet>
                 <title>Sign In | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <AuthPageShell activeTab="login">

@@ -15,7 +15,7 @@ const ListContainer = styled.div`
 const Row = styled.div`
     display: flex;
     align-items: center;
-    padding: 0.4rem 0.5rem;
+    padding: 0.4rem 0;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.4rem;
     min-height: 52px;
@@ -169,7 +169,7 @@ const ActionButton = styled.button`
 const SortTabs = styled.div`
     display: flex;
     gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
+    padding: 0.4rem 0;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
 `;

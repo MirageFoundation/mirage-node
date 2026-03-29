@@ -4,10 +4,8 @@ import { Navigate } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
 import { THEMES } from "../../../styled/theme";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { useSettings, CheckboxInput, RadioInput } from "../../../logic/useSettings";
 const Row = styled.div`
     display: grid;
@@ -506,9 +504,7 @@ export default function SettingsView({
             <Helmet>
                 <title>Settings | Mirage</title>
             </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <TabbedContainer>

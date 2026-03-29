@@ -4,7 +4,7 @@ import Button from "../components/Button.js";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, ContainerBody } from "../Layout";
 import { useWelcome } from "../../../logic/useWelcome";
 const Centered = styled.div`
     text-align: center;

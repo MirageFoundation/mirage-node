@@ -84,6 +84,7 @@ function buildLayout(colors) {
         // Form rows
 
         fontFamily: "'Noto Sans', sans-serif",
+        formRowColumns: 'minmax(140px, 220px) minmax(0, 1fr)',
         formRowGap: '0.5rem',
         formRowMargin: '0.4rem 0',
         formRowAlign: 'start',

@@ -2,10 +2,8 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
 import { Link } from "react-router-dom";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getMaxInputLength } from "../../../config/chainParams";
 import { useChangeUsername } from "../../../logic/useChangeUsername";
 const BlockingOverlay = styled.div`
@@ -22,12 +20,8 @@ const Centered = styled.div`
     max-width: 500px;
     margin: 0 auto;
     text-align: center;
-    padding: 0 1rem;
+    padding: 0;
     box-sizing: border-box;
-    
-    @media (max-width: 600px) {
-        padding: 0 0.5rem;
-    }
 `;
 const InputWrapper = styled.div`
     display: flex;
@@ -203,9 +197,7 @@ function ChangeUsernameView({
             </Helmet>
             {submitting && <BlockingOverlay />}
             <ContentGrid>
-                <Sidebar currentPath={location.pathname} state={state} />
                 <div>
-                    <TopBar state={state} />
                     <ModernPostFeed>
                         <MobileHeader />
                         <TabbedContainer>

@@ -1,11 +1,9 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Navigate } from "react-router-dom";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { formatMirage } from "../../../utils/formatters";
 import { useInbox, formatAwardLabel } from "../../../logic/useInbox";
@@ -267,9 +265,7 @@ export default function InboxView({
         <Helmet>
             <title>{heading || 'Inbox'} | Mirage</title>
         </Helmet>
-        <Sidebar currentPath={location.pathname} state={state} />
         <div>
-            <TopBar state={state} />
             <ModernPostFeed>
                 <MobileHeader />
                 <TabbedContainer>

@@ -1,10 +1,8 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import Sidebar from "../components/Sidebar.js";
-import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
-import { ContentGrid, ModernPostFeed } from "../../../styled/Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useNotFound } from "../../../logic/useNotFound";
 const NotFoundCard = styled.div`
     background: ${({
@@ -62,12 +60,10 @@ function NotFoundView({
     state
   });
   return <ContentGrid>
-            <Sidebar currentPath={location.pathname} state={state} />
             <div>
                 <Helmet>
                     <title>404 - Mirage</title>
                 </Helmet>
-                <TopBar state={state} />
                 <ModernPostFeed>
                     <MobileHeader />
                     <NotFoundCard>
