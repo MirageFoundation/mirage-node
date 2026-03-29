@@ -17,6 +17,7 @@ import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
 import { usePendingSends } from "../utils/usePendingSends";
 import { usePendingSubscribes } from "../utils/usePendingSubscribes";
+import { formatMirageCompact } from "../utils/formatters";
 
 import { Tooltip, tooltipStyles } from "./Tooltip";
 
@@ -1268,18 +1269,18 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             console.debug('[CardView] donate.submit', { target: post.user_id, amount });
             const result = await tx.sendTokens(post.user_id, amount);
+            setConfirmDonate(false);
             if (result.success) {
                 setDonateMessage({ type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` });
-                setConfirmDonate(false);
-                setTimeout(() => setDonateMessage(null), 5000);
             } else {
                 if (!result?.error) {
                     throw new Error('Missing error for send_tokens');
                 }
                 setDonateMessage({ type: 'error', message: `Failed: ${result.error}` });
-                setTimeout(() => setDonateMessage(null), 5000);
             }
+            setTimeout(() => setDonateMessage(null), 5000);
         } catch (error) {
+            setConfirmDonate(false);
             setDonateMessage({ type: 'error', message: `Error: ${error.message || error}` });
             setTimeout(() => setDonateMessage(null), 5000);
         }
@@ -1315,15 +1316,18 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             console.debug('[CardView] gift-subscribe.submit', { target: post.user_id });
             const result = await tx.subscribe(1, 0, post.user_id);
+            setConfirmGiftSub(false);
             if (result.success) {
                 setGiftSubMessage({ type: 'success', message: 'Subscription gifted!' });
-                setConfirmGiftSub(false);
             } else {
-                setGiftSubMessage({ type: 'error', message: `Failed: ${result.error}` });
+                const raw = String(result.error || 'Transaction failed');
+                const friendly = raw.replace(/^(HTTP \d+:\s*)/i, '').replace(/^Failed:\s*/i, '');
+                setGiftSubMessage({ type: 'error', message: friendly });
             }
             setTimeout(() => setGiftSubMessage(null), 5000);
         } catch (error) {
-            setGiftSubMessage({ type: 'error', message: `Error: ${error.message || error}` });
+            setConfirmGiftSub(false);
+            setGiftSubMessage({ type: 'error', message: `${error.message || error}` });
             setTimeout(() => setGiftSubMessage(null), 5000);
         }
     };
@@ -1354,6 +1358,18 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, [nodeConfigTick]);
 
     const giftSubscriptionLabel = 'Gift Subscription';
+
+    const subscribeFeeLabel = useMemo(() => {
+        void nodeConfigTick;
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            const tiers = cfg?.tiers || [];
+            const fee = Number(tiers[1]?.period_fee || 0);
+            if (fee > 0) return formatMirageCompact(fee) + ' MIRAGE';
+        } catch (_) { }
+        return null;
+    }, [nodeConfigTick]);
 
     const getAwardCost = (name) => {
         if (awardConfigs.length === 0) return null;
@@ -2662,7 +2678,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                                 <span style={{ whiteSpace: 'nowrap' }}>
-                                    🎁 Gift subscription to {post?.username || post?.user_id?.substring(0, 12) + '...'}?
+                                    🎁 Gift subscription to {post?.username || post?.user_id?.substring(0, 12) + '...'}?{subscribeFeeLabel ? ` (${subscribeFeeLabel})` : ''}
                                 </span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button

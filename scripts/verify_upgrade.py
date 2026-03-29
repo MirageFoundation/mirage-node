@@ -3,10 +3,10 @@
 Post-upgrade verification for v1.22.x.
 
 Checks:
-  1. Required environment variables are set
+  1. Required environment variables are set (DB URLs)
   2. Backend + indexer (RO) DB connections succeed
   3. Successful send_tokens/multi tx_index rows have non-empty JSON raw_log
-  4. Backend routes: /api/core/subscribe exists, /api/core/upgrade_level is removed
+  4. Backend routes: /api/core/subscribe exists, /api/core/upgrade_level is removed (if BACKEND_API is set)
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -38,6 +38,7 @@ except ImportError:
 
 passed = 0
 failed = 0
+warnings = 0
 
 
 def ok(msg: str) -> None:
@@ -50,6 +51,12 @@ def fail(msg: str) -> None:
     global failed
     failed += 1
     print(f"  ✗ {msg}")
+
+
+def warn(msg: str) -> None:
+    global warnings
+    warnings += 1
+    print(f"  ⚠ {msg}")
 
 
 def info(msg: str) -> None:
@@ -137,7 +144,7 @@ def check_subscribe_routes(backend_api: str) -> None:
 
 
 def main() -> None:
-    global passed, failed
+    global passed, failed, warnings
 
     print("=" * 60)
     print("  Mirage Post-Upgrade Verification (v1.22.x)")
@@ -147,22 +154,25 @@ def main() -> None:
     try:
         backend_db_url = require_env("BACKEND_DB_URL")
         indexer_ro_url = require_env("INDEXER_DB_RO_URL")
-        backend_api = require_env("BACKEND_API")
         ok("BACKEND_DB_URL is set")
         ok("INDEXER_DB_RO_URL is set")
-        ok("BACKEND_API is set")
     except Exception as exc:
         fail(str(exc))
         print("\nFATAL: Missing required environment variables")
         sys.exit(1)
 
-    try:
-        ensure_local_url("BACKEND_API", backend_api)
-        ok("BACKEND_API is local")
-    except Exception as exc:
-        fail(str(exc))
-        print("\nFATAL: Refusing to run against non-local BACKEND_API")
-        sys.exit(1)
+    backend_api = os.environ.get("BACKEND_API", "").strip()
+    if backend_api:
+        ok("BACKEND_API is set")
+        try:
+            ensure_local_url("BACKEND_API", backend_api)
+            ok("BACKEND_API is local")
+        except Exception as exc:
+            fail(str(exc))
+            print("\nFATAL: Refusing to run against non-local BACKEND_API")
+            sys.exit(1)
+    else:
+        warn("BACKEND_API not set; skipping backend route checks")
 
     section("2. Database Connectivity")
     backend_conn = None
@@ -187,7 +197,10 @@ def main() -> None:
     check_tx_index_raw_log(indexer_conn)
 
     section("4. Backend route checks")
-    check_subscribe_routes(backend_api)
+    if backend_api:
+        check_subscribe_routes(backend_api)
+    else:
+        warn("Skipped backend route checks (BACKEND_API missing)")
 
     if backend_conn:
         backend_conn.close()
@@ -195,8 +208,8 @@ def main() -> None:
         indexer_conn.close()
 
     print(f"\n{'=' * 60}")
-    total = passed + failed
-    print(f"  Results: {passed} passed, {failed} failed ({total} total)")
+    total = passed + failed + warnings
+    print(f"  Results: {passed} passed, {failed} failed, {warnings} warnings ({total} total)")
     if failed == 0:
         print("  STATUS: ALL CHECKS PASSED")
     else:

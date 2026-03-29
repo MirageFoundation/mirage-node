@@ -31,6 +31,7 @@ import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
+import { formatMirageCompact } from "../utils/formatters";
 import { Tooltip, tooltipStyles } from "../components/Tooltip";
 
 const pickCard = (theme, key) => {
@@ -1770,14 +1771,17 @@ function ViewPostView({ state, updatePost }) {
         try {
             console.debug('[ViewPostView] gift-subscribe.submit', { target: userAddress, postId });
             const result = await tx.subscribe(1, 0, userAddress);
+            setConfirmGiftSub(null);
             if (result.success) {
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: 'Subscription gifted!' } }));
-                setConfirmGiftSub(null);
             } else {
-                setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: `Failed: ${result.error}` } }));
+                const raw = String(result.error || 'Transaction failed');
+                const friendly = raw.replace(/^(HTTP \d+:\s*)/i, '').replace(/^Failed:\s*/i, '');
+                setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: friendly } }));
             }
         } catch (error) {
-            setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: `Error: ${error.message || error}` } }));
+            setConfirmGiftSub(null);
+            setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: `${error.message || error}` } }));
         }
         setTimeout(() => {
             setGiftSubMessages((prev) => {
@@ -1814,6 +1818,18 @@ function ViewPostView({ state, updatePost }) {
     }, [configUpdateTrigger]);
 
     const giftSubscriptionLabel = 'Gift Subscription';
+
+    const subscribeFeeLabel = useMemo(() => {
+        void configUpdateTrigger;
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            const tiers = cfg?.tiers || [];
+            const fee = Number(tiers[1]?.period_fee || 0);
+            if (fee > 0) return formatMirageCompact(fee) + ' MIRAGE';
+        } catch (_) { }
+        return null;
+    }, [configUpdateTrigger]);
 
     const getAwardCost = (name) => {
         if (awardConfigs.length === 0) return null;
@@ -1995,38 +2011,34 @@ function ViewPostView({ state, updatePost }) {
         try {
             console.debug('[ViewPostView] donate.submit', { target: userAddress, amount });
             const result = await tx.sendTokens(userAddress, amount);
+            setConfirmDonate(null);
             if (result.success) {
                 if (postId) {
                     setDonateMessages(prev => ({
                         ...prev,
                         [postId]: { type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` }
                     }));
-                    setTimeout(() => {
-                        setDonateMessages(prev => {
-                            const updated = { ...prev };
-                            delete updated[postId];
-                            return updated;
-                        });
-                    }, 5000);
                 }
-                setConfirmDonate(null);
             } else {
                 if (postId) {
                     setDonateMessages(prev => ({
                         ...prev,
                         [postId]: { type: 'error', message: `Failed: ${result.error}` }
                     }));
-                    setTimeout(() => {
-                        setDonateMessages(prev => {
-                            const updated = { ...prev };
-                            delete updated[postId];
-                            return updated;
-                        });
-                    }, 5000);
                 }
+            }
+            if (postId) {
+                setTimeout(() => {
+                    setDonateMessages(prev => {
+                        const updated = { ...prev };
+                        delete updated[postId];
+                        return updated;
+                    });
+                }, 5000);
             }
         } catch (error) {
             console.error("Donate error:", error);
+            setConfirmDonate(null);
             if (postId) {
                 setDonateMessages(prev => ({
                     ...prev,
@@ -3191,7 +3203,7 @@ function ViewPostView({ state, updatePost }) {
                 <BlockConfirmMessage>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                         <span style={{ whiteSpace: 'nowrap' }}>
-                            🎁 Gift subscription to {post.username || post.user_id.substring(0, 12) + '...'}?
+                            🎁 Gift subscription to {post.username || post.user_id.substring(0, 12) + '...'}?{subscribeFeeLabel ? ` (${subscribeFeeLabel})` : ''}
                         </span>
                         <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
                             <Button
