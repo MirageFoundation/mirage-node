@@ -15,63 +15,149 @@ from cosmpy.aerial.wallet import LocalWallet
 from cosmpy.crypto.keypairs import PrivateKey
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _docker_exec, _run_miraged, _INSIDE_CONTAINER,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _docker_exec,
+    _run_miraged,
+    _INSIDE_CONTAINER,
     DEFAULT_BACKEND,
-    get_status, sign_canonical, compute_pow, check_pow_target,
+    get_status,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
     canon_signed_with_pow,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_delete_raw, _canon_base_delete_user_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_follow_user_raw, _canon_base_unfollow_user_raw,
-    _canon_base_follow_topic_raw, _canon_base_unfollow_topic_raw,
-    _canon_base_enable_agent_raw, _canon_base_disable_agent_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_delete_raw,
+    _canon_base_delete_user_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_follow_user_raw,
+    _canon_base_unfollow_user_raw,
+    _canon_base_follow_topic_raw,
+    _canon_base_unfollow_topic_raw,
+    _canon_base_enable_agent_raw,
+    _canon_base_disable_agent_raw,
     _canon_base_set_agents_raw,
-    _canon_base_block_post_raw, _canon_base_unblock_post_raw,
-    _canon_base_block_user_raw, _canon_base_unblock_user_raw,
-    _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
-    _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
-    _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
+    _canon_base_block_post_raw,
+    _canon_base_unblock_post_raw,
+    _canon_base_block_user_raw,
+    _canon_base_unblock_user_raw,
+    _canon_base_block_topic_raw,
+    _canon_base_unblock_topic_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_subscribe_raw,
+    _canon_base_set_auto_renewal_raw,
+    _canon_base_award_raw,
     _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
-    _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
-    _get_chain_profile, _get_profile_full, _assert_capped_deque,
-    _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
-    _broadcast_tx_sync, _wait_for_tx_result, _submit_tx, _sign_relay,
-    _build_msg_post, _build_msg_vote, _build_msg_set_username,
-    _build_msg_set_biography, _build_msg_send_tokens,
-    _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
+    _gen_nonce,
+    _compute_pow_quiet,
+    _pow_digest,
+    _rand_hex,
+    _get_pow_params,
+    _get_chain_params,
+    _get_tier_config,
+    _tier_int,
+    _get_chain_profile,
+    _get_profile_full,
+    _assert_capped_deque,
+    _build_tx_bytes,
+    _simulate_tx_gas,
+    _simulate_tx_bytes_gas,
+    _broadcast_tx_sync,
+    _wait_for_tx_result,
+    _submit_tx,
+    _sign_relay,
+    _build_msg_post,
+    _build_msg_vote,
+    _build_msg_set_username,
+    _build_msg_set_biography,
+    _build_msg_send_tokens,
+    _build_msg_delete,
+    _build_msg_delete_user,
+    _build_msg_award,
+    _build_msg_edit,
+    _build_msg_annotate,
+    _build_msg_block_post,
+    _build_msg_block_user,
+    _build_msg_block_topic,
     _build_msg_subscribe,
-    _build_msg_follow_user, _build_msg_unfollow_user,
-    _build_msg_follow_topic, _build_msg_unfollow_topic,
-    _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
-    _build_msg_unblock_post, _build_msg_unblock_user, _build_msg_unblock_topic,
+    _build_msg_follow_user,
+    _build_msg_unfollow_user,
+    _build_msg_follow_topic,
+    _build_msg_unfollow_topic,
+    _build_msg_enable_agent,
+    _build_msg_disable_agent,
+    _build_msg_set_agents,
+    _build_msg_unblock_post,
+    _build_msg_unblock_user,
+    _build_msg_unblock_topic,
     _build_msg_set_auto_renewal,
-    _check_reject, _check_accept, _check_deliver_reject, _check_deliver_accept,
-    _min_gas_price_umirage, _get_grpc_target,
-    DEFAULT_GAS_LIMIT, FILL_GAS_LIMIT, FILL_GAS_BUFFER,
-    COMET_RPC_URL, ESTIMATED_CHECKTX_TOTAL,
-    _validate_validator_funds, _required_validator_fee_budget_umirage,
+    _check_reject,
+    _check_accept,
+    _check_deliver_reject,
+    _check_deliver_accept,
+    _min_gas_price_umirage,
+    _get_grpc_target,
+    DEFAULT_GAS_LIMIT,
+    FILL_GAS_LIMIT,
+    FILL_GAS_BUFFER,
+    COMET_RPC_URL,
+    ESTIMATED_CHECKTX_TOTAL,
+    _validate_validator_funds,
+    _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
 import tests.blockchain_helpers as _bh
 from shared.datatypes import (
-    MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
-    MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
-    MsgEnableAgent, MsgFollowTopic, MsgFollowUser,
-    MsgMintTokens, MsgPost, MsgSendTokens, MsgSetAutoRenewal,
-    MsgSetLevel, MsgSetUsername, MsgSetBiography,
-    MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
-    MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgSubscribe, MsgVote, MsgAnnotate,
+    MsgAward,
+    MsgBlockPost,
+    MsgBlockTopic,
+    MsgBlockUser,
+    MsgBurnTokens,
+    MsgDelete,
+    MsgDeleteUser,
+    MsgEdit,
+    MsgEnableAgent,
+    MsgFollowTopic,
+    MsgFollowUser,
+    MsgMintTokens,
+    MsgPost,
+    MsgSendTokens,
+    MsgSetAutoRenewal,
+    MsgSetLevel,
+    MsgSetUsername,
+    MsgSetBiography,
+    MsgUnblockPost,
+    MsgUnblockTopic,
+    MsgUnblockUser,
+    MsgDisableAgent,
+    MsgSetAgents,
+    MsgUnfollowTopic,
+    MsgUnfollowUser,
+    MsgSubscribe,
+    MsgVote,
+    MsgAnnotate,
 )
 
 
@@ -146,6 +232,38 @@ def test_chain_auto_renewal(backend: str) -> None:
     else:
         _fail("auto.pow_forbidden", f"check={ccode} deliver={dcode}")
 
+
+def test_send_tokens_raw_log_present(backend: str) -> None:
+    """Ensure send_tokens deliver log is present and JSON."""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+    sender = WALLETS["sub1"]
+    recipient = WALLETS["sub2"]
+    sender_addr = str(sender.address())
+    recipient_addr = str(recipient.address())
+    lb, _, _, _ = _get_pow_params(backend, sender_addr)
+    ts = _now_ms()
+    amount = 1_000_000
+    msg = _build_msg_send_tokens(sender, lb, 0, ts, sender_addr, recipient_addr, amount, pow_val=0, nonce=_gen_nonce())
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSendTokens")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sender.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("send_tokens.raw_log_present", ccode, dcode, dlog)
+    if not dlog or not str(dlog).strip():
+        _fail("send_tokens.raw_log_present", "missing deliver log")
+        return
+    try:
+        parsed = json.loads(str(dlog))
+    except Exception as e:
+        _fail("send_tokens.raw_log_present", f"invalid json log: {e}")
+        return
+    if isinstance(parsed, list) and parsed:
+        _pass("send_tokens.raw_log_present")
+    else:
+        _fail("send_tokens.raw_log_present", f"unexpected log format: {type(parsed).__name__}")
 
 
 def test_biography(backend: str) -> None:
@@ -272,7 +390,6 @@ def test_biography(backend: str) -> None:
     _check_deliver_reject("biography.control_chars_rejected", ccode, dcode, dlog)
 
 
-
 def test_annotate_chain(backend: str) -> None:
     """Chain-level tests for MsgAnnotate validation."""
 
@@ -291,6 +408,7 @@ def test_annotate_chain(backend: str) -> None:
 
     # First create a post to annotate (via backend for convenience)
     from tests.backend_helpers import _do_post, _wait_indexed
+
     txh = _do_post(backend, free, "test", f"ChainAnnotateTarget {_rand_str(6)}", "content")
     if not txh:
         _fail("annotate_chain.create_target")
@@ -513,7 +631,6 @@ def test_annotate_chain(backend: str) -> None:
     _check_reject("annotate_chain.setagents_no_username", code, log, "username", tx_hash)
 
 
-
 def test_security(backend: str) -> None:
     """Security checks: tier params, subscription period, bridge threshold, replay rejection."""
 
@@ -602,5 +719,3 @@ def test_security(backend: str) -> None:
             _fail("security.first_post_accepted", f"ccode={ccode} dcode={dcode}")
     else:
         _fail("security.relay_test", "agent1 wallet not available")
-
-

@@ -164,8 +164,13 @@ def test_subscriber(backend: str):
 
             resp = _do_subscribe(backend, sub1_wallet, 1, target=sub2_addr)
             txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+            err = str(resp.get("error", "")) if resp else ""
+            if err:
+                _debug(f"gift subscribe error={err}")
             if txh:
-                _wait_tx_deliver(txh)
+                deliver = _wait_tx_deliver(txh)
+                if deliver and deliver[0] != 0:
+                    _debug(f"gift subscribe deliver failed code={deliver[0]} log={deliver[1][:200]}")
 
             deadline = time.time() + 30
             after_exp = before_exp

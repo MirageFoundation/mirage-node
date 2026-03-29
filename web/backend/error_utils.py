@@ -147,6 +147,8 @@ ERRORS = {
     "admin_insufficient_balance": "admin insufficient balance",
     "insufficient_funds": "insufficient funds",
     "auto_renew_required": "auto_renew required",
+    "gift_rejected_higher_tier": "gift rejected: recipient has a higher tier than requested",
+    "gift_invalid_target": "target must be a valid mirage1 address",
 
     # Awards
     "cannot_award_own_post": "cannot award your own post",

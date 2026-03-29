@@ -213,6 +213,144 @@ def test_subscribe_gift_rejects_higher_tier(backend: str) -> None:
     _check_deliver_reject("subscribe.gift_reject_higher_tier", ccode, dcode, dlog)
 
 
+def test_subscribe_gift_extends_expiry(backend: str) -> None:
+    """Gift should extend expiry and keep auto_renew unchanged."""
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+    giver = WALLETS["sub1"]
+    recipient = WALLETS["sub2"]
+    recipient_addr = str(recipient.address())
+    auto_original = False
+
+    try:
+        params = _get_chain_params()
+        period_minutes = int(params.get("subscription_period", 0) or 0)
+        if period_minutes <= 0:
+            _fail("subscribe.gift_extends_expiry", f"subscription_period={period_minutes}")
+            return
+    except Exception as e:
+        _fail("subscribe.gift_extends_expiry", str(e))
+        return
+
+    try:
+        profile = _get_chain_profile(recipient_addr)
+        level = int(profile.get("level", 0) or 0)
+        if level < 1:
+            lb, _, _, _ = _get_pow_params(backend, recipient_addr)
+            ts = _now_ms()
+            msg = _build_msg_subscribe(recipient, lb, 0, ts, 1, pow_val=0, nonce=_gen_nonce())
+            _, ccode, _, dcode, dlog = _submit_tx(
+                [(msg, "/mirage.core.v1.MsgSubscribe")],
+                DEFAULT_GAS_LIMIT,
+                fee_payer,
+                recipient.public_key().public_key_bytes,
+                wait_deliver=True,
+            )
+            _check_deliver_accept("subscribe.gift_extends_expiry.setup_subscribe", ccode, dcode, dlog)
+            time.sleep(2)
+            profile = _get_chain_profile(recipient_addr)
+            level = int(profile.get("level", 0) or 0)
+        if level < 1:
+            _fail("subscribe.gift_extends_expiry.setup_subscribe", f"level={level}")
+            return
+    except Exception as e:
+        _fail("subscribe.gift_extends_expiry.setup_subscribe", str(e))
+        return
+
+    try:
+        original = _get_chain_profile(recipient_addr)
+        auto_original = bool(original.get("auto_renew", False))
+        if auto_original:
+            lb, _, _, _ = _get_pow_params(backend, recipient_addr)
+            ts = _now_ms()
+            msg = _build_msg_set_auto_renewal(recipient, lb, ts, False, nonce=_gen_nonce())
+            _, ccode, _, dcode, dlog = _submit_tx(
+                [(msg, "/mirage.core.v1.MsgSetAutoRenewal")],
+                DEFAULT_GAS_LIMIT,
+                fee_payer,
+                recipient.public_key().public_key_bytes,
+                wait_deliver=True,
+            )
+            _check_deliver_accept("subscribe.gift_auto_renew_disable", ccode, dcode, dlog)
+            time.sleep(2)
+    except Exception as e:
+        _fail("subscribe.gift_auto_renew_disable", str(e))
+        return
+
+    try:
+        before = _get_chain_profile(recipient_addr)
+        before_exp = int(before.get("subscription_expiry", 0) or 0)
+        auto_before = bool(before.get("auto_renew", False))
+        _debug(
+            f"subscribe.gift_extends_expiry.before addr={recipient_addr} exp={before_exp} "
+            f"auto={auto_before} period_min={period_minutes}"
+        )
+        if before_exp <= 0:
+            _fail("subscribe.gift_extends_expiry", f"before_exp={before_exp}")
+            return
+    except Exception as e:
+        _fail("subscribe.gift_extends_expiry", str(e))
+        return
+
+    try:
+        lb, _, _, _ = _get_pow_params(backend, str(giver.address()))
+        ts = _now_ms()
+        msg = _build_msg_subscribe(giver, lb, 0, ts, 1, target=recipient_addr, pow_val=0, nonce=_gen_nonce())
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgSubscribe")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            giver.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        _check_deliver_accept("subscribe.gift_extends_expiry", ccode, dcode, dlog)
+    except Exception as e:
+        _fail("subscribe.gift_extends_expiry", str(e))
+        return
+
+    deadline = time.time() + 30
+    after_exp = before_exp
+    auto_after = auto_before
+    while time.time() < deadline:
+        after = _get_chain_profile(recipient_addr)
+        after_exp = int(after.get("subscription_expiry", 0) or 0)
+        auto_after = bool(after.get("auto_renew", False))
+        if after_exp > before_exp:
+            break
+        time.sleep(2)
+
+    _debug(
+        f"subscribe.gift_extends_expiry.after addr={recipient_addr} exp={after_exp} auto={auto_after}"
+    )
+
+    if after_exp <= before_exp:
+        _fail("subscribe.gift_extends_expiry", f"before={before_exp} after={after_exp}")
+    elif auto_after != auto_before:
+        _fail("subscribe.gift_auto_renew_unchanged", f"before={auto_before} after={auto_after}")
+    elif after_exp < before_exp + period_minutes * 60:
+        _fail("subscribe.gift_extends_expiry", f"delta={after_exp - before_exp} expected>={period_minutes * 60}")
+    else:
+        _pass("subscribe.gift_extends_expiry")
+        _pass("subscribe.gift_auto_renew_unchanged")
+
+    if not auto_original:
+        return
+
+    try:
+        lb, _, _, _ = _get_pow_params(backend, recipient_addr)
+        ts = _now_ms()
+        msg = _build_msg_set_auto_renewal(recipient, lb, ts, True, nonce=_gen_nonce())
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgSetAutoRenewal")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            recipient.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        _check_deliver_accept("subscribe.gift_auto_renew_restore", ccode, dcode, dlog)
+    except Exception as e:
+        _fail("subscribe.gift_auto_renew_restore", str(e))
+
+
 def test_tier_features(backend: str) -> None:
     """Test tier-specific features: can_remove_anon, content limits."""
 

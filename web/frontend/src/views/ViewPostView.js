@@ -25,7 +25,7 @@ import { sortComments } from '../utils/SortComments';
 import StickerPicker from '../components/StickerPicker';
 import GifPicker from '../components/GifPicker';
 import { getCollapseThreshold, shouldAutoCollapse } from '../utils/Comments';
-import { formatMirageCompact } from '../utils/formatters';
+
 import { updateNotification } from '../utils/notifications';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
@@ -851,6 +851,7 @@ function ViewPostView({ state, updatePost }) {
     const [donateAmount, setDonateAmount] = useState("10000");
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [giftSubMessages, setGiftSubMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
+    const [confirmGiftSub, setConfirmGiftSub] = useState(null); // { userId, postId }
     const [confirmAward, setConfirmAward] = useState(null); // { postId }
     const [isAwarding, setIsAwarding] = useState(false);
     const [awardMessages, setAwardMessages] = useState({}); // { postId: { type, message } }
@@ -1734,18 +1735,20 @@ function ViewPostView({ state, updatePost }) {
         setConfirmReportPost(null);
         setConfirmSuspendQuests(null);
         setConfirmUnsuspendQuests(null);
+        setConfirmGiftSub(null);
         setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
         setDonateAmount("10000"); // Reset to default
     };
 
-    const handleGiftSubscription = async (userAddress, postId) => {
+    const handleGiftSubscription = (userAddress, postId) => {
         if (!userAddress) return;
         if (isSubscribePending(userAddress)) return;
         if (!viewerAddress || viewerAddress === 'guest') {
             alert('Please log in to gift a subscription');
             return;
         }
+        console.debug('[ViewPostView] gift-subscribe.confirm', { target: userAddress, postId });
         setOpenMenuId(null);
         setConfirmDonate(null);
         setConfirmBlockPost(null);
@@ -1754,11 +1757,22 @@ function ViewPostView({ state, updatePost }) {
         setConfirmReportPost(null);
         setConfirmSuspendQuests(null);
         setConfirmUnsuspendQuests(null);
+        setConfirmAward(null);
+        setConfirmGiftSub({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
+    };
+
+    const confirmGiftSubAction = async () => {
+        const userAddress = confirmGiftSub?.userId;
+        const postId = confirmGiftSub?.postId;
+        if (!userAddress) return;
+        if (isSubscribePending(userAddress)) return;
         try {
+            console.debug('[ViewPostView] gift-subscribe.submit', { target: userAddress, postId });
             const result = await tx.subscribe(1, 0, userAddress);
             if (result.success) {
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: 'Subscription gifted!' } }));
+                setConfirmGiftSub(null);
             } else {
                 setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: `Failed: ${result.error}` } }));
             }
@@ -1772,6 +1786,11 @@ function ViewPostView({ state, updatePost }) {
                 return next;
             });
         }, 5000);
+    };
+
+    const cancelGiftSub = () => {
+        console.debug('[ViewPostView] gift-subscribe.cancel', { target: confirmGiftSub?.userId || null, postId: confirmGiftSub?.postId || null });
+        setConfirmGiftSub(null);
     };
 
     const { displayBalance: userBalanceUmirage } = useBalance();
@@ -1794,22 +1813,7 @@ function ViewPostView({ state, updatePost }) {
         }
     }, [configUpdateTrigger]);
 
-    const subscribeFeeUmirage = useMemo(() => {
-        void configUpdateTrigger;
-        try {
-            const raw = localStorage.getItem('chainConfig');
-            const cfg = raw ? JSON.parse(raw) : null;
-            const tiers = cfg?.tiers || [];
-            const subTier = tiers[1] || {};
-            return Number(subTier.period_fee || 0) || 0;
-        } catch (_) {
-            return 0;
-        }
-    }, [configUpdateTrigger]);
-
-    const giftSubscriptionLabel = subscribeFeeUmirage > 0
-        ? `Gift ${formatMirageCompact(subscribeFeeUmirage)} subscription`
-        : 'Gift subscription';
+    const giftSubscriptionLabel = 'Gift Subscription';
 
     const getAwardCost = (name) => {
         if (awardConfigs.length === 0) return null;
@@ -1824,6 +1828,7 @@ function ViewPostView({ state, updatePost }) {
         setConfirmBlockPost(null);
         setConfirmBlockUser(null);
         setConfirmReportPost(null);
+        setConfirmGiftSub(null);
         setConfirmAward({ postId });
         setTimeout(() => {
             const el = document.getElementById(`comment-${postId.toLowerCase()}`);
@@ -3181,6 +3186,29 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
+        if (confirmGiftSub?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>
+                            🎁 Gift subscription to {post.username || post.user_id.substring(0, 12) + '...'}?
+                        </span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button
+                                variant="warning"
+                                size="sm"
+                                onClick={confirmGiftSubAction}
+                                disabled={isSubscribePending(confirmGiftSub?.userId)}
+                            >
+                                {formatSubscribeStatus(confirmGiftSub?.userId) || 'Confirm'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelGiftSub}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
+
         const giftMsg = giftSubMessages[post.post_id];
         if (giftMsg) {
             return (
@@ -3415,7 +3443,7 @@ function ViewPostView({ state, updatePost }) {
                                 </MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleGiveAward(post.post_id); }}>Give Award</MenuItem>
                                 {viewerAddress !== 'guest' && (
-                                    <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
+                                    <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Gift Mirage</MenuItem>
                                 )}
                                 {viewerAddress !== 'guest' && (
                                     <MenuItem onClick={() => { setOpenMenuId(null); handleGiftSubscription(post.user_id, post.post_id); }} disabled={isSubscribePending(post.user_id)}>

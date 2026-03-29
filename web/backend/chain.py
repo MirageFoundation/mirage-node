@@ -292,6 +292,17 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                 }
             )
             return out
+        if "gift rejected" in msg and "level" in msg:
+            out.update(
+                {
+                    "reason": "gift_rejected_higher_tier",
+                    "message": "gift rejected: recipient has a higher tier than requested",
+                }
+            )
+            return out
+        if "insufficient balance" in msg:
+            out.update({"reason": "insufficient_balance", "message": "insufficient balance"})
+            return out
     except Exception:
         pass
 

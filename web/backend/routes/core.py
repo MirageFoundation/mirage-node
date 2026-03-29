@@ -59,7 +59,7 @@ from shared.datatypes import (
 )
 
 from logging_utils import log_event, next_request_id, logger
-from error_utils import api_error_code
+from error_utils import api_error_code, get_message
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
 from db import connect_db, connect_backend_db
@@ -493,6 +493,10 @@ def _classify_exception(err_str: str):
     low = err_str.lower()
     if "admin insufficient balance" in low:
         return "admin insufficient balance", 400
+    if "gift rejected" in low and "level" in low:
+        return get_message("gift_rejected_higher_tier"), 400
+    if "insufficient balance" in low or "insufficient funds" in low:
+        return "insufficient balance", 400
     return "internal server error", 500
 
 
@@ -3546,9 +3550,6 @@ def core_post():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        if target and not _is_valid_mirage_addr(target):
-            return jsonify({"error": "target must be a valid mirage1 address"}), 400
-
         validator_addr = require_runtime().validator_payer_addr
 
         # Enforce tier limits (title/content) based on user's subscription level
@@ -4218,7 +4219,7 @@ def core_subscribe():
             return jsonify({"error": "invalid pubkey"}), 400
 
         if target and not _is_valid_mirage_addr(target):
-            return jsonify({"error": "target must be a valid mirage1 address"}), 400
+            return api_error_code("gift_invalid_target")
 
         is_gift = bool(target and target != user_addr)
         if is_gift:
@@ -4229,7 +4230,7 @@ def core_subscribe():
                 log_event(rid, "subscribe.db_error", error=str(db_err))
                 return api_error_code("indexer_unavailable", 503)
             if recipient_level > level:
-                return jsonify({"error": f"gift rejected: recipient level {recipient_level} > requested {level}"}), 400
+                return api_error_code("gift_rejected_higher_tier")
 
         validator_addr = require_runtime().validator_payer_addr
 

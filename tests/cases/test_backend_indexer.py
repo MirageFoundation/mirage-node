@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
-
-
+from urllib.parse import urlparse
 
 from tests.common import (
     _pass,
@@ -18,6 +18,17 @@ from tests.common import (
     _check_local_docker,
     WALLETS,
 )
+
+
+def _get_indexer_db_name() -> str:
+    url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if url:
+        return urlparse(url).path.lstrip("/")
+    if _check_local_docker():
+        code, out = _docker_exec("printenv INDEXER_DB_URL")
+        if code == 0 and out:
+            return urlparse(out.strip()).path.lstrip("/")
+    return "mirage_indexer"
 from tests.backend_helpers import (
     _do_send_tokens,
     _do_follow_user,
@@ -668,8 +679,10 @@ def test_tx_index(backend: str):
         _skip("tx_index.tx_receipts_dropped", "not running in local-docker")
         return
 
+    db_name = _get_indexer_db_name()
+
     rc, out = _docker_exec(
-        """su - postgres -c "psql -d mirage -tAc 'SELECT count(*) FROM tx_index' 2>&1" """,
+        f"""su - postgres -c "psql -d {db_name} -tAc 'SELECT count(*) FROM tx_index' 2>&1" """,
         timeout=10,
     )
     if rc == 0:
@@ -685,7 +698,7 @@ def test_tx_index(backend: str):
         _fail("tx_index.db_table_exists", f"rc={rc} out={out}")
 
     rc2, out2 = _docker_exec(
-        """su - postgres -c "psql -d mirage -tAc 'SELECT count(*) FROM tx_receipts' 2>&1" """,
+        f"""su - postgres -c "psql -d {db_name} -tAc 'SELECT count(*) FROM tx_receipts' 2>&1" """,
         timeout=10,
     )
     if rc2 != 0 or "does not exist" in out2:

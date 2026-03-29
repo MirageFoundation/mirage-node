@@ -564,6 +564,7 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
     - post award: quality_post
     - comment award: receipts
     - token send happy path: 1000 umirage
+    - gift subscription to sub2: one period_fee for level 1
     """
     code, cfg = _get(f"{backend}/api/get_chain_config")
     if code != 200 or not isinstance(cfg, dict):
@@ -590,11 +591,19 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
     if missing:
         raise RuntimeError(f"required award types missing from chain config: {missing}")
 
+    gift_fee = int(cfg.get("subscription_period_fee", 0) or 0)
+    if gift_fee <= 0:
+        tiers = cfg.get("tiers") or []
+        if isinstance(tiers, list) and len(tiers) > 1:
+            gift_fee = int((tiers[1] or {}).get("period_fee", 0) or 0)
+    if gift_fee <= 0:
+        gift_fee = 100_000_000_000
+
     token_send_amount = 1000  # test_tokens.happy_path
     indexer_transfer_test = 1  # test_backend_indexer.balance_after_transfer
     # Fee buffer: sub1 sends many txs across backend tests (posts/votes/etc).
     fee_buffer = 25_000_000_000  # 25k MIRAGE in umirage
-    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test + fee_buffer
+    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test + gift_fee + fee_buffer
 
 
 def setup_test_wallets(backend: str) -> bool:

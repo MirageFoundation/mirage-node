@@ -46,6 +46,7 @@ from tests.cases.test_blockchain_tiers import (
     test_tier_enforcement,
     test_subscribe_validation,
     test_subscribe_gift_rejects_higher_tier,
+    test_subscribe_gift_extends_expiry,
     test_tier_features,
 )
 from tests.cases.test_blockchain_social import test_follow_limits, test_hard_cap_vs_deque
@@ -55,6 +56,7 @@ from tests.cases.test_blockchain_features import (
     test_biography,
     test_annotate_chain,
     test_security,
+    test_send_tokens_raw_log_present,
 )
 
 ALL_CATEGORIES = {
@@ -74,10 +76,12 @@ ALL_CATEGORIES = {
     "hard_cap_vs_deque": test_hard_cap_vs_deque,
     "subscribe_validation": test_subscribe_validation,
     "subscribe_gift_reject": test_subscribe_gift_rejects_higher_tier,
+    "subscribe_gift_extends": test_subscribe_gift_extends_expiry,
     "tier_features": test_tier_features,
     "biography": test_biography,
     "annotate_chain": test_annotate_chain,
     "security": test_security,
+    "send_tokens_raw_log": test_send_tokens_raw_log_present,
     "envelope_replay": test_envelope_replay,
     "mandatory_nonce": test_mandatory_nonce,
     "envelope_fields": test_envelope_fields,

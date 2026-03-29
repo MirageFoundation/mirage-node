@@ -212,7 +212,7 @@ def test_agents(backend: str):
     except Exception as e:
         _fail("agents.set_agents_happy_path", str(e))
 
-    time.sleep(3)
+    _wait_list_count(backend, sub1_addr, "enabled_agents", 2)
 
     # 13.7b Verify order in get_user_followed
     code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
