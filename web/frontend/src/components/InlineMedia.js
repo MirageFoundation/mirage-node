@@ -1,5 +1,5 @@
 import React from "react";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { normalizeRedgifsToMp4, extractRedgifsId, redgifsCanonicalWatchUrl } from "../utils/media";
 
 const StyledLink = styled.a`
@@ -63,7 +63,11 @@ const MAX_INITIAL_HEIGHT_ROOT = 600;
 const MAX_INITIAL_HEIGHT_COMMENT = 225;
 const MAX_INITIAL_WIDTH = 600;
 
+const OLDREDDIT_MAX_VIDEO_WIDTH = 800;
+
 export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta = null }) {
+    const theme = useTheme();
+    const isOldReddit = theme?.themeId === 'oldreddit';
     const [naturalWidth, setNaturalWidth] = React.useState((mediaMeta && mediaMeta.w) || 0);
     const [naturalHeight, setNaturalHeight] = React.useState((mediaMeta && mediaMeta.h) || 0);
     const [displayWidth, setDisplayWidth] = React.useState(null);
@@ -106,8 +110,6 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         return () => window.removeEventListener('resize', updateContainerWidth);
     }, []);
 
-    const ratio = naturalWidth && naturalHeight ? naturalWidth / naturalHeight : 1;
-
     const computeInitialWidth = React.useCallback(() => {
         if (!naturalWidth || !naturalHeight) return MAX_INITIAL_WIDTH;
         const r = naturalWidth / naturalHeight;
@@ -145,7 +147,8 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const expDx = sign * Math.pow(Math.abs(dx), 1.05);
         let newWidth = dragStartWidthRef.current + expDx;
         const minWidth = 50;
-        const maxWidth = containerMaxWidth || (typeof window !== 'undefined' ? window.innerWidth : 1000);
+        let maxWidth = containerMaxWidth || (typeof window !== 'undefined' ? window.innerWidth : 1000);
+        if (isOldReddit && maxWidth > OLDREDDIT_MAX_VIDEO_WIDTH) maxWidth = OLDREDDIT_MAX_VIDEO_WIDTH;
         if (newWidth < minWidth) newWidth = minWidth;
         if (newWidth > maxWidth) newWidth = maxWidth;
         setDisplayWidth(newWidth);
@@ -347,7 +350,6 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const isVid = isStreamDomain || isVidExt;
 
         const currentWidth = displayWidth || computeInitialWidth();
-        const currentHeight = currentWidth / ratio;
 
         const resizeHandlers = isMobile ? {} : {
             onPointerDown,

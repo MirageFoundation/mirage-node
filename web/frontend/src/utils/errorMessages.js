@@ -270,4 +270,5 @@ export function isErrorCode(resp, code) {
     return (typeof resp === 'string' ? resp : resp.error_code) === code;
 }
 
-export default { formatError, isErrorCode };
+const errorMessages = { formatError, isErrorCode };
+export default errorMessages;

@@ -1412,7 +1412,7 @@ class TransactionHandler {
      */
     async sendTokens(targetAddress, amountMirage) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
+            const _seed = seedVault.getSeed() || ""; // eslint-disable-line no-unused-vars
             const publicKey = Storage.load("publicKey", "");
             const targetTrimmed = String(targetAddress || "").trim().toLowerCase();
 
@@ -2206,7 +2206,7 @@ class TransactionHandler {
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
             const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, _deleteKey: _ignored4, _agentKey: _ignored5, ...transaction } = queued;
             const giftTarget = String(transaction.target || '').trim();
-            const isGiftSubscribe = transaction.action === 'subscribe' && giftTarget !== '';
+            const _isGiftSubscribe = transaction.action === 'subscribe' && giftTarget !== ''; // eslint-disable-line no-unused-vars
             this.processedTransactions += 1;
             // Track quest-relevant actions
             if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {

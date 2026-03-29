@@ -300,8 +300,12 @@ export default function ProfileView({ state }) {
         ? normalizedOwn === normalizedProfile
         : Boolean(normalizedOwn) && !routeIdentity;
 
-    const VALID_TABS = ['profile', 'posts', 'algo'];
-    const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
+    const isOldReddit = theme?.themeId === 'oldreddit';
+    const VALID_TABS = isOldReddit
+        ? ['overview', 'submissions', 'comments', 'profile', 'algo']
+        : ['profile', 'posts', 'algo'];
+    const [activeTab, setActiveTab] = useTabs(isOldReddit ? 'overview' : 'profile', VALID_TABS);
+    const isPostsTab = activeTab === 'posts' || activeTab === 'overview' || activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => (isOwnProfile ? (username || '') : ''));
     const [balance, setBalance] = useState(null);
     const [reserveFunds, setReserveFunds] = useState(null);
@@ -581,12 +585,16 @@ export default function ProfileView({ state }) {
             clearTimeout(recentLoadTimerRef.current);
             recentLoadTimerRef.current = null;
         }
-    }, [recentPostsFilter]);
+    }, [effectivePostsFilter]);
 
-    // Lazy-load posts only when posts tab is active
+    const effectivePostsFilter = isOldReddit
+        ? (activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : 'all')
+        : recentPostsFilter;
+
+    // Lazy-load posts only when a posts-related tab is active
     useEffect(() => {
         let cancelled = false;
-        if (!profileAddress || activeTab !== 'posts') {
+        if (!profileAddress || !isPostsTab) {
             return;
         }
         const fetchRecentPosts = async () => {
@@ -596,8 +604,8 @@ export default function ProfileView({ state }) {
             try {
                 const params = { owner: profileAddress, limit: 50, page: recentPage };
                 if (address) params.address = address;
-                if (recentPostsFilter === 'submissions' || recentPostsFilter === 'comments') {
-                    params.type = recentPostsFilter;
+                if (effectivePostsFilter === 'submissions' || effectivePostsFilter === 'comments') {
+                    params.type = effectivePostsFilter;
                 }
                 params.allowed_tags = getAllowedTagsParam();
                 const res = await Api.get('get_user_posts', params);
@@ -627,7 +635,7 @@ export default function ProfileView({ state }) {
         return () => {
             cancelled = true;
         };
-    }, [profileAddress, address, recentPage, recentPostsFilter, activeTab]);
+    }, [profileAddress, address, recentPage, effectivePostsFilter, activeTab, isPostsTab]);
 
     // Reset posts when profile changes
     useEffect(() => {
@@ -968,15 +976,37 @@ export default function ProfileView({ state }) {
                     <MobileHeader />
                     <TabbedContainer>
                         <TabsRow>
-                            <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
-                                Profile
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'posts'} onClick={() => setActiveTab('posts')}>
-                                Posts
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
-                                Algo
-                            </ClickableTab>
+                            {isOldReddit ? (
+                                <>
+                                    <ClickableTab $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
+                                        overview
+                                    </ClickableTab>
+                                    <ClickableTab $active={activeTab === 'submissions'} onClick={() => setActiveTab('submissions')}>
+                                        submissions
+                                    </ClickableTab>
+                                    <ClickableTab $active={activeTab === 'comments'} onClick={() => setActiveTab('comments')}>
+                                        comments
+                                    </ClickableTab>
+                                    <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
+                                        profile
+                                    </ClickableTab>
+                                    <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
+                                        algo
+                                    </ClickableTab>
+                                </>
+                            ) : (
+                                <>
+                                    <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
+                                        Profile
+                                    </ClickableTab>
+                                    <ClickableTab $active={activeTab === 'posts'} onClick={() => setActiveTab('posts')}>
+                                        Posts
+                                    </ClickableTab>
+                                    <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
+                                        Algo
+                                    </ClickableTab>
+                                </>
+                            )}
                         </TabsRow>
                         <ContainerBody>
                             {activeTab === 'profile' && (
@@ -1221,9 +1251,9 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
 
-                            {activeTab === 'posts' && (
+                            {isPostsTab && (
                                 <>
-                                    {profileAddress && (
+                                    {!isOldReddit && profileAddress && (
                                         <FilterSelect
                                             value={recentPostsFilter}
                                             onChange={(e) => setRecentPostsFilter(e.target.value)}
@@ -1243,7 +1273,7 @@ export default function ProfileView({ state }) {
                                         <Mono style={{ color: '#f87171' }}>{recentPostsError}</Mono>
                                     )}
                                     {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && (
-                                        <SubtleMono>No {recentPostsFilter === 'all' ? 'posts' : (recentPostsFilter === 'submissions' ? 'submissions' : 'comments')} yet.</SubtleMono>
+                                        <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : (effectivePostsFilter === 'submissions' ? 'submissions' : 'comments')} yet.</SubtleMono>
                                     )}
                                     {!recentPostsError && recentPosts.length > 0 && (
                                         <PostsList>

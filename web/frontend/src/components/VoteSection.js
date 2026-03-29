@@ -50,23 +50,25 @@ const StyledVoteArea = styled.div`
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    width: ${(props) => (props.compact ? '56px' : '64px')};
-    height: ${(props) => (props.compact ? '96px' : '120px')};
-    min-height: ${(props) => (props.compact ? '96px' : '120px')};
-    padding: ${(props) => (props.compact ? '6px 4px' : '8px 6px')};
-    margin-right: 0.25rem;
-    border-radius: 14px;
-    background: ${({ theme }) => theme?.colors?.panel || '#1f2126'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || 'rgba(0,0,0,0.08)'};
-    box-shadow: 0 10px 24px rgba(0,0,0,0.14);
-    gap: ${(props) => (props.compact ? '6px' : '10px')};
+    width: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? 'auto' : (compact ? '56px' : '64px')};
+    height: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? 'auto' : (compact ? '96px' : '120px')};
+    min-height: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? '0' : (compact ? '96px' : '120px')};
+    padding: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? '0' : (compact ? '6px 4px' : '8px 6px')};
+    margin-right: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0.25rem'};
+    border-radius: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '14px'};
+    background: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'transparent' : (theme?.colors?.panel || '#1f2126')};
+    border: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'none' : `1px solid ${theme?.colors?.border || 'rgba(0,0,0,0.08)'}`};
+    box-shadow: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'none' : '0 10px 24px rgba(0,0,0,0.14)'};
+    gap: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? '0' : (compact ? '6px' : '10px')};
 
     @media (max-width: 768px) {
-        width: 60px;
-        height: 120px;
-        min-height: 120px;
-        margin-right: 0.65rem;
-        padding: 8px 4px;
+        ${({ theme }) => theme?.themeId !== 'oldreddit' ? `
+            width: 60px;
+            height: 120px;
+            min-height: 120px;
+            margin-right: 0.65rem;
+            padding: 8px 4px;
+        ` : ''}
     }
 `;
 
@@ -87,19 +89,22 @@ const InlineVoteCount = styled.span`
 
 const VoteButton = styled.button`
     appearance: none;
-    border: 1px solid transparent;
     background: ${({ active, up, theme }) =>
-        active
-            ? (up ? 'rgba(22, 163, 74, 0.16)' : 'rgba(220, 38, 38, 0.16)')
-            : (theme?.colors?.panelAlt || 'rgba(0,0,0,0.06)')};
+        theme?.themeId === 'oldreddit'
+            ? 'transparent'
+            : (active
+                ? (up ? 'rgba(22, 163, 74, 0.16)' : 'rgba(220, 38, 38, 0.16)')
+                : (theme?.colors?.panelAlt || 'rgba(0,0,0,0.06)'))};
     color: ${({ active, up, theme }) =>
         active
-            ? (up ? '#16a34a' : '#dc2626')
-            : (theme?.colors?.text || '#111')};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || 'rgba(0,0,0,0.12)'};
-    border-radius: 10px;
-    width: ${({ compact }) => (compact ? '28px' : '32px')};
-    height: ${({ compact }) => (compact ? '28px' : '32px')};
+            ? (up
+                ? (theme?.colors?.voteUp || '#ff4500')
+                : (theme?.colors?.voteDown || '#7193ff'))
+            : (theme?.colors?.subtleText || '#818384')};
+    border: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'none' : `1px solid ${theme?.colors?.border || 'rgba(0,0,0,0.12)'}`};
+    border-radius: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '10px'};
+    width: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? '36px' : (compact ? '28px' : '32px')};
+    height: ${({ compact, theme }) => theme?.themeId === 'oldreddit' ? '36px' : (compact ? '28px' : '32px')};
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -108,10 +113,10 @@ const VoteButton = styled.button`
     padding: 0;
 
     &:hover {
-        background: ${({ up }) => (up ? 'rgba(22, 163, 74, 0.12)' : 'rgba(220, 38, 38, 0.12)')};
-        color: ${({ up }) => (up ? '#16a34a' : '#dc2626')};
-        border-color: rgba(0,0,0,0.12);
-        transform: translateY(-1px);
+        background: ${({ up, theme }) => theme?.themeId === 'oldreddit' ? 'transparent' : (up ? 'rgba(22, 163, 74, 0.12)' : 'rgba(220, 38, 38, 0.12)')};
+        color: ${({ up, theme }) => up ? (theme?.colors?.voteUp || '#ff4500') : (theme?.colors?.voteDown || '#7193ff')};
+        border-color: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'transparent' : 'rgba(0,0,0,0.12)'};
+        transform: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'none' : 'translateY(-1px)'};
     }
 
     &:active {
@@ -119,17 +124,18 @@ const VoteButton = styled.button`
     }
 
     svg {
-        width: 16px;
-        height: 16px;
+        width: ${({ theme }) => theme?.themeId === 'oldreddit' ? '27px' : '16px'};
+        height: ${({ theme }) => theme?.themeId === 'oldreddit' ? '27px' : '16px'};
         fill: currentColor;
     }
 `;
 
 const StyledVotes = styled.div`
     text-align: center;
-    font-size: 0.95rem;
+    font-size: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0.7rem' : '0.95rem'};
     font-weight: 700;
     color: ${({ theme }) => theme?.colors?.text || '#FFF'};
+    line-height: ${({ theme }) => theme?.themeId === 'oldreddit' ? '1' : 'normal'};
 `;
 
 const UpIcon = (props) => (

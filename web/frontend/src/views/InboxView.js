@@ -13,11 +13,13 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBo
 import { getAuthorColor, getAuthorTooltip } from '../utils/tierColors';
 import { formatMirage } from '../utils/formatters';
 
+const isOr = (theme) => theme?.themeId === 'oldreddit';
+
 const HeaderRow = styled.div`
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    margin: 0.25rem 0 0.75rem 0;
+    justify-content: ${({ theme }) => isOr(theme) ? 'flex-start' : 'flex-end'};
+    margin: ${({ theme }) => isOr(theme) ? '0.35rem 0' : '0.25rem 0 0.75rem 0'};
 `;
 
 // Using <a> tag so right-click "Open in new window" works natively
@@ -25,28 +27,35 @@ const ReplyItem = styled.a`
     display: block;
     text-decoration: none;
     color: inherit;
-    padding: 0.5rem;
-    margin-bottom: 0.5rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.5rem 0.75rem' : '0.5rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0' : '0.5rem'};
     background: ${({ theme, $isUnread, $isActive }) => {
+        if (isOr(theme)) {
+            if ($isActive) return theme?.colors?.panelAlt;
+            return $isUnread ? theme?.colors?.panelAlt : theme?.colors?.panel;
+        }
         if ($isActive) return theme?.colors?.panelAlt || 'rgba(250, 204, 21, 0.12)';
         return $isUnread
             ? (theme?.name === 'dark' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.08)')
             : (theme?.name === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)');
     }};
-    border-radius: 6px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
     font-size: 0.5rem;
     cursor: pointer;
     transition: background-color 0.2s;
-    border: 1px solid ${({ theme, $isUnread, $isActive }) => {
-        if ($isActive) return theme?.colors?.accent || 'rgba(250, 204, 21, 0.8)';
-        return $isUnread
+    border: ${({ theme, $isUnread, $isActive }) => {
+        if (isOr(theme)) return 'none';
+        if ($isActive) return `1px solid ${theme?.colors?.accent || 'rgba(250, 204, 21, 0.8)'}`;
+        return `1px solid ${$isUnread
             ? (theme?.name === 'dark' ? 'rgba(59, 130, 246, 0.4)' : 'rgba(59, 130, 246, 0.3)')
-            : (theme?.name === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)');
+            : (theme?.name === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)')}`;
     }};
-    opacity: ${({ $isUnread, $isActive }) => ($isActive || $isUnread ? '1' : '0.7')};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border}` : undefined};
+    opacity: ${({ theme, $isUnread, $isActive }) => isOr(theme) ? '1' : ($isActive || $isUnread ? '1' : '0.7')};
 
     &:hover {
         background-color: ${({ theme, $isUnread, $isActive }) => {
+        if (isOr(theme)) return theme?.colors?.panelAlt;
         if ($isActive) return theme?.colors?.panelAlt || 'rgba(250, 204, 21, 0.15)';
         return $isUnread
             ? (theme?.name === 'dark' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(59, 130, 246, 0.12)')
@@ -55,9 +64,9 @@ const ReplyItem = styled.a`
         opacity: 1;
     }
     @media (max-width: 1000px) {
-        padding: 0.35rem;
-        margin-bottom: 0.35rem;
-        border-radius: 4px;
+        padding: ${({ theme }) => isOr(theme) ? '0.35rem 0.5rem' : '0.35rem'};
+        margin-bottom: ${({ theme }) => isOr(theme) ? '0' : '0.35rem'};
+        border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
     }
 `;
 
@@ -66,6 +75,10 @@ const ReplyContentText = styled.div`
     font-size: 0.6rem;
     white-space: pre-wrap;
     word-break: break-word;
+    ${({ theme }) => isOr(theme) ? `
+        margin-left: 0.5rem;
+        max-width: 700px;
+    ` : ''}
 `;
 
 const MarkReadButton = styled.button`
@@ -74,17 +87,18 @@ const MarkReadButton = styled.button`
     padding: 0.15rem 0.35rem;
     font-size: 0.5rem;
     font-weight: 600;
-    background: rgba(102, 126, 234, 0.15);
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    border: 1px solid rgba(102, 126, 234, 0.3);
-    border-radius: 3px;
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(102, 126, 234, 0.15)'};
+    color: ${({ theme }) => isOr(theme) ? theme?.colors?.subtleText : (theme?.colors?.text || '#fff')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : '1px solid rgba(102, 126, 234, 0.3)'};
+    border-radius: 0;
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
 
     &:hover {
-        background: rgba(102, 126, 234, 0.25);
-        border-color: rgba(102, 126, 234, 0.5);
+        background: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(102, 126, 234, 0.25)'};
+        border-color: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(102, 126, 234, 0.5)'};
+        text-decoration: ${({ theme }) => isOr(theme) ? 'underline' : 'none'};
     }
 
     @media (min-width: 1001px) {
@@ -108,6 +122,11 @@ const ReplyHeader = styled.div`
     line-height: 1.4;
     word-break: break-word;
     overflow-wrap: break-word;
+    ${({ theme }) => isOr(theme) ? `
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    ` : ''}
 `;
 
 const ReplyUsername = styled.span`
@@ -124,13 +143,13 @@ const ReplyUsername = styled.span`
         background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
         border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
         color: ${({ theme }) => theme?.colors?.text || '#eee'};
-        padding: 0.5rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
+        padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.5rem' : '0.5rem 0.75rem'};
+        border-radius: 0;
+        font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.7rem'};
         font-weight: normal;
         white-space: nowrap;
         z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        box-shadow: none;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.15s ease;
@@ -157,9 +176,9 @@ const Separator = styled.div`
 `;
 
 const QuoteBlock = styled.blockquote`
-    margin: 0.25rem 0 0 0;
+    margin: 0.25rem 0 0 ${({ theme }) => isOr(theme) ? '0.5rem' : '0'};
     padding: 0.25rem 0.4rem;
-    border-left: 2px solid ${({ theme }) => theme?.colors?.accent || 'rgba(250, 204, 21, 0.6)'};
+    border-left: 2px solid ${({ theme }) => theme?.colors?.border || 'rgba(250, 204, 21, 0.6)'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#AAA'};
     font-size: 0.55rem;
     font-style: italic;

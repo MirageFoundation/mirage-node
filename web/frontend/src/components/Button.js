@@ -23,6 +23,25 @@ const MIN_WIDTH_PRESETS = {
     follow: '8.5rem',
 };
 
+const oldredditOverride = css`
+    ${({ theme }) => theme?.themeId === 'oldreddit' && css`
+        background: ${theme?.colors?.panelAlt} !important;
+        color: ${theme?.colors?.text} !important;
+        border: 1px solid ${theme?.colors?.border} !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        transform: none !important;
+        font-size: 0.7rem !important;
+        padding: 0.25rem 0.5rem !important;
+
+        &:hover:not(:disabled) {
+            background: ${theme?.colors?.accent} !important;
+            box-shadow: none !important;
+            transform: none !important;
+        }
+    `}
+`;
+
 const baseStyles = css`
     display: inline-flex;
     align-items: center;
@@ -268,6 +287,7 @@ const StyledButton = styled.button`
         background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
         color: #FFFFFF !important;
     `}
+    ${oldredditOverride}
     
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
@@ -283,6 +303,7 @@ const StyledLink = styled(Link)`
     ${({ $size }) => getSizeStyles($size)}
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
+    ${oldredditOverride}
     
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
@@ -298,6 +319,7 @@ const StyledAnchor = styled.a`
     ${({ $size }) => getSizeStyles($size)}
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
+    ${oldredditOverride}
     
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}

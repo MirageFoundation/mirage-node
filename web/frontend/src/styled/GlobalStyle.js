@@ -85,4 +85,20 @@ export const GlobalStyle = createGlobalStyle`
     transition: none !important;
     animation: none !important;
   }
+
+  /* oldreddit: force flat aesthetic globally —
+     covers all views/components without per-component overrides.
+     Circular elements (spinners, avatars, dots) get preserved below. */
+  ${({ theme }) => theme?.themeId === 'oldreddit' ? `
+  div, section, article, aside, main,
+  button, input, select, textarea, a,
+  nav, header, footer, blockquote, pre,
+  form, fieldset, ul, ol, li, img, video {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  [data-round], span[role="status"] {
+    border-radius: 50% !important;
+  }
+  ` : ''}
 `

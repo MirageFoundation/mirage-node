@@ -177,47 +177,6 @@ const ShareText = styled.span`
     }
 `
 
-// Helper component to render the title scaled down to fit within the card area (for image cards)
-function MobileCardFitTitle({ titleText, children }) {
-    const overlayRef = useRef(null);
-    const textRef = useRef(null);
-
-    useEffect(() => {
-        const el = textRef.current;
-        const parent = overlayRef.current;
-        if (!el || !parent) return;
-        // Reset font-size to a reasonable starting point based on viewport width
-        let base = 16;
-        try {
-            if (typeof window !== 'undefined') {
-                base = Math.max(10, Math.min(18, Math.floor(window.innerWidth * 0.04)));
-            }
-        } catch (_) { /* ignore */ }
-        el.style.fontSize = base + 'px';
-        el.style.wordBreak = 'break-word';
-        el.style.overflow = 'hidden';
-        el.style.display = 'block';
-        // Shrink until it fits or until minimum size
-        let size = base;
-        const minSize = 8;
-        let guard = 0;
-        while (guard < 80 && parent && el && (el.scrollHeight > parent.clientHeight - 8) && size > minSize) {
-            size -= 1;
-            el.style.fontSize = size + 'px';
-            guard += 1;
-        }
-    }, [titleText]);
-
-    return (
-        <>
-            {children}
-            <MobileCardTitleBar ref={overlayRef}>
-                <span ref={textRef}>{titleText}</span>
-            </MobileCardTitleBar>
-        </>
-    );
-}
-
 // Helper component to render centered text that auto-fits (for text-only cards)
 function MobileCardFitText({ titleText }) {
     const containerRef = useRef(null);
@@ -399,6 +358,7 @@ const generatePostGradient = (post) => {
     return gradients[index];
 };
 
+// eslint-disable-next-line no-unused-vars
 const MobileCardTitleBar = styled.div`
     position: absolute;
     left: 0;
@@ -412,7 +372,6 @@ const MobileCardTitleBar = styled.div`
     text-shadow: 0 1px 2px rgba(0,0,0,0.65);
     pointer-events: none;
     z-index: 2;
-    /* Extend the gradient well above the bar for readability on bright images */
     &::before {
         content: '';
         position: absolute;

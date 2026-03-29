@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link } from 'react-router-dom';
 import VoteSection from './VoteSection';
@@ -10,7 +10,6 @@ const ListContainer = styled.div`
     display: flex;
     flex-direction: column;
     border: 1px solid ${({ theme }) => theme?.colors?.border};
-    border-radius: 4px;
     background: ${({ theme }) => theme?.colors?.panel};
 `;
 
@@ -52,8 +51,7 @@ const VoteColumn = styled.div`
 const Thumbnail = styled(Link)`
     flex: 0 0 70px;
     width: 70px;
-    height: 52px;
-    border-radius: 3px;
+    height: 70px;
     overflow: hidden;
     background: ${({ theme }) => theme?.colors?.panelAlt};
     display: flex;
@@ -69,7 +67,7 @@ const Thumbnail = styled(Link)`
     @media (max-width: 600px) {
         flex: 0 0 50px;
         width: 50px;
-        height: 38px;
+        height: 50px;
     }
 `;
 
@@ -122,9 +120,21 @@ const MetaLink = styled(Link)`
 const AuthorLink = styled(Link)`
     text-decoration: none;
     font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.subtleText};
     &:hover {
         text-decoration: underline;
     }
+`;
+
+const TagBadge = styled.span`
+    display: inline;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.subtleText};
+    margin-right: 0.3rem;
+    text-transform: uppercase;
+    &::before { content: '['; }
+    &::after { content: ']'; }
 `;
 
 const ActionsLine = styled.div`
@@ -172,7 +182,6 @@ const SortTab = styled.button`
     font-size: 0.65rem;
     font-weight: 700;
     padding: 0.15rem 0.4rem;
-    border-radius: 2px;
     text-transform: lowercase;
     cursor: pointer;
     &:hover {
@@ -201,7 +210,7 @@ function getThumbUrl(post) {
     return null;
 }
 
-function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare }) {
+function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive }) {
     if (!post || !post.post_id) return null;
     if (typeof post.title !== 'string' || typeof post.topic !== 'string') {
         throw new Error('ListFeedView: post title/topic missing');
@@ -219,9 +228,11 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
         throw new Error('ListFeedView: timestamp missing');
     }
     if (ts > 1e12) ts = Math.floor(ts / 1000);
-    const numComments = Number(post.num_comments) || 0;
+    const numComments = Number(post.comments) || 0;
     const thumbUrl = getThumbUrl(post);
     const authorColor = getAuthorColor(post?.author_level, post?.author_is_new);
+    const hasTag = !!(post.tag && String(post.tag).trim());
+    const shouldBlur = blurSensitive && hasTag;
     let displayAuthor = '';
     if (typeof username === 'string' && username.trim().length > 0) {
         displayAuthor = username;
@@ -233,15 +244,18 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
         <Row>
             <Rank>{rank}</Rank>
             <VoteColumn>
-                <VoteSection state={state} post={post} updatePost={updatePost} showToggle={false} inline />
+                <VoteSection state={state} post={post} updatePost={updatePost} showToggle={false} />
             </VoteColumn>
             {thumbUrl ? (
                 <Thumbnail to={`/p/${postId}`}>
-                    <img src={thumbUrl} alt="" loading="lazy" />
+                    <img src={thumbUrl} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
                 </Thumbnail>
             ) : null}
             <ContentColumn>
-                <Title to={`/p/${postId}`}>{title}</Title>
+                <Title to={`/p/${postId}`}>
+                    {hasTag && <TagBadge>{String(post.tag).trim()}</TagBadge>}
+                    {title}
+                </Title>
                 <MetaLine>
                     submitted {formatAge(ts)} by{' '}
                     <AuthorLink
@@ -279,19 +293,38 @@ const MemoizedRow = memo(ListRow, (prev, next) => {
     const p = prev.post;
     const n = next.post;
     return (
-        p === n ||
-        (p?.post_id === n?.post_id &&
-            p?.score === n?.score &&
-            p?.direction === n?.direction &&
-            p?.num_comments === n?.num_comments &&
-            prev.rank === next.rank &&
-            prev.saved === next.saved)
+        prev.blurSensitive === next.blurSensitive &&
+        (p === n ||
+            (p?.post_id === n?.post_id &&
+                p?.score === n?.score &&
+                p?.direction === n?.direction &&
+                p?.comments === n?.comments &&
+                prev.rank === next.rank &&
+                prev.saved === next.saved))
     );
 });
 
-const SORT_TABS = ['best', 'hot', 'new', 'rising', 'controversial', 'top'];
+const SORT_TABS = ['best', 'new'];
 
 export default function ListFeedView({ posts, state, updatePost, startRank = 1, sortMode, onSortChange, showSortTabs }) {
+    const [blurSensitive, setBlurSensitive] = useState(() => {
+        const val = Storage.load('blur_sensitive_media', true);
+        return val !== false;
+    });
+
+    useEffect(() => {
+        const handler = (e) => {
+            if (e?.detail && typeof e.detail.blurSensitiveMedia !== 'undefined') {
+                setBlurSensitive(e.detail.blurSensitiveMedia !== false);
+                return;
+            }
+            const val = Storage.load('blur_sensitive_media', true);
+            setBlurSensitive(val !== false);
+        };
+        window.addEventListener('settingsUpdated', handler);
+        return () => window.removeEventListener('settingsUpdated', handler);
+    }, []);
+
     const [savedSet, setSavedSet] = useState(() => {
         const raw = Storage.load('saved_posts', []);
         const list = Array.isArray(raw) ? raw : [];
@@ -375,6 +408,7 @@ export default function ListFeedView({ posts, state, updatePost, startRank = 1, 
                         onToggleSave={onToggleSave}
                         onHide={onHide}
                         onShare={onShare}
+                        blurSensitive={blurSensitive}
                     />
                 );
             })}

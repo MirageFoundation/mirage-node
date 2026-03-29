@@ -1452,8 +1452,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [oldRedditSort, setOldRedditSort] = useState('best');
 
     const handleOldRedditSortChange = useCallback((mode) => {
-        const allowed = new Set(['best', 'hot', 'new', 'rising', 'controversial', 'top']);
-        if (!allowed.has(mode)) return;
+        if (mode !== 'best' && mode !== 'new') return;
         console.debug('[OldReddit] sort.select', { mode });
         setOldRedditSort(mode);
     }, []);
@@ -1624,7 +1623,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 ios_banner_enabled: nodeConfig.ios_banner_enabled,
             });
         } catch (_) { }
-    }, [nodeConfig?.android_banner_enabled, nodeConfig?.ios_banner_enabled]);
+    }, [nodeConfig]);
 
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
@@ -2986,7 +2985,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Invite-only banner - shown only when invite codes are enabled on this node */}
-                        {isLoggedIn && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && (
+                        {isLoggedIn && !isOldReddit && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && (
                             <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
@@ -3029,7 +3028,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Android app banner - shown once for Android users until dismissed */}
-                        {showAndroidBanner && (
+                        {!isOldReddit && showAndroidBanner && (
                             <AndroidAppHero role="region" aria-label="Android app available">
                                 <AndroidHeroTitle>
                                     <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
@@ -3048,7 +3047,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </AndroidAppHero>
                         )}
 
-                        {showIPhoneBanner && (
+                        {!isOldReddit && showIPhoneBanner && (
                             <IPhoneAppHero role="region" aria-label="iPhone app available">
                                 <AndroidHeroTitle>
                                     <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
@@ -3068,7 +3067,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
-                        {isLoggedIn && urlTopic === 'home' && showNsfwHero && (
+                        {isLoggedIn && !isOldReddit && urlTopic === 'home' && showNsfwHero && (
                             <NsfwWelcomeHero role="region" aria-label="Content preferences">
                                 <NsfwHeroTitle>
                                     <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
@@ -3091,35 +3090,33 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
-                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && (
+                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && !isOldReddit && (
                             <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
                                     </HomeFeedInfoTitle>
-                                    {!isOldReddit && (
-                                        <HomeFeedModeInline>
-                                            <HomeFeedModeSelect
-                                                value={homeSortMode}
-                                                onChange={(e) => {
-                                                    const mode = e.target.value;
-                                                    setHomeSortMode(mode);
-                                                    Storage.save('home_sort_mode', mode);
-                                                }}
-                                            >
-                                                <option value="magic">Magic</option>
-                                                <option value="newest">Newest</option>
-                                            </HomeFeedModeSelect>
-                                            <HomeFeedModeSelect
-                                                value={cardSize}
-                                                onChange={(e) => handleCardSizeChange(e.target.value)}
-                                            >
-                                                <option value="large">Large</option>
-                                                {!isMobile && <option value="compact">Compact</option>}
-                                                <option value="media">Media</option>
-                                            </HomeFeedModeSelect>
-                                        </HomeFeedModeInline>
-                                    )}
+                                    <HomeFeedModeInline>
+                                        <HomeFeedModeSelect
+                                            value={homeSortMode}
+                                            onChange={(e) => {
+                                                const mode = e.target.value;
+                                                setHomeSortMode(mode);
+                                                Storage.save('home_sort_mode', mode);
+                                            }}
+                                        >
+                                            <option value="magic">Magic</option>
+                                            <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                        <HomeFeedModeSelect
+                                            value={cardSize}
+                                            onChange={(e) => handleCardSizeChange(e.target.value)}
+                                        >
+                                            <option value="large">Large</option>
+                                            {!isMobile && <option value="compact">Compact</option>}
+                                            <option value="media">Media</option>
+                                        </HomeFeedModeSelect>
+                                    </HomeFeedModeInline>
                                 </HomeFeedHeaderRow>
                                 <HomeFeedInfoDescription>
                                     Your followed topics plus fresh content to discover. <strong>The more you vote, the more your feed reflects your preferences.</strong>
@@ -3128,35 +3125,33 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Following feed info card - permanent for logged-in users */}
-                        {isLoggedIn && urlTopic === 'following' && (
+                        {isLoggedIn && urlTopic === 'following' && !isOldReddit && (
                             <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
                                     </HomeFeedInfoTitle>
-                                    {!isOldReddit && (
-                                        <HomeFeedModeInline>
-                                            <HomeFeedModeSelect
-                                                value={homeSortMode}
-                                                onChange={(e) => {
-                                                    const mode = e.target.value;
-                                                    setHomeSortMode(mode);
-                                                    Storage.save('home_sort_mode', mode);
-                                                }}
-                                            >
-                                                <option value="magic">Magic</option>
-                                                <option value="newest">Newest</option>
-                                            </HomeFeedModeSelect>
-                                            <HomeFeedModeSelect
-                                                value={cardSize}
-                                                onChange={(e) => handleCardSizeChange(e.target.value)}
-                                            >
-                                                <option value="large">Large</option>
-                                                {!isMobile && <option value="compact">Compact</option>}
-                                                <option value="media">Media</option>
-                                            </HomeFeedModeSelect>
-                                        </HomeFeedModeInline>
-                                    )}
+                                    <HomeFeedModeInline>
+                                        <HomeFeedModeSelect
+                                            value={homeSortMode}
+                                            onChange={(e) => {
+                                                const mode = e.target.value;
+                                                setHomeSortMode(mode);
+                                                Storage.save('home_sort_mode', mode);
+                                            }}
+                                        >
+                                            <option value="magic">Magic</option>
+                                            <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                        <HomeFeedModeSelect
+                                            value={cardSize}
+                                            onChange={(e) => handleCardSizeChange(e.target.value)}
+                                        >
+                                            <option value="large">Large</option>
+                                            {!isMobile && <option value="compact">Compact</option>}
+                                            <option value="media">Media</option>
+                                        </HomeFeedModeSelect>
+                                    </HomeFeedModeInline>
                                 </HomeFeedHeaderRow>
                                 <HomeFeedInfoDescription>
                                     <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
