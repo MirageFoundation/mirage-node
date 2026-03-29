@@ -1,6 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
-import MobileBottomNav from '../../components/MobileBottomNav';
+import MobileBottomNav from './components/MobileBottomNav';
 
 const Container = styled.div`
     width: 100%;

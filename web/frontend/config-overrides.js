@@ -74,5 +74,12 @@ module.exports = function override(config) {
             process: 'process/browser',
         }),
     ]);
+    // CRA's eslint-webpack-plugin caches to node_modules/.cache/.eslintcache. After large refactors,
+    // that cache can serve stale rule results (wrong line numbers, imports that no longer exist).
+    for (const plugin of config.plugins || []) {
+        if (plugin && plugin.constructor && plugin.constructor.name === 'ESLintWebpackPlugin' && plugin.options) {
+            plugin.options.cache = false;
+        }
+    }
     return config;
 };

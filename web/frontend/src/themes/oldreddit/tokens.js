@@ -273,22 +273,13 @@ formRowGap: '0.25rem',
         clickableTabInactiveBorderBottom: '2px solid transparent',
         clickableTabShowAfter: false,
         tabSizeTablet: '0.6rem',
+
+        flatMode: true,
+        maxVideoWidth: 800,
+        inboxFullWidth: true,
+        profilePostsFullWidth: true,
     };
 }
-
-export const caps = {
-    showDefaultChrome: false,
-    showHeroCards: false,
-    flatMode: true,
-    maxVideoWidth: 800,
-    profileTabs: ['profile', 'overview', 'submissions', 'comments', 'algo'],
-    profileDefaultTab: 'profile',
-    profileUsesListFeed: true,
-    profileHideFilterSelect: true,
-    profilePostsFullWidth: true,
-    mapHomeSortMode: true,
-    inboxFullWidth: true,
-};
 
 export const dark = {
     name: 'dark',
@@ -296,7 +287,6 @@ export const dark = {
     fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
     colors: oldredditDarkColors,
     layout: buildLayout(oldredditDarkColors),
-    caps,
 };
 
 export const light = {
@@ -305,5 +295,4 @@ export const light = {
     fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
     colors: oldredditLightColors,
     layout: buildLayout(oldredditLightColors),
-    caps,
 };

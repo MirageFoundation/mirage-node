@@ -82,7 +82,7 @@ export const GlobalStyle = createGlobalStyle`
     animation: none !important;
   }
 
-  ${({ theme }) => theme.caps.flatMode ? `
+  ${({ theme }) => theme.layout.flatMode ? `
   div, section, article, aside, main,
   button, input, select, textarea, a,
   nav, header, footer, blockquote, pre,

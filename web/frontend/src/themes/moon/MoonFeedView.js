@@ -1,6 +1,6 @@
 import React from 'react';
 import { PostGrid, AnimatedCard } from '../../styled/Layout';
-import CardView from '../../components/CardView';
+import CardView from './components/CardView';
 
 export default function MoonFeedView({ posts, state, updatePost, hidingPostsSet, flashingPostsSet, viewerAddress }) {
     if (!posts || posts.length === 0) return null;

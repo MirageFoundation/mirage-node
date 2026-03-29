@@ -1,53 +1,24 @@
 /**
  * Theme Registry
  *
- * Central source of truth for all theme families. Each family defines
- * dark and light token sets (colors, layout, caps) plus metadata.
- *
- * Components access tokens via theme.colors.*, theme.layout.*, and
- * theme.caps.* from styled-components ThemeProvider. No component should
- * ever check theme.themeId to alter styling or behavior -- use tokens.
+ * Each theme lives under src/themes/<name>/ and exports a manifest from
+ * index.js containing: id, label, dark/light tokens, Shell, Feed,
+ * VoteSection, and a config object for structural behavior.
  *
  * HOW TO ADD A NEW THEME:
- * 1. Create src/themes/<name>/ with tokens.js, Shell.js, FeedView.js
- * 2. tokens.js exports { dark, light, caps } with colors + layout + caps
- * 3. Register an entry in THEMES below
- * 4. Done -- zero other files need changes
+ * 1. Create src/themes/<name>/ with index.js, tokens.js, Shell, Feed, etc.
+ * 2. index.js default-exports a manifest (see moon/index.js for shape)
+ * 3. Import the manifest below and add it to the manifests array
+ * 4. Done -- no other files need changes
  */
 
-import * as moonTokens from '../themes/moon/tokens';
-import * as oldredditTokens from '../themes/oldreddit/tokens';
-import MoonShell from '../themes/moon/MoonShell';
-import OldRedditShell from '../themes/oldreddit/OldRedditShell';
-import MoonFeedView from '../themes/moon/MoonFeedView';
-import ListFeedView from '../themes/oldreddit/ListFeedView';
+import moonManifest from '../themes/moon/index';
+import oldredditManifest from '../themes/oldreddit/index';
 
-// ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
+const manifests = [moonManifest, oldredditManifest];
 
-export const THEMES = {
-    moon: {
-        id: 'moon',
-        label: 'Moon',
-        description: 'Modern card-based feed',
-        supportsDarkLight: true,
-        dark: moonTokens.dark,
-        light: moonTokens.light,
-        Shell: MoonShell,
-        Feed: MoonFeedView,
-    },
-    oldreddit: {
-        id: 'oldreddit',
-        label: 'Classic',
-        description: 'Compact list-based feed (old Reddit style)',
-        supportsDarkLight: true,
-        dark: oldredditTokens.dark,
-        light: oldredditTokens.light,
-        Shell: OldRedditShell,
-        Feed: ListFeedView,
-    },
-};
+export const THEMES = {};
+manifests.forEach((m) => { THEMES[m.id] = m; });
 
 /**
  * Resolve a concrete theme object from a family id and a resolved variant.
@@ -55,13 +26,69 @@ export const THEMES = {
  * @param {string} themeMode - Already resolved to 'dark' or 'light'
  */
 export function getResolvedTheme({ themeId, themeMode }) {
-    const family = THEMES[themeId] || THEMES.moon;
-    return family[themeMode === 'light' ? 'light' : 'dark'];
+    const family = THEMES[themeId];
+    if (!family) {
+        throw new Error(`Unknown theme: ${themeId}`);
+    }
+    if (themeMode !== 'light' && themeMode !== 'dark') {
+        throw new Error(`Unknown theme mode: ${themeMode}`);
+    }
+    const base = family[themeMode];
+    const config = family.config || {};
+    const layout = base.layout || {};
+    return {
+        ...base,
+        caps: {
+            ...config,
+            flatMode: layout.flatMode,
+            inboxFullWidth: layout.inboxFullWidth,
+            profilePostsFullWidth: layout.profilePostsFullWidth,
+        },
+    };
 }
 
 /**
- * Return the theme family metadata for a given id.
+ * Return the theme family metadata + config for a given id.
  */
 export function getThemeFamily(themeId) {
-    return THEMES[themeId] || THEMES.moon;
+    const family = THEMES[themeId];
+    if (!family) {
+        throw new Error(`Unknown theme: ${themeId}`);
+    }
+    return family;
+}
+
+export function getThemeComponent(themeId, key) {
+    const family = THEMES[themeId];
+    if (!family) {
+        console.debug('[theme] missing theme family', { themeId, key });
+        throw new Error(`Unknown theme: ${themeId}`);
+    }
+    const component = family.components && family.components[key];
+    if (!component) {
+        console.debug('[theme] missing component', { themeId, key });
+        throw new Error(`Missing component "${key}" for theme "${themeId}"`);
+    }
+    return component;
+}
+
+export function getThemeComponentFromTheme(theme, key) {
+    if (!theme || !theme.themeId) {
+        throw new Error('Theme object missing themeId');
+    }
+    return getThemeComponent(theme.themeId, key);
+}
+
+export function getThemeRoute(themeId, key) {
+    const family = THEMES[themeId];
+    if (!family) {
+        console.debug('[theme] missing theme family', { themeId, key });
+        throw new Error(`Unknown theme: ${themeId}`);
+    }
+    const route = family.routes && family.routes[key];
+    if (!route) {
+        console.debug('[theme] missing route', { themeId, key });
+        throw new Error(`Missing route "${key}" for theme "${themeId}"`);
+    }
+    return route;
 }

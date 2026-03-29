@@ -11,8 +11,6 @@ import websocket
 import grpc
 from datetime import datetime, timezone
 import urllib.parse as _up
-from cosmpy.protos.cosmos.gov.v1beta1 import query_pb2 as gov_query_pb2
-from cosmpy.protos.cosmos.gov.v1beta1 import query_pb2_grpc as gov_query_pb2_grpc
 from indexer.settings import (
     HTTP_TIMEOUT_SHORT,
     HTTP_TIMEOUT_MEDIUM,
@@ -233,62 +231,8 @@ class ChainClient:
         return profiles
 
     def fetch_proposal_messages(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
-        """Fetch proposal messages via gRPC v1beta1, falling back to REST v1 for multi-message proposals."""
-        try:
-            return self._fetch_proposal_messages_grpc(proposal_id, type_url_to_proto)
-        except RuntimeError as e:
-            if "not exactly one" not in str(e):
-                raise
-            logger.info(
-                "Proposal %s has multiple messages — falling back to REST gov/v1",
-                proposal_id,
-            )
-            return self._fetch_proposal_messages_rest(proposal_id, type_url_to_proto)
-
-    def _fetch_proposal_messages_grpc(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
-        """Fetch proposal via gRPC v1beta1 (single-message proposals only)."""
-        try:
-            with grpc.insecure_channel(self.grpc_target) as channel:
-                stub = gov_query_pb2_grpc.QueryStub(channel)
-                req = gov_query_pb2.QueryProposalRequest(proposal_id=proposal_id)
-                resp = stub.Proposal(req, timeout=GRPC_TIMEOUT)
-                if not resp or not resp.proposal:
-                    raise RuntimeError(f"Proposal {proposal_id} not found")
-
-                proposal = resp.proposal
-                messages: list[dict] = []
-
-                if hasattr(proposal, "messages") and proposal.messages:
-                    for msg_any in proposal.messages:
-                        if not msg_any.type_url or not msg_any.value:
-                            continue
-                        if msg_any.type_url not in type_url_to_proto:
-                            continue
-                        messages.append(
-                            {
-                                "type_url": msg_any.type_url,
-                                "value": base64.b64encode(msg_any.value).decode("ascii"),
-                            }
-                        )
-                elif hasattr(proposal, "content") and proposal.content:
-                    content = proposal.content
-                    if content.type_url and content.value:
-                        if content.type_url in type_url_to_proto:
-                            messages.append(
-                                {
-                                    "type_url": content.type_url,
-                                    "value": base64.b64encode(content.value).decode("ascii"),
-                                }
-                            )
-
-                if not messages:
-                    raise RuntimeError(
-                        f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTokens or MsgBurnTokens)"
-                    )
-
-                return messages
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch proposal {proposal_id} messages: {e}") from e
+        """Fetch proposal messages via REST gov/v1 (multi-message friendly)."""
+        return self._fetch_proposal_messages_rest(proposal_id, type_url_to_proto)
 
     def _fetch_proposal_messages_rest(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
         """Fetch proposal via REST gov/v1 and convert JSON messages to protobuf bytes."""

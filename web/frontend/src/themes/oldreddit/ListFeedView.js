@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link } from 'react-router-dom';
-import VoteSection from '../../components/VoteSection';
+import VoteSection from './components/VoteSection';
 import { buildPhotonUrl, isLikelyImageUrl } from '../../utils/media';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
@@ -9,13 +9,12 @@ import Storage from '../../utils/Storage';
 const ListContainer = styled.div`
     display: flex;
     flex-direction: column;
-    border: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
 `;
 
 const Row = styled.div`
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     padding: 0.4rem 0.5rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.4rem;
@@ -45,7 +44,7 @@ const VoteColumn = styled.div`
     flex-direction: column;
     align-items: center;
     min-width: 2.5rem;
-    padding-top: 0.1rem;
+    align-self: flex-start;
 `;
 
 const Thumbnail = styled(Link)`

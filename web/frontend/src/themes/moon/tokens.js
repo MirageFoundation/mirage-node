@@ -82,9 +82,9 @@ const moonLightColors = {
 function buildLayout(colors) {
     return {
         // Form rows
-        
+
         fontFamily: "'Noto Sans', sans-serif",
-formRowGap: '0.5rem',
+        formRowGap: '0.5rem',
         formRowMargin: '0.4rem 0',
         formRowAlign: 'start',
 
@@ -212,8 +212,8 @@ formRowGap: '0.5rem',
         voteAreaPadding: '8px 6px',
         voteAreaPaddingCompact: '6px 4px',
         voteAreaMarginRight: '0.25rem',
-        voteAreaGap: '10px',
-        voteAreaGapCompact: '6px',
+        voteAreaGap: '2px',
+        voteAreaGapCompact: '2px',
         voteAreaWidth: '64px',
         voteAreaWidthCompact: '56px',
         voteAreaHeight: '120px',
@@ -252,29 +252,19 @@ formRowGap: '0.5rem',
         clickableTabInactiveBorderBottom: 'none',
         clickableTabShowAfter: true,
         tabSizeTablet: '0.7rem',
+
+        flatMode: false,
+        maxVideoWidth: null,
+        inboxFullWidth: false,
+        profilePostsFullWidth: false,
     };
 }
-
-export const caps = {
-    showDefaultChrome: true,
-    showHeroCards: true,
-    flatMode: false,
-    maxVideoWidth: null,
-    profileTabs: ['profile', 'posts', 'algo'],
-    profileDefaultTab: 'profile',
-    profileUsesListFeed: false,
-    profileHideFilterSelect: false,
-    profilePostsFullWidth: false,
-    mapHomeSortMode: false,
-    inboxFullWidth: false,
-};
 
 export const dark = {
     name: 'dark',
     themeId: 'moon',
     colors: moonDarkColors,
     layout: buildLayout(moonDarkColors),
-    caps,
 };
 
 export const light = {
@@ -282,5 +272,4 @@ export const light = {
     themeId: 'moon',
     colors: moonLightColors,
     layout: buildLayout(moonLightColors),
-    caps,
 };
