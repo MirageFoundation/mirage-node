@@ -501,6 +501,38 @@ def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
     return tx_hash, code, log
 
 
+def _synthesize_log_from_events(events: list) -> str:
+    """Build a raw_log JSON string from CometBFT events when the log field is empty.
+
+    Newer CometBFT versions omit the ``log`` field for successful txs but
+    still populate ``events``.  This mirrors the indexer's synthesis logic.
+    """
+    decoded_events: list[dict] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        attrs_raw = ev.get("attributes") or []
+        attrs: list[dict] = []
+        for attr in attrs_raw:
+            if not isinstance(attr, dict):
+                continue
+            k = attr.get("key", "")
+            v = attr.get("value", "")
+            try:
+                k = base64.b64decode(k).decode() if k else ""
+            except Exception:
+                pass
+            try:
+                v = base64.b64decode(v).decode() if v else ""
+            except Exception:
+                pass
+            attrs.append({"key": k, "value": v})
+        decoded_events.append({"type": ev.get("type", ""), "attributes": attrs})
+    if not decoded_events:
+        return ""
+    return json.dumps([{"events": decoded_events}])
+
+
 def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
     """Wait for a tx to land in a block by scanning block_results (tx_index disabled)."""
     if not tx_hash:
@@ -538,6 +570,8 @@ def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
                         tx_result = deliver_txs[tx_index_in_block]
                         code = int(tx_result.get("code", 0) or 0)
                         log = str(tx_result.get("log", "") or "")
+                        if code == 0 and not log.strip():
+                            log = _synthesize_log_from_events(tx_result.get("events") or [])
                         return code, log
                     time.sleep(0.5)
                 raise RuntimeError(f"tx at height={height} idx={tx_index_in_block}: block_results never populated")

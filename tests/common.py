@@ -603,7 +603,14 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
     indexer_transfer_test = 1  # test_backend_indexer.balance_after_transfer
     # Fee buffer: sub1 sends many txs across backend tests (posts/votes/etc).
     fee_buffer = 25_000_000_000  # 25k MIRAGE in umirage
-    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test + gift_fee + fee_buffer
+    return (
+        int(costs["quality_post"])
+        + int(costs["receipts"])
+        + token_send_amount
+        + indexer_transfer_test
+        + gift_fee
+        + fee_buffer
+    )
 
 
 def setup_test_wallets(backend: str) -> bool:
@@ -696,7 +703,7 @@ def setup_test_wallets(backend: str) -> bool:
             "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
             "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
             "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-            "agent2": 500_000_000_000,  # 500,000 MIRAGE (Agent fee)
+            "agent2": 1_500_000_000_000,  # 1,500,000 MIRAGE (Agent fee + 2 agent gifts)
         }
     )
     try:

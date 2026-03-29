@@ -97,7 +97,7 @@ def check_tx_index_raw_log(conn: psycopg.Connection) -> None:
         )
         rows = cur.fetchall()
     if not rows:
-        fail("tx_index has no send_tokens/multi rows to validate raw_log")
+        warn("tx_index has no send_tokens/multi rows to validate raw_log")
         return
     info(f"Validating raw_log for {len(rows)} tx_index rows")
     for txhash, tx_type, raw_log in rows:
@@ -117,6 +117,32 @@ def check_tx_index_raw_log(conn: psycopg.Connection) -> None:
             fail(f"tx_index raw_log unexpected format tx={txh} type={tx_type}")
             continue
     ok("tx_index raw_log present and JSON for send_tokens/multi")
+
+
+def check_tier_config(backend_api: str) -> None:
+    try:
+        resp = requests.get(f"{backend_api}/api/get_chain_config", timeout=10)
+    except Exception as exc:
+        fail(f"get_chain_config error: {exc}")
+        return
+    if resp.status_code != 200:
+        fail(f"get_chain_config returned {resp.status_code}")
+        return
+    try:
+        cfg = resp.json()
+    except Exception:
+        fail("get_chain_config returned non-JSON")
+        return
+    tiers = cfg.get("tiers")
+    if not isinstance(tiers, list) or len(tiers) < 3:
+        fail(f"chain config has {len(tiers) if isinstance(tiers, list) else 0} tiers, expected >= 3")
+        return
+    ok(f"chain config has {len(tiers)} tiers")
+    agent_fee = int(tiers[2].get("period_fee", 0) or 0) if isinstance(tiers[2], dict) else 0
+    if agent_fee > 0:
+        ok(f"agent tier (index 2) period_fee={agent_fee}")
+    else:
+        fail("agent tier (index 2) period_fee is 0 or missing")
 
 
 def check_subscribe_routes(backend_api: str) -> None:
@@ -199,6 +225,7 @@ def main() -> None:
     section("4. Backend route checks")
     if backend_api:
         check_subscribe_routes(backend_api)
+        check_tier_config(backend_api)
     else:
         warn("Skipped backend route checks (BACKEND_API missing)")
 

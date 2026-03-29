@@ -497,6 +497,18 @@ def _classify_exception(err_str: str):
         return get_message("gift_rejected_higher_tier"), 400
     if "insufficient balance" in low or "insufficient funds" in low:
         return "insufficient balance", 400
+    # Input parsing errors (int(), base64, type coercion)
+    if "invalid literal for int()" in low:
+        return "invalid input type", 400
+    if "int() argument must be" in low:
+        return "invalid input type", 400
+    if "base64" in low or "incorrect padding" in low:
+        return "invalid base64 encoding", 400
+    # Chain simulation / broadcast rejections (HTTP 400 from chain = client error)
+    if "simulate_gas http 400" in low:
+        return "transaction rejected", 400
+    if "simulate_gas http 4" in low:
+        return "transaction rejected", 400
     return "internal server error", 500
 
 
@@ -3459,10 +3471,16 @@ def core_post():
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
         has_difficulty = "pow_difficulty" in data
         has_pow = "pow" in data
+        try:
+            difficulty = int(data.get("pow_difficulty", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow_difficulty", "error_code": "invalid_input"}), 400
+        try:
+            proof = int(data.get("pow", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow", "error_code": "invalid_input"}), 400
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -3539,8 +3557,14 @@ def core_post():
             if not re.fullmatch(r"[a-z0-9]+", topic):
                 return jsonify({"error": "invalid topic format"}), 400
 
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
+        try:
+            pub_dec = base64.b64decode(pub_b64)
+        except Exception:
+            return jsonify({"error": "invalid pubkey encoding", "error_code": "invalid_input"}), 400
+        try:
+            sig_dec = base64.b64decode(sig_b64)
+        except Exception:
+            return jsonify({"error": "invalid signature encoding", "error_code": "invalid_input"}), 400
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
@@ -3770,12 +3794,21 @@ def core_vote():
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
         has_difficulty = "pow_difficulty" in data
         has_pow = "pow" in data
+        try:
+            difficulty = int(data.get("pow_difficulty", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow_difficulty", "error_code": "invalid_input"}), 400
+        try:
+            proof = int(data.get("pow", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow", "error_code": "invalid_input"}), 400
         target = str(data.get("target", ""))
-        direction = int(data.get("direction", 0))
+        try:
+            direction = int(data.get("direction", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid direction", "error_code": "invalid_input"}), 400
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -3807,8 +3840,14 @@ def core_vote():
         if not _is_hex64(target.strip()):
             return jsonify({"error": "invalid target"}), 400
 
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
+        try:
+            pub_dec = base64.b64decode(pub_b64)
+        except Exception:
+            return jsonify({"error": "invalid pubkey encoding", "error_code": "invalid_input"}), 400
+        try:
+            sig_dec = base64.b64decode(sig_b64)
+        except Exception:
+            return jsonify({"error": "invalid signature encoding", "error_code": "invalid_input"}), 400
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
@@ -3991,12 +4030,21 @@ def core_send_tokens():
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
         has_difficulty = "pow_difficulty" in data
         has_pow = "pow" in data
+        try:
+            difficulty = int(data.get("pow_difficulty", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow_difficulty", "error_code": "invalid_input"}), 400
+        try:
+            proof = int(data.get("pow", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow", "error_code": "invalid_input"}), 400
         target = str(data.get("target", "")).strip().lower()
-        amount = int(data.get("amount", 0))
+        try:
+            amount = int(data.get("amount", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid amount", "error_code": "invalid_input"}), 400
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -4018,8 +4066,14 @@ def core_send_tokens():
         if not target.startswith("mirage1"):
             return jsonify({"error": "target must be a valid mirage1 address"}), 400
 
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
+        try:
+            pub_dec = base64.b64decode(pub_b64)
+        except Exception:
+            return jsonify({"error": "invalid pubkey encoding", "error_code": "invalid_input"}), 400
+        try:
+            sig_dec = base64.b64decode(sig_b64)
+        except Exception:
+            return jsonify({"error": "invalid signature encoding", "error_code": "invalid_input"}), 400
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:

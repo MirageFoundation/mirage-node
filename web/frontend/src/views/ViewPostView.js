@@ -1742,14 +1742,15 @@ function ViewPostView({ state, updatePost }) {
         setDonateAmount("10000"); // Reset to default
     };
 
-    const handleGiftSubscription = (userAddress, postId) => {
+    const handleGiftSubscription = (userAddress, postId, authorLevel) => {
         if (!userAddress) return;
         if (isSubscribePending(userAddress)) return;
         if (!viewerAddress || viewerAddress === 'guest') {
             alert('Please log in to gift a subscription');
             return;
         }
-        console.debug('[ViewPostView] gift-subscribe.confirm', { target: userAddress, postId });
+        const level = (Number(authorLevel) || 0) >= 10 ? 10 : 1;
+        console.debug('[ViewPostView] gift-subscribe.confirm', { target: userAddress, postId, level });
         setOpenMenuId(null);
         setConfirmDonate(null);
         setConfirmBlockPost(null);
@@ -1759,21 +1760,61 @@ function ViewPostView({ state, updatePost }) {
         setConfirmSuspendQuests(null);
         setConfirmUnsuspendQuests(null);
         setConfirmAward(null);
-        setConfirmGiftSub({ userId: userAddress, postId });
+        setConfirmGiftSub({ userId: userAddress, postId, level, loading: true, expiryLabel: null, error: null });
+        void (async () => {
+            let cfg = null;
+            try {
+                const raw = localStorage.getItem('chainConfig');
+                cfg = raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                console.debug('[ViewPostView] gift-subscribe.config-error', e);
+                setConfirmGiftSub((prev) => (prev && prev.userId === userAddress && prev.postId === postId ? { ...prev, loading: false, error: 'Failed to read chain config' } : prev));
+                return;
+            }
+            const periodMinutes = Number(cfg?.subscription_period || 0);
+            if (!periodMinutes || periodMinutes <= 0) {
+                console.debug('[ViewPostView] gift-subscribe.config-invalid', { periodMinutes });
+                setConfirmGiftSub((prev) => (prev && prev.userId === userAddress && prev.postId === postId ? { ...prev, loading: false, error: 'Invalid subscription period' } : prev));
+                return;
+            }
+            try {
+                const pre = await Api.get('get_user_status', { address: userAddress, _cb: Date.now() });
+                const currentExp = Number(pre?.subscription_expiry || 0);
+                const nowSec = Math.floor(Date.now() / 1000);
+                const base = Math.max(nowSec, currentExp);
+                const expectedExp = base + periodMinutes * 60;
+                const label = new Date(expectedExp * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                console.debug('[ViewPostView] gift-subscribe.expected', { target: userAddress, postId, level, currentExp, expectedExp });
+                setConfirmGiftSub((prev) => (prev && prev.userId === userAddress && prev.postId === postId ? { ...prev, loading: false, expiryLabel: label, error: null } : prev));
+            } catch (e) {
+                console.debug('[ViewPostView] gift-subscribe.status-error', e);
+                setConfirmGiftSub((prev) => (prev && prev.userId === userAddress && prev.postId === postId ? { ...prev, loading: false, error: 'Failed to load recipient status' } : prev));
+            }
+        })();
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
     };
 
     const confirmGiftSubAction = async () => {
         const userAddress = confirmGiftSub?.userId;
         const postId = confirmGiftSub?.postId;
+        const giftLevel = confirmGiftSub?.level || 1;
         if (!userAddress) return;
         if (isSubscribePending(userAddress)) return;
+        if (confirmGiftSub?.loading || confirmGiftSub?.error) return;
+        const expiryLabel = confirmGiftSub?.expiryLabel || null;
+        if (!expiryLabel) {
+            setConfirmGiftSub((prev) => (prev ? { ...prev, error: 'Missing expected expiry' } : prev));
+            return;
+        }
         try {
-            console.debug('[ViewPostView] gift-subscribe.submit', { target: userAddress, postId });
-            const result = await tx.subscribe(1, 0, userAddress);
+            console.debug('[ViewPostView] gift-subscribe.submit', { target: userAddress, postId, level: giftLevel });
+            const result = await tx.subscribe(giftLevel, 0, userAddress);
             setConfirmGiftSub(null);
             if (result.success) {
-                setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: 'Subscription gifted!' } }));
+                const isAgent = giftLevel === 10;
+                let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
+                msg += ` Active until ${expiryLabel}`;
+                setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: msg } }));
             } else {
                 const raw = String(result.error || 'Transaction failed');
                 const friendly = raw.replace(/^HTTP \d+:\s*/i, '').replace(/^Failed:\s*/i, '');
@@ -1789,7 +1830,7 @@ function ViewPostView({ state, updatePost }) {
                 delete next[postId];
                 return next;
             });
-        }, 5000);
+        }, 8000);
     };
 
     const cancelGiftSub = () => {
@@ -1819,16 +1860,20 @@ function ViewPostView({ state, updatePost }) {
 
     const giftSubscriptionLabel = 'Gift Subscription';
 
-    const subscribeFeeLabel = useMemo(() => {
+    const { subFeeLabel, agentFeeLabel } = useMemo(() => {
         void configUpdateTrigger;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
             const tiers = cfg?.tiers || [];
-            const fee = Number(tiers[1]?.period_fee || 0);
-            if (fee > 0) return formatMirageCompact(fee) + ' MIRAGE';
+            const sf = Number(tiers[1]?.period_fee || 0);
+            const af = Number(tiers[2]?.period_fee || 0);
+            return {
+                subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
+                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
+            };
         } catch (_) { }
-        return null;
+        return { subFeeLabel: null, agentFeeLabel: null };
     }, [configUpdateTrigger]);
 
     const getAwardCost = (name) => {
@@ -3200,18 +3245,30 @@ function ViewPostView({ state, updatePost }) {
         }
 
         if (confirmGiftSub?.postId === post.post_id) {
+            const giftFeeLabel = confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel;
             return (
                 <BlockConfirmMessage>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                        <span style={{ whiteSpace: 'nowrap' }}>
-                            🎁 Gift subscription to {post.username || post.user_id.substring(0, 12) + '...'}?{subscribeFeeLabel ? ` (${subscribeFeeLabel})` : ''}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <span style={{ whiteSpace: 'nowrap' }}>
+                                🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post.username || post.user_id.substring(0, 12) + '...'}?{giftFeeLabel ? ` (${giftFeeLabel})` : ''}
+                            </span>
+                            {confirmGiftSub.loading && (
+                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
+                            )}
+                            {confirmGiftSub.expiryLabel && (
+                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Active until {confirmGiftSub.expiryLabel}</span>
+                            )}
+                            {confirmGiftSub.error && (
+                                <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>
+                            )}
+                        </div>
                         <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
                             <Button
                                 variant="warning"
                                 size="sm"
                                 onClick={confirmGiftSubAction}
-                                disabled={isSubscribePending(confirmGiftSub?.userId)}
+                                disabled={isSubscribePending(confirmGiftSub?.userId) || confirmGiftSub.loading || !!confirmGiftSub.error}
                             >
                                 {formatSubscribeStatus(confirmGiftSub?.userId) || 'Confirm'}
                             </Button>
@@ -3459,7 +3516,7 @@ function ViewPostView({ state, updatePost }) {
                                     <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Gift Mirage</MenuItem>
                                 )}
                                 {viewerAddress !== 'guest' && (
-                                    <MenuItem onClick={() => { setOpenMenuId(null); handleGiftSubscription(post.user_id, post.post_id); }} disabled={isSubscribePending(post.user_id)}>
+                                    <MenuItem onClick={() => { setOpenMenuId(null); handleGiftSubscription(post.user_id, post.post_id, post.author_level); }} disabled={isSubscribePending(post.user_id)}>
                                         {formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}
                                     </MenuItem>
                                 )}

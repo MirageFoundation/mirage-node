@@ -1297,7 +1297,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             alert('Please log in to gift a subscription');
             return;
         }
-        console.debug('[CardView] gift-subscribe.confirm', { target: post.user_id });
+        const level = (Number(post.author_level) || 0) >= 10 ? 10 : 1;
+        const target = post.user_id;
+        console.debug('[CardView] gift-subscribe.confirm', { target, level });
         setConfirmDelete(false);
         setConfirmSuspendQuests(false);
         setSuspendSuccess(null);
@@ -1307,26 +1309,67 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmUnsuspend(false);
         setConfirmAward(false);
         setGiftSubMessage(null);
-        setConfirmGiftSub(true);
+        setConfirmGiftSub({ level, target, loading: true, expiryLabel: null, error: null });
+        void (async () => {
+            let cfg = null;
+            try {
+                const raw = localStorage.getItem('chainConfig');
+                cfg = raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                console.debug('[CardView] gift-subscribe.config-error', e);
+                setConfirmGiftSub((prev) => (prev && prev.target === target ? { ...prev, loading: false, error: 'Failed to read chain config' } : prev));
+                return;
+            }
+            const periodMinutes = Number(cfg?.subscription_period || 0);
+            if (!periodMinutes || periodMinutes <= 0) {
+                console.debug('[CardView] gift-subscribe.config-invalid', { periodMinutes });
+                setConfirmGiftSub((prev) => (prev && prev.target === target ? { ...prev, loading: false, error: 'Invalid subscription period' } : prev));
+                return;
+            }
+            try {
+                const pre = await Api.get('get_user_status', { address: target, _cb: Date.now() });
+                const currentExp = Number(pre?.subscription_expiry || 0);
+                const nowSec = Math.floor(Date.now() / 1000);
+                const base = Math.max(nowSec, currentExp);
+                const expectedExp = base + periodMinutes * 60;
+                const label = new Date(expectedExp * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                console.debug('[CardView] gift-subscribe.expected', { target, level, currentExp, expectedExp });
+                setConfirmGiftSub((prev) => (prev && prev.target === target ? { ...prev, loading: false, expiryLabel: label, error: null } : prev));
+            } catch (e) {
+                console.debug('[CardView] gift-subscribe.status-error', e);
+                setConfirmGiftSub((prev) => (prev && prev.target === target ? { ...prev, loading: false, error: 'Failed to load recipient status' } : prev));
+            }
+        })();
     };
 
     const confirmGiftSubAction = async () => {
         if (!post || !post.user_id) return;
         if (isSubscribePending(post.user_id)) return;
+        if (confirmGiftSub?.loading || confirmGiftSub?.error) return;
+        const giftLevel = confirmGiftSub?.level || 1;
+        const target = confirmGiftSub?.target || post.user_id;
+        const expiryLabel = confirmGiftSub?.expiryLabel || null;
+        if (!expiryLabel) {
+            setConfirmGiftSub((prev) => (prev ? { ...prev, error: 'Missing expected expiry' } : prev));
+            return;
+        }
         try {
-            console.debug('[CardView] gift-subscribe.submit', { target: post.user_id });
-            const result = await tx.subscribe(1, 0, post.user_id);
-            setConfirmGiftSub(false);
+            console.debug('[CardView] gift-subscribe.submit', { target, level: giftLevel });
+            const result = await tx.subscribe(giftLevel, 0, target);
+            setConfirmGiftSub(null);
             if (result.success) {
-                setGiftSubMessage({ type: 'success', message: 'Subscription gifted!' });
+                const isAgent = giftLevel === 10;
+                let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
+                msg += ` Active until ${expiryLabel}`;
+                setGiftSubMessage({ type: 'success', message: msg });
             } else {
                 const raw = String(result.error || 'Transaction failed');
                 const friendly = raw.replace(/^HTTP \d+:\s*/i, '').replace(/^Failed:\s*/i, '');
                 setGiftSubMessage({ type: 'error', message: friendly });
             }
-            setTimeout(() => setGiftSubMessage(null), 5000);
+            setTimeout(() => setGiftSubMessage(null), 8000);
         } catch (error) {
-            setConfirmGiftSub(false);
+            setConfirmGiftSub(null);
             setGiftSubMessage({ type: 'error', message: `${error.message || error}` });
             setTimeout(() => setGiftSubMessage(null), 5000);
         }
@@ -1334,7 +1377,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const cancelGiftSub = () => {
         console.debug('[CardView] gift-subscribe.cancel', { target: post?.user_id || null });
-        setConfirmGiftSub(false);
+        setConfirmGiftSub(null);
     };
 
     const { displayBalance: userBalanceUmirage } = useBalance();
@@ -1359,16 +1402,20 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const giftSubscriptionLabel = 'Gift Subscription';
 
-    const subscribeFeeLabel = useMemo(() => {
+    const { subFeeLabel, agentFeeLabel } = useMemo(() => {
         void nodeConfigTick;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
             const tiers = cfg?.tiers || [];
-            const fee = Number(tiers[1]?.period_fee || 0);
-            if (fee > 0) return formatMirageCompact(fee) + ' MIRAGE';
+            const sf = Number(tiers[1]?.period_fee || 0);
+            const af = Number(tiers[2]?.period_fee || 0);
+            return {
+                subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
+                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
+            };
         } catch (_) { }
-        return null;
+        return { subFeeLabel: null, agentFeeLabel: null };
     }, [nodeConfigTick]);
 
     const getAwardCost = (name) => {
@@ -2677,15 +2724,26 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {confirmGiftSub && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>
-                                    🎁 Gift subscription to {post?.username || post?.user_id?.substring(0, 12) + '...'}?{subscribeFeeLabel ? ` (${subscribeFeeLabel})` : ''}
-                                </span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <span style={{ whiteSpace: 'nowrap' }}>
+                                        🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post?.username || post?.user_id?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
+                                    </span>
+                                    {confirmGiftSub.loading && (
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
+                                    )}
+                                    {confirmGiftSub.expiryLabel && (
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Active until {confirmGiftSub.expiryLabel}</span>
+                                    )}
+                                    {confirmGiftSub.error && (
+                                        <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>
+                                    )}
+                                </div>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button
                                         variant="warning"
                                         size="sm"
                                         onClick={confirmGiftSubAction}
-                                        disabled={isSubscribePending(post?.user_id)}
+                                        disabled={isSubscribePending(post?.user_id) || confirmGiftSub.loading || !!confirmGiftSub.error}
                                     >
                                         {formatSubscribeStatus(post?.user_id) || 'Confirm'}
                                     </Button>

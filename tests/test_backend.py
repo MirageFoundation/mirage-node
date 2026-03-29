@@ -36,7 +36,7 @@ from tests.cases.test_backend_content import (
 )
 from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
 from tests.cases.test_backend_tokens import test_pow, test_tokens
-from tests.cases.test_backend_subscriptions import test_subscriber, test_auto_renewal, test_tier_config_api, test_subscribe_gift_validation
+from tests.cases.test_backend_subscriptions import test_subscriber, test_auto_renewal, test_tier_config_api, test_subscribe_gift_validation, test_subscribe_gift_agent
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
 from tests.cases.test_backend_security import test_security, test_validation
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
@@ -78,6 +78,7 @@ ALL_CATEGORIES = {
     "indexer": test_indexer,
     "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
+    "subscribe_gift_agent": test_subscribe_gift_agent,
 }
 
 STATELESS_CATEGORIES = {

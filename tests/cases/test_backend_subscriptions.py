@@ -604,5 +604,103 @@ def test_subscribe_gift_validation(backend: str):
 
 
 # =========================================================================
+# Category 26: Gift Agent Subscription (backend API)
+# =========================================================================
+
+
+def test_subscribe_gift_agent(backend: str):
+    """Test gifting level 10 (Agent) subscriptions via the backend API."""
+
+    agent2_wallet = WALLETS["agent2"]
+    agent1_wallet = WALLETS["agent1"]
+    agent1_addr = str(agent1_wallet.address())
+
+    # 26.1 Gift level 10 from agent2 to agent1 (already level 10) — should succeed
+    try:
+        before = get_user_status(backend, agent1_addr)
+        before_exp = int(before.get("subscription_expiry", 0) or 0)
+        _debug(f"subscribe.gift_agent.before agent1 exp={before_exp} level={before.get('user_level')}")
+
+        resp = _do_subscribe(backend, agent2_wallet, 10, target=agent1_addr)
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        err = str(resp.get("error", "")) if resp else ""
+        if err:
+            _debug(f"subscribe.gift_agent error={err}")
+            _fail("subscribe.gift_agent_succeeds", f"error={err[:200]}")
+        elif txh:
+            deliver = _wait_tx_deliver(txh)
+            if deliver and deliver[0] != 0:
+                _fail("subscribe.gift_agent_succeeds", f"deliver code={deliver[0]} log={deliver[1][:200]}")
+            else:
+                _pass("subscribe.gift_agent_succeeds")
+        else:
+            _fail("subscribe.gift_agent_succeeds", f"no txh or error: {resp}")
+    except Exception as e:
+        _fail("subscribe.gift_agent_succeeds", str(e))
+
+    # 26.2 Wait for indexer and verify expiry increased
+    try:
+        deadline = time.time() + 30
+        after_exp = before_exp
+        while time.time() < deadline:
+            after = get_user_status(backend, agent1_addr)
+            after_exp = int(after.get("subscription_expiry", 0) or 0)
+            if after_exp > before_exp:
+                break
+            time.sleep(2)
+        _debug(f"subscribe.gift_agent.after agent1 exp={after_exp}")
+        if after_exp > before_exp:
+            _pass("subscribe.gift_agent_extends_expiry")
+        else:
+            _fail("subscribe.gift_agent_extends_expiry", f"before={before_exp} after={after_exp}")
+    except Exception as e:
+        _fail("subscribe.gift_agent_extends_expiry", str(e))
+
+    # 26.3 Gift level 10 again — should extend expiry further
+    try:
+        before_exp2 = after_exp
+        resp = _do_subscribe(backend, agent2_wallet, 10, target=agent1_addr)
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        err = str(resp.get("error", "")) if resp else ""
+        if err:
+            _fail("subscribe.gift_agent_extends_again", f"error={err[:200]}")
+        elif txh:
+            deliver = _wait_tx_deliver(txh)
+            if deliver and deliver[0] != 0:
+                _fail("subscribe.gift_agent_extends_again", f"deliver code={deliver[0]}")
+            else:
+                deadline2 = time.time() + 30
+                after_exp2 = before_exp2
+                while time.time() < deadline2:
+                    st = get_user_status(backend, agent1_addr)
+                    after_exp2 = int(st.get("subscription_expiry", 0) or 0)
+                    if after_exp2 > before_exp2:
+                        break
+                    time.sleep(2)
+                if after_exp2 > before_exp2:
+                    _pass("subscribe.gift_agent_extends_again")
+                else:
+                    _fail("subscribe.gift_agent_extends_again", f"before={before_exp2} after={after_exp2}")
+        else:
+            _fail("subscribe.gift_agent_extends_again", f"no txh or error: {resp}")
+    except Exception as e:
+        _fail("subscribe.gift_agent_extends_again", str(e))
+
+    # 26.4 Gift level 1 to agent1 (level 10) — should be rejected
+    try:
+        resp = _do_subscribe(backend, agent2_wallet, 1, target=agent1_addr)
+        err = str(resp.get("error", "")).lower() if resp else ""
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        if "gift rejected" in err and not txh:
+            _pass("subscribe.gift_lower_tier_rejected")
+        elif not txh and ("reject" in err or "level" in err):
+            _pass("subscribe.gift_lower_tier_rejected")
+        else:
+            _fail("subscribe.gift_lower_tier_rejected", f"txh={txh} err={err[:200]}")
+    except Exception as e:
+        _fail("subscribe.gift_lower_tier_rejected", str(e))
+
+
+# =========================================================================
 # Category 21: Subscribe Validation (backend API)
 # =========================================================================
