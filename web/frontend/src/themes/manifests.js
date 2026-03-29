@@ -1,0 +1,21 @@
+/**
+ * Theme registry — single place to register theme families.
+ *
+ * To add a theme:
+ * 1. Create src/themes/<id>/ with index.js (manifest), tokens, Style, Layout, Shell, routes, components, …
+ * 2. Import the manifest here and append to THEME_MANIFESTS.
+ * 3. If you rename a theme id and need to migrate old localStorage values, add an entry to LEGACY_THEME_IDS.
+ *
+ * Order: THEME_MANIFESTS[0] is the default when storage is missing or invalid.
+ * Themes own all visuals; shared app code lives in logic/, utils/, lib API — not under themes/.
+ */
+
+import bluemoonManifest from './bluemoon/index';
+import oldredditManifest from './oldreddit/index';
+
+export const THEME_MANIFESTS = [bluemoonManifest, oldredditManifest];
+
+/** Map old persisted theme_id values → current manifest id (renames only). */
+export const LEGACY_THEME_IDS = Object.freeze({
+    moon: 'bluemoon',
+});

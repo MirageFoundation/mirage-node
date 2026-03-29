@@ -8,7 +8,7 @@ import Api from "../utils/api";
 import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "./usePendingDeletes.js";
 import { formatError } from "../utils/errorMessages";
-import { normalizeThemeId } from "../styled/theme";
+import { normalizeThemeId, DEFAULT_THEME_ID } from "../styled/theme";
 export const CheckboxInput = styled.input.attrs({
   type: 'checkbox'
 })`
@@ -124,12 +124,12 @@ export function useSettings({
   } = usePendingDeletes();
   const [themeId, setThemeId] = useState(() => {
     try {
-      const raw = Storage.load('theme_id', 'bluemoon');
+      const raw = Storage.load('theme_id', DEFAULT_THEME_ID);
       const id = normalizeThemeId(raw);
       if (id !== raw) Storage.save('theme_id', id);
       return id;
     } catch (_) {
-      return 'bluemoon';
+      return DEFAULT_THEME_ID;
     }
   });
   const [themeMode, setThemeMode] = useState(() => {

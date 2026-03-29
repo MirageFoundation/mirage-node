@@ -6,7 +6,7 @@ import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
 import Api from './utils/api';
 import * as tx from './utils/tx';
-import { getResolvedTheme, getThemeFamily, normalizeThemeId } from './styled/theme';
+import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './styled/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
@@ -209,7 +209,7 @@ class App extends Component {
         this.setCredentials = this.setCredentials.bind(this);
         this.setWarnOnLeave = this.setWarnOnLeave.bind(this);
         {
-            const raw = Storage.load('theme_id', 'bluemoon');
+            const raw = Storage.load('theme_id', DEFAULT_THEME_ID);
             const themeId = normalizeThemeId(raw);
             if (themeId !== raw) Storage.save('theme_id', themeId);
             this.state.themeId = themeId;
@@ -371,7 +371,7 @@ class App extends Component {
 
         // Listen for theme id changes from SettingsView
         this._onThemeIdChange = (e) => {
-            const newId = normalizeThemeId(e.detail?.themeId || 'bluemoon');
+            const newId = normalizeThemeId(e.detail?.themeId || DEFAULT_THEME_ID);
             try { document.documentElement.setAttribute('data-theme-id', newId); } catch (_) { }
             this.setState({ themeId: newId });
         };

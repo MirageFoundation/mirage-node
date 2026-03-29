@@ -32,21 +32,7 @@
     <meta name="twitter:image" content="%PUBLIC_URL%/logo.webp" />
     <!-- Smart App Banner (iOS Safari) -->
     <meta name="apple-itunes-app" content="app-id=6757619038">
-    <!-- Set data-theme-id before React mounts so CSS can target theme families (must match normalizeThemeId in styled/theme.js) -->
-    <script>
-        try {
-            var raw = localStorage.getItem('theme_id');
-            var tid = 'bluemoon';
-            if (raw) {
-                try { tid = JSON.parse(raw); } catch (e) { tid = 'bluemoon'; }
-            }
-            if (typeof tid !== 'string') tid = 'bluemoon';
-            tid = tid.trim();
-            if (tid === 'moon') tid = 'bluemoon';
-            if (tid !== 'bluemoon' && tid !== 'oldreddit') tid = 'bluemoon';
-            document.documentElement.setAttribute('data-theme-id', tid);
-        } catch (e) { }
-    </script>
+    <!-- data-theme-id is set from src/bootstrapTheme.js (same rules as themes/manifests.js) -->
     <!-- Prevent white flash before JS/styles load by matching system theme early -->
     <style>
         html,

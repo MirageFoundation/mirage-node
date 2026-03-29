@@ -30,4 +30,5 @@ Switching **theme** swaps the resolved page component **without** changing `App`
 
 ## Related
 
-- **`src/components/README.md`** — global **`Toast` / `UnlockPrompt` / `Tooltip`**; all other UI lives under **`themes/*/components`**.
+- **`src/themes/README.md`** — register themes in **`themes/manifests.js`** only.
+- **`src/components/README.md`** — global **`Toast` / `UnlockPrompt` / `Tooltip`** entrypoints; implementations are still per manifest.

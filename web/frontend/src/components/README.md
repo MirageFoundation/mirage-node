@@ -1,10 +1,12 @@
-# `src/components` — a few global shells only
+# `src/components` — a few global entrypoints only
 
 ## Where themed UI actually lives
 
-**All real UI** for each look is under **`src/themes/<themeId>/components/`** (styled-components, tokens, layout). Theme routes import those files directly, e.g. `themes/bluemoon/routes/MainView.js` → `../components/Button.js` (theme-local path).
+**All real UI** for each look is under **`src/themes/<themeId>/components/`** and **`routes/`**. Themes are **not** skins: each manifest can define **any** structure and styling; only **backend/chain behavior** stays in **`logic/`** and **`utils/`**.
 
-Each theme’s **`index.js`** registers implementations on the manifest’s **`components`** map. Shared hooks use **`useThemeComponent('Button')`** / **`getThemeComponent(themeId, key)`** (see `src/styled/theme.js`) so code that does not know the active theme can still resolve the right implementation.
+Theme routes import theme-local paths, e.g. `themes/bluemoon/routes/MainView.js` → `../components/Button.js`.
+
+Each theme’s **`index.js`** registers **`components`** on the manifest (see **`themes/manifests.js`**). Hooks use **`useThemeComponent('Button')`** / **`getThemeComponent(themeId, key)`** (`src/styled/theme.js`) when something outside a themed subtree must resolve by name.
 
 ## What stays in this folder
 

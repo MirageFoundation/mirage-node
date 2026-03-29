@@ -1,30 +1,16 @@
 /**
- * Theme Registry
+ * Theme Registry (resolve components, routes, tokens from manifest id)
  *
- * Each theme lives under src/themes/<themeId>/ and exports a manifest from
- * index.js. Visuals are theme-only: each manifest must export Style
- * (from themes/<id>/Style.js — html/body rules for that theme only), Shell, Feed, VoteSection,
- * dark/light tokens, and config. Shared code here is registry + getResolvedTheme only.
- *
- * HOW TO ADD A NEW THEME:
- * 1. Create src/themes/<name>/ with index.js, tokens.js, Style.js,
- *    Layout.js (styled primitives for that theme), Shell, Feed, etc.
- * 2. index.js default-exports a manifest (see themes/bluemoon/index.js for shape);
- *    Style is required.
- * 3. Import the manifest below and add it to the manifests array
- * 4. Done -- no other files need changes
+ * @see ../themes/manifests.js — import manifests there only; this file builds lookups + helpers.
  */
 
-import bluemoonManifest from '../themes/bluemoon/index';
-import oldredditManifest from '../themes/oldreddit/index';
-
-const manifests = [bluemoonManifest, oldredditManifest];
+import { THEME_MANIFESTS, LEGACY_THEME_IDS } from '../themes/manifests';
 
 export const THEMES = {};
-manifests.forEach((m) => { THEMES[m.id] = m; });
+THEME_MANIFESTS.forEach((m) => { THEMES[m.id] = m; });
 
-/** Default when storage is missing, invalid, or an unknown id. */
-export const DEFAULT_THEME_ID = 'bluemoon';
+/** Default when storage is missing, invalid, or an unknown id (first entry in THEME_MANIFESTS). */
+export const DEFAULT_THEME_ID = THEME_MANIFESTS[0].id;
 
 /**
  * Map legacy ids and unknown values to a registered theme id. Persists corrected values via callers.
@@ -34,14 +20,16 @@ export const DEFAULT_THEME_ID = 'bluemoon';
 export function normalizeThemeId(id) {
     if (id == null || typeof id !== 'string') return DEFAULT_THEME_ID;
     const t = id.trim();
-    if (t === 'moon') return 'bluemoon';
+    if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_IDS, t)) {
+        return LEGACY_THEME_IDS[t];
+    }
     if (THEMES[t]) return t;
     return DEFAULT_THEME_ID;
 }
 
 /**
  * Resolve a concrete theme object from a family id and a resolved variant.
- * @param {string} themeId   - 'bluemoon' | 'oldreddit' | ...
+ * @param {string} themeId   - any registered manifest id (see themes/manifests.js)
  * @param {string} themeMode - Already resolved to 'dark' or 'light'
  */
 export function getResolvedTheme({ themeId, themeMode }) {
@@ -85,7 +73,7 @@ export function getThemeFamily(themeId) {
  * `src/themes/<themeId>/components/` and are registered on the manifest `components` map.
  * This registry function is shared logic; it does not render or style anything.
  *
- * @param {string} themeId — e.g. 'bluemoon' | 'oldreddit'
+ * @param {string} themeId — registered manifest id
  * @param {string} key — e.g. 'Button', 'Toast' (must exist on that theme's manifest)
  */
 export function getThemeComponent(themeId, key) {
