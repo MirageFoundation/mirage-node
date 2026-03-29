@@ -575,6 +575,10 @@ export default function ProfileView({ state }) {
         }
     }, [profileAddress]);
 
+    const effectivePostsFilter = isOldReddit
+        ? (activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : 'all')
+        : recentPostsFilter;
+
     useEffect(() => {
         setRecentPosts([]);
         setRecentPage(1);
@@ -586,10 +590,6 @@ export default function ProfileView({ state }) {
             recentLoadTimerRef.current = null;
         }
     }, [effectivePostsFilter]);
-
-    const effectivePostsFilter = isOldReddit
-        ? (activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : 'all')
-        : recentPostsFilter;
 
     // Lazy-load posts only when a posts-related tab is active
     useEffect(() => {

@@ -397,7 +397,7 @@ export default function InboxView({ state }) {
                     <MobileHeader />
                     <TabbedContainer>
                         <ContainerTab>{heading || 'Inbox'}</ContainerTab>
-                        <ContainerBody>
+                        <ContainerBody $fullWidth>
                             {body}
                         </ContainerBody>
                     </TabbedContainer>

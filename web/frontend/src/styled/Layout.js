@@ -70,7 +70,7 @@ export const ContainerBody = styled.div`
     border-radius: ${({ theme }) => isOr(theme) ? '0' : '12px'};
     overflow: visible;
     padding: ${({ theme }) => isOr(theme) ? '0.75rem 0' : '1.25rem'};
-    max-width: ${({ theme }) => isOr(theme) ? '960px' : 'none'};
+    max-width: ${({ theme, $fullWidth }) => isOr(theme) ? ($fullWidth ? 'none' : '960px') : 'none'};
     
     @media (max-width: 1000px) {
         border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
