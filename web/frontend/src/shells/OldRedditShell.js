@@ -58,6 +58,8 @@ const NavLink = styled(Link)`
 `;
 
 const PAGE_TITLES = {
+    '/home': 'home',
+    '/following': 'following',
     '/create_post': 'submit',
     '/inbox': 'inbox',
     '/profile': 'profile',
@@ -88,6 +90,7 @@ function getPageTitle(path) {
         return user ? `u/${user}` : null;
     }
     if (path.startsWith('/p/')) return 'post';
+    if (path === '/') return 'home';
     return null;
 }
 

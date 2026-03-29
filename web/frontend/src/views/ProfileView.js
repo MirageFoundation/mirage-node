@@ -12,6 +12,7 @@ import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
+import ListFeedView from "../components/ListFeedView";
 import { useTabs } from "../utils/useTabs";
 import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { tooltipStyles } from "../components/Tooltip";
@@ -20,12 +21,14 @@ import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCac
 import { formatMirage } from "../utils/formatters";
 import { usePendingSends } from "../utils/usePendingSends";
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const Row = styled.div`
     display: grid;
-    grid-template-columns: 6rem minmax(0, 1fr);
-    gap: 0.5rem;
-    align-items: start;
-    margin: 0.4rem 0;
+    grid-template-columns: ${({ theme }) => isOr(theme) ? '5.5rem minmax(0, 1fr)' : '6rem minmax(0, 1fr)'};
+    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    align-items: ${({ theme }) => isOr(theme) ? 'center' : 'start'};
+    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.4rem 0'};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
@@ -39,8 +42,8 @@ const RowCentered = styled(Row)`
 
 const Label = styled.div`
     color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: 600;
-    font-size: 0.85rem;
+    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
     white-space: nowrap;
     @media (max-width: 1000px) {
         margin-bottom: 0.1rem;
@@ -49,8 +52,8 @@ const Label = styled.div`
 
 const HoverableLabel = styled.div`
     color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: 600;
-    font-size: 0.85rem;
+    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
     white-space: nowrap;
     ${tooltipStyles()}
     
@@ -60,10 +63,11 @@ const HoverableLabel = styled.div`
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.6rem 0.85rem;
+    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.6rem 0.85rem'};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -74,21 +78,21 @@ const BioTextarea = styled.textarea`
     box-sizing: border-box;
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.6rem 0.85rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.6rem 0.85rem'};
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
     resize: vertical;
-    min-height: 80px;
+    min-height: ${({ theme }) => isOr(theme) ? '60px' : '80px'};
     &:focus { outline: none; border-color: ${({ theme }) => theme?.colors?.accent || '#7c6dcd'}; }
 `;
 
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 0.75rem;
+    align-items: center;
+    gap: ${({ theme }) => isOr(theme) ? '0.4rem' : '0.75rem'};
     flex-wrap: nowrap;
     overflow: hidden;
     @media (max-width: 1000px) {
@@ -99,11 +103,11 @@ const ValueBoxWithButton = styled(ValueBox)`
 
 
 const SectionTitle = styled.div`
-    margin-top: ${({ $first }) => $first ? '0' : '1.5rem'};
-    margin-bottom: 0.5rem;
+    margin-top: ${({ $first, theme }) => $first ? '0' : (isOr(theme) ? '0.75rem' : '1.5rem')};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
     font-weight: 700;
     color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: 0.95rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.75rem' : '0.95rem'};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -118,44 +122,49 @@ const SectionTitle = styled.div`
 
 const FilterSelect = styled.select`
     width: 100%;
-    margin-bottom: 0.75rem;
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.35rem' : '0.75rem'};
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.5rem 0.85rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.25rem 0.4rem' : '0.5rem 0.85rem'};
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
     cursor: pointer;
     transition: all 0.2s ease;
     
     &:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
     }
 `;
 
 const PostsList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: ${({ theme }) => isOr(theme) ? '0' : '0.5rem'};
 `;
 
 const PostItem = styled.a`
     display: block;
     text-decoration: none;
     color: inherit;
-    border: 1px solid ${({ theme, isActive }) => isActive ? '#667eea' : (theme?.colors?.border || '#444')};
-    background-color: ${({ theme, isActive }) => isActive ? 'rgba(102, 126, 234, 0.1)' : (theme?.colors?.panel || '#23272C')};
-    border-radius: 8px;
-    padding: 0.6rem 0.85rem;
+    border: ${({ theme, isActive }) => isOr(theme)
+        ? 'none'
+        : `1px solid ${isActive ? '#667eea' : (theme?.colors?.border || '#444')}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    background-color: ${({ theme, isActive }) => isOr(theme)
+        ? 'transparent'
+        : (isActive ? 'rgba(102, 126, 234, 0.1)' : (theme?.colors?.panel || '#23272C'))};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.35rem 0.4rem' : '0.6rem 0.85rem'};
     cursor: pointer;
     transition: background-color 0.2s ease, border-color 0.2s ease;
-    box-shadow: ${({ isActive }) => (isActive ? '0 0 12px rgba(102, 126, 234, 0.25)' : 'none')};
+    box-shadow: ${({ theme, isActive }) => isOr(theme) ? 'none' : (isActive ? '0 0 12px rgba(102, 126, 234, 0.25)' : 'none')};
 
     &:hover {
         background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2E3238'};
-        border-color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+        border-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.subtleText || '#666')};
     }
 `;
 
@@ -178,7 +187,7 @@ const PostPreview = styled.div`
 
 const Mono = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     white-space: normal;
     word-break: break-word;
@@ -302,9 +311,9 @@ export default function ProfileView({ state }) {
 
     const isOldReddit = theme?.themeId === 'oldreddit';
     const VALID_TABS = isOldReddit
-        ? ['overview', 'submissions', 'comments', 'profile', 'algo']
+        ? ['profile', 'overview', 'submissions', 'comments', 'algo']
         : ['profile', 'posts', 'algo'];
-    const [activeTab, setActiveTab] = useTabs(isOldReddit ? 'overview' : 'profile', VALID_TABS);
+    const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
     const isPostsTab = activeTab === 'posts' || activeTab === 'overview' || activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => (isOwnProfile ? (username || '') : ''));
     const [balance, setBalance] = useState(null);
@@ -978,6 +987,9 @@ export default function ProfileView({ state }) {
                         <TabsRow>
                             {isOldReddit ? (
                                 <>
+                                    <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
+                                        profile
+                                    </ClickableTab>
                                     <ClickableTab $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
                                         overview
                                     </ClickableTab>
@@ -986,9 +998,6 @@ export default function ProfileView({ state }) {
                                     </ClickableTab>
                                     <ClickableTab $active={activeTab === 'comments'} onClick={() => setActiveTab('comments')}>
                                         comments
-                                    </ClickableTab>
-                                    <ClickableTab $active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>
-                                        profile
                                     </ClickableTab>
                                     <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
                                         algo
@@ -1008,7 +1017,7 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
                         </TabsRow>
-                        <ContainerBody>
+                        <ContainerBody $fullWidth={isOldReddit && isPostsTab}>
                             {activeTab === 'profile' && (
                                 <>
                                     <RowCentered>
@@ -1251,9 +1260,39 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
 
-                            {isPostsTab && (
+                            {isPostsTab && isOldReddit && (
                                 <>
-                                    {!isOldReddit && profileAddress && (
+                                    {isLoadingRecentPosts && recentPosts.length === 0 && (
+                                        <LoadingRow>
+                                            <LoadingSpinner />
+                                            <SubtleMono>Loading posts...</SubtleMono>
+                                        </LoadingRow>
+                                    )}
+                                    {!isLoadingRecentPosts && recentPostsError && (
+                                        <Mono style={{ color: '#f87171' }}>{recentPostsError}</Mono>
+                                    )}
+                                    {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && (
+                                        <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : (effectivePostsFilter === 'submissions' ? 'submissions' : 'comments')} yet.</SubtleMono>
+                                    )}
+                                    {recentPosts.length > 0 && (
+                                        <ListFeedView
+                                            posts={recentPosts}
+                                            state={state}
+                                            showSortTabs={false}
+                                        />
+                                    )}
+                                    {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                        <SubtleMono style={{ display: 'block', marginTop: '0.5rem', fontStyle: 'italic' }}>
+                                            Loading more...
+                                        </SubtleMono>
+                                    )}
+                                    <div ref={recentBottomSentinelRef} style={{ width: '100%', height: '20px', minHeight: '20px' }} />
+                                </>
+                            )}
+
+                            {isPostsTab && !isOldReddit && (
+                                <>
+                                    {profileAddress && (
                                         <FilterSelect
                                             value={recentPostsFilter}
                                             onChange={(e) => setRecentPostsFilter(e.target.value)}

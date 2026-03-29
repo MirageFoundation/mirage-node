@@ -10,12 +10,14 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 import { formatMirage } from "../utils/formatters";
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const Row = styled.div`
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);
-    gap: 0.5rem;
-    align-items: start;
-    margin: 0.4rem 0;
+    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    align-items: ${({ theme }) => isOr(theme) ? 'center' : 'start'};
+    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.4rem 0'};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
@@ -32,8 +34,8 @@ const SectionRow = styled(Row)`
 
 const Label = styled.div`
     color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: 600;
-    font-size: 0.85rem;
+    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
 `;
 
 const SectionLabel = styled(Label)`
@@ -41,10 +43,11 @@ const SectionLabel = styled(Label)`
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.6rem 0.85rem;
+    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.6rem 0.85rem'};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -55,7 +58,7 @@ const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 0.75rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.4rem' : '0.75rem'};
     flex-wrap: nowrap;
     overflow: hidden;
     @media (max-width: 1000px) {
@@ -67,7 +70,7 @@ const ValueBoxWithButton = styled(ValueBox)`
 
 const Mono = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 `;
 
@@ -90,9 +93,10 @@ const PeerItem = styled.div`
     flex-direction: row;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border-radius: 8px;
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panel || '#23272C')};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
     transition: background 0.2s ease;
 
     &:hover {

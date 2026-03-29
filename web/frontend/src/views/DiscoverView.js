@@ -13,6 +13,8 @@ import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const SearchInput = styled.input`
     width: 100%;
     padding: 0.4rem 0.6rem;
@@ -20,9 +22,9 @@ const SearchInput = styled.input`
     margin-bottom: 0.5rem;
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 4px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
     color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.65rem' : '0.75rem'};
     font-family: inherit;
     &:focus {
         outline: none;
@@ -32,15 +34,15 @@ const SearchInput = styled.input`
 
 const Section = styled.div`
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 6px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
     margin: 0.5rem 0;
-    padding: 0.5rem 0.6rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.6rem'};
     background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
 `;
 
 const SectionTitle = styled.div`
     font-weight: bold;
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
     margin-bottom: 0.4rem;
 `;
 
@@ -51,7 +53,7 @@ const ItemRow = styled.div`
     padding: 0.5rem 0;
     border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     &:last-child { border-bottom: none; }
-    font-size: 0.7rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6rem' : '0.7rem'};
     gap: 0.4rem;
 
     @media (max-width: 700px) {

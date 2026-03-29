@@ -100,13 +100,15 @@ const BridgeLayout = styled.div`
     width: 100%;
 `;
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const SectionTitle = styled.h3`
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    margin: 0 0 0.75rem 0;
+    margin: ${({ theme }) => isOr(theme) ? '0 0 0.45rem 0' : '0 0 0.75rem 0'};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -118,18 +120,21 @@ const StepNumber = styled.span`
     justify-content: center;
     width: 1.1rem;
     height: 1.1rem;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
+    background: ${({ theme }) =>
+        isOr(theme)
+            ? (theme?.colors?.panelAlt || '#333')
+            : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
     color: #fff;
-    font-size: 0.6rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
     font-weight: 700;
 `;
 
 const NetworkGrid = styled.div`
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     
     @media (max-width: 600px) {
         grid-template-columns: 1fr;
@@ -138,13 +143,15 @@ const NetworkGrid = styled.div`
 
 const NetworkCard = styled.button`
     background: ${({ theme, $selected, $color }) =>
-        $selected
-            ? `linear-gradient(135deg, ${$color}22 0%, ${$color}11 100%)`
-            : (theme?.colors?.panel || '#23272C')};
+        isOr(theme)
+            ? ($selected ? (theme?.colors?.panelAlt || '#1a1d22') : (theme?.colors?.panel || '#23272C'))
+            : ($selected
+                ? `linear-gradient(135deg, ${$color}22 0%, ${$color}11 100%)`
+                : (theme?.colors?.panel || '#23272C'))};
     border: 2px solid ${({ $selected, $color, theme }) =>
         $selected ? $color : (theme?.colors?.border || '#444')};
-    border-radius: 10px;
-    padding: 0.85rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
@@ -153,12 +160,12 @@ const NetworkCard = styled.button`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
     
     &:hover:not(:disabled) {
         border-color: ${({ $color }) => $color};
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px ${({ $color }) => `${$color}33`};
+        transform: ${({ theme }) => isOr(theme) ? 'none' : 'translateY(-2px)'};
+        box-shadow: ${({ theme, $color }) => isOr(theme) ? 'none' : `0 4px 12px ${$color}33`};
     }
     
     &:disabled {
@@ -166,8 +173,8 @@ const NetworkCard = styled.button`
         cursor: not-allowed;
     }
     
-    ${({ $selected, $color }) => $selected && css`
-        box-shadow: 0 0 0 1px ${$color}44, 0 4px 12px ${$color}22;
+    ${({ $selected, $color, theme }) => $selected && css`
+        box-shadow: ${isOr(theme) ? 'none' : `0 0 0 1px ${$color}44, 0 4px 12px ${$color}22`};
     `}
 `;
 
@@ -177,21 +184,21 @@ const NetworkCardContent = styled.div`
 `;
 
 const NetworkIcon = styled.img`
-    width: 2.5rem;
-    height: 2.5rem;
+    width: ${({ theme }) => isOr(theme) ? '2.125rem' : '2.5rem'};
+    height: ${({ theme }) => isOr(theme) ? '2.125rem' : '2.5rem'};
     flex-shrink: 0;
     object-fit: contain;
 `;
 
 const NetworkName = styled.div`
-    font-size: 0.9rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.765rem' : '0.9rem'};
     font-weight: 700;
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
     margin-bottom: 0.2rem;
 `;
 
 const NetworkMeta = styled.div`
-    font-size: 0.7rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     display: flex;
     align-items: center;
@@ -201,9 +208,9 @@ const NetworkMeta = styled.div`
 const NetworkBadge = styled.span`
     display: inline-flex;
     align-items: center;
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.6rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.09rem 0.24rem' : '0.15rem 0.4rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
     font-weight: 600;
     background: ${({ $color }) => `${$color}22`};
     color: ${({ $color }) => $color};
@@ -211,27 +218,27 @@ const NetworkBadge = styled.span`
 
 const SelectedIndicator = styled.div`
     position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
+    top: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    right: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
     width: 1rem;
     height: 1rem;
-    border-radius: 50%;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
     background: ${({ $color }) => $color};
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.6rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
     color: #fff;
     animation: ${fadeIn} 0.2s ease-out;
 `;
 
 const InputSection = styled.div`
-    margin-bottom: 1.5rem;
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
 `;
 
 const InputLabel = styled.label`
     display: block;
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     font-weight: 600;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     margin-bottom: 0.5rem;
@@ -245,13 +252,14 @@ const InputWrapper = styled.div`
 
 const AmountInput = styled.input`
     width: 100%;
-    padding: 0.65rem 5rem 0.65rem 0.85rem;
+    padding: ${({ theme }) =>
+        isOr(theme) ? '0.39rem 3rem 0.39rem 0.51rem' : '0.65rem 5rem 0.65rem 0.85rem'};
     border: 1px solid ${({ theme, $error }) =>
         $error ? '#f56565' : (theme?.colors?.border || '#444')};
-    border-radius: 8px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-size: 1rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
     font-weight: 600;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     outline: none;
@@ -265,8 +273,8 @@ const AmountInput = styled.input`
     &:focus {
         border-color: ${({ theme, $error }) =>
         $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
-        box-shadow: 0 0 0 3px ${({ $error }) =>
-        $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
+        box-shadow: ${({ theme, $error }) =>
+        isOr(theme) ? 'none' : `0 0 0 3px ${$error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'}`};
     }
     
     /* Hide number spinners */
@@ -280,8 +288,8 @@ const AmountInput = styled.input`
 
 const AmountSuffix = styled.span`
     position: absolute;
-    right: 0.85rem;
-    font-size: 0.8rem;
+    right: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     font-weight: 600;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     pointer-events: none;
@@ -289,13 +297,14 @@ const AmountSuffix = styled.span`
 
 const MaxButton = styled.button`
     position: absolute;
-    right: 4.5rem;
-    padding: 0.25rem 0.5rem;
+    right: ${({ theme }) => isOr(theme) ? '2.7rem' : '4.5rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.15rem 0.3rem' : '0.25rem 0.5rem'};
     border: none;
-    border-radius: 4px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+    background: ${({ theme }) =>
+        isOr(theme) ? (theme?.colors?.link || '#667eea') : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
     color: #fff;
-    font-size: 0.6rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.6rem'};
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -303,20 +312,20 @@ const MaxButton = styled.button`
     transition: all 0.2s ease;
     
     &:hover {
-        transform: scale(1.05);
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        transform: ${({ theme }) => isOr(theme) ? 'none' : 'scale(1.05)'};
+        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 2px 8px rgba(102, 126, 234, 0.4)'};
     }
 `;
 
 const AddressInput = styled.input`
     width: 100%;
-    padding: 0.65rem 0.85rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.39rem 0.51rem' : '0.65rem 0.85rem'};
     border: 1px solid ${({ theme, $error }) =>
         $error ? '#f56565' : (theme?.colors?.border || '#444')};
-    border-radius: 8px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     outline: none;
     transition: all 0.2s ease;
@@ -329,14 +338,14 @@ const AddressInput = styled.input`
     &:focus {
         border-color: ${({ theme, $error }) =>
         $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
-        box-shadow: 0 0 0 3px ${({ $error }) =>
-        $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
+        box-shadow: ${({ theme, $error }) =>
+        isOr(theme) ? 'none' : `0 0 0 3px ${$error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'}`};
     }
 `;
 
 const ErrorText = styled.div`
     color: #f56565;
-    font-size: 0.7rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
     margin-top: 0.35rem;
     display: flex;
     align-items: center;
@@ -344,26 +353,29 @@ const ErrorText = styled.div`
 `;
 
 const PreviewCard = styled.div`
-    background: linear-gradient(135deg, 
-        ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'} 0%, 
-        ${({ theme }) => theme?.colors?.panel || '#23272C'} 100%);
+    background: ${({ theme }) =>
+        isOr(theme)
+            ? (theme?.colors?.panelAlt || '#1f2328')
+            : `linear-gradient(135deg, 
+        ${theme?.colors?.panelAlt || '#1f2328'} 0%, 
+        ${theme?.colors?.panel || '#23272C'} 100%)`};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 10px;
-    padding: 1rem;
-    margin-bottom: 1rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
 `;
 
 const PreviewHeader = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 0.75rem;
-    padding-bottom: 0.6rem;
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    padding-bottom: ${({ theme }) => isOr(theme) ? '0.36rem' : '0.6rem'};
     border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
 `;
 
 const PreviewTitle = styled.span`
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     font-weight: 600;
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
 `;
@@ -372,7 +384,7 @@ const PreviewNetwork = styled.span`
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     color: ${({ $color }) => $color};
     font-weight: 600;
 `;
@@ -381,8 +393,8 @@ const PreviewRow = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.35rem 0;
-    font-size: 0.8rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.21rem 0' : '0.35rem 0'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     gap: 1rem;
 `;
 
@@ -418,38 +430,38 @@ const SubmitSection = styled.div`
 const WarningBanner = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: 0.6rem;
-    padding: 0.75rem;
-    margin-bottom: 1rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.36rem' : '0.6rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     background: rgba(245, 158, 11, 0.1);
     border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: 8px;
-    font-size: 0.75rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     color: #f59e0b;
     line-height: 1.5;
 `;
 
 const WarningIcon = styled.span`
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
     flex-shrink: 0;
 `;
 
 const InfoBanner = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.85rem;
-    margin-bottom: 1rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    font-size: 0.75rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     line-height: 1.5;
 `;
 
 const InfoIcon = styled.span`
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
     flex-shrink: 0;
 `;
 
@@ -457,17 +469,17 @@ const StatusBanner = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    padding: 0.75rem;
-    margin-top: 0.75rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.24rem' : '0.4rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    margin-top: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
     background: ${({ $success, $error }) =>
         $success ? 'rgba(72, 187, 120, 0.1)' :
             $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
     border: 1px solid ${({ $success, $error }) =>
         $success ? 'rgba(72, 187, 120, 0.3)' :
             $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
-    border-radius: 8px;
-    font-size: 0.8rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     color: ${({ $success, $error }) =>
         $success ? '#48bb78' :
             $error ? '#ef4444' : '#667eea'};
@@ -478,29 +490,29 @@ const StatusBanner = styled.div`
 const StepsCard = styled.div`
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 10px;
-    padding: 0.85rem;
-    margin-top: 0.75rem;
-    margin-bottom: 0.75rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.51rem' : '0.85rem'};
+    margin-top: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
 `;
 
 const StepsList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
 `;
 
 const StepItem = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    font-size: 0.8rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.36rem' : '0.6rem'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
 `;
 
 const StepDot = styled.span`
     width: 0.65rem;
     height: 0.65rem;
-    border-radius: 50%;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
     flex-shrink: 0;
     background: ${({ $state, theme }) => {
         if ($state === 'complete') return '#48bb78';
@@ -508,7 +520,8 @@ const StepDot = styled.span`
         if ($state === 'error') return '#ef4444';
         return theme?.colors?.border || '#555';
     }};
-    box-shadow: ${({ $state }) => $state === 'active' ? '0 0 0 3px rgba(102, 126, 234, 0.2)' : 'none'};
+    box-shadow: ${({ $state, theme }) =>
+        isOr(theme) || $state !== 'active' ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.2)'};
 `;
 
 const StepText = styled.div`
@@ -524,7 +537,7 @@ const StepTitle = styled.span`
 
 const StepMeta = styled.span`
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: 0.7rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
     
     a {
         color: ${({ theme }) => theme?.colors?.link || '#667eea'};
@@ -551,28 +564,28 @@ const StepMeta = styled.span`
 // Progress Screen Components (full-screen progress view after submit)
 const ProgressScreenContainer = styled.div`
     animation: ${fadeIn} 0.3s ease-out;
-    padding: 0.5rem 0;
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.5rem 0'};
 `;
 
 const ProgressScreenHeader = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 1.25rem;
-    padding-bottom: 1rem;
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.75rem' : '1.25rem'};
+    padding-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
 `;
 
 const ProgressScreenTitle = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
 `;
 
 const ProgressScreenNetworkIcon = styled.img`
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
+    width: ${({ theme }) => isOr(theme) ? '1.7rem' : '2rem'};
+    height: ${({ theme }) => isOr(theme) ? '1.7rem' : '2rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
     ${({ $isMirage, theme }) => $isMirage && `
         filter: brightness(0) ${theme?.isDark === false ? 'invert(0)' : 'invert(1)'};
     `}
@@ -585,13 +598,13 @@ const ProgressScreenTitleText = styled.div`
 `;
 
 const ProgressScreenMainTitle = styled.span`
-    font-size: 1rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
     font-weight: 700;
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
 `;
 
 const ProgressScreenSubtitle = styled.span`
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
 `;
 
@@ -600,32 +613,32 @@ const ProgressScreenAmount = styled.div`
 `;
 
 const ProgressScreenAmountValue = styled.div`
-    font-size: 1.1rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.935rem' : '1.1rem'};
     font-weight: 700;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
 `;
 
 const ProgressScreenAmountLabel = styled.div`
-    font-size: 0.7rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
 `;
 
 const BalanceComparisonCard = styled.div`
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 10px;
-    padding: 1rem;
-    margin-top: 1rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '10px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    margin-top: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
 `;
 
 const BalanceComparisonTitle = styled.div`
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    margin-bottom: 0.75rem;
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -634,7 +647,7 @@ const BalanceComparisonTitle = styled.div`
 const BalanceComparisonGrid = styled.div`
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     
     @media (max-width: 500px) {
         grid-template-columns: 1fr;
@@ -644,23 +657,23 @@ const BalanceComparisonGrid = styled.div`
 const BalanceComparisonColumn = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
 `;
 
 const BalanceComparisonNetwork = styled.div`
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     font-weight: 600;
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
     margin-bottom: 0.25rem;
 `;
 
 const BalanceComparisonNetworkIcon = styled.img`
-    width: 1rem;
-    height: 1rem;
-    border-radius: 50%;
+    width: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
+    height: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
     ${({ $isMirage, theme }) => $isMirage && `
         filter: brightness(0) ${theme?.isDark === false ? 'invert(0)' : 'invert(1)'};
     `}
@@ -670,8 +683,8 @@ const BalanceComparisonRow = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 0.8rem;
-    padding: 0.35rem 0;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.21rem 0' : '0.35rem 0'};
     border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
     
     &:last-child {
@@ -696,10 +709,10 @@ const BalanceComparisonValue = styled.span`
 const DerivedAddressBox = styled.div`
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.65rem 0.85rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.39rem 0.51rem' : '0.65rem 0.85rem'};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
     word-break: break-all;
     display: flex;
@@ -739,7 +752,7 @@ const HelpIconWrapper = styled.span`
     justify-content: center;
     width: 1rem;
     height: 1rem;
-    border-radius: 50%;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '50%'};
     background: ${({ theme }) => theme?.colors?.border || '#444'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     font-size: 0.6rem;
@@ -752,19 +765,19 @@ const HelpIconWrapper = styled.span`
 const AddressExplanation = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.6rem 0.75rem;
-    margin-bottom: 0.75rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.36rem 0.45rem' : '0.6rem 0.75rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    font-size: 0.7rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.595rem' : '0.7rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     line-height: 1.5;
 `;
 
 const ExplanationIcon = styled.span`
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
     flex-shrink: 0;
 `;
 
@@ -787,21 +800,23 @@ const SolanaWalletButton = styled.button`
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
     width: 100%;
-    padding: 0.75rem 1rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.45rem 0.6rem' : '0.75rem 1rem'};
     border: 2px solid #14F195;
-    border-radius: 8px;
-    background: rgba(20, 241, 149, 0.1);
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    background: ${({ theme }) =>
+        isOr(theme) ? (theme?.colors?.panelAlt || '#1f2328') : 'rgba(20, 241, 149, 0.1)'};
     color: #14F195;
-    font-size: 0.9rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.765rem' : '0.9rem'};
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
     
     &:hover:not(:disabled) {
-        background: rgba(20, 241, 149, 0.2);
-        transform: translateY(-1px);
+        background: ${({ theme }) =>
+        isOr(theme) ? (theme?.colors?.panelAlt || '#1f2328') : 'rgba(20, 241, 149, 0.2)'};
+        transform: ${({ theme }) => isOr(theme) ? 'none' : 'translateY(-1px)'};
     }
     
     &:disabled {
@@ -818,20 +833,20 @@ const SolanaWalletButton = styled.button`
 const ConnectedWalletBox = styled.div`
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid #14F195;
-    border-radius: 8px;
-    padding: 0.75rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
 `;
 
 const WalletRow = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
 `;
 
 const WalletAddress = styled.span`
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
 `;
 

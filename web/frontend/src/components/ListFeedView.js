@@ -215,13 +215,10 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
     if (typeof post.title !== 'string' || typeof post.topic !== 'string') {
         throw new Error('ListFeedView: post title/topic missing');
     }
-    if (typeof post.author !== 'string') {
-        throw new Error('ListFeedView: post author missing');
-    }
     const postId = String(post.post_id);
     const topic = post.topic;
     const title = post.title;
-    const author = post.author;
+    const author = post.author || '';
     const username = post.username;
     let ts = Number(post.timestamp);
     if (!Number.isFinite(ts)) {

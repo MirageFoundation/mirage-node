@@ -18,7 +18,7 @@ const isOr = (theme) => theme?.themeId === 'oldreddit';
 const HeaderRow = styled.div`
     display: flex;
     align-items: center;
-    justify-content: ${({ theme }) => isOr(theme) ? 'flex-start' : 'flex-end'};
+    justify-content: flex-end;
     margin: ${({ theme }) => isOr(theme) ? '0.35rem 0' : '0.25rem 0 0.75rem 0'};
 `;
 

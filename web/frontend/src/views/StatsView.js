@@ -22,12 +22,14 @@ const TIER_COLORS = {
     10: '#EF4444'
 };
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const Row = styled.div`
     display: grid;
     grid-template-columns: 10rem minmax(0, 1fr);
-    gap: 0.5rem;
-    align-items: start;
-    margin: 0.4rem 0;
+    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
+    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.4rem 0'};
+    align-items: ${({ theme }) => isOr(theme) ? 'center' : 'start'};
     @media (max-width: 1000px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
@@ -36,16 +38,17 @@ const Row = styled.div`
 
 const Label = styled.div`
     color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: 600;
-    font-size: 0.85rem;
-    padding-top: 0.75rem;
+    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    padding-top: ${({ theme }) => isOr(theme) ? '0' : '0.75rem'};
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.6rem 0.85rem;
+    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.6rem 0.85rem'};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -57,9 +60,9 @@ const InfoIcon = TooltipInfoIcon;
 const SectionTitle = styled.div`
     color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
     font-weight: bold;
-    font-size: 0.9rem;
-    margin-top: 1rem;
-    margin-bottom: 0.5rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.75rem' : '0.9rem'};
+    margin-top: ${({ theme }) => isOr(theme) ? '0.5rem' : '1rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
     padding-bottom: 0.25rem;
     border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     display: flex;
@@ -74,7 +77,7 @@ const SectionInfoIcon = styled(TooltipInfoIcon)`
 
 const Mono = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.8rem'};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     white-space: normal;
     word-break: break-word;

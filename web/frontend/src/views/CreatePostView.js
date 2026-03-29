@@ -18,12 +18,14 @@ import StickerPicker from '../components/StickerPicker';
 import GifPicker from '../components/GifPicker';
 import { formatError } from '../utils/errorMessages';
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const Row = styled.div`
     display: grid;
     grid-template-columns: 5.5rem minmax(0, 1fr);
-    gap: 0.5rem;
+    gap: ${({ theme }) => isOr(theme) ? '0.25rem' : '0.5rem'};
     align-items: start;
-    margin: 0.5rem 0;
+    margin: ${({ theme }) => isOr(theme) ? '0.15rem 0' : '0.5rem 0'};
     
     &:not(:first-child) {
         margin-top: 1rem;
@@ -38,20 +40,21 @@ const Row = styled.div`
 
 const Label = styled.div`
     color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    font-weight: 600;
-    font-size: 0.85rem;
+    font-weight: ${({ theme }) => isOr(theme) ? '700' : '600'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
     white-space: nowrap;
-    padding-top: 8px;
+    padding-top: ${({ theme }) => isOr(theme) ? '0' : '8px'};
     @media (max-width: 1000px) {
         display: none;
     }
 `;
 
 const ValueBox = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.6rem 0.85rem;
+    background-color: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0' : '0.6rem 0.85rem'};
     width: 100%;
     box-sizing: border-box;
     overflow-x: auto;
@@ -59,11 +62,11 @@ const ValueBox = styled.div`
 
 const StyledInputBox = styled.input`    
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: 0.85rem;
-    padding: 0.5rem 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
     margin: 0;
     box-sizing: border-box;
     width: 100%;
@@ -77,7 +80,7 @@ const StyledInputBox = styled.input`
     }
     &:focus {
         border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
     }
     &:disabled {
         opacity: 0.5;
@@ -90,11 +93,11 @@ const StyledInputBox = styled.input`
 
 const StyledSelect = styled.select`
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    font-size: 0.85rem;
-    padding: 0.5rem 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.7rem' : '0.85rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.4rem' : '0.5rem 0.75rem'};
     margin: 0;
     box-sizing: border-box;
     width: 100%;
@@ -108,7 +111,7 @@ const StyledSelect = styled.select`
     }
     &:focus {
         border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.15)'};
     }
     &:disabled {
         opacity: 0.5;

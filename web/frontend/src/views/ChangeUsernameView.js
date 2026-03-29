@@ -13,6 +13,8 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBo
 import { getMaxUsernameSize, getMinUsernameSize, getMaxInputLength } from "../config/chainParams";
 import { formatError } from "../utils/errorMessages";
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const BlockingOverlay = styled.div`
     position: fixed;
     top: 0;
@@ -41,7 +43,7 @@ const InputWrapper = styled.div`
     align-items: center;
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
-    border-radius: 6px;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
     margin: 0.75rem auto;
     overflow: hidden;
     opacity: ${({ $disabled }) => $disabled ? 0.5 : 1};
@@ -72,15 +74,18 @@ const StyledInputBox = styled.input`
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
     text-align: ${({ $hasPrefix }) => $hasPrefix ? 'left' : 'center'};
     resize: none;
-    font-size: 0.85rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : 'inherit'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.7225rem' : '0.85rem'};
     line-height: 1.3;
-    padding: 0.5rem 0.75rem;
-    padding-left: ${({ $hasPrefix }) => $hasPrefix ? '0.15rem' : '0.75rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.45rem' : '0.5rem 0.75rem'};
+    padding-left: ${({ $hasPrefix, theme }) =>
+        $hasPrefix ? (isOr(theme) ? '0.09rem' : '0.15rem') : (isOr(theme) ? '0.45rem' : '0.75rem')};
     box-sizing: border-box;
     text-overflow: ellipsis;
 
     &:focus {
         outline: none;
+        box-shadow: ${({ theme }) => isOr(theme) ? 'none' : 'unset'};
     }
 
     &::placeholder {
@@ -100,10 +105,10 @@ const ButtonWrapper = styled.div`
 const WarningBox = styled.div`
     background-color: rgba(245, 158, 11, 0.1);
     border: 1px solid #f59e0b;
-    padding: 0.75rem;
-    border-radius: 6px;
+    padding: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
     margin-bottom: 0.75rem;
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
     text-align: left;
     box-sizing: border-box;
@@ -122,7 +127,8 @@ const WarningBox = styled.div`
 
 const SuccessBox = styled.div`
     text-align: center;
-    padding: 1.5rem 0;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : 'unset'};
+    padding: ${({ theme }) => isOr(theme) ? '0.9rem 0' : '1.5rem 0'};
 `;
 
 const SuccessTitle = styled.div`

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
-import styled from 'styled-components';
+import styled, { useTheme } from 'styled-components';
 import { useLocation } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import { formatMirage, formatMirageCompact } from '../utils/formatters';
@@ -40,16 +40,18 @@ const getTierColor = (level) => {
 
 const isAdmin = (level) => level >= 100;
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const CurrentTierBanner = styled.div`
-    background: linear-gradient(135deg, ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'} 0%, ${({ theme }) => theme?.colors?.panel || '#23272C'} 100%);
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : `linear-gradient(135deg, ${theme?.colors?.panelAlt || '#1f2328'} 0%, ${theme?.colors?.panel || '#23272C'} 100%)`};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.5rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '12px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.75rem' : '1.25rem 1.5rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.75rem' : '1.5rem'};
     display: grid;
     grid-template-columns: 1fr;
     gap: 1.25rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: ${({ theme }) => isOr(theme) ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.2)'};
     
     @media (min-width: 600px) {
         grid-template-columns: auto 1fr;
@@ -61,7 +63,7 @@ const TierSection = styled.div`
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding-right: 2rem;
+    padding-right: ${({ theme }) => isOr(theme) ? '1.2rem' : '2rem'};
     border-right: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     min-width: 180px;
 
@@ -69,7 +71,7 @@ const TierSection = styled.div`
         border-right: none;
         border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
         padding-right: 0;
-        padding-bottom: 1.5rem;
+        padding-bottom: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
         align-items: center;
         text-align: center;
     }
@@ -85,15 +87,15 @@ const CurrentPlanLabel = styled.div`
 `;
 
 const TierNameDisplay = styled.div`
-    font-size: 1.5rem;
+    font-size: ${({ theme }) => isOr(theme) ? '1.275rem' : '1.5rem'};
     font-weight: 800;
     line-height: 1.5;
-    background: linear-gradient(135deg, ${props => props.$color}, ${props => props.$color}88);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    color: ${props => props.$color}; /* Fallback */
-    filter: drop-shadow(0 2px 10px ${props => `${props.$color}33`});
+    background: ${({ theme, $color }) => isOr(theme) ? 'transparent' : `linear-gradient(135deg, ${$color}, ${$color}88)`};
+    -webkit-background-clip: ${({ theme }) => isOr(theme) ? 'unset' : 'text'};
+    -webkit-text-fill-color: ${({ theme }) => isOr(theme) ? 'unset' : 'transparent'};
+    background-clip: ${({ theme }) => isOr(theme) ? 'unset' : 'text'};
+    color: ${({ $color }) => $color};
+    filter: ${({ theme, $color }) => isOr(theme) ? 'none' : `drop-shadow(0 2px 10px ${$color}33)`};
     letter-spacing: -0.03em;
 `;
 
@@ -124,8 +126,8 @@ const StatusBadge = styled.div`
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.4rem 0.75rem;
-    border-radius: 6px;
+    padding: ${({ theme }) => isOr(theme) ? '0.24rem 0.45rem' : '0.4rem 0.75rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
     font-size: 0.75rem;
     font-weight: 600;
     width: fit-content;
@@ -190,9 +192,9 @@ const BalanceSection = styled.div`
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
-    border-radius: 6px;
-    padding: 0.5rem 0.75rem;
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#33373C')};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '6px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem 0.45rem' : '0.5rem 0.75rem'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     min-width: 180px;
     margin-left: auto;
@@ -206,7 +208,10 @@ const BalanceItem = styled.div`
 `;
 
 const BalanceValueDisplay = styled.div`
-    font-size: ${props => props.$small ? '0.85rem' : '1rem'};
+    font-size: ${({ theme, $small }) => {
+        if ($small) return isOr(theme) ? '0.7225rem' : '0.85rem';
+        return isOr(theme) ? '0.85rem' : '1rem';
+    }};
     font-weight: 700;
     color: ${props => props.$small ? ({ theme }) => theme?.colors?.subtleText || '#AAA' : ({ theme }) => theme?.colors?.text || '#FFFFFF'};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -242,14 +247,19 @@ const TiersGrid = styled.div`
 `;
 
 const TierCard = styled.div`
-    background: ${({ theme, $isActive }) => $isActive
-        ? (theme?.colors?.panelAlt || '#33373C')
-        : (theme?.colors?.panel || '#23272C')};
+    background: ${({ theme, $isActive }) => {
+        if (isOr(theme)) {
+            return $isActive ? (theme?.colors?.panelAlt || '#33373C') : 'transparent';
+        }
+        return $isActive
+            ? (theme?.colors?.panelAlt || '#33373C')
+            : (theme?.colors?.panel || '#23272C');
+    }};
     border: 2px solid ${props => props.$isActive
         ? props.$color
         : (props.theme?.colors?.border || '#444')};
-    border-radius: 8px;
-    padding: 1rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     display: flex;
     flex-direction: column;
     transition: border-color 0.2s, transform 0.1s;
@@ -268,13 +278,13 @@ const TierHeader = styled.div`
 `;
 
 const TierName = styled.div`
-    font-size: 1rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.85rem' : '1rem'};
     font-weight: bold;
     color: ${props => props.$color || '#FFFFFF'};
 `;
 
 const TierPrice = styled.div`
-    font-size: 1.5rem;
+    font-size: ${({ theme }) => isOr(theme) ? '1.275rem' : '1.5rem'};
     font-weight: bold;
     color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
     margin: 0.5rem 0;
@@ -315,10 +325,10 @@ const TierFeatures = styled.ul`
 `;
 
 const TierDetailsPanel = styled.div`
-    margin-top: 1.5rem;
-    padding: 1.5rem;
-    border-radius: 8px;
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    margin-top: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
+    padding: ${({ theme }) => isOr(theme) ? '0.9rem' : '1.5rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#1f2328')};
     border: 2px solid ${props => props.$color || 'rgba(255, 255, 255, 0.1)'};
     animation: slideDown 0.3s ease-out;
 
@@ -338,14 +348,14 @@ const TierDetailsHeader = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem;
-    padding-bottom: 0.75rem;
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    padding-bottom: ${({ theme }) => isOr(theme) ? '0.45rem' : '0.75rem'};
     border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
 `;
 
 const TierDetailsTitle = styled.h3`
     margin: 0;
-    font-size: 1.2rem;
+    font-size: ${({ theme }) => isOr(theme) ? '1.02rem' : '1.2rem'};
     font-weight: 700;
     color: ${props => props.$color || '#fff'};
 `;
@@ -388,6 +398,16 @@ const Mono = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
     font-size: 0.8rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+`;
+
+const ErrorMessageBox = styled.div`
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : 'rgba(220, 38, 38, 0.1)'};
+    border: 1px solid #dc2626;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.3rem' : '0.5rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
+    color: #dc2626;
+    font-size: ${({ theme }) => isOr(theme) ? '0.6375rem' : '0.75rem'};
 `;
 
 const TIERS = [
@@ -482,6 +502,7 @@ export default function SubscriptionView({ state }) {
     const txInFlightRef = useRef(false);
     const autoRenewDisplayRef = useRef(false);
     const detailsPanelRef = useRef(null);
+    const theme = useTheme();
 
     const loadTierConfigFromStorage = () => {
         try {
@@ -1128,17 +1149,9 @@ Not directly spendable and will get burned if not used.`}>
                                     </CurrentTierBanner>
 
                                     {error && (
-                                        <div style={{
-                                            background: 'rgba(220, 38, 38, 0.1)',
-                                            border: '1px solid #dc2626',
-                                            borderRadius: '4px',
-                                            padding: '0.5rem',
-                                            marginBottom: '1rem',
-                                            color: '#dc2626',
-                                            fontSize: '0.75rem'
-                                        }}>
+                                        <ErrorMessageBox>
                                             {error}
-                                        </div>
+                                        </ErrorMessageBox>
                                     )}
 
                                     {userIsAdmin ? (
@@ -1189,7 +1202,10 @@ Not directly spendable and will get burned if not used.`}>
                                                                 disabled={isActive || isUpgrading || isSubscribePending(address) || (!affordable && tier.level > 0)}
                                                                 style={{
                                                                     marginTop: 'auto',
-                                                                    ...(isActive ? {} : {
+                                                                    ...(isActive ? {} : isOr(theme) ? {
+                                                                        background: theme?.colors?.panelAlt || '#33373C',
+                                                                        borderColor: color
+                                                                    } : {
                                                                         background: `linear-gradient(135deg, ${color}, ${color}CC)`,
                                                                         borderColor: color
                                                                     })

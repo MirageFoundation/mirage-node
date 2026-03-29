@@ -9,12 +9,15 @@ import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 
+const isOr = (t) => t?.themeId === 'oldreddit';
+
 const ShareBox = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2A2E33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    margin-bottom: 1rem;
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#2A2E33')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.6rem 0.75rem' : '1rem 1.25rem'};
+    margin-bottom: ${({ theme }) => isOr(theme) ? '0.6rem' : '1rem'};
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -24,12 +27,12 @@ const ShareBox = styled.div`
 const ShareUrl = styled.input`
     flex: 1;
     min-width: 200px;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panel || '#23272C')};
     color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 4px;
-    padding: 0.4rem 0.6rem;
-    font-size: 0.75rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.34rem 0.5rem' : '0.4rem 0.6rem'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.64rem' : '0.75rem'};
     font-family: monospace;
 `;
 
@@ -37,9 +40,9 @@ const CopyBtn = styled.button`
     background: ${({ $copied, theme }) => $copied ? '#4caf50' : (theme?.colors?.accent || '#5865f2')};
     color: white;
     border: none;
-    border-radius: 4px;
-    padding: 0.4rem 0.8rem;
-    font-size: 0.75rem;
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '4px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.34rem 0.68rem' : '0.4rem 0.8rem'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.64rem' : '0.75rem'};
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.2s;
@@ -49,7 +52,7 @@ const CopyBtn = styled.button`
 const Table = styled.table`
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.75rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.64rem' : '0.75rem'};
 `;
 
 const Th = styled.th`
@@ -70,9 +73,9 @@ const Td = styled.td`
 
 const Badge = styled.span`
     display: inline-block;
-    padding: 0.15rem 0.4rem;
-    border-radius: 3px;
-    font-size: 0.65rem;
+    padding: ${({ theme }) => isOr(theme) ? '0.1rem 0.34rem' : '0.15rem 0.4rem'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '3px'};
+    font-size: ${({ theme }) => isOr(theme) ? '0.55rem' : '0.65rem'};
     font-weight: 600;
     background: ${({ $real }) => $real ? '#2e7d3233' : '#78909c22'};
     color: ${({ $real }) => $real ? '#66bb6a' : '#90a4ae'};
@@ -80,9 +83,9 @@ const Badge = styled.span`
 
 const EmptyState = styled.div`
     text-align: center;
-    padding: 2rem 1rem;
+    padding: ${({ theme }) => isOr(theme) ? '1.2rem 0.6rem' : '2rem 1rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.68rem' : '0.8rem'};
 `;
 
 const SummaryRow = styled.div`
@@ -93,22 +96,23 @@ const SummaryRow = styled.div`
 `;
 
 const SummaryCard = styled.div`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2A2E33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
+    background: ${({ theme }) => isOr(theme) ? 'transparent' : (theme?.colors?.panelAlt || '#2A2E33')};
+    border: ${({ theme }) => isOr(theme) ? 'none' : `1px solid ${theme?.colors?.border || '#444'}`};
+    border-bottom: ${({ theme }) => isOr(theme) ? `1px solid ${theme?.colors?.border || '#444'}` : 'none'};
+    border-radius: ${({ theme }) => isOr(theme) ? '0' : '8px'};
+    padding: ${({ theme }) => isOr(theme) ? '0.45rem 0.6rem' : '0.75rem 1rem'};
     min-width: 100px;
     text-align: center;
 `;
 
 const SummaryValue = styled.div`
-    font-size: 1.25rem;
+    font-size: ${({ theme }) => isOr(theme) ? '1.06rem' : '1.25rem'};
     font-weight: 700;
     color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
 `;
 
 const SummaryLabel = styled.div`
-    font-size: 0.65rem;
+    font-size: ${({ theme }) => isOr(theme) ? '0.55rem' : '0.65rem'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
     margin-top: 0.15rem;
 `;
