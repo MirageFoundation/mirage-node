@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SearchContainer, SearchRow, SearchInput } from "../styled/Layout";
 import Storage from "../utils/Storage";
@@ -343,6 +343,7 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
 }
 
 function TopBar({ state }) {
+    const theme = useTheme();
     // Hide TopBar entirely on mobile viewports
     const [isMobile, setIsMobile] = useState(() => {
         if (typeof window === 'undefined') return false;
@@ -457,6 +458,7 @@ function TopBar({ state }) {
         }
     };
 
+    if (theme?.themeId === 'oldreddit') return null;
     if (isMobile) return null;
 
     const handleNavClick = (targetPath, e) => {

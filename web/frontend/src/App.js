@@ -3,13 +3,12 @@ import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-ro
 import { HelmetProvider } from 'react-helmet-async';
 import { GlobalStyle } from './styled/GlobalStyle';
 import { ThemeProvider } from 'styled-components';
-import styled from 'styled-components';
 import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
 import Api from './lib/api';
 import * as tx from './utils/tx';
+import { getResolvedTheme, getThemeFamily } from './styled/theme';
 
-import MobileBottomNav from './components/MobileBottomNav';
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
 
@@ -74,63 +73,6 @@ const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
-const darkTheme = {
-    name: 'dark',
-    colors: {
-        bg: '#1A1A1A',
-        text: '#FFFFFF',
-        subtleText: '#CCCCCC',
-        panel: '#23272C',
-        panelAlt: '#33373C',
-        border: '#444',
-        accent: '#2E3238',
-        accentHover: '#3A3F46',
-        accentDisabled: '#4A4F55',
-        buttonText: '#FFFFFF',
-        link: '#FFFFFF',
-        linkHover: '#CCCCCC',
-        scrollbar: '#CCCCCC',
-    }
-};
-
-const lightTheme = {
-    name: 'light',
-    colors: {
-        bg: '#FFFFFF',
-        text: '#111827',
-        subtleText: '#4B5563',
-        panel: '#F7F7F8',
-        panelAlt: '#EFEFF1',
-        border: '#D1D5DB',
-        accent: '#E5E7EB',
-        accentHover: '#D1D5DB',
-        accentDisabled: '#F3F4F6',
-        buttonText: '#111827',
-        link: '#111827',
-        linkHover: '#374151',
-        scrollbar: '#9CA3AF',
-    }
-};
-
-// Hoist styled component out of render to keep component identity stable across renders
-const SiteContainer = styled.div`
-            width: 100%;
-            max-width: 100%;
-            margin: 0 auto;
-            padding: 0 1rem;
-            padding-bottom: 3rem;
-            @media (max-width: 1000px) {
-                padding: 0 0.25rem;
-                padding-bottom: 3rem;
-            }
-            @media (min-width: 1000px) {
-                max-width: 80%;
-            }
-            /* Extra bottom padding on mobile for bottom nav */
-            @media (max-width: 600px) {
-                padding-bottom: 80px;
-            }
-        `;
 
 // Routes that should not be saved/restored
 const excludedRoutes = [
@@ -267,6 +209,7 @@ class App extends Component {
 
         this.setCredentials = this.setCredentials.bind(this);
         this.setWarnOnLeave = this.setWarnOnLeave.bind(this);
+        this.state.themeId = Storage.load('theme_id', 'moon');
         this.state.themeMode = Storage.load('theme_mode', 'time');
         this.state.theme = this.calculateTheme(this.state.themeMode);
     }
@@ -422,6 +365,14 @@ class App extends Component {
         };
         window.addEventListener('keydown', this._onKeyDown);
 
+        // Listen for theme id changes from SettingsView
+        this._onThemeIdChange = (e) => {
+            const newId = e.detail?.themeId || 'moon';
+            try { document.documentElement.setAttribute('data-theme-id', newId); } catch (_) { }
+            this.setState({ themeId: newId });
+        };
+        window.addEventListener('themeIdChanged', this._onThemeIdChange);
+
         // Listen for theme mode changes from SettingsView
         this._onThemeModeChange = (e) => {
             const newMode = e.detail?.mode || 'time';
@@ -521,6 +472,7 @@ class App extends Component {
         try { window.removeEventListener('keydown', this._onKeyDown); } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
         try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
+        try { window.removeEventListener('themeIdChanged', this._onThemeIdChange); } catch (_) { }
         try { window.removeEventListener('themeModeChanged', this._onThemeModeChange); } catch (_) { }
         try {
             if (this._themeMql && this._themeMql.removeEventListener) {
@@ -827,7 +779,9 @@ class App extends Component {
     };
 
     render() {
-        const themeObj = this.state.theme === 'light' ? lightTheme : darkTheme;
+        const themeObj = getResolvedTheme({ themeId: this.state.themeId, themeMode: this.state.theme });
+        const family = getThemeFamily(this.state.themeId);
+        const Shell = family.Shell;
         return (
             <HelmetProvider>
                 <ThemeProvider theme={themeObj}>
@@ -845,10 +799,9 @@ class App extends Component {
 
                         <BrowserRouter>
                             <RouteTracker>
-                                <SiteContainer>
+                                <Shell state={this.state}>
                                     <React.Suspense fallback={null}>
                                         <Routes>
-                                            {/* MobileBottomNav renders in its own Suspense below */}
                                             <Route
                                                 path="/"
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="home" />}
@@ -872,7 +825,6 @@ class App extends Component {
                                             <Route path="/welcome" element={<WelcomeView state={this.state} />} />
                                             <Route path="/change_username" element={<ChangeUsernameView state={this.state} />} />
                                             <Route path="/sign_out" element={<SignOutView state={this.state} setCredentials={this.setCredentials} />} />
-                                            {/* New clean URL routes */}
                                             <Route path="/p/:postId" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/u/:identity" element={<ProfileView state={this.state} />} />
                                             <Route path="/profile" element={<ProfileView state={this.state} />} />
@@ -894,8 +846,7 @@ class App extends Component {
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>
-                                </SiteContainer>
-                                <MobileBottomNav state={this.state} />
+                                </Shell>
                             </RouteTracker>
                         </BrowserRouter>
                     </div>

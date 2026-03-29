@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Helmet } from 'react-helmet-async';
-import CardView from "../components/CardView";
+import { getThemeFamily } from "../styled/theme";
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
 import Button from "../components/Button";
@@ -19,8 +19,6 @@ import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import {
     ContentGrid,
     ModernPostFeed,
-    PostGrid,
-    AnimatedCard,
     StyledError,
 } from "../styled/Layout";
 
@@ -1342,6 +1340,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const urlTopic = routeTopic || params.topic || "home"; // Get the topic from URL or prop
     const navigationType = useNavigationType(); // 'POP' = back/forward, 'PUSH'/'REPLACE' = direct nav
     const isBackNavigation = getIsBackNavigation(navigationType);
+    const isOldReddit = state?.themeId === 'oldreddit';
 
     const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
@@ -1450,6 +1449,24 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
         return mode;
     });
+    const [oldRedditSort, setOldRedditSort] = useState('best');
+
+    const handleOldRedditSortChange = useCallback((mode) => {
+        const allowed = new Set(['best', 'hot', 'new', 'rising', 'controversial', 'top']);
+        if (!allowed.has(mode)) return;
+        console.debug('[OldReddit] sort.select', { mode });
+        setOldRedditSort(mode);
+    }, []);
+
+    useEffect(() => {
+        if (!isOldReddit) return;
+        const mapped = oldRedditSort === 'new' ? 'newest' : 'magic';
+        if (homeSortMode !== mapped) {
+            console.debug('[OldReddit] sort.map', { oldRedditSort, homeSortMode, mapped });
+            setHomeSortMode(mapped);
+            Storage.save('home_sort_mode', mapped);
+        }
+    }, [isOldReddit, oldRedditSort, homeSortMode]);
     const [cardSize, setCardSize] = useState(() => {
         try {
             return Storage.load('card_size', 'compact');
@@ -2895,7 +2912,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                     <ModernPostFeed>
                         <MobileHeader />
 
-                        {isLoggedIn && isCurrentTopic && (
+                        {isLoggedIn && isCurrentTopic && !isOldReddit && (
                             <TopicHeroCard>
                                 <TopicHeroHeader>
                                     <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
@@ -3080,27 +3097,29 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
                                     </HomeFeedInfoTitle>
-                                    <HomeFeedModeInline>
-                                        <HomeFeedModeSelect
-                                            value={homeSortMode}
-                                            onChange={(e) => {
-                                                const mode = e.target.value;
-                                                setHomeSortMode(mode);
-                                                Storage.save('home_sort_mode', mode);
-                                            }}
-                                        >
-                                            <option value="magic">Magic</option>
-                                            <option value="newest">Newest</option>
-                                        </HomeFeedModeSelect>
-                                        <HomeFeedModeSelect
-                                            value={cardSize}
-                                            onChange={(e) => handleCardSizeChange(e.target.value)}
-                                        >
-                                            <option value="large">Large</option>
-                                            {!isMobile && <option value="compact">Compact</option>}
-                                            <option value="media">Media</option>
-                                        </HomeFeedModeSelect>
-                                    </HomeFeedModeInline>
+                                    {!isOldReddit && (
+                                        <HomeFeedModeInline>
+                                            <HomeFeedModeSelect
+                                                value={homeSortMode}
+                                                onChange={(e) => {
+                                                    const mode = e.target.value;
+                                                    setHomeSortMode(mode);
+                                                    Storage.save('home_sort_mode', mode);
+                                                }}
+                                            >
+                                                <option value="magic">Magic</option>
+                                                <option value="newest">Newest</option>
+                                            </HomeFeedModeSelect>
+                                            <HomeFeedModeSelect
+                                                value={cardSize}
+                                                onChange={(e) => handleCardSizeChange(e.target.value)}
+                                            >
+                                                <option value="large">Large</option>
+                                                {!isMobile && <option value="compact">Compact</option>}
+                                                <option value="media">Media</option>
+                                            </HomeFeedModeSelect>
+                                        </HomeFeedModeInline>
+                                    )}
                                 </HomeFeedHeaderRow>
                                 <HomeFeedInfoDescription>
                                     Your followed topics plus fresh content to discover. <strong>The more you vote, the more your feed reflects your preferences.</strong>
@@ -3115,27 +3134,29 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
                                     </HomeFeedInfoTitle>
-                                    <HomeFeedModeInline>
-                                        <HomeFeedModeSelect
-                                            value={homeSortMode}
-                                            onChange={(e) => {
-                                                const mode = e.target.value;
-                                                setHomeSortMode(mode);
-                                                Storage.save('home_sort_mode', mode);
-                                            }}
-                                        >
-                                            <option value="magic">Magic</option>
-                                            <option value="newest">Newest</option>
-                                        </HomeFeedModeSelect>
-                                        <HomeFeedModeSelect
-                                            value={cardSize}
-                                            onChange={(e) => handleCardSizeChange(e.target.value)}
-                                        >
-                                            <option value="large">Large</option>
-                                            {!isMobile && <option value="compact">Compact</option>}
-                                            <option value="media">Media</option>
-                                        </HomeFeedModeSelect>
-                                    </HomeFeedModeInline>
+                                    {!isOldReddit && (
+                                        <HomeFeedModeInline>
+                                            <HomeFeedModeSelect
+                                                value={homeSortMode}
+                                                onChange={(e) => {
+                                                    const mode = e.target.value;
+                                                    setHomeSortMode(mode);
+                                                    Storage.save('home_sort_mode', mode);
+                                                }}
+                                            >
+                                                <option value="magic">Magic</option>
+                                                <option value="newest">Newest</option>
+                                            </HomeFeedModeSelect>
+                                            <HomeFeedModeSelect
+                                                value={cardSize}
+                                                onChange={(e) => handleCardSizeChange(e.target.value)}
+                                            >
+                                                <option value="large">Large</option>
+                                                {!isMobile && <option value="compact">Compact</option>}
+                                                <option value="media">Media</option>
+                                            </HomeFeedModeSelect>
+                                        </HomeFeedModeInline>
+                                    )}
                                 </HomeFeedHeaderRow>
                                 <HomeFeedInfoDescription>
                                     <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
@@ -3204,44 +3225,28 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         )}
 
                         {/* Posts grid - only show to logged-in users */}
-                        {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (
-                            <PostGrid>
-                                {orderedPosts.map((post, index) => {
-                                    // Skip posts that would render as empty (no title/topic)
-                                    const hasValidTitle = post && typeof post.title === 'string' && post.title.trim().length > 0;
-                                    const hasValidTopic = post && typeof post.topic === 'string' && post.topic.trim().length > 0;
-                                    if (!hasValidTitle || !hasValidTopic || post.deleted) return null;
-
-                                    const postKey = String(post?.post_id || '').toLowerCase();
-                                    const isHiding = hidingPostsSet.has(postKey);
-                                    // Flash if in flashingPostsSet OR if it's a very recent post by the viewer (< 30 sec)
-                                    // Don't flash if hiding
-                                    const isViewerPost = String(post?.author || '').toLowerCase() === viewerAddress.toLowerCase();
-                                    let postTs = Number(post?.timestamp || 0);
-                                    if (postTs > 1e12) postTs = Math.floor(postTs / 1000);
-                                    const isVeryRecent = Number.isFinite(postTs) && (Math.floor(Date.now() / 1000) - postTs) <= 30;
-                                    const isFlashing = !isHiding && (flashingPostsSet.has(postKey) || (isViewerPost && isVeryRecent));
-                                    // Only stagger animation for first ~5 posts (avoid long delays on pagination)
-                                    const animDelay = isHiding ? 0 : Math.min(index * 50, 250);
-                                    return (
-                                        <AnimatedCard
-                                            key={post.post_id}
-                                            $hiding={isHiding}
-                                            $flash={isFlashing}
-                                            style={{
-                                                animationDelay: `${animDelay}ms`,
-                                            }}
-                                        >
-                                            <CardView
-                                                state={state}
-                                                post={post}
-                                                updatePost={updatePost}
-                                            />
-                                        </AnimatedCard>
-                                    );
-                                })}
-                            </PostGrid>
-                        )}
+                        {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                            const family = getThemeFamily(state?.themeId);
+                            const FeedComponent = family.Feed;
+                            const visiblePosts = orderedPosts.filter((p) => {
+                                const hasValidTitle = p && typeof p.title === 'string' && p.title.trim().length > 0;
+                                const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
+                                return hasValidTitle && hasValidTopic && !p.deleted;
+                            });
+                            return (
+                                <FeedComponent
+                                    posts={visiblePosts}
+                                    state={state}
+                                    updatePost={updatePost}
+                                    hidingPostsSet={hidingPostsSet}
+                                    flashingPostsSet={flashingPostsSet}
+                                    viewerAddress={viewerAddress}
+                                    sortMode={oldRedditSort}
+                                    onSortChange={handleOldRedditSortChange}
+                                    showSortTabs={urlTopic === 'home' || urlTopic === 'following'}
+                                />
+                            );
+                        })()}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
                             <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>

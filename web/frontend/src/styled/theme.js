@@ -1,321 +1,195 @@
 /**
- * Mirage Design System - Comprehensive Theme Tokens
- * 
- * Design Principles:
- * - WCAG AA contrast (4.5:1 for text, 3:1 for UI elements)
- * - Dark mode first, light mode pair-mirrored
- * - Consistent brand feeling across modes
- * - No neon or overly saturated colors
- * - Balanced shadows with low blur
+ * Theme Registry
+ *
+ * Central source of truth for all theme families. Each family defines
+ * dark and light token sets plus metadata (label, description, capabilities).
+ *
+ * Components continue to access tokens via `theme.colors.xxx` from
+ * styled-components ThemeProvider. The fallback modules in colors/dark.js
+ * and colors/light.js are still used by pickThemeColor in components that
+ * need extended tokens not present in the base set.
+ *
+ * HOW TO ADD A NEW THEME:
+ * 1. Define dark + light token objects (same shape as moonDark/moonLight).
+ *    Required fields: name ('dark'|'light'), themeId (your id string), colors.
+ *    Optional: fontFamily (defaults to Noto Sans via GlobalStyle).
+ * 2. Create a shell component in src/shells/ (can copy MoonShell as a base).
+ * 3. Create a feed component (MoonFeedView/ListFeedView-style) for that theme.
+ * 4. Add an entry to THEMES below with id, label, description,
+ *    supportsDarkLight, dark, light, Shell, and Feed.
+ * 5. No other files need changes -- the registry, App.js, and SettingsView
+ *    discover new themes automatically.
  */
 
-// ============================================================================
-// SPACING & RADIUS SCALE
-// ============================================================================
+import MoonShell from '../shells/MoonShell';
+import OldRedditShell from '../shells/OldRedditShell';
+import MoonFeedView from '../components/MoonFeedView';
+import ListFeedView from '../components/ListFeedView';
 
-export const radius = {
-    xs: '4px',      // Small controls, tags, badges
-    sm: '6px',      // Buttons, inputs, pills
-    md: '10px',     // Cards, dropdowns
-    lg: '14px',     // Large cards, modals
-    xl: '20px',     // Hero sections, large panels
-    full: '9999px', // Circular elements, fully rounded pills
-};
+// ---------------------------------------------------------------------------
+// Moon theme - current Mirage look
+// These values are the exact tokens that App.js previously passed to
+// ThemeProvider. Changing them would change the rendered UI.
+// ---------------------------------------------------------------------------
 
-// ============================================================================
-// SHADOW SYSTEM
-// ============================================================================
-
-export const shadows = {
-    dark: {
-        sm: '0 2px 4px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2)',
-        md: '0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25)',
-        lg: '0 8px 24px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.3)',
-        focus: '0 0 0 3px rgba(99, 179, 237, 0.4)',
-        focusError: '0 0 0 3px rgba(239, 68, 68, 0.4)',
-        focusSuccess: '0 0 0 3px rgba(34, 197, 94, 0.4)',
-        overlay: 'rgba(0, 0, 0, 0.75)',
-    },
-    light: {
-        sm: '0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)',
-        md: '0 4px 12px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)',
-        lg: '0 8px 24px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.08)',
-        focus: '0 0 0 3px rgba(59, 130, 246, 0.35)',
-        focusError: '0 0 0 3px rgba(220, 38, 38, 0.35)',
-        focusSuccess: '0 0 0 3px rgba(22, 163, 74, 0.35)',
-        overlay: 'rgba(0, 0, 0, 0.5)',
-    }
-};
-
-// ============================================================================
-// DARK THEME - Primary theme, designed first
-// ============================================================================
-
-export const darkTheme = {
+const moonDark = {
     name: 'dark',
-
+    themeId: 'moon',
     colors: {
-        // === Background/Surface Tiers ===
-        bg: '#0f1114',                    // Page background (deepest)
-        surface1: '#1a1d21',              // Cards, sections (elevated)
-        surface2: '#22262b',              // Hover/raised surfaces
-        surface3: '#2a2f36',              // Modals, popovers (highest)
-
-        // Legacy aliases (for backwards compatibility)
-        panel: '#1a1d21',
-        panelAlt: '#22262b',
-
-        // === Border Colors ===
-        border: '#32383f',                // Default border
-        borderSubtle: '#282d33',          // Low-elevation borders
-        borderStrong: '#434a52',          // High-emphasis borders
-        borderFocus: '#63b3ed',           // Focus ring color
-
-        // === Text Colors ===
-        text: '#f0f2f5',                  // Primary text (WCAG AA on surface1: 15:1)
-        textSecondary: '#a0a8b3',         // Secondary/muted text (WCAG AA: 6.5:1)
-        textDisabled: '#5a6370',          // Disabled text (intentionally lower contrast)
-        textOnAccent: '#0f1114',          // Text on primary buttons
-        textOnAccentSubtle: '#1a1d21',    // Text on subtle accents
-
-        // Legacy aliases
-        subtleText: '#a0a8b3',
-        mutedText: '#7a8390',
-
-        // === Primary Accent ===
-        accent: '#63b3ed',                // Primary accent (bright sky blue)
-        accentHover: '#4299e1',           // Primary hover
-        accentActive: '#3182ce',          // Primary pressed/active
-        accentSubtle: 'rgba(99, 179, 237, 0.12)',  // Subtle accent background
-        accentDisabled: '#4a5568',        // Disabled accent
-
-        // === Secondary Accent ===
-        secondary: '#2a2f36',             // Secondary button background
-        secondaryHover: '#343b44',        // Secondary hover
-        secondaryActive: '#3d454f',       // Secondary active
-        secondaryBorder: '#434a52',       // Secondary border
-
-        // === Semantic Colors ===
-        success: '#48bb78',               // Success green
-        successHover: '#38a169',
-        successSubtle: 'rgba(72, 187, 120, 0.12)',
-        successText: '#68d391',           // Success text color
-
-        warning: '#ed8936',               // Warning orange
-        warningHover: '#dd6b20',
-        warningSubtle: 'rgba(237, 137, 54, 0.12)',
-        warningText: '#f6ad55',           // Warning text color
-
-        error: '#f56565',                 // Error red
-        errorHover: '#e53e3e',
-        errorSubtle: 'rgba(245, 101, 101, 0.12)',
-        errorText: '#fc8181',             // Error text color
-
-        // === Link Colors ===
-        link: '#63b3ed',                  // Link default
-        linkHover: '#90cdf4',             // Link hover
-        linkVisited: '#b794f4',           // Link visited (purple tint)
-        linkActive: '#4299e1',            // Link active/pressed
-
-        // === Divider/Separator ===
-        divider: '#282d33',               // Subtle dividers
-        dividerStrong: '#32383f',         // Prominent dividers
-
-        // === Chips/Tags/Badges ===
-        chip: '#22262b',                  // Default chip background
-        chipBorder: '#32383f',            // Chip border
-        chipText: '#a0a8b3',              // Chip text
-        chipHover: '#2a2f36',             // Chip hover
-        chipActive: '#343b44',            // Chip active/selected
-        chipActiveText: '#f0f2f5',        // Active chip text
-
-        // === Code/Inline Media ===
-        code: '#22262b',                  // Inline code background
-        codeBorder: '#32383f',            // Code block border
-        codeText: '#e2e8f0',              // Code text
-
-        // === Vote Colors ===
-        voteUp: '#48bb78',                // Upvote green
-        voteUpHover: '#68d391',
-        voteUpBg: 'rgba(72, 187, 120, 0.15)',
-        voteDown: '#f56565',              // Downvote red
-        voteDownHover: '#fc8181',
-        voteDownBg: 'rgba(245, 101, 101, 0.15)',
-
-        // === Overlay/Scrim ===
-        overlay: 'rgba(0, 0, 0, 0.75)',
-        overlayLight: 'rgba(0, 0, 0, 0.5)',
-
-        // === Scrollbar ===
-        scrollbar: '#434a52',
-        scrollbarHover: '#5a6370',
-        scrollbarTrack: 'transparent',
-
-        // === Button Text (legacy) ===
-        buttonText: '#0f1114',
+        bg: '#1A1A1A',
+        text: '#FFFFFF',
+        subtleText: '#CCCCCC',
+        panel: '#23272C',
+        panelAlt: '#33373C',
+        border: '#444',
+        accent: '#2E3238',
+        accentHover: '#3A3F46',
+        accentDisabled: '#4A4F55',
+        buttonText: '#FFFFFF',
+        link: '#FFFFFF',
+        linkHover: '#CCCCCC',
+        scrollbar: '#CCCCCC',
+        cardShadow: 'none',
+        cardShadowHover: 'none',
     },
-
-    shadows: shadows.dark,
-    radius,
 };
 
-// ============================================================================
-// LIGHT THEME - Pair-mirrored from dark theme
-// ============================================================================
-
-export const lightTheme = {
+const moonLight = {
     name: 'light',
-
+    themeId: 'moon',
     colors: {
-        // === Background/Surface Tiers ===
-        bg: '#f8fafc',                    // Page background (lightest)
-        surface1: '#ffffff',              // Cards, sections
-        surface2: '#f1f5f9',              // Hover/raised surfaces
-        surface3: '#e2e8f0',              // Modals, popovers
-
-        // Legacy aliases
-        panel: '#ffffff',
-        panelAlt: '#f1f5f9',
-
-        // === Border Colors ===
-        border: '#d1d5db',                // Default border
-        borderSubtle: '#e5e7eb',          // Low-elevation borders
-        borderStrong: '#9ca3af',          // High-emphasis borders
-        borderFocus: '#3b82f6',           // Focus ring color
-
-        // === Text Colors ===
-        text: '#1a202c',                  // Primary text (WCAG AA on surface1: 15.6:1)
-        textSecondary: '#4a5568',         // Secondary/muted text (WCAG AA: 7.5:1)
-        textDisabled: '#a0aec0',          // Disabled text
-        textOnAccent: '#ffffff',          // Text on primary buttons
-        textOnAccentSubtle: '#f8fafc',    // Text on subtle accents
-
-        // Legacy aliases
-        subtleText: '#4a5568',
-        mutedText: '#718096',
-
-        // === Primary Accent ===
-        accent: '#3b82f6',                // Primary accent (vivid blue)
-        accentHover: '#2563eb',           // Primary hover
-        accentActive: '#1d4ed8',          // Primary pressed/active
-        accentSubtle: 'rgba(59, 130, 246, 0.1)',   // Subtle accent background
-        accentDisabled: '#cbd5e1',        // Disabled accent
-
-        // === Secondary Accent ===
-        secondary: '#f1f5f9',             // Secondary button background
-        secondaryHover: '#e2e8f0',        // Secondary hover
-        secondaryActive: '#cbd5e1',       // Secondary active
-        secondaryBorder: '#d1d5db',       // Secondary border
-
-        // === Semantic Colors ===
-        success: '#22c55e',               // Success green
-        successHover: '#16a34a',
-        successSubtle: 'rgba(34, 197, 94, 0.1)',
-        successText: '#15803d',           // Success text color
-
-        warning: '#f59e0b',               // Warning orange
-        warningHover: '#d97706',
-        warningSubtle: 'rgba(245, 158, 11, 0.1)',
-        warningText: '#b45309',           // Warning text color
-
-        error: '#ef4444',                 // Error red
-        errorHover: '#dc2626',
-        errorSubtle: 'rgba(239, 68, 68, 0.1)',
-        errorText: '#dc2626',             // Error text color
-
-        // === Link Colors ===
-        link: '#2563eb',                  // Link default
-        linkHover: '#1d4ed8',             // Link hover
-        linkVisited: '#7c3aed',           // Link visited (purple)
-        linkActive: '#1e40af',            // Link active/pressed
-
-        // === Divider/Separator ===
-        divider: '#e5e7eb',               // Subtle dividers
-        dividerStrong: '#d1d5db',         // Prominent dividers
-
-        // === Chips/Tags/Badges ===
-        chip: '#f1f5f9',                  // Default chip background
-        chipBorder: '#d1d5db',            // Chip border
-        chipText: '#4a5568',              // Chip text
-        chipHover: '#e2e8f0',             // Chip hover
-        chipActive: '#3b82f6',            // Chip active/selected
-        chipActiveText: '#ffffff',        // Active chip text
-
-        // === Code/Inline Media ===
-        code: '#f1f5f9',                  // Inline code background
-        codeBorder: '#e2e8f0',            // Code block border
-        codeText: '#1a202c',              // Code text
-
-        // === Vote Colors ===
-        voteUp: '#16a34a',                // Upvote green
-        voteUpHover: '#15803d',
-        voteUpBg: 'rgba(22, 163, 74, 0.1)',
-        voteDown: '#dc2626',              // Downvote red
-        voteDownHover: '#b91c1c',
-        voteDownBg: 'rgba(220, 38, 38, 0.1)',
-
-        // === Overlay/Scrim ===
-        overlay: 'rgba(0, 0, 0, 0.5)',
-        overlayLight: 'rgba(0, 0, 0, 0.3)',
-
-        // === Scrollbar ===
-        scrollbar: '#9ca3af',
-        scrollbarHover: '#6b7280',
-        scrollbarTrack: 'transparent',
-
-        // === Button Text (legacy) ===
-        buttonText: '#1a202c',
+        bg: '#FFFFFF',
+        text: '#111827',
+        subtleText: '#4B5563',
+        panel: '#F7F7F8',
+        panelAlt: '#EFEFF1',
+        border: '#D1D5DB',
+        accent: '#E5E7EB',
+        accentHover: '#D1D5DB',
+        accentDisabled: '#F3F4F6',
+        buttonText: '#111827',
+        link: '#111827',
+        linkHover: '#374151',
+        scrollbar: '#9CA3AF',
+        cardShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+        cardShadowHover: '0 6px 20px rgba(0, 0, 0, 0.15)',
     },
-
-    shadows: shadows.light,
-    radius,
 };
 
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
+// ---------------------------------------------------------------------------
+// Old Reddit theme - compact list-based feed, dense information layout
+// Verdana/system sans-serif, tight spacing, no card shadows, text links
+// ---------------------------------------------------------------------------
+
+const oldredditDark = {
+    name: 'dark',
+    themeId: 'oldreddit',
+    fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
+    colors: {
+        bg: '#1a1a1b',
+        text: '#d7dadc',
+        subtleText: '#818384',
+        panel: '#1a1a1b',
+        panelAlt: '#272729',
+        border: '#343536',
+        accent: '#272729',
+        accentHover: '#3a3a3c',
+        accentDisabled: '#3a3a3c',
+        buttonText: '#d7dadc',
+        link: '#4fbcff',
+        linkHover: '#7fcfff',
+        scrollbar: '#4a4a4c',
+        card: '#1a1a1b',
+        cardAlt: '#222224',
+        cardBorder: '#343536',
+        sidebarBg: '#1a1a1b',
+        headerBg: '#1a1a1b',
+        voteUp: '#ff4500',
+        voteUpHover: '#ff5722',
+        voteUpBg: 'rgba(255, 69, 0, 0.15)',
+        voteDown: '#7193ff',
+        voteDownHover: '#5a7cff',
+        voteDownBg: 'rgba(113, 147, 255, 0.15)',
+        cardShadow: 'none',
+        cardShadowHover: 'none',
+    },
+};
+
+const oldredditLight = {
+    name: 'light',
+    themeId: 'oldreddit',
+    fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
+    colors: {
+        bg: '#dae0e6',
+        text: '#1c1c1c',
+        subtleText: '#7c7c7c',
+        panel: '#ffffff',
+        panelAlt: '#f6f7f8',
+        border: '#ccc',
+        accent: '#f6f7f8',
+        accentHover: '#e8e8e8',
+        accentDisabled: '#eee',
+        buttonText: '#1c1c1c',
+        link: '#0079d3',
+        linkHover: '#0059a3',
+        scrollbar: '#c1c1c1',
+        card: '#ffffff',
+        cardAlt: '#f6f7f8',
+        cardBorder: '#ccc',
+        sidebarBg: '#ffffff',
+        headerBg: '#f6f7f8',
+        voteUp: '#ff4500',
+        voteUpHover: '#cc3700',
+        voteUpBg: 'rgba(255, 69, 0, 0.1)',
+        voteDown: '#7193ff',
+        voteDownHover: '#4a6cff',
+        voteDownBg: 'rgba(113, 147, 255, 0.1)',
+        cardShadow: 'none',
+        cardShadowHover: 'none',
+    },
+};
+
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
+
+export const THEMES = {
+    moon: {
+        id: 'moon',
+        label: 'Moon',
+        description: 'Modern card-based feed',
+        supportsDarkLight: true,
+        dark: moonDark,
+        light: moonLight,
+        Shell: MoonShell,
+        Feed: MoonFeedView,
+    },
+    oldreddit: {
+        id: 'oldreddit',
+        label: 'Classic',
+        description: 'Compact list-based feed (old Reddit style)',
+        supportsDarkLight: true,
+        dark: oldredditDark,
+        light: oldredditLight,
+        Shell: OldRedditShell,
+        Feed: ListFeedView,
+    },
+};
 
 /**
- * Get theme by name
+ * Resolve a concrete theme object from a family id and a resolved variant.
+ * @param {string} themeId   - 'moon' | 'oldreddit' | ...
+ * @param {string} themeMode - Already resolved to 'dark' or 'light'
+ *                             (not 'system' or 'time' — resolve those first).
  */
-export function getTheme(themeName) {
-    return themeName === 'light' ? lightTheme : darkTheme;
+export function getResolvedTheme({ themeId, themeMode }) {
+    const family = THEMES[themeId] || THEMES.moon;
+    return family[themeMode === 'light' ? 'light' : 'dark'];
 }
 
 /**
- * Calculate system theme preference
+ * Return the theme family metadata for a given id.
  */
-export function getSystemTheme() {
-    if (typeof window === 'undefined') return 'dark';
-    try {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    } catch (_) {
-        return 'dark';
-    }
+export function getThemeFamily(themeId) {
+    return THEMES[themeId] || THEMES.moon;
 }
-
-// ============================================================================
-// CSS CUSTOM PROPERTIES (for potential future CSS variables approach)
-// ============================================================================
-
-export function generateCSSVariables(theme) {
-    const vars = {};
-    const flatten = (obj, prefix = '') => {
-        for (const [key, value] of Object.entries(obj)) {
-            const varName = prefix ? `${prefix}-${key}` : key;
-            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                flatten(value, varName);
-            } else {
-                vars[`--${varName}`] = value;
-            }
-        }
-    };
-    flatten(theme.colors, 'color');
-    flatten(theme.shadows, 'shadow');
-    flatten(theme.radius, 'radius');
-    return vars;
-}
-
-const themeExports = { darkTheme, lightTheme, shadows, radius };
-export default themeExports;
-

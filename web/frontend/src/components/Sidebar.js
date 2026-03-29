@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import styled from 'styled-components';
+import styled, { useTheme } from 'styled-components';
 import { Link, useLocation } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import { fetchFollowedTopics, loadSubscriptions } from '../utils/Subscriptions';
@@ -198,6 +198,7 @@ const EmptyState = styled.div`
 `;
 
 const Sidebar = ({ currentPath, state }) => {
+    const theme = useTheme();
     const location = useLocation();
     const [showAllTopics, setShowAllTopics] = useState(false);
     const [showAllPeople, setShowAllPeople] = useState(false);
@@ -342,6 +343,8 @@ const Sidebar = ({ currentPath, state }) => {
         const trimmed = lower.replace(/^mirage1/, 'm1');
         return `@${trimmed.slice(0, 10)}…${trimmed.slice(-4)}`;
     };
+
+    if (theme?.themeId === 'oldreddit') return null;
 
     return (
         <SidebarContainer>

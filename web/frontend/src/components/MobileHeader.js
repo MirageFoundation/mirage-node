@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import styled from 'styled-components';
+import styled, { useTheme } from 'styled-components';
 import Storage from '../utils/Storage';
 import { formatMirageBalance } from '../utils/formatters';
 import useBalance from '../utils/useBalance';
@@ -218,6 +218,7 @@ const MobileBalanceLabel = styled.span`
 `;
 
 const MobileHeader = () => {
+    const theme = useTheme();
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState('');
     const [searchExpanded, setSearchExpanded] = useState(false);
@@ -249,6 +250,8 @@ const MobileHeader = () => {
         setSearchExpanded(false);
         setSearchQuery('');
     };
+
+    if (theme?.themeId === 'oldreddit') return null;
 
     return (
         <MobileHeaderContainer>

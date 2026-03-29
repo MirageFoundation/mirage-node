@@ -41,11 +41,11 @@ const StyledMainContainer = styled.div`
     margin: 0;
     contain: layout style;
     will-change: transform;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.1)' : 'none'};
+    box-shadow: ${({ theme }) => theme?.colors?.cardShadow || 'none'};
 
     &:hover {
         background: ${({ theme }) => pickCard(theme, 'cardAlt')};
-        box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 6px 20px rgba(0, 0, 0, 0.15)' : 'none'};
+        box-shadow: ${({ theme }) => theme?.colors?.cardShadowHover || 'none'};
     }
 
     position: relative;
@@ -664,8 +664,8 @@ const FeedReasonInline = styled.span`
 const FeedDebugTooltip = styled.div`
     position: fixed;
     z-index: 10000;
-    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : (theme?.colors?.cardBackground || '#1a1a1a')};
-    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : (theme?.colors?.border || '#333')};
+    background: ${({ theme }) => theme?.colors?.panel};
+    border: 1px solid ${({ theme }) => theme?.colors?.border};
     border-radius: 6px;
     padding: 0.75rem;
     min-width: 420px;
@@ -675,7 +675,7 @@ const FeedDebugTooltip = styled.div`
     font-size: 0.7rem;
     line-height: 1.4;
     text-align: left;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
+    box-shadow: 0 4px 12px rgba(0, 0, 0, ${({ theme }) => theme?.name === 'light' ? '0.15' : '0.3'});
     white-space: normal;
     word-break: break-word;
 `;
@@ -691,20 +691,19 @@ const FeedDebugRow = styled.div`
 `;
 
 const FeedDebugLabel = styled.span`
-    /* Use main text color for maximum contrast in both themes */
-    color: ${({ theme }) => theme?.colors?.text || (theme?.name === 'light' ? '#111111' : '#f5f5f5')};
+    color: ${({ theme }) => theme?.colors?.text};
 `;
 
 const FeedDebugValue = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || (theme?.name === 'light' ? '#000000' : '#ffffff')};
+    color: ${({ theme }) => theme?.colors?.text};
     font-weight: 600;
 `;
 
 const FeedDebugExplanation = styled.div`
     margin-top: 0.5rem;
     padding-top: 0.5rem;
-    border-top: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : (theme?.colors?.border || '#333')};
-    color: ${({ theme }) => theme?.colors?.subtleText || (theme?.name === 'light' ? '#555555' : '#aaaaaa')};
+    border-top: 1px solid ${({ theme }) => theme?.colors?.border};
+    color: ${({ theme }) => theme?.colors?.subtleText};
     white-space: normal;
 `;
 

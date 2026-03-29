@@ -8,6 +8,7 @@ import { deleteUser } from "../utils/tx";
 import Api from "../lib/api";
 import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "../utils/usePendingDeletes";
+import { THEMES } from "../styled/theme";
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
 import MobileHeader from '../components/MobileHeader';
@@ -411,6 +412,13 @@ export default function SettingsView({ state }) {
     const location = useLocation();
     const { getInfo: getDeleteInfo, formatStatus: formatDeleteStatus } = usePendingDeletes();
 
+    const [themeId, setThemeId] = useState(() => {
+        try {
+            return Storage.load('theme_id', 'moon');
+        } catch (_) {
+            return 'moon';
+        }
+    });
     const [themeMode, setThemeMode] = useState(() => {
         try {
             return Storage.load('theme_mode', 'time');
@@ -668,11 +676,17 @@ export default function SettingsView({ state }) {
         return () => { cancelled = true; };
     }, [state.publicKey]);
 
+    const handleThemeIdChange = (e) => {
+        const newId = e.target.value;
+        setThemeId(newId);
+        Storage.save('theme_id', newId);
+        window.dispatchEvent(new CustomEvent('themeIdChanged', { detail: { themeId: newId } }));
+    };
+
     const handleThemeModeChange = (e) => {
         const newMode = e.target.value;
         setThemeMode(newMode);
         Storage.save('theme_mode', newMode);
-        // Trigger a custom event that App.js can listen to
         window.dispatchEvent(new CustomEvent('themeModeChanged', { detail: { mode: newMode } }));
     };
 
@@ -998,6 +1012,17 @@ export default function SettingsView({ state }) {
 
                             <Row>
                                 <Label>Theme:</Label>
+                                <ValueBox>
+                                    <ThemeSelect value={themeId} onChange={handleThemeIdChange}>
+                                        {Object.values(THEMES).map((t) => (
+                                            <option key={t.id} value={t.id}>{t.label} — {t.description}</option>
+                                        ))}
+                                    </ThemeSelect>
+                                </ValueBox>
+                            </Row>
+
+                            <Row>
+                                <Label>Theme mode:</Label>
                                 <ValueBox>
                                     <ThemeSelect value={themeMode} onChange={handleThemeModeChange}>
                                         <option value="time">Time-based</option>

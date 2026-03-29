@@ -80,17 +80,17 @@ export const ContainerBody = styled.div`
 // Uses CSS custom property --content-max-width for full-width mode support
 export const ContentGrid = styled.div`
     display: grid;
-    grid-template-columns: 200px minmax(0, 1fr);
-    gap: 0.5rem;
+    grid-template-columns: ${({ theme }) => theme?.themeId === 'oldreddit' ? 'minmax(0, 1fr)' : '200px minmax(0, 1fr)'};
+    gap: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0.5rem'};
     max-width: var(--content-max-width, 1240px);
     margin: 0 auto;
-    padding: 0 0.5rem;
+    padding: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0 0.5rem'};
     box-sizing: border-box;
     width: 100%;
 
     @media (max-width: 1000px) {
         grid-template-columns: minmax(0, 1fr);
-        padding: 0 0.25rem;
+        padding: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0 0.25rem'};
     }
 `;
 
@@ -107,20 +107,20 @@ export const ModernPostFeed = styled.div`
     max-width: var(--feed-max-width, 1000px);
     width: 100%;
     margin: 0 auto;
-    padding: 0 0.75rem;
+    padding: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0 0.75rem'};
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: var(--card-gap, 0.5rem);
+    gap: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : 'var(--card-gap, 0.5rem)'};
 
     @media (max-width: 1000px) {
-        padding: 0 0.25rem;
-        gap: 0.4rem;
+        padding: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0 0.25rem'};
+        gap: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : '0.4rem'};
     }
 
     @media (max-width: 600px) {
-        padding: 0 0 0 0;
-        gap: var(--card-gap-mobile, 0.35rem);
+        padding: 0;
+        gap: ${({ theme }) => theme?.themeId === 'oldreddit' ? '0' : 'var(--card-gap-mobile, 0.35rem)'};
     }
 `;
 

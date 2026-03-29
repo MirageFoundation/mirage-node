@@ -29,7 +29,7 @@ const NavContainer = styled.nav`
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         background: ${({ theme }) =>
-        theme?.name === 'dark'
+        theme?.name !== 'light'
             ? 'rgba(26, 26, 26, 0.95)'
             : 'rgba(255, 255, 255, 0.95)'};
         box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);

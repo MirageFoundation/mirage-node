@@ -10,7 +10,7 @@ export const GlobalStyle = createGlobalStyle`
   /* This makes the entire UI more compact without changing any component code */
   html {
     box-sizing: border-box;
-    font-family: 'Noto Sans';
+    font-family: ${({ theme }) => theme?.fontFamily || "'Noto Sans'"};
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
