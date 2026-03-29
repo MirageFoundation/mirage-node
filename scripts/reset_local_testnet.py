@@ -453,6 +453,25 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
         for item in sorted(env_dir.iterdir()):
             if item.is_file():
                 run(["bash", "-lc", f"docker cp '{item}' mirage:/root/.mirage/env/"])
+        desired_snapshot_keep_recent = read_node_env_value("SNAPSHOT_KEEP_RECENT")
+        if not desired_snapshot_keep_recent.isdigit() or int(desired_snapshot_keep_recent) <= 0:
+            raise RuntimeError(
+                f"SNAPSHOT_KEEP_RECENT must be a positive integer (got {desired_snapshot_keep_recent!r})"
+            )
+        status(f"Enforcing SNAPSHOT_KEEP_RECENT={desired_snapshot_keep_recent} in container env...")
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage bash -lc "
+                f"'set -euo pipefail; "
+                'if ! grep -q "^SNAPSHOT_KEEP_RECENT=" /root/.mirage/env/node.env; then '
+                'echo "SNAPSHOT_KEEP_RECENT missing in /root/.mirage/env/node.env" >&2; exit 1; '
+                "fi; "
+                f'sed -i "s/^SNAPSHOT_KEEP_RECENT=.*/SNAPSHOT_KEEP_RECENT={desired_snapshot_keep_recent}/" '
+                "/root/.mirage/env/node.env'",
+            ]
+        )
         # Force backend-db-split migration to re-run (production backup has the
         # marker but the local backend DB is restored separately and may be empty)
         run(
@@ -462,6 +481,15 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
                 "docker exec mirage sed -i '/v1\\.21\\.10-migrate-backend-db-split/d' /root/.mirage/env/.migrations 2>/dev/null || true",
             ]
         )
+        if migrations_file.exists():
+            status("Forcing snapshot retention migration to re-run on startup...")
+            run(
+                [
+                    "bash",
+                    "-lc",
+                    "docker exec mirage sed -i '/v1\\.22\\.0-snapshot-keep-recent/d' /root/.mirage/env/.migrations",
+                ]
+            )
         # Clear DOMAIN to prevent entrypoint from attempting HTTPS/LetsEncrypt setup locally
         run(
             [

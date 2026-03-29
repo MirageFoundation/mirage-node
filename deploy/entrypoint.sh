@@ -464,6 +464,13 @@ python3 -m deploy.migrations --config-dir "$ENV_DIR"
 # Reload env files after migrations
 load_env_files
 
+# Re-render node configs in case migrations updated env values.
+echo "==> Re-rendering node config from updated env..."
+mkdir -p "$NODE_HOME/config"
+python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/config.toml" "$NODE_HOME/config/config.toml"
+python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/app.toml" "$NODE_HOME/config/app.toml"
+python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/client.toml" "$NODE_HOME/config/client.toml"
+
 # Sync critical env vars to the tmux session (the session was created before
 # migrations may have updated env files, so new windows need the latest values)
 for _evar in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL CLIENT_HASH_SALT; do

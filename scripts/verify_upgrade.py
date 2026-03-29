@@ -4,14 +4,15 @@ Post-upgrade verification for v1.22.x.
 
 Checks:
   1. Required environment variables are set (DB URLs)
-  2. Backend + indexer (RO) DB connections succeed
-  3. Database schema: key tables exist
-  4. Indexer freshness: latest block is recent, chain_stats populated
-  5. Data integrity: profiles, balances, tx_index raw_log
-  6. Chain params completeness via /api/get_chain_config
-  7. Backend API health: key GET endpoints return valid data
-  8. Core routes: subscribe exists, upgrade_level removed, POST routes reachable
-  9. Error catalog: deprecated errors removed (e.g. pow_not_allowed_for_subscribers)
+  2. Node retention config (snapshot keep recent)
+  3. Backend + indexer (RO) DB connections succeed
+  4. Database schema: key tables exist
+  5. Indexer freshness: latest block is recent, chain_stats populated
+  6. Data integrity: profiles, balances, tx_index raw_log
+  7. Chain params completeness via /api/get_chain_config
+  8. Backend API health: key GET endpoints return valid data
+  9. Core routes: subscribe exists, upgrade_level removed, POST routes reachable
+ 10. Error catalog: deprecated errors removed (e.g. pow_not_allowed_for_subscribers)
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -87,6 +89,49 @@ def ensure_local_url(name: str, raw: str) -> None:
     host = (parsed.hostname or "").lower()
     if host not in {"127.0.0.1", "localhost"}:
         raise RuntimeError(f"{name} must be local (got host={host})")
+
+
+def read_toml_value(path: Path, key: str) -> str | None:
+    content = path.read_text()
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.+?)\s*$")
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = pattern.match(line)
+        if match:
+            value = match.group(1).strip()
+            if value and value[0] in ('"', "'") and len(value) > 1 and value[-1] == value[0]:
+                value = value[1:-1]
+            return value
+    return None
+
+
+def check_node_retention_config() -> None:
+    expected_keep_recent = 4
+    node_home_raw = os.environ.get("NODE_HOME", "").strip()
+    node_home = Path(node_home_raw).expanduser() if node_home_raw else Path.home() / ".mirage" / "node"
+    app_toml = node_home / "config" / "app.toml"
+    info(f"Checking node retention config in {app_toml}")
+
+    try:
+        snapshot_keep_recent = read_toml_value(app_toml, "snapshot-keep-recent")
+    except Exception as exc:
+        fail(f"could not read app.toml: {exc}")
+        return
+    if snapshot_keep_recent is None:
+        fail("snapshot-keep-recent not found in app.toml")
+        return
+    try:
+        snapshot_keep_recent_int = int(snapshot_keep_recent)
+    except Exception:
+        fail(f"snapshot-keep-recent is not an int: {snapshot_keep_recent!r}")
+        return
+
+    if snapshot_keep_recent_int == expected_keep_recent:
+        ok(f"snapshot-keep-recent={snapshot_keep_recent_int}")
+    else:
+        fail(f"snapshot-keep-recent={snapshot_keep_recent_int} (expected {expected_keep_recent})")
 
 
 # ─── HTTP helpers (rate-limit aware) ──────────────────────────────────
@@ -566,7 +611,10 @@ def main() -> None:
         print("\nFATAL: Refusing to run against non-local BACKEND_API")
         sys.exit(1)
 
-    section("2. Database Connectivity")
+    section("2. Node Retention Config")
+    check_node_retention_config()
+
+    section("3. Database Connectivity")
     backend_conn = None
     indexer_conn = None
     try:
@@ -585,33 +633,33 @@ def main() -> None:
         print("\nFATAL: Cannot proceed without database connections")
         sys.exit(1)
 
-    section("3. Database Schema")
+    section("4. Database Schema")
     check_indexer_schema(indexer_conn)
     check_backend_schema(backend_conn)
 
-    section("4. Indexer Health")
+    section("5. Indexer Health")
     check_indexer_freshness(indexer_conn)
     check_chain_stats(indexer_conn)
 
-    section("5. Data Integrity")
+    section("6. Data Integrity")
     check_profile_data(indexer_conn)
     check_balances(indexer_conn)
     check_tx_index_raw_log(indexer_conn)
 
-    section("6. Chain Params (via API)")
+    section("7. Chain Params (via API)")
     check_chain_config(backend_api)
 
-    section("7. Backend API Health")
+    section("8. Backend API Health")
     check_api_parameters(backend_api)
     check_api_node_config(backend_api)
     check_api_search(backend_api)
     check_api_feed(backend_api)
 
-    section("8. Core Routes")
+    section("9. Core Routes")
     check_subscribe_routes(backend_api)
     check_core_routes_reachable(backend_api)
 
-    section("9. Error Catalog")
+    section("10. Error Catalog")
     check_error_catalog()
 
     if backend_conn:
