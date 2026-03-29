@@ -6711,7 +6711,7 @@ def get_inbox():
             actor_created_at = item["actor_created_at"]
             amount = item["amount"]
 
-            is_profile_notice = item_type in ("follow", "donation")
+            is_profile_notice = item_type in ("follow", "donation", "subscription_gift")
             if actor_owner in blocked_users:
                 continue
 
