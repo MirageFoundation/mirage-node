@@ -1,109 +1,39 @@
 # Mirage v1.22.0 Release Notes
 
-## Chain Upgrade: MsgSubscribe + Subscription Gifting
+### Gift a Subscription
 
-### MsgUpgradeLevel Renamed to MsgSubscribe
+You can now gift subscriptions to other users directly from a post. Tap the triple-dot menu, pick "Gift subscription," and the recipient gets a full subscription period paid for by you. The cost is shown upfront so there are no surprises, and the confirmation tells you the exact date the subscription will run through.
 
-The on-chain message for subscribing to a paid tier has been renamed from `MsgUpgradeLevel` to `MsgSubscribe` across the entire stack — proto definitions, chain handler, backend API, frontend, indexer, tests, and documentation. The rename reflects what the message actually does: it subscribes a user to a tier rather than "upgrading a level." All field tags remain identical, so the change is wire-compatible with no state migration required.
+Gifts stack. If someone already has an active subscription, your gift extends it from where it currently ends, not from today. Two gifts back-to-back give two full periods. The recipient's auto-renewal setting is never touched — if they had it off, it stays off. You cannot downgrade someone either: if they are already on a higher tier, the chain rejects the gift outright and your tokens stay in your wallet.
 
-The backend API endpoint has moved from `/api/core/upgrade_level` to `/api/core/subscribe`. The frontend `TransactionHandler` method was renamed from `upgradeLevel()` to `subscribe()`. All canonical signing functions were updated accordingly.
+Governance can gift subscriptions too, so the community can vote to sponsor contributors, moderators, or anyone who deserves it. All of this runs on-chain with the same burn-and-escrow mechanics as a regular subscription — no special rules, no backdoors.
 
-### Subscription Gifting
+### Donations and Follows in Your Inbox
 
-Users can now gift a subscription to another address. When calling `MsgSubscribe` with a `target` field set to a different user's address, the sender pays the period fee and the recipient's subscription is extended by one subscription period.
+When someone sends you MIRAGE or starts following you, it now shows up in your inbox alongside replies and awards. Push notifications fire for both, so you know the moment someone tips your post or joins your audience. This works whether the sender used the web wallet, the CLI, or any other tool — the indexer picks up every on-chain transfer and turns it into a notification.
 
-Key behaviors:
+The donate flow has a 10,000 MIRAGE minimum and is available from post menus, the full post view, and profile pages. Guests are prompted to log in first. Pending donations show real-time queue status just like votes and posts.
 
-- **Expiry stacking**: If the recipient already has an active subscription, the gift extends from their current expiry (not from now), so multiple gifts stack correctly.
-- **Auto-renew preserved**: The recipient's `auto_renew` setting is never modified by a gift. If they had auto-renewal off, it stays off.
-- **Higher-tier rejection**: Gifting a lower tier to someone who already has a higher tier is explicitly rejected on-chain and at the backend (e.g., gifting Subscriber tier to someone who is already an Agent).
-- **Self-subscribe unchanged**: Omitting the `target` field or setting it to your own address behaves exactly like before — a normal self-subscription.
-- **Fee handling**: The sender's tokens are burned and escrowed in the same proportions as a normal subscription. The recipient's existing reserve funds are preserved (not burned on gift).
+### Cleaner Mobile Experience
 
-The frontend adds a "Gift subscription" option to the triple-dot menu on posts. The menu item shows the exact cost (e.g., "Gift 100.00K subscription"). Pending gift transactions are tracked with real-time status indicators ("Gifting...").
+Post cards on mobile got a facelift. When a post has an image, the title now sits below the thumbnail instead of overlaid on top of it, so you can actually read both. Images no longer stretch awkwardly on narrow screens — they scale proportionally with consistent spacing regardless of device width.
 
-### Backend Gift Validation
+### Smaller, Leaner Nodes
 
-The backend validates gift requests before broadcasting:
+State-sync snapshot retention dropped from 28 to 4. That wipes out 24 full-state dumps that were quietly eating disk on every node in the network. Four snapshots still give a 24-hour window for new nodes to state-sync, which is plenty. The blockstore still keeps 7 days of history — that part is unchanged. Node operators should see a noticeable drop in disk usage over the next day as old snapshots are pruned.
 
-- Invalid `target` addresses (not matching `mirage1[0-9a-z]{38}`) are rejected with 400.
-- Gifts to higher-tier recipients are pre-checked against the indexer and rejected with 400, mirroring the chain-level rejection.
-- If the indexer is unavailable during the pre-check, the request returns 503 (fail-closed).
+The deploy pipeline now applies config changes from migrations on the same startup instead of requiring a second restart. One deploy, one restart, everything takes effect.
 
-### Governance Subscriptions
+### Bug Fixes
 
-Governance proposals can now target a specific user address for subscription via `MsgSubscribe` with a `target` field. The governance module address acts as the authority and the target is the subscription recipient. The standard governance flow is: mint tokens to the target, then submit a `MsgSubscribe` proposal.
+Paginated feeds with tag filters no longer stop loading early. A short filtered page used to trick the backend into thinking there was nothing left — that is fixed. The database sequence drift from the v1.21.10 DB split has been patched so insert conflicts cannot recur. The referral client-hash gate that was temporarily off for testing is back on. And the gift subscription dialog no longer says "Extend until..." when the recipient has no subscription — it just says "Until..." for new subs.
 
-`MsgSubscribe` is restricted to levels 1 (Subscriber) and 10 (Agent). Attempting to subscribe to any other level — including admin levels (100+) — is rejected both at the backend and on-chain.
+### iOS Deep Links
 
----
-
-## Donation Notifications and Pending Sends
-
-Token sends (donations) and follows now appear in the inbox with push notifications.
-
-- **Inbox**: Shows follow events ("started following you") and donation events ("sent you X MIRAGE") alongside existing reply and award notifications. Combined list is sorted chronologically with unified pagination.
-- **Push notifications**: Sent for follows and donations. Works for sends made through the web wallet and for on-chain transfers indexed from any source (CLI, other nodes).
-- **Pending send tracking**: The frontend tracks in-flight `send_tokens` transactions with queue-style status indicators, matching the pattern used for other transaction types.
-- **Donate UI**: Minimum 10,000 MIRAGE per donation. Guests are prompted to log in. The donate flow is available from post menus, the view-post page, and profile pages.
-- **Push listener expansion**: The background push listener now polls `tx_index` for `send_tokens` and `multi` transactions, parses transfers from raw logs, writes inbox events, and sends donation pushes — covering sends that don't go through the web wallet API.
-
----
-
-## Mobile UI Improvements
-
-### Card Layout
-
-On mobile, post cards with images now show the title below the thumbnail instead of overlaid on the image. Text-only cards are unchanged.
-
-### Image Rendering
-
-Fixed image stretching on narrow screens. Images now use `aspect-ratio` with `maxHeight` and `objectFit: 'cover'` instead of explicit pixel heights, producing more predictable vertical spacing without distortion.
-
----
-
-## Bug Fixes
-
-### Infinite Scroll with Tag Filtering
-
-Fixed a bug where paginated feeds would stop loading early when tag filtering was enabled. The backend no longer sets `has_more = false` prematurely when filtered results produce a short page.
-
-### DB-Split SERIAL Sequence Drift
-
-After the v1.21.10 database split, SERIAL sequences for backend-owned tables (`pending_rewards`, `referral_*`, `reports`, `push_*`, etc.) could drift below the actual max ID, causing primary key conflicts on insert. The schema init now resets all SERIAL sequences to `MAX(id)`, and the migration script does the same post-migration.
-
-### Referral Client Hash Gate
-
-The referral `client_hash` abuse-prevention gate was temporarily disabled for testing and has been re-enabled. Users are again blocked from reusing the same referrer from the same client fingerprint.
-
----
-
-## Platform Integration
-
-### iOS Deep Links (AASA)
-
-Added missing paths to the Apple App Site Association file: `/referrals`, `/blocks`, `/login`, `/follows`, and `/`. Universal Links on iOS can now open these routes in the app when installed.
-
----
-
-## Indexer
-
-The indexer now stores the Comet `raw_log` field in `tx_index`, enabling the push listener to parse transfer events from any transaction type.
-
----
-
-## Node Storage Optimization
-
-State-sync snapshot retention has been reduced from 28 snapshots to 4, cutting out 24 full-state dumps that were consuming significant disk on every node. Snapshots are created every 6 hours, so 4 snapshots still provide a 24-hour window for other nodes to state-sync — more than enough for practical use. The old setting of 28 was originally tied to the 7-day blockstore retention window, but snapshot count and blockstore retention are independent concerns. Blockstore retention remains at 201,600 blocks (7 days) and is unaffected.
-
-The deploy migration updates existing nodes automatically on restart. The entrypoint now re-renders node configs after migrations run, so config changes from migrations take effect on the same startup — no second restart required. The status dashboard's retention logic has also been corrected to no longer conflate snapshot count with blockstore retention when reporting expected block counts.
-
-### Gift Subscription UX Fix
-
-The confirmation dialog for gifting a subscription previously always said "Extend until..." even when the recipient had no active subscription. It now correctly shows "Until..." for new subscriptions and "Extend until..." only when extending an existing one.
+Universal Links on iOS now cover `/referrals`, `/blocks`, `/login`, `/follows`, and `/`. If you have the app installed, tapping these links opens them natively instead of bouncing through the browser.
 
 ---
 
 ## Upgrade Instructions
 
-The chain upgrade name is `v1.22.0` and the binary must be built from the `v1.22.0` tag. No state migration is required — the MsgSubscribe rename is wire-compatible (same field tags). All clients (frontend, backend, indexer) must be updated simultaneously. The old `/api/core/upgrade_level` endpoint no longer exists.
+The chain upgrade name is `v1.22.0` and the binary must be built from the `v1.22.0` tag. No state migration is required — the subscribe rename is wire-compatible. All clients (frontend, backend, indexer) must be updated simultaneously. The old `/api/core/upgrade_level` endpoint no longer exists.
