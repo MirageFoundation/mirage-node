@@ -1,7 +1,5 @@
 ## Cursor Operational Rules
 
-Use these rules to avoid hanging sessions and enforce fail-fast behavior.
-
 ### #1 RULE: NEVER COMMIT OR PUSH TO GIT WITHOUT MY EXPLICIT APPROVAL.
 - Do NOT run `/commit-push` or `git commit`, `git push`, or any combined commit+push command unless I specifically tell you to.
 - After making code changes, STOP and wait for my go-ahead before committing.
