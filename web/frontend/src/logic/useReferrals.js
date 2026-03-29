@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
-import Api from "../lib/api";
+import Api from "../utils/api";
 export const PERIODS = [{
   key: "7d",
   label: "Last 7 Days"

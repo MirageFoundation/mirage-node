@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import Api from '../lib/api';
+import Api from '../utils/api';
 import Storage from '../utils/Storage';
 
 const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';

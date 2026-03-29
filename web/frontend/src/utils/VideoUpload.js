@@ -1,4 +1,4 @@
-import Api from '../lib/api';
+import Api from './api';
 
 /**
  * Get a Stream direct upload URL

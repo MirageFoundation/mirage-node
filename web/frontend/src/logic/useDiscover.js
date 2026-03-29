@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
 import { usePendingFollows } from "./useFollowState.js";
 import { useLocation } from "react-router-dom";

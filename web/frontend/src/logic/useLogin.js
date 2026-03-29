@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { deriveKeysFromSeed } from "../utils/CryptoUtils.js";
 import { validateMnemonic } from "bip39";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import Storage from "../utils/Storage";
 export function useLogin({
   state,

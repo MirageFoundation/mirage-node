@@ -1,4 +1,4 @@
-import Api from '../lib/api';
+import Api from './api';
 
 const CACHE_KEY = 'profile_followed_cache';
 const NO_CACHE_UNTIL_KEY = 'profile_no_cache_until';

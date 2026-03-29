@@ -355,7 +355,7 @@ export function adjustBalanceOptimistic(deltaUmirage) {
 
 export async function refreshBalance() {
     const Storage = (await import('./Storage')).default;
-    const Api = (await import('../lib/api')).default;
+    const Api = (await import('./api')).default;
     const publicKey = Storage.load('publicKey', '');
     if (!publicKey) return;
     try {
@@ -458,7 +458,7 @@ export async function pollTxStatus(txHash, options = {}) {
         console.debug('[pollTxStatus] Using custom interval schedule:', intervals);
     }
 
-    const Api = (await import('../lib/api')).default;
+    const Api = (await import('./api')).default;
     const Storage = (await import('./Storage')).default;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

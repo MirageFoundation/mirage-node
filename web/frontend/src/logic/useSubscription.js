@@ -3,7 +3,7 @@ import { useTheme } from "styled-components";
 import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import { formatMirageCompact } from "../utils/formatters";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { subscribe as txSubscribe, setAutoRenewal as txSetAutoRenewal } from "../utils/tx";
 import { usePendingSubscribes } from "./usePendingSubscribes.js";
 import transactionHandler from "../utils/TransactionHandler";

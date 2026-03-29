@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "styled-components";
 import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { signPlainPayload } from "../utils/signPlain";
 export const AWARD_LABELS = {
     quality_post: 'Quality Post',

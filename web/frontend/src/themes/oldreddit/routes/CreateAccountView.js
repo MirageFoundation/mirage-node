@@ -4,7 +4,7 @@ import Button from "../components/Button.js";
 import AuthPageShell from "../components/AuthPageShell.js";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
-import { getMaxInputLength } from "../../../config/chainParams";
+import { getMaxInputLength } from "../../../utils/chainParams";
 import { formatError } from "../../../utils/errorMessages";
 import { useCreateAccount } from "../../../logic/useCreateAccount";
 const Centered = styled.div`

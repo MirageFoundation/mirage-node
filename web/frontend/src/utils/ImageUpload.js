@@ -1,4 +1,4 @@
-import Api from '../lib/api';
+import Api from './api';
 
 /**
  * Downscale an image to a maximum size while maintaining aspect ratio

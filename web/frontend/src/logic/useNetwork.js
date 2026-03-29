@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import Api from "../lib/api";
+import Api from "../utils/api";
 
 // Shared chart layout constants — ALL charts MUST use the same values so axes align.
 // labelH reserves space above/below the plot area for Y-axis text labels.

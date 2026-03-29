@@ -1,4 +1,4 @@
-import Api from '../lib/api';
+import Api from './api';
 
 // Shared username cache (address -> username), persisted for 24h.
 const CACHE_KEY = 'usernames_cache_v1';

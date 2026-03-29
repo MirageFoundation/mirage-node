@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { bech32 } from "bech32";
 import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import * as tx from "../utils/tx";
 import { getThemeFamily } from "../styled/theme";
 import { useTabs } from "./useTabs.js";

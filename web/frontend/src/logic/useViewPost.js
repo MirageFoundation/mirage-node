@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme } from "styled-components";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as tx from "../utils/tx.js";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import Storage from "../utils/Storage";
 import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
 import { fetchFollowedUsers, follow as followAuthor, unfollow as unfollowAuthor, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";

@@ -5,8 +5,8 @@ import Storage from "../utils/Storage.js";
 import seedVault from "../utils/SeedVault.js";
 import { deriveKeysFromSeed } from "../utils/CryptoUtils.js";
 import * as tx from "../utils/tx";
-import Api from "../lib/api";
-import { getMaxUsernameSize, getMinUsernameSize } from "../config/chainParams";
+import Api from "../utils/api";
+import { getMaxUsernameSize, getMinUsernameSize } from "../utils/chainParams";
 import { formatError } from "../utils/errorMessages";
 export function useCreateAccount({
     state,

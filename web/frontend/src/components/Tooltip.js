@@ -1,3 +1,8 @@
+/**
+ * Theme facades — see ./README.md. Tooltip / InfoIcon use getThemeComponent + useTheme
+ * (forwardRef). tooltipStyles() delegates to the theme's `tooltipStyles` helper for use
+ * inside styled-components css`` blocks. No visual rules in this file.
+ */
 import React from 'react';
 import { useTheme, css } from 'styled-components';
 import { getThemeComponent, getThemeComponentFromTheme } from '../styled/theme';

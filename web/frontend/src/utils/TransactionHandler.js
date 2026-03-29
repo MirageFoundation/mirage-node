@@ -4,7 +4,7 @@ import Storage from './Storage';
 import seedVault from './SeedVault';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
-import Api from '../lib/api';
+import Api from './api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 import { generateEnvelopeNonce } from './canonicalEncoding';
 import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';

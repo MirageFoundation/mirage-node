@@ -3,7 +3,7 @@ import { useTheme } from "styled-components";
 import { useLocation, useParams, useNavigationType } from "react-router-dom";
 import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { fetchFollowedTopics } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { usePendingFollows } from "./useFollowState.js";

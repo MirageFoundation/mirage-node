@@ -2,30 +2,30 @@
  * Theme Registry
  *
  * Each theme lives under src/themes/<name>/ and exports a manifest from
- * index.js. Visuals are theme-only: each manifest must export ThemeGlobalStyle
- * (document-level CSS for that theme), Shell, Feed, VoteSection, dark/light
- * tokens, and config. Shared code here is registry + getResolvedTheme only.
+ * index.js. Visuals are theme-only: each manifest must export Style
+ * (from themes/<id>/Style.js — html/body rules for that theme only), Shell, Feed, VoteSection,
+ * dark/light tokens, and config. Shared code here is registry + getResolvedTheme only.
  *
  * HOW TO ADD A NEW THEME:
- * 1. Create src/themes/<name>/ with index.js, tokens.js, ThemeGlobalStyle.js,
+ * 1. Create src/themes/<name>/ with index.js, tokens.js, Style.js,
  *    Layout.js (styled primitives for that theme), Shell, Feed, etc.
- * 2. index.js default-exports a manifest (see moon/index.js for shape);
- *    ThemeGlobalStyle is required.
+ * 2. index.js default-exports a manifest (see themes/bluemoon/index.js for shape);
+ *    Style is required.
  * 3. Import the manifest below and add it to the manifests array
  * 4. Done -- no other files need changes
  */
 
-import moonManifest from '../themes/moon/index';
+import bluemoonManifest from '../themes/bluemoon/index';
 import oldredditManifest from '../themes/oldreddit/index';
 
-const manifests = [moonManifest, oldredditManifest];
+const manifests = [bluemoonManifest, oldredditManifest];
 
 export const THEMES = {};
 manifests.forEach((m) => { THEMES[m.id] = m; });
 
 /**
  * Resolve a concrete theme object from a family id and a resolved variant.
- * @param {string} themeId   - 'moon' | 'oldreddit' | ...
+ * @param {string} themeId   - 'bluemoon' | 'oldreddit' | ...
  * @param {string} themeMode - Already resolved to 'dark' or 'light'
  */
 export function getResolvedTheme({ themeId, themeMode }) {
@@ -58,12 +58,20 @@ export function getThemeFamily(themeId) {
     if (!family) {
         throw new Error(`Unknown theme: ${themeId}`);
     }
-    if (!family.ThemeGlobalStyle) {
-        throw new Error(`Theme "${themeId}" manifest must export ThemeGlobalStyle`);
+    if (!family.Style) {
+        throw new Error(`Theme "${themeId}" manifest must export Style`);
     }
     return family;
 }
 
+/**
+ * Resolve a **themed** UI component by logical name. Implementations live only under
+ * `src/themes/<themeId>/components/` and are registered on the manifest `components` map.
+ * This registry function is shared logic; it does not render or style anything.
+ *
+ * @param {string} themeId — e.g. 'bluemoon' | 'oldreddit'
+ * @param {string} key — e.g. 'Button', 'Toast' (must exist on that theme's manifest)
+ */
 export function getThemeComponent(themeId, key) {
     const family = THEMES[themeId];
     if (!family) {
@@ -78,6 +86,10 @@ export function getThemeComponent(themeId, key) {
     return component;
 }
 
+/**
+ * Same as getThemeComponent but takes the resolved theme object from ThemeProvider.
+ * Used where `useTheme()` is already available (e.g. tooltipStyles helper).
+ */
 export function getThemeComponentFromTheme(theme, key) {
     if (!theme || !theme.themeId) {
         throw new Error('Theme object missing themeId');

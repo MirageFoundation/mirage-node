@@ -4,7 +4,7 @@ import Button from "../components/Button.js";
 import { Link } from "react-router-dom";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
-import { getMaxInputLength } from "../../../config/chainParams";
+import { getMaxInputLength } from "../../../utils/chainParams";
 import { useChangeUsername } from "../../../logic/useChangeUsername";
 const BlockingOverlay = styled.div`
     position: fixed;

@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage.js";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import * as tx from "../utils/tx";
-import { getMaxUsernameSize, getMinUsernameSize } from "../config/chainParams";
+import { getMaxUsernameSize, getMinUsernameSize } from "../utils/chainParams";
 import { formatError } from "../utils/errorMessages";
 export function useChangeUsername({
     state

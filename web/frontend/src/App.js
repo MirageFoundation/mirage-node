@@ -4,7 +4,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { ThemeProvider } from 'styled-components';
 import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
-import Api from './lib/api';
+import Api from './utils/api';
 import * as tx from './utils/tx';
 import { getResolvedTheme, getThemeFamily } from './styled/theme';
 
@@ -208,7 +208,7 @@ class App extends Component {
 
         this.setCredentials = this.setCredentials.bind(this);
         this.setWarnOnLeave = this.setWarnOnLeave.bind(this);
-        this.state.themeId = Storage.load('theme_id', 'moon');
+        this.state.themeId = Storage.load('theme_id', 'bluemoon');
         this.state.themeMode = Storage.load('theme_mode', 'time');
         this.state.theme = this.calculateTheme(this.state.themeMode);
     }
@@ -366,7 +366,7 @@ class App extends Component {
 
         // Listen for theme id changes from SettingsView
         this._onThemeIdChange = (e) => {
-            const newId = e.detail?.themeId || 'moon';
+            const newId = e.detail?.themeId || 'bluemoon';
             try { document.documentElement.setAttribute('data-theme-id', newId); } catch (_) { }
             this.setState({ themeId: newId });
         };
@@ -781,12 +781,12 @@ class App extends Component {
         const themeObj = getResolvedTheme({ themeId: this.state.themeId, themeMode: this.state.theme });
         const family = getThemeFamily(this.state.themeId);
         const Shell = family.Shell;
-        const ThemeGlobalStyle = family.ThemeGlobalStyle;
+        const Style = family.Style;
         return (
             <HelmetProvider>
                 <ThemeProvider theme={themeObj}>
                     <div>
-                        <ThemeGlobalStyle />
+                        <Style />
                         <Toast />
 
                         {this.state.vaultLocked && (

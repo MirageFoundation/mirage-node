@@ -1,5 +1,5 @@
 import { dark, light } from './tokens';
-import { ThemeGlobalStyle } from './ThemeGlobalStyle';
+import { Style } from './Style';
 import OldRedditShell from './OldRedditShell';
 import ListFeedView from './ListFeedView';
 import OldRedditVoteSection from './components/VoteSection';
@@ -56,6 +56,7 @@ import WelcomeView from './routes/WelcomeView';
 
 const NullComponent = () => null;
 
+/** Themed UI implementations keyed by name (used by theme routes + `useThemeComponent`). @see ../../components/README.md */
 const components = {
     AuthPageShell,
     Button,
@@ -120,7 +121,7 @@ const oldredditManifest = {
     supportsDarkLight: true,
     dark,
     light,
-    ThemeGlobalStyle,
+    Style,
     Shell: OldRedditShell,
     Feed: ListFeedView,
     VoteSection: OldRedditVoteSection,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import * as tx from "../utils/tx";
 import { unfollow, notifyUsersUpdated } from "../utils/FollowUsers";
 import { notifyTopicsUpdated } from "../utils/Subscriptions";

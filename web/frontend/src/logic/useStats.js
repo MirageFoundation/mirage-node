@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "react-router-dom";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip";
 import { useTabs } from "./useTabs.js";
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTheme } from "styled-components";
 import { useLocation, useSearchParams } from "react-router-dom";
 import Storage from "../utils/Storage";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { bridgeBurn, pollTxStatus } from "../utils/tx";
 import transactionHandler from "../utils/TransactionHandler";
 import { formatError } from "../utils/errorMessages";

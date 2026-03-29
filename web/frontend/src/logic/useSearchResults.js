@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
-import Api from "../lib/api";
+import Api from "../utils/api";
 export const tagColors = {
   porn: {
     bg: 'rgba(236, 72, 153, 0.18)',

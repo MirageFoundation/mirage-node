@@ -4,7 +4,7 @@ import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import seedVault from "../utils/SeedVault";
 import { deleteUser } from "../utils/tx";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "./usePendingDeletes.js";
 import { formatError } from "../utils/errorMessages";
@@ -123,9 +123,9 @@ export function useSettings({
   } = usePendingDeletes();
   const [themeId, setThemeId] = useState(() => {
     try {
-      return Storage.load('theme_id', 'moon');
+      return Storage.load('theme_id', 'bluemoon');
     } catch (_) {
-      return 'moon';
+      return 'bluemoon';
     }
   });
   const [themeMode, setThemeMode] = useState(() => {

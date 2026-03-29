@@ -2,7 +2,7 @@ import React from "react";
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as tx from "../utils/tx.js";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import Storage from "../utils/Storage";
 import { formatError } from "../utils/errorMessages";
 export const TAG_OPTIONS = [{

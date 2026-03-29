@@ -101,8 +101,6 @@ All blockchain interactions flow through a single `TransactionHandler` singleton
 web/frontend/src/
 ├── App.js                 # Root component, routing, theme
 ├── index.js               # Entry point
-├── lib/
-│   └── api.js             # HTTP client wrapper
 ├── views/
 │   ├── MainView.js        # Feed views (home, following, topic)
 │   ├── CreatePostView.js  # Post/comment creation
@@ -120,6 +118,8 @@ web/frontend/src/
 │   ├── MarkdownEditor.js  # Content editor
 │   └── ...
 ├── utils/
+│   ├── api.js                 # HTTP client wrapper
+│   ├── chainParams.js         # Username limits from cached chain config
 │   ├── TransactionHandler.js  # Transaction queue and signing
 │   ├── CryptoUtils.js         # Key derivation
 │   ├── Storage.js             # LocalStorage wrapper

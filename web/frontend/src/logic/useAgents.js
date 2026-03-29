@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Storage from "../utils/Storage";
-import Api from "../lib/api";
+import Api from "../utils/api";
 import { useLocation } from "react-router-dom";
 import * as tx from "../utils/tx";
 import { usePendingAgents } from "./usePendingAgents.js";
