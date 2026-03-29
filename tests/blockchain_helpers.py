@@ -49,7 +49,7 @@ from shared.canon import (
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_username as _canon_base_set_username_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
-    canon_base_upgrade_level as _canon_base_upgrade_level_raw,
+    canon_base_subscribe as _canon_base_subscribe_raw,
     canon_base_vote as _canon_base_vote_raw,
     canon_base_annotate as _canon_base_annotate_raw,
     canon_signed_with_pow,
@@ -80,7 +80,7 @@ from shared.datatypes import (
     MsgSetAgents,
     MsgUnfollowTopic,
     MsgUnfollowUser,
-    MsgUpgradeLevel,
+    MsgSubscribe,
     MsgVote,
     MsgAnnotate,
 )
@@ -976,20 +976,21 @@ def _build_msg_block_topic(
     return msg
 
 
-def _build_msg_upgrade_level(
+def _build_msg_subscribe(
     wallet: LocalWallet,
     lb: str,
     diff: int,
     ts: int,
     level: int,
+    target: str = "",
     pow_val: int = 0,
     nonce: int = 0,
-) -> MsgUpgradeLevel:
+) -> MsgSubscribe:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_upgrade_level_raw(pub, lb_bytes, diff, ts, level, nonce=nonce)
+    base = _canon_base_subscribe_raw(pub, lb_bytes, diff, ts, level, target=target, nonce=nonce)
     sig = _sign_relay(wallet, base, pow_val)
-    msg = MsgUpgradeLevel()
+    msg = MsgSubscribe()
     msg.authority = _VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
@@ -999,6 +1000,8 @@ def _build_msg_upgrade_level(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.level = int(level)
+    if target:
+        msg.target = target
     return msg
 
 

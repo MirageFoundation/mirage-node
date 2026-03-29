@@ -41,7 +41,7 @@ from tests.common import (
     _canon_base_block_topic_raw,
     _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw,
-    _canon_base_upgrade_level_raw,
+    _canon_base_subscribe_raw,
     _canon_base_report_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,

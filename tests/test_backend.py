@@ -25,7 +25,7 @@ from tests.cases.test_backend_infra import (
     test_tx_status_matrix,
     test_failed_tx_non_post_vote,
 )
-from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_upgrade_level_validation
+from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_subscribe_validation
 from tests.cases.test_backend_content import (
     test_post_lifecycle,
     test_comments,
@@ -36,7 +36,7 @@ from tests.cases.test_backend_content import (
 )
 from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
 from tests.cases.test_backend_tokens import test_pow, test_tokens
-from tests.cases.test_backend_subscriptions import test_subscriber, test_auto_renewal, test_tier_config_api
+from tests.cases.test_backend_subscriptions import test_subscriber, test_auto_renewal, test_tier_config_api, test_subscribe_gift_validation
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
 from tests.cases.test_backend_security import test_security, test_validation
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
@@ -63,7 +63,7 @@ ALL_CATEGORIES = {
     "rate_limit": test_rate_limit,
     "hard_cap_vs_deque": test_hard_cap_vs_deque,
     "tier_config_api": test_tier_config_api,
-    "upgrade_validation": test_upgrade_level_validation,
+    "subscribe_validation": test_subscribe_validation,
     "indexer_deque": test_indexer_deque_storage,
     "content_limits": test_content_limits,
     "profile_fields": test_profile_fields,
@@ -77,6 +77,7 @@ ALL_CATEGORIES = {
     "failed_tx_npv": test_failed_tx_non_post_vote,
     "indexer": test_indexer,
     "tx_index": test_tx_index,
+    "subscribe_gift_validation": test_subscribe_gift_validation,
 }
 
 STATELESS_CATEGORIES = {

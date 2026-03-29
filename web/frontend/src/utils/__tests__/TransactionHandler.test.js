@@ -166,7 +166,7 @@ const MSG_CONFIGS = {
     MsgDeleteUser: [[100, encStr('t')]],
     MsgSendTokens: [[100, encStr('s')], [101, encStr('t')], [102, uvarint64(1000)]],
     MsgVote: [[100, encStr('target')], [101, uvarint(1)]],
-    MsgUpgradeLevel: [[100, uvarint(1)]],
+    MsgSubscribe: [[100, uvarint(1)]],
     MsgSetAutoRenewal: [[100, uvarint(1)]],
     MsgBridgeBurn: [[100, encStr('solana')], [101, encStr('addr')], [102, uvarint64(500)]],
     MsgAward: [[100, encStr('target')], [101, encStr('quality_post')]],

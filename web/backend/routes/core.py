@@ -53,7 +53,7 @@ from shared.datatypes import (
     MsgVote,
     MsgEdit,
     MsgAnnotate,
-    MsgUpgradeLevel,
+    MsgSubscribe,
     MsgSetAutoRenewal,
     MsgAward,
 )
@@ -92,7 +92,7 @@ from pow import (
     canon_base_delete,
     canon_base_delete_user,
     canon_base_send_tokens,
-    canon_base_upgrade_level,
+    canon_base_subscribe,
     canon_base_set_auto_renewal,
     canon_base_award,
     check_pow_target,
@@ -3546,6 +3546,9 @@ def core_post():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if target and not _is_valid_mirage_addr(target):
+            return jsonify({"error": "target must be a valid mirage1 address"}), 400
+
         validator_addr = require_runtime().validator_payer_addr
 
         # Enforce tier limits (title/content) based on user's subscription level
@@ -4155,9 +4158,9 @@ def core_send_tokens():
         return jsonify({"error": msg}), status
 
 
-@core_bp.route("/api/core/upgrade_level", methods=["POST"])
-def core_upgrade_level():
-    """Upgrade user subscription level (tier).
+@core_bp.route("/api/core/subscribe", methods=["POST"])
+def core_subscribe():
+    """Subscribe to a paid tier (self or gift).
 
     Required fields:
     - pubkey: Base64 encoded compressed public key
@@ -4165,22 +4168,24 @@ def core_upgrade_level():
     - last_block_hash: Recent block hash for replay protection
     - level: Target paid subscription level (1=Subscriber, 10=Agent)
 
+    Optional fields:
+    - target: Recipient address for gifting (omit or empty for self-subscribe)
+
     Note:
-    - PoW is NOT allowed for MsgUpgradeLevel. Users must pay with tokens.
+    - PoW is NOT allowed for MsgSubscribe. Users must pay with tokens.
     - To change auto-renewal without changing tier, use /api/core/set_auto_renewal instead.
     """
     rid = next_request_id()
-    log_event(rid, "upgrade_level.begin")
+    log_event(rid, "subscribe.begin")
     try:
         if is_node_catching_up():
             return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
-        log_event(rid, "upgrade_level.data", data=data)
+        log_event(rid, "subscribe.data", data=data)
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        # PoW is not used for upgrade_level; difficulty/pow must be zero.
-        # Client MUST provide timestamp for replay protection; no backend fallback.
+        target = str(data.get("target", "")).strip().lower()
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -4191,9 +4196,7 @@ def core_upgrade_level():
         if err is not None:
             return err[0], err[1]
         level = int(data.get("level", 0))
-        # no client-provided fees
 
-        # Minimal fields; last_block_hash is optional (no PoW for upgrade)
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
 
@@ -4214,16 +4217,27 @@ def core_upgrade_level():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if target and not _is_valid_mirage_addr(target):
+            return jsonify({"error": "target must be a valid mirage1 address"}), 400
+
+        is_gift = bool(target and target != user_addr)
+        if is_gift:
+            log_event(rid, "subscribe.gift", payer=user_addr, recipient=target)
+            try:
+                recipient_level = _db_get_profile_level(target) or 0
+            except Exception as db_err:
+                log_event(rid, "subscribe.db_error", error=str(db_err))
+                return api_error_code("indexer_unavailable", 503)
+            if recipient_level > level:
+                return jsonify({"error": f"gift rejected: recipient level {recipient_level} > requested {level}"}), 400
+
         validator_addr = require_runtime().validator_payer_addr
 
-        # PoW is NOT allowed for upgrade_level - must pay with tokens. No upfront fee field required.
-
-        # Backend precheck: ensure user has enough balance for the target tier's period fee
+        # Backend precheck: ensure payer has enough balance
         p = expect_params()
         period_fee = 0
         try:
             tiers = p.get("tiers") or []
-            # Map user level to tier array index: 0->0, 1->1, 10->2
             tier_idx = {0: 0, 1: 1, 10: 2}.get(level, -1)
             if isinstance(tiers, list) and 0 <= tier_idx < len(tiers):
                 tf = tiers[tier_idx] or {}
@@ -4235,19 +4249,19 @@ def core_upgrade_level():
                 bal = get_balance(user_addr)
                 have = int(bal)
             except Exception as db_err:
-                log_event(rid, "upgrade_level.db_error", error=str(db_err))
+                log_event(rid, "subscribe.db_error", error=str(db_err))
                 return api_error_code("indexer_unavailable", 503)
             if have < period_fee:
                 return api_error_code("insufficient_balance", balance=have, needed=int(period_fee))
 
-        # Verify relay signature matches shared canonical bytes (with timestamp)
         try:
-            base = canon_base_upgrade_level(
+            base = canon_base_subscribe(
                 pub_dec,
                 last_block_hash,
-                0,  # difficulty always 0 for upgrade_level
+                0,
                 timestamp,
                 level,
+                target=target if is_gift else "",
                 nonce=nonce,
             )
             signed = canon_signed_with_pow(base, 0)
@@ -4256,20 +4270,21 @@ def core_upgrade_level():
         except Exception:
             return jsonify({"error": "invalid signature"}), 400
 
-        msg = MsgUpgradeLevel()
+        msg = MsgSubscribe()
         msg.authority = validator_addr
         msg.envelope_pubkey = pub_dec
-        # Use client-provided last_block_hash (may be empty); no PoW for upgrade
         msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = 0  # No PoW for upgrade
-        msg.envelope_pow = 0  # No PoW for upgrade
+        msg.envelope_difficulty = 0
+        msg.envelope_pow = 0
         msg.envelope_timestamp = int(timestamp)
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.level = level
+        if is_gift:
+            msg.target = target
 
         any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgUpgradeLevel"
+        any_msg.type_url = "/mirage.core.v1.MsgSubscribe"
         any_msg.value = msg.SerializeToString()
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
@@ -4286,13 +4301,14 @@ def core_upgrade_level():
                 "user_addr": user_addr,
                 "level": int(level),
                 "last_block_hash": last_block_hash,
+                "target": target,
             }
-            return _tx_error(rid, "core/upgrade_level", "MsgUpgradeLevel", code, tx_hash, raw_log, extra)
+            return _tx_error(rid, "core/subscribe", "MsgSubscribe", code, tx_hash, raw_log, extra)
 
-        log_event(rid, "upgrade_level.success", tx_hash=tx_hash)
+        log_event(rid, "subscribe.success", tx_hash=tx_hash, is_gift=is_gift)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
-        log_event(rid, "upgrade_level.err", error=str(e))
+        log_event(rid, "subscribe.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 

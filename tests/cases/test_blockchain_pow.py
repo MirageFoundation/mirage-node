@@ -31,7 +31,7 @@ from tests.common import (
     _canon_base_block_post_raw, _canon_base_unblock_post_raw,
     _canon_base_block_user_raw, _canon_base_unblock_user_raw,
     _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
-    _canon_base_send_tokens_raw, _canon_base_upgrade_level_raw,
+    _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
     _canon_base_annotate_raw,
     _request_with_retries,
@@ -47,7 +47,7 @@ from tests.blockchain_helpers import (
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
     _build_msg_edit, _build_msg_annotate,
     _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
-    _build_msg_upgrade_level,
+    _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
     _build_msg_follow_topic, _build_msg_unfollow_topic,
     _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
@@ -69,7 +69,7 @@ from shared.datatypes import (
     MsgSetLevel, MsgSetUsername, MsgSetBiography,
     MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
     MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgUpgradeLevel, MsgVote, MsgAnnotate,
+    MsgSubscribe, MsgVote, MsgAnnotate,
 )
 
 
@@ -187,15 +187,15 @@ def test_pow(backend: str) -> None:
     else:
         _pass("pow.pow_on_paid_user (accepted: PoW optional for paid)")
 
-    # 2.5 PoW on MsgUpgradeLevel (never allowed)
-    msg = _build_msg_upgrade_level(free_wallet, lb, 0, ts, 1, pow_val=1, nonce=_gen_nonce())
+    # 2.5 PoW on MsgSubscribe (never allowed)
+    msg = _build_msg_subscribe(free_wallet, lb, 0, ts, 1, pow_val=1, nonce=_gen_nonce())
     _, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgUpgradeLevel")],
+        [(msg, "/mirage.core.v1.MsgSubscribe")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         free_wallet.public_key().public_key_bytes,
     )
-    _check_reject("pow.pow_on_upgrade_level", code, log)
+    _check_reject("pow.pow_on_subscribe", code, log)
 
     # 2.6 PoW on MsgAward (never allowed)
     award_target = _rand_hex(64)

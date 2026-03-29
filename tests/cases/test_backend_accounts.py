@@ -36,7 +36,7 @@ from tests.common import (
     _COLOR_RESET,
     _COLOR_BOLD,
     _fetch_params,
-    _do_upgrade_level,
+    _do_subscribe,
     _docker_exec,
     _run_miraged,
     _miraged_cmd,
@@ -53,7 +53,7 @@ from tests.common import (
     check_pow_target,
     _difficulty_factor,
     _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw,
+    _canon_base_subscribe_raw,
     _canon_base_send_tokens_raw,
     _canon_base_award_raw,
     _canon_base_post_raw,
@@ -220,8 +220,8 @@ def test_account(backend: str):
 # =========================================================================
 
 
-def test_upgrade_level_validation(backend: str):
-    """Test level upgrade validation via the backend API."""
+def test_subscribe_validation(backend: str):
+    """Test subscribe validation via the backend API."""
 
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
@@ -233,41 +233,41 @@ def test_upgrade_level_validation(backend: str):
         val = us.get("user_level")
         free_level = int(val) if val is not None else -1
         if free_level == 0:
-            _pass("upgrade.free_level_is_0")
+            _pass("subscribe.free_level_is_0")
         else:
-            _fail("upgrade.free_level_is_0", f"level={free_level}")
+            _fail("subscribe.free_level_is_0", f"level={free_level}")
     except Exception as e:
-        _fail("upgrade.free_level_is_0", str(e))
+        _fail("subscribe.free_level_is_0", str(e))
 
     # 21.2 Invalid level 3 should be rejected
-    resp = _do_upgrade_level(backend, free_wallet, 3)
+    resp = _do_subscribe(backend, free_wallet, 3)
     err = str(resp.get("error", "")).lower() if resp else ""
     txh = str(resp.get("tx_hash", "")).lower() if resp else ""
     tx_code = int(resp.get("code", 0) or 0) if resp else -1
     if "invalid" in err or (not txh) or tx_code != 0:
-        _pass("upgrade.level_3_rejected")
+        _pass("subscribe.level_3_rejected")
     else:
-        _fail("upgrade.level_3_rejected", f"txh={txh} code={tx_code} err={err[:100]}")
+        _fail("subscribe.level_3_rejected", f"txh={txh} code={tx_code} err={err[:100]}")
 
     # 21.3 Invalid level 0 (already free)
-    resp = _do_upgrade_level(backend, free_wallet, 0)
+    resp = _do_subscribe(backend, free_wallet, 0)
     err = str(resp.get("error", "")).lower() if resp else ""
     txh = str(resp.get("tx_hash", "")).lower() if resp else ""
     if "invalid" in err or (not txh):
-        _pass("upgrade.level_0_rejected")
+        _pass("subscribe.level_0_rejected")
     else:
-        _fail("upgrade.level_0_rejected", f"txh={txh}")
+        _fail("subscribe.level_0_rejected", f"txh={txh}")
 
     # 21.4 Invalid levels 2, 5, 9, 100
     for invalid_level in [2, 5, 9, 100]:
-        resp = _do_upgrade_level(backend, free_wallet, invalid_level)
+        resp = _do_subscribe(backend, free_wallet, invalid_level)
         err = str(resp.get("error", "")).lower() if resp else ""
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         tx_code = int(resp.get("code", 0) or 0) if resp else -1
         if "invalid" in err or (not txh) or tx_code != 0:
-            _pass(f"upgrade.level_{invalid_level}_rejected")
+            _pass(f"subscribe.level_{invalid_level}_rejected")
         else:
-            _fail(f"upgrade.level_{invalid_level}_rejected", f"txh={txh} code={tx_code}")
+            _fail(f"subscribe.level_{invalid_level}_rejected", f"txh={txh} code={tx_code}")
 
 
 # =========================================================================
@@ -350,12 +350,12 @@ def _ensure_subscriber(backend: str, wallet: LocalWallet, name: str, expected_le
         if level >= expected_level:
             return True
         _debug(f"{name} level dropped to {level}, re-subscribing to level {expected_level}")
-        resp = _do_upgrade_level(backend, wallet, expected_level)
+        resp = _do_subscribe(backend, wallet, expected_level)
         txh = str(resp.get("tx_hash", "")).lower()
         if not txh:
             _debug(f"{name} re-subscribe failed: {resp.get('error', resp)}")
             return False
-        # Wait until the indexer reflects the upgraded level; core routes gate skip_pow on indexer level.
+        # Wait until the indexer reflects the subscription level; core routes gate skip_pow on indexer level.
         for _ in range(15):
             time.sleep(1)
             us = get_user_status(backend, addr)

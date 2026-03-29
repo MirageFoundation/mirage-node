@@ -19,11 +19,13 @@ import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalid
 import { fetchFollowedUsers, follow as followAuthor, unfollow as unfollowAuthor, invalidateCache as invalidateFollowCache } from '../utils/FollowUsers';
 import { usePendingFollows } from '../utils/useFollowState';
 import { usePendingSends } from '../utils/usePendingSends';
+import { usePendingSubscribes } from '../utils/usePendingSubscribes';
 import { uploadImage } from '../utils/ImageUpload';
 import { sortComments } from '../utils/SortComments';
 import StickerPicker from '../components/StickerPicker';
 import GifPicker from '../components/GifPicker';
 import { getCollapseThreshold, shouldAutoCollapse } from '../utils/Comments';
+import { formatMirageCompact } from '../utils/formatters';
 import { updateNotification } from '../utils/notifications';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
@@ -848,6 +850,9 @@ function ViewPostView({ state, updatePost }) {
     const [confirmDonate, setConfirmDonate] = useState(null); // { userId, postId }
     const [donateAmount, setDonateAmount] = useState("10000");
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
+    const [giftSubMessages, setGiftSubMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
+    const [giftSubPending, setGiftSubPending] = useState(null); // userId being gifted
+    const [giftSubMessages, setGiftSubMessages] = useState({}); // { userId: { type, message } }
     const [confirmAward, setConfirmAward] = useState(null); // { postId }
     const [isAwarding, setIsAwarding] = useState(false);
     const [awardMessages, setAwardMessages] = useState({}); // { postId: { type, message } }
@@ -1047,6 +1052,7 @@ function ViewPostView({ state, updatePost }) {
     const [topicFollowHover, setTopicFollowHover] = useState(false);
     const { isTopicPending, isUserPending, formatTopicStatus, formatUserStatus } = usePendingFollows();
     const { isPending: isSendPending, formatStatus: formatSendStatus } = usePendingSends();
+    const { isPending: isSubscribePending, formatStatus: formatSubscribeStatus } = usePendingSubscribes();
 
     // Menu state for three-dots dropdown
     const [openMenuId, setOpenMenuId] = useState(null);
@@ -1735,6 +1741,41 @@ function ViewPostView({ state, updatePost }) {
         setDonateAmount("10000"); // Reset to default
     };
 
+    const handleGiftSubscription = async (userAddress, postId) => {
+        if (!userAddress) return;
+        if (isSubscribePending(userAddress)) return;
+        if (!viewerAddress || viewerAddress === 'guest') {
+            alert('Please log in to gift a subscription');
+            return;
+        }
+        setOpenMenuId(null);
+        setConfirmDonate(null);
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmDeletePost(null);
+        setConfirmReportPost(null);
+        setConfirmSuspendQuests(null);
+        setConfirmUnsuspendQuests(null);
+        try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
+        try {
+            const result = await tx.subscribe(1, 0, userAddress);
+            if (result.success) {
+                setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'success', message: 'Subscription gifted!' } }));
+            } else {
+                setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: `Failed: ${result.error}` } }));
+            }
+        } catch (error) {
+            setGiftSubMessages((prev) => ({ ...prev, [postId]: { type: 'error', message: `Error: ${error.message || error}` } }));
+        }
+        setTimeout(() => {
+            setGiftSubMessages((prev) => {
+                const next = { ...prev };
+                delete next[postId];
+                return next;
+            });
+        }, 5000);
+    };
+
     const { displayBalance: userBalanceUmirage } = useBalance();
 
     const AWARD_TYPES = [
@@ -1754,6 +1795,23 @@ function ViewPostView({ state, updatePost }) {
             return [];
         }
     }, [configUpdateTrigger]);
+
+    const subscribeFeeUmirage = useMemo(() => {
+        void configUpdateTrigger;
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            const tiers = cfg?.tiers || [];
+            const subTier = tiers[1] || {};
+            return Number(subTier.period_fee || 0) || 0;
+        } catch (_) {
+            return 0;
+        }
+    }, [configUpdateTrigger]);
+
+    const giftSubscriptionLabel = subscribeFeeUmirage > 0
+        ? `Gift ${formatMirageCompact(subscribeFeeUmirage)} subscription`
+        : 'Gift subscription';
 
     const getAwardCost = (name) => {
         if (awardConfigs.length === 0) return null;
@@ -3125,6 +3183,25 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
+        const giftMsg = giftSubMessages[post.post_id];
+        if (giftMsg) {
+            return (
+                <>
+                    {giftMsg.type === 'error' ? (
+                        <BlockErrorMessage>
+                            <span>⚠</span>
+                            {giftMsg.message}
+                        </BlockErrorMessage>
+                    ) : (
+                        <BlockSuccessMessage>
+                            <span>✓</span>
+                            {giftMsg.message}
+                        </BlockSuccessMessage>
+                    )}
+                </>
+            );
+        }
+
         if (confirmAward?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
@@ -3341,6 +3418,11 @@ function ViewPostView({ state, updatePost }) {
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleGiveAward(post.post_id); }}>Give Award</MenuItem>
                                 {viewerAddress !== 'guest' && (
                                     <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
+                                )}
+                                {viewerAddress !== 'guest' && (
+                                    <MenuItem onClick={() => { setOpenMenuId(null); handleGiftSubscription(post.user_id, post.post_id); }} disabled={isSubscribePending(post.user_id)}>
+                                        {formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}
+                                    </MenuItem>
                                 )}
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id, post.post_id); }} data-danger="true">Block user</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockPost(post.post_id); }} data-danger="true">Block post</MenuItem>

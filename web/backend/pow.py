@@ -413,16 +413,17 @@ def canon_base_report(
     )
 
 
-def canon_base_upgrade_level(
+def canon_base_subscribe(
     pub_dec: bytes,
     last_block_hash: str,
     difficulty: int,
     timestamp: int,
     level: int,
+    target: str = "",
     nonce: int = 0,
 ) -> bytes:
-    return canon_shared.canon_base_upgrade_level(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), int(level), nonce=int(nonce)
+    return canon_shared.canon_base_subscribe(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), int(level), target=str(target or ""), nonce=int(nonce)
     )
 
 
@@ -604,7 +605,7 @@ __all__ = [
     "canon_base_delete",
     "canon_base_delete_user",
     "canon_base_send_tokens",
-    "canon_base_upgrade_level",
+    "canon_base_subscribe",
     "canon_base_set_auto_renewal",
     "canon_base_award",
     "canon_base_bridge_burn",

@@ -543,7 +543,7 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/block_user` | MsgBlockUser |
 | `POST /api/core/delete` | MsgDelete |
 | `POST /api/core/send_tokens` | MsgSendTokens |
-| `POST /api/core/upgrade_level` | MsgUpgradeLevel |
+| `POST /api/core/subscribe` | MsgSubscribe |
 | `POST /api/core/set_auto_renewal` | MsgSetAutoRenewal |
 | `POST /api/core/award` | MsgAward (burn MIRAGE to award a post/comment) |
 | `POST /api/core/report` | Content reporting |

@@ -3123,20 +3123,25 @@ func (am AppModule) BurnTokens(ctx context.Context, req *types.MsgBurnTokens) (*
 	return &types.MsgBurnTokensResponse{}, nil
 }
 
-// UpgradeLevel upgrades or cancels a user's tier subscription
-func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel) (*types.MsgUpgradeLevelResponse, error) {
+// Subscribe handles paid tier subscriptions (self or gift).
+// When target == payer (or empty): self-subscribe with full setup.
+// When target != payer: gift — payer pays, recipient's expiry extends by one period.
+func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*types.MsgSubscribeResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
 
-	var owner string
+	var payer string
+	var isGov bool
 	if authority == govAuthority {
+		// Governance path: target is the recipient, governance pays
 		if err := validateAddress(target); err != nil {
 			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
-		owner = target
+		payer = target
+		isGov = true
 	} else {
 		if len(req.GetEnvelopePubkey()) != 33 {
 			return nil, fmt.Errorf("invalid envelope_pubkey length")
@@ -3145,131 +3150,201 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 		if err != nil {
 			return nil, err
 		}
-		if target != "" && target != derived {
-			return nil, fmt.Errorf("target must be empty or match envelope owner")
+		payer = derived
+		isGov = false
+	}
+
+	// Determine recipient: if target is set and different from payer, it's a gift
+	recipient := payer
+	isGift := false
+	if target != "" && target != payer && !isGov {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid gift target address: %w", err)
 		}
-		owner = derived
+		recipient = target
+		isGift = true
 	}
 
-	sdkCtx.Logger().Debug("UpgradeLevel request",
-		"owner", owner,
-		"authority", authority,
-		"target", target,
-		"level", req.GetLevel(),
-	)
-
-	core, err := am.requireUsername(sdkCtx, owner, "UpgradeLevel")
-	if err != nil {
-		return nil, err
-	}
-
-	// MsgUpgradeLevel MUST be paid with tokens, not PoW
+	// MsgSubscribe MUST be paid with tokens, not PoW
 	if req.GetEnvelopePow() > 0 {
-		return nil, fmt.Errorf("MsgUpgradeLevel cannot use PoW, must pay with tokens")
+		return nil, fmt.Errorf("MsgSubscribe cannot use PoW, must pay with tokens")
 	}
 
 	requestedLevel := int(req.GetLevel())
 
-	// Only levels 1 (Subscriber) and 10 (Agent) can be self-upgraded to.
-	// Admin levels require governance via MsgSetLevel; level 0 is free (downgrade via MsgSetAutoRenewal).
+	// Only levels 1 (Subscriber) and 10 (Agent) are valid
 	if !types.ValidSubscriptionLevels[requestedLevel] {
 		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber) or %d (Agent)", requestedLevel, types.LevelSubscriber, types.LevelAgent)
 	}
 
-	// Get tier config for requested level
 	tierConfig := params.GetTierConfig(requestedLevel)
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", requestedLevel)
 	}
 
-	// Burn any existing reserve from module account before charging new fee
-	if core.ReserveFunds > 0 {
-		if err := am.k.BurnFromModuleAmount(sdkCtx, core.ReserveFunds); err != nil {
-			return nil, fmt.Errorf("UpgradeLevel: failed to burn old reserve: %w", err)
-		}
-		core.ReserveFunds = 0
-	}
-
-	// Charge period fee: split into burn portion and reserve portion
-	periodFee := tierConfig.PeriodFee
-	var reserveAmount uint64
-	if periodFee > 0 {
-		balance := am.k.GetBalance(sdkCtx, owner, "umirage")
-		if balance.LT(sdkmath.NewIntFromUint64(periodFee)) {
-			return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
-		}
-
-		// Integer reserve calculation: basis points to avoid float64 precision loss.
-		reserveBps := uint64(params.SubscriptionReservePercent * 10000)
-		if reserveBps > 10000 {
-			reserveBps = 10000
-		}
-		reserveAmount = periodFee * reserveBps / 10000
-		burnAmount := periodFee - reserveAmount
-
-		// Burn the non-reserve portion directly from user
-		if burnAmount > 0 {
-			if err := am.k.BurnFromAccount(sdkCtx, owner, burnAmount); err != nil {
-				return nil, fmt.Errorf("failed to burn fee portion: %w", err)
-			}
-		}
-
-		// Transfer reserve portion from user to module account (escrow)
-		if reserveAmount > 0 {
-			if err := am.k.DeductFeeFromOwner(sdkCtx, owner, reserveAmount); err != nil {
-				return nil, fmt.Errorf("failed to escrow reserve: %w", err)
-			}
-		}
-	}
-
-	// Remove old subscription index if exists
-	if core.SubscriptionExpiry > 0 {
-		_ = am.k.RemoveSubscription(sdkCtx, owner, core.SubscriptionExpiry)
-	}
-
-	// Calculate new expiry
-	var newExpiry int64
-	if params.SubscriptionPeriod > 0 {
-		// subscription_period is in minutes
-		newExpiry = sdkCtx.BlockTime().Unix() + int64(params.SubscriptionPeriod)*60
-	} else {
-		// One-time payment, no renewal needed
-		newExpiry = 0
-	}
-
-	// Update profile core
-	core.Level = int32(requestedLevel)
-	core.SubscriptionExpiry = newExpiry
-	core.AutoRenew = true // Enable auto-renewal for paid tiers
-	core.ReserveFunds = reserveAmount
-
-	// Index subscription for renewal tracking (only if recurring)
-	if newExpiry > 0 {
-		if err := am.k.SetSubscription(sdkCtx, owner, requestedLevel, newExpiry); err != nil {
-			sdkCtx.Logger().Error("UpgradeLevel: failed to set subscription index", "owner", owner, "err", err)
-		}
-	}
-
-	// Save profile core
-	bz, err := json.Marshal(core)
+	// Load recipient profile (must have a username)
+	recipientCore, err := am.requireUsername(sdkCtx, recipient, "Subscribe")
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal profile: %w", err)
-	}
-	if err := am.k.SetProfileCore(sdkCtx, owner, bz); err != nil {
-		return nil, fmt.Errorf("failed to save profile: %w", err)
+		return nil, err
 	}
 
-	sdkCtx.Logger().Info("UpgradeLevel",
-		"owner", owner,
+	sdkCtx.Logger().Debug("Subscribe",
+		"payer", payer,
+		"recipient", recipient,
+		"is_gift", isGift,
+		"is_gov", isGov,
 		"level", requestedLevel,
-		"period_fee", periodFee,
-		"reserve", reserveAmount,
-		"expiry", newExpiry,
-		"auto_renew", true,
-		"subscription_period", params.SubscriptionPeriod,
 	)
 
-	return &types.MsgUpgradeLevelResponse{}, nil
+	periodFee := tierConfig.PeriodFee
+	reserveBps := uint64(params.SubscriptionReservePercent * 10000)
+	if reserveBps > 10000 {
+		reserveBps = 10000
+	}
+
+	if isGift {
+		if recipientCore.Level > int32(requestedLevel) {
+			return nil, fmt.Errorf("gift rejected: recipient level %d > requested %d", recipientCore.Level, requestedLevel)
+		}
+		// ── Gift path: payer pays, recipient's subscription extends ──
+		var reserveAmount uint64
+		if periodFee > 0 {
+			balance := am.k.GetBalance(sdkCtx, payer, "umirage")
+			if balance.LT(sdkmath.NewIntFromUint64(periodFee)) {
+				return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
+			}
+
+			reserveAmount = periodFee * reserveBps / 10000
+			burnAmount := periodFee - reserveAmount
+
+			if burnAmount > 0 {
+				if err := am.k.BurnFromAccount(sdkCtx, payer, burnAmount); err != nil {
+					return nil, fmt.Errorf("Subscribe gift: failed to burn fee: %w", err)
+				}
+			}
+			if reserveAmount > 0 {
+				if err := am.k.DeductFeeFromOwner(sdkCtx, payer, reserveAmount); err != nil {
+					return nil, fmt.Errorf("Subscribe gift: failed to escrow reserve: %w", err)
+				}
+			}
+		}
+
+		// Remove old subscription index
+		if recipientCore.SubscriptionExpiry > 0 {
+			_ = am.k.RemoveSubscription(sdkCtx, recipient, recipientCore.SubscriptionExpiry)
+		}
+
+		// Extend expiry from max(currentExpiry, now) + period
+		var newExpiry int64
+		if params.SubscriptionPeriod > 0 {
+			base := sdkCtx.BlockTime().Unix()
+			if recipientCore.SubscriptionExpiry > base {
+				base = recipientCore.SubscriptionExpiry
+			}
+			newExpiry = base + int64(params.SubscriptionPeriod)*60
+		}
+
+		recipientCore.Level = int32(requestedLevel)
+		recipientCore.SubscriptionExpiry = newExpiry
+		// Keep auto_renew unchanged for gifts
+		recipientCore.ReserveFunds += reserveAmount
+
+		if newExpiry > 0 {
+			if err := am.k.SetSubscription(sdkCtx, recipient, requestedLevel, newExpiry); err != nil {
+				sdkCtx.Logger().Error("Subscribe gift: failed to set subscription index", "recipient", recipient, "err", err)
+			}
+		}
+
+		bz, err := json.Marshal(recipientCore)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal profile: %w", err)
+		}
+		if err := am.k.SetProfileCore(sdkCtx, recipient, bz); err != nil {
+			return nil, fmt.Errorf("failed to save profile: %w", err)
+		}
+
+		sdkCtx.Logger().Info("Subscribe (gift)",
+			"payer", payer,
+			"recipient", recipient,
+			"level", requestedLevel,
+			"period_fee", periodFee,
+			"reserve_added", reserveAmount,
+			"new_expiry", newExpiry,
+			"auto_renew", recipientCore.AutoRenew,
+		)
+	} else {
+		// ── Self-subscribe path (or governance): payer == recipient ──
+		// Burn old reserve
+		if recipientCore.ReserveFunds > 0 {
+			if err := am.k.BurnFromModuleAmount(sdkCtx, recipientCore.ReserveFunds); err != nil {
+				return nil, fmt.Errorf("Subscribe: failed to burn old reserve: %w", err)
+			}
+			recipientCore.ReserveFunds = 0
+		}
+
+		var reserveAmount uint64
+		if periodFee > 0 {
+			balance := am.k.GetBalance(sdkCtx, payer, "umirage")
+			if balance.LT(sdkmath.NewIntFromUint64(periodFee)) {
+				return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
+			}
+
+			reserveAmount = periodFee * reserveBps / 10000
+			burnAmount := periodFee - reserveAmount
+
+			if burnAmount > 0 {
+				if err := am.k.BurnFromAccount(sdkCtx, payer, burnAmount); err != nil {
+					return nil, fmt.Errorf("Subscribe: failed to burn fee: %w", err)
+				}
+			}
+			if reserveAmount > 0 {
+				if err := am.k.DeductFeeFromOwner(sdkCtx, payer, reserveAmount); err != nil {
+					return nil, fmt.Errorf("Subscribe: failed to escrow reserve: %w", err)
+				}
+			}
+		}
+
+		// Remove old subscription index
+		if recipientCore.SubscriptionExpiry > 0 {
+			_ = am.k.RemoveSubscription(sdkCtx, recipient, recipientCore.SubscriptionExpiry)
+		}
+
+		var newExpiry int64
+		if params.SubscriptionPeriod > 0 {
+			newExpiry = sdkCtx.BlockTime().Unix() + int64(params.SubscriptionPeriod)*60
+		}
+
+		recipientCore.Level = int32(requestedLevel)
+		recipientCore.SubscriptionExpiry = newExpiry
+		recipientCore.AutoRenew = true
+		recipientCore.ReserveFunds = reserveAmount
+
+		if newExpiry > 0 {
+			if err := am.k.SetSubscription(sdkCtx, recipient, requestedLevel, newExpiry); err != nil {
+				sdkCtx.Logger().Error("Subscribe: failed to set subscription index", "recipient", recipient, "err", err)
+			}
+		}
+
+		bz, err := json.Marshal(recipientCore)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal profile: %w", err)
+		}
+		if err := am.k.SetProfileCore(sdkCtx, recipient, bz); err != nil {
+			return nil, fmt.Errorf("failed to save profile: %w", err)
+		}
+
+		sdkCtx.Logger().Info("Subscribe (self)",
+			"owner", payer,
+			"level", requestedLevel,
+			"period_fee", periodFee,
+			"reserve", reserveAmount,
+			"expiry", newExpiry,
+			"auto_renew", true,
+			"subscription_period", params.SubscriptionPeriod,
+		)
+	}
+
+	return &types.MsgSubscribeResponse{}, nil
 }
 
 // SetAutoRenewal sets the auto_renew flag for a user's subscription.

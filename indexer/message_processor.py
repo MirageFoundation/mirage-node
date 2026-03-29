@@ -31,7 +31,7 @@ from shared.datatypes import (
     MsgDelete,
     MsgDeleteUser,
     MsgSetLevel,
-    MsgUpgradeLevel,
+    MsgSubscribe,
     MsgSetAutoRenewal,
     MsgUpdateParams,
     MsgBridgeBurn,
@@ -104,7 +104,7 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgDelete": MsgDelete,
     "/mirage.core.v1.MsgDeleteUser": MsgDeleteUser,
     "/mirage.core.v1.MsgSetLevel": MsgSetLevel,
-    "/mirage.core.v1.MsgUpgradeLevel": MsgUpgradeLevel,
+    "/mirage.core.v1.MsgSubscribe": MsgSubscribe,
     "/mirage.core.v1.MsgSetAutoRenewal": MsgSetAutoRenewal,
     "/mirage.core.v1.MsgUpdateParams": MsgUpdateParams,
     "/mirage.core.v1.MsgBridgeBurn": MsgBridgeBurn,
@@ -197,8 +197,8 @@ class MessageProcessor:
             self._handle_delete_user(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetLevel":
             self._handle_set_level(type_url, value, ts)
-        elif type_url == "/mirage.core.v1.MsgUpgradeLevel":
-            self._handle_upgrade_level(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgSubscribe":
+            self._handle_subscribe(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetAutoRenewal":
             self._handle_set_auto_renewal(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgUpdateParams":
@@ -1636,23 +1636,21 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling set_level: %s", e, exc_info=True)
 
-    def _handle_upgrade_level(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgUpgradeLevel (user or governance tier upgrade)."""
+    def _handle_subscribe(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgSubscribe (self or gift subscription)."""
         try:
-            parsed = MsgUpgradeLevel()
+            parsed = MsgSubscribe()
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = ""
-            if msg_dict.get("envelope_pubkey"):
-                owner = derive_owner_from_msg(msg_dict)
+            owner = str(msg_dict.get("target", "")).strip().lower()
+            if owner:
+                logger.debug("Subscribe target: owner=%s", owner)
             else:
-                owner = str(msg_dict.get("target", "")).strip().lower()
-                if owner:
-                    logger.debug("UpgradeLevel via governance: owner=%s", owner)
+                owner = derive_owner_from_msg(msg_dict)
             requested_level = int(msg_dict.get("level", 0) or 0)
 
             if not owner:
-                logger.warning("Rejected upgrade_level: could not derive owner")
+                logger.warning("Rejected subscribe: could not derive owner")
                 return
 
             # Query the chain for the updated profile (includes subscription_expiry, auto_renew)
@@ -1684,7 +1682,7 @@ class MessageProcessor:
                     reserve_funds=reserve_funds,
                 )
                 self.log_yaml(
-                    "User upgraded level",
+                    "User subscribed",
                     {
                         "owner": owner,
                         "level": level,
@@ -1702,7 +1700,7 @@ class MessageProcessor:
                 else:
                     self.db.upsert_profile(owner, None, requested_level, ts)
                 self.log_yaml(
-                    "User upgraded level (chain query failed)",
+                    "User subscribed (chain query failed)",
                     {
                         "owner": owner,
                         "level": requested_level,
@@ -1711,7 +1709,7 @@ class MessageProcessor:
                     },
                 )
         except Exception as e:
-            logger.error("Error handling upgrade_level: %s", e, exc_info=True)
+            logger.error("Error handling subscribe: %s", e, exc_info=True)
 
     def _handle_set_auto_renewal(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetAutoRenewal (user-initiated auto_renew toggle)."""

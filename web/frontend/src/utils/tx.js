@@ -129,6 +129,26 @@ export async function getPendingSendInfo(target) {
     return h.getPendingSendInfo(target);
 }
 
+export async function addSubscribeListener(fn) {
+    const h = await getHandler();
+    return h.addSubscribeListener(fn);
+}
+
+export async function getPendingSubscribes() {
+    const h = await getHandler();
+    return h.getPendingSubscribes();
+}
+
+export async function isPendingSubscribe(target) {
+    const h = await getHandler();
+    return h.isPendingSubscribe(target);
+}
+
+export async function getPendingSubscribeInfo(target) {
+    const h = await getHandler();
+    return h.getPendingSubscribeInfo(target);
+}
+
 // Delete-account tracking
 export async function addDeleteListener(fn) {
     const h = await getHandler();
@@ -366,9 +386,9 @@ export async function refreshBalance() {
     }
 }
 
-export async function upgradeLevel(level, monthlyFeeUmirage) {
+export async function subscribe(level, monthlyFeeUmirage, target) {
     const h = await getHandler();
-    return h.upgradeLevel(level, monthlyFeeUmirage);
+    return h.subscribe(level, monthlyFeeUmirage, target);
 }
 
 export async function setAutoRenewal(autoRenew) {

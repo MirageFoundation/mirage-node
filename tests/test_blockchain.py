@@ -44,7 +44,8 @@ from tests.cases.test_blockchain_chain_rules import (
 )
 from tests.cases.test_blockchain_tiers import (
     test_tier_enforcement,
-    test_upgrade_level_validation,
+    test_subscribe_validation,
+    test_subscribe_gift_rejects_higher_tier,
     test_tier_features,
 )
 from tests.cases.test_blockchain_social import test_follow_limits, test_hard_cap_vs_deque
@@ -71,7 +72,8 @@ ALL_CATEGORIES = {
     "auto_renewal": test_chain_auto_renewal,
     "governance": test_governance_reject,
     "hard_cap_vs_deque": test_hard_cap_vs_deque,
-    "upgrade_validation": test_upgrade_level_validation,
+    "subscribe_validation": test_subscribe_validation,
+    "subscribe_gift_reject": test_subscribe_gift_rejects_higher_tier,
     "tier_features": test_tier_features,
     "biography": test_biography,
     "annotate_chain": test_annotate_chain,
@@ -88,7 +90,8 @@ STATELESS_CATEGORIES = {
     "malicious_inputs",
     "tier_enforcement",
     "governance",
-    "upgrade_validation",
+    "subscribe_validation",
+    "subscribe_gift_reject",
     "relay_sig",
     "pow",
     "msg_format",

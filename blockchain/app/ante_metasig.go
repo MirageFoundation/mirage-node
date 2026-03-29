@@ -823,12 +823,12 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetLevel", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-		case *coretypes.MsgUpgradeLevel:
+		case *coretypes.MsgSubscribe:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
 			}
 			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgUpgradeLevel", "err", err.Error())
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, err
 			}
 			pubHash := sha256.Sum256(m.EnvelopePubkey)
@@ -838,7 +838,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
 				return ctx, fmt.Errorf("envelope replay: nonce already used")
 			}
-			if err := verifyRelaySignature("MsgUpgradeLevel", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+			if err := verifyRelaySignature("MsgSubscribe", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
 				w.writeBytes(3, m.EnvelopeBlockHash)
 				w.writeUvarint(4, m.EnvelopeDifficulty)
@@ -846,13 +846,16 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeUvarint(100, uint64(uint32(m.Level)))
+				if m.Target != "" {
+					w.writeString(101, m.Target)
+				}
 			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUpgradeLevel", "err", err.Error())
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, err
 			}
 			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUpgradeLevel", "err", err.Error())
+				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
 		case *coretypes.MsgSetAutoRenewal:

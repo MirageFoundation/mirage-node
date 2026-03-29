@@ -61,7 +61,7 @@ from shared.canon import (  # noqa: E402
     canon_base_block_topic as _canon_base_block_topic_raw,
     canon_base_unblock_topic as _canon_base_unblock_topic_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
-    canon_base_upgrade_level as _canon_base_upgrade_level_raw,
+    canon_base_subscribe as _canon_base_subscribe_raw,
     canon_base_report as _canon_base_report_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
@@ -530,8 +530,8 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     return False
 
 
-def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
-    """Upgrade a wallet's subscription to the given level (1=Subscriber, 10=Agent)."""
+def _do_subscribe(backend: str, wallet: LocalWallet, level: int, target: str = "") -> dict:
+    """Subscribe a wallet to the given level (1=Subscriber, 10=Agent), optionally gifting to target."""
     addr = str(wallet.address())
     st = get_status(backend, address=addr)
     lb = str(st.get("last_block_hash", ""))
@@ -539,8 +539,8 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
     ts = _now_ms()
     nonce = _fresh_nonce()
 
-    # upgrade_level: difficulty=0, proof=0 (no PoW)
-    base = _canon_base_upgrade_level_raw(pub, _lb_bytes(lb), 0, ts, level, nonce)
+    # subscribe: difficulty=0, proof=0 (no PoW)
+    base = _canon_base_subscribe_raw(pub, _lb_bytes(lb), 0, ts, level, target=target, nonce=nonce)
     signed = canon_signed_with_pow(base, 0)
     sig = sign_canonical(wallet, signed)
     payload = {
@@ -551,7 +551,9 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
         "envelope_nonce": str(nonce),
         "level": level,
     }
-    code, resp = _post(f"{backend}/api/core/upgrade_level", payload)
+    if target:
+        payload["target"] = target
+    code, resp = _post(f"{backend}/api/core/subscribe", payload)
     return resp
 
 
@@ -744,7 +746,7 @@ def setup_test_wallets(backend: str) -> bool:
     # Subscribe wallets: sub1,sub2 -> level 1, agent1/agent2 -> level 10
     for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
-        resp = _do_upgrade_level(backend, w, level)
+        resp = _do_subscribe(backend, w, level)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
             print(f"  Subscribed {name} to level {level} (tx: {txh[:16]}...)")

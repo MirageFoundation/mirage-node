@@ -5,7 +5,8 @@ import { useLocation } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import { formatMirage, formatMirageCompact } from '../utils/formatters';
 import Api from '../lib/api';
-import { upgradeLevel as txUpgradeLevel, setAutoRenewal as txSetAutoRenewal } from '../utils/tx';
+import { subscribe as txSubscribe, setAutoRenewal as txSetAutoRenewal } from '../utils/tx';
+import { usePendingSubscribes } from '../utils/usePendingSubscribes';
 import transactionHandler from '../utils/TransactionHandler';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
@@ -476,6 +477,7 @@ export default function SubscriptionView({ state }) {
     const [subscriptionPeriodMinutes, setSubscriptionPeriodMinutes] = useState(0);
     const [tierConfig, setTierConfig] = useState([]);
     const [expandedTierLevel, setExpandedTierLevel] = useState(null);
+    const { isPending: isSubscribePending, formatStatus: formatSubscribeStatus } = usePendingSubscribes();
     const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 599px)').matches);
     const txInFlightRef = useRef(false);
     const autoRenewDisplayRef = useRef(false);
@@ -716,6 +718,7 @@ export default function SubscriptionView({ state }) {
 
     const handleToggleAutoRenew = async () => {
         if (txInFlightRef.current) return;
+        if (isSubscribePending(address)) return;
         txInFlightRef.current = true;
         setError('');
         autoRenewDisplayRef.current = autoRenew;
@@ -898,7 +901,7 @@ export default function SubscriptionView({ state }) {
                     setError(formatError(result));
                 }
             } else {
-                const result = await txUpgradeLevel(tier.level, tier.periodFeeUmirage);
+                const result = await txSubscribe(tier.level, tier.periodFeeUmirage);
 
                 if (result.success || result.tx_hash) {
                     setError('');
@@ -1183,7 +1186,7 @@ Not directly spendable and will get burned if not used.`}>
                                                                 variant={isActive ? 'ghost' : 'primary'}
                                                                 size="sm"
                                                                 onClick={() => handleUpgrade(tier)}
-                                                                disabled={isActive || isUpgrading || (!affordable && tier.level > 0)}
+                                                                disabled={isActive || isUpgrading || isSubscribePending(address) || (!affordable && tier.level > 0)}
                                                                 style={{
                                                                     marginTop: 'auto',
                                                                     ...(isActive ? {} : {
@@ -1196,9 +1199,9 @@ Not directly spendable and will get burned if not used.`}>
                                                                     ? (isMobile ? 'Active Plan' : 'Active')
                                                                     : tier.level < userLevel
                                                                         ? 'Downgrade'
-                                                                        : !affordable
-                                                                            ? (isMobile ? 'Insufficient Funds' : 'No Funds')
-                                                                            : 'Upgrade'}
+                                                                    : !affordable
+                                                                        ? (isMobile ? 'Insufficient Funds' : 'No Funds')
+                                                                        : (formatSubscribeStatus(address) || 'Subscribe')}
                                                             </Button>
                                                         </TierCard>
                                                     );

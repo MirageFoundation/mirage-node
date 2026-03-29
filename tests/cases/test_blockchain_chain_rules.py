@@ -64,7 +64,7 @@ from tests.common import (
     _canon_base_block_topic_raw,
     _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw,
-    _canon_base_upgrade_level_raw,
+    _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
     _canon_base_annotate_raw,
@@ -103,7 +103,7 @@ from tests.blockchain_helpers import (
     _build_msg_block_post,
     _build_msg_block_user,
     _build_msg_block_topic,
-    _build_msg_upgrade_level,
+    _build_msg_subscribe,
     _build_msg_follow_user,
     _build_msg_unfollow_user,
     _build_msg_follow_topic,
@@ -156,7 +156,7 @@ from shared.datatypes import (
     MsgSetAgents,
     MsgUnfollowTopic,
     MsgUnfollowUser,
-    MsgUpgradeLevel,
+    MsgSubscribe,
     MsgVote,
     MsgAnnotate,
 )
@@ -485,16 +485,16 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.post_invalid_media", ccode, dcode, dlog)
 
-    # 6.9 MsgUpgradeLevel invalid level
-    msg = _build_msg_upgrade_level(w1, lb, 0, ts, 99, pow_val=0, nonce=_gen_nonce())
+    # 6.9 MsgSubscribe invalid level
+    msg = _build_msg_subscribe(w1, lb, 0, ts, 99, pow_val=0, nonce=_gen_nonce())
     _, ccode, clog, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgUpgradeLevel")],
+        [(msg, "/mirage.core.v1.MsgSubscribe")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         w1.public_key().public_key_bytes,
         wait_deliver=True,
     )
-    _check_deliver_reject("msg.upgrade_level_invalid", ccode, dcode, dlog)
+    _check_deliver_reject("msg.subscribe_invalid", ccode, dcode, dlog)
 
     # 6.10 Block limits — use the FREE wallet (tier 0) so we hit the real
     # free-tier ceiling and can verify overflow is rejected.

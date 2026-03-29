@@ -563,21 +563,24 @@ def canon_base_report(
     return bytes(out)
 
 
-def canon_base_upgrade_level(
+def canon_base_subscribe(
     pubkey: bytes,
     last_block_hash: bytes,
     difficulty: int,
     timestamp: int,
     level: int,
+    target: str = "",
     nonce: int = 0,
 ) -> bytes:
-    out = bytearray(_prefix("MsgUpgradeLevel"))
+    out = bytearray(_prefix("MsgSubscribe"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
     out += _enc_u64(7, nonce)
     out += _enc_u64(100, level)
+    if target:
+        out += _enc_str(101, target)
     return bytes(out)
 
 

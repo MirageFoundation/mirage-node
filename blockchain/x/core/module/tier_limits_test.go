@@ -1021,13 +1021,13 @@ func TestRequireUsernamePassesWithUsername(t *testing.T) {
 	require.Equal(t, []string{genAddr(1)}, followed)
 }
 
-func TestRequireUsernameRejectsUpgradeLevel(t *testing.T) {
+func TestRequireUsernameRejectsSubscribe(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithLogger(log.NewNopLogger())
 	am := newTestModule(mk)
 
 	pub, _ := testPubkeyOwner()
-	_, err := am.UpgradeLevel(ctx, &types.MsgUpgradeLevel{
+	_, err := am.Subscribe(ctx, &types.MsgSubscribe{
 		Authority:      "not-gov",
 		EnvelopePubkey: pub,
 		Level:          uint32(types.LevelSubscriber),

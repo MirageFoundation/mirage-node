@@ -169,6 +169,11 @@ class TransactionHandler {
             this.pendingSends = new Map();
             this._sendListeners = new Set();
 
+            // Track in-flight subscribe operations
+            // Map<key, { target: string, action: 'subscribe'|'gift', queuePosition: number }>
+            this.pendingSubscribes = new Map();
+            this._subscribeListeners = new Set();
+
             // Vote detail polling can overlap when users vote quickly.
             // Track the latest vote tx per target and cancel/ignore stale poll loops.
             this._voteDetailsPollToken = new Map();   // Map<targetLower, number>
@@ -311,6 +316,39 @@ class TransactionHandler {
     getPendingSendInfo(target) {
         const key = `send:${String(target).toLowerCase()}`;
         return this.pendingSends.get(key) || null;
+    }
+
+    // Subscribe tracking methods
+    addSubscribeListener(callback) {
+        if (typeof callback === 'function') {
+            this._subscribeListeners.add(callback);
+        }
+        return () => this._subscribeListeners.delete(callback);
+    }
+
+    _notifySubscribeListeners() {
+        const pending = this.getPendingSubscribes();
+        this._subscribeListeners.forEach(cb => {
+            try { cb(pending); } catch (_) { }
+        });
+    }
+
+    getPendingSubscribes() {
+        const result = {};
+        this.pendingSubscribes.forEach((value, key) => {
+            result[key] = value;
+        });
+        return result;
+    }
+
+    isPendingSubscribe(target) {
+        const key = `subscribe:${String(target).toLowerCase()}`;
+        return this.pendingSubscribes.has(key);
+    }
+
+    getPendingSubscribeInfo(target) {
+        const key = `subscribe:${String(target).toLowerCase()}`;
+        return this.pendingSubscribes.get(key) || null;
     }
 
     // Follow tracking methods
@@ -1499,29 +1537,31 @@ class TransactionHandler {
     }
 
     /**
-     * Upgrade subscription level (tier)
+     * Subscribe (or gift a subscription) to a tier level.
      * @param {number} level - Target paid subscription level (1=Subscriber, 10=Agent)
      * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier (unused, kept for API compatibility)
+     * @param {string} [target] - Optional target address to gift the subscription to
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
-    async upgradeLevel(level, monthlyFeeUmirage) {
+    async subscribe(level, monthlyFeeUmirage, target) {
         try {
             const seedPhrase = seedVault.getSeed() || "";
             const targetLevel = Number(level);
 
             if (targetLevel !== 1 && targetLevel !== 10) {
-                return this._fail("Invalid level (must be 1 or 10)");
+                return this._fail("Invalid level");
             }
 
-            updateNotification("Upgrading subscription");
+            const targetTrimmed = String(target || "").trim().toLowerCase();
+            updateNotification(targetTrimmed ? "Gifting subscription" : "Subscribing");
 
-            // No need to fetch parameters for upgrade; chain determines tier fee server-side
             const last_block_hash = "";
             const tx = {
-                action: 'upgrade_level',
+                action: 'subscribe',
                 level: targetLevel,
+                target: targetTrimmed,
                 last_block_hash,
-                pow_difficulty: 0, // PoW not allowed for upgrade
+                pow_difficulty: 0, // PoW not allowed for subscribe
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1529,9 +1569,35 @@ class TransactionHandler {
             const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
             const challenge = `${derivedAddress}:${last_block_hash}:0`;
 
-            // Force fees mode (no PoW)
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            const recipient = targetTrimmed || String(derivedAddress || "").trim().toLowerCase();
+            const subKey = `subscribe:${recipient}`;
+            if (this.pendingSubscribes.has(subKey)) {
+                return this._fail("subscription already in progress");
+            }
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingSubscribes.set(subKey, {
+                target: recipient,
+                action: targetTrimmed ? 'gift' : 'subscribe',
+                queuePosition,
+            });
+            this._notifySubscribeListeners();
+            console.debug("[subscribe] enqueue", { target: recipient, action: targetTrimmed ? 'gift' : 'subscribe', queuePosition });
+
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingSubscribes.delete(subKey);
+                    this._notifySubscribeListeners();
+                    console.debug("[subscribe] resolved", {
+                        target: recipient,
+                        success: !!result?.success,
+                        error: result?.error,
+                    });
+                    resolve(result);
+                };
+                this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false)
+                    .then(wrappedResolve)
+                    .catch((err) => wrappedResolve(this._failFromException(err)));
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -3786,7 +3852,7 @@ class TransactionHandler {
             else if (action === 'report') msgName = 'MsgReport';
             else if (action === 'edit_post') msgName = 'MsgEdit';
             else if (action === 'annotate_post') msgName = 'MsgAnnotate';
-            else if (action === 'upgrade_level') msgName = 'MsgUpgradeLevel';
+            else if (action === 'subscribe') msgName = 'MsgSubscribe';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
             else if (action === 'bridge_burn') msgName = 'MsgBridgeBurn';
             else if (action === 'award') msgName = 'MsgAward';
@@ -4557,9 +4623,9 @@ class TransactionHandler {
                     envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/vote';
-            } else if (msgName === 'MsgUpgradeLevel') {
-                // Sign relay for upgrade level (must match chain ante_metasig)
-                // Note: PoW is NOT allowed for MsgUpgradeLevel - must pay with tokens
+            } else if (msgName === 'MsgSubscribe') {
+                // Sign relay for subscribe (must match chain ante_metasig)
+                // Note: PoW is NOT allowed for MsgSubscribe - must pay with tokens
                 const uvarint = (n) => {
                     const out = [];
                     let v = (n >>> 0);
@@ -4588,24 +4654,31 @@ class TransactionHandler {
                     let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
                     return out;
                 };
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUpgradeLevel\x00");
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgSubscribe\x00");
                 const tag2 = Uint8Array.from([2]);   // envelope_pubkey
                 const tag3 = Uint8Array.from([3]);   // envelope_block_hash
                 const tag4 = Uint8Array.from([4]);   // envelope_difficulty (always 0)
-                const tag5 = Uint8Array.from([5]);   // envelope_pow (always 0 for upgrade)
+                const tag5 = Uint8Array.from([5]);   // envelope_pow (always 0 for subscribe)
                 const tag6 = Uint8Array.from([6]);   // envelope_timestamp
                 const tag100 = Uint8Array.from([100]); // level
+                const tag101 = Uint8Array.from([101]); // target
                 const targetLevel = Number(transaction.level || 0);
-                const canon = concat(
+                const targetStr = (transaction.target || "").trim().toLowerCase();
+                const targetBytes = new TextEncoder().encode(targetStr);
+                const canonParts = [
                     prefix,
                     tag2, encBytes(pubBytes),
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(0), // difficulty always 0 for upgrade
-                    tag5, uvarint(0), // pow always 0 for upgrade
+                    tag4, uvarint(0), // difficulty always 0 for subscribe
+                    tag5, uvarint(0), // pow always 0 for subscribe
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, uvarint(targetLevel),
-                );
+                ];
+                if (targetStr) {
+                    canonParts.push(tag101, encBytes(targetBytes));
+                }
+                const canon = concat(...canonParts);
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
                 const sigFixed = sigCompact.toFixedLength();
@@ -4618,7 +4691,10 @@ class TransactionHandler {
                     level: targetLevel,
                     envelope_nonce: envelopeNonce,
                 };
-                endpoint = 'core/upgrade_level';
+                if (targetStr) {
+                    toRelay.target = targetStr;
+                }
+                endpoint = 'core/subscribe';
             } else if (msgName === 'MsgSetAutoRenewal') {
                 // Sign relay for set_auto_renewal (must match chain ante_metasig)
                 // Note: PoW is NOT allowed for MsgSetAutoRenewal - must pay via reserve
@@ -5104,11 +5180,11 @@ class TransactionHandler {
             transaction.envelope_nonce = envelopeNonce;
 
             // Subscribers (level >= 1) skip PoW — chain trusts them.
-            // Fee-only actions (upgrade_level, set_auto_renewal) never use PoW regardless of level.
+            // Fee-only actions (subscribe, set_auto_renewal) never use PoW regardless of level.
             // NOTE: pow_difficulty=0 for a free user means "base difficulty" (0 extra steps),
             // which still requires computing a valid argon2 hash.  Do NOT skip PoW for that.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal', 'award']);
+            const NO_POW_ACTIONS = new Set(['subscribe', 'set_auto_renewal', 'award']);
             const canSkipPow = !forcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
 
             // Inform UI that we are starting a transaction
@@ -5611,25 +5687,32 @@ class TransactionHandler {
                     ...mediaParts,
                     tag107, encStr(transaction.appendix || ""),
                 );
-            } else if (action === 'upgrade_level') {
-                // upgrade_level should NEVER use PoW - it must be paid with tokens
+            } else if (action === 'subscribe') {
+                // subscribe should NEVER use PoW - it must be paid with tokens
                 // This branch should not be reached, but handle gracefully
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUpgradeLevel\x00");
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgSubscribe\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag5 = Uint8Array.from([5]);
                 const tag100 = Uint8Array.from([100]);
-                baseBytes = concat(
+                const tag101 = Uint8Array.from([101]);
+                const targetStr = (transaction.target || "").trim().toLowerCase();
+                const targetBytes = new TextEncoder().encode(targetStr);
+                const parts = [
                     prefix,
                     tag2, encBytes(pubBytes),
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(0), // difficulty always 0
                     tag5, uvarint(0),
                     tag100, uvarint(Number(transaction.level) || 0),
-                );
+                ];
+                if (targetStr) {
+                    parts.push(tag101, encBytes(targetBytes));
+                }
+                baseBytes = concat(...parts);
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, annotate_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, annotate_post, subscribe, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

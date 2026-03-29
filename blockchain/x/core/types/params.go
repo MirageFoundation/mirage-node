@@ -21,7 +21,7 @@ const (
 	MaxRelayMaxGasFee  = 100_000_000_000    // 100k MIRAGE per tx
 )
 
-// ValidSubscriptionLevels are the levels users can self-upgrade to via MsgUpgradeLevel.
+// ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
 var ValidSubscriptionLevels = map[int]bool{
 	LevelSubscriber: true,
 	LevelAgent:      true,

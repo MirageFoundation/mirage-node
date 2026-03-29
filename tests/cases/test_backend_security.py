@@ -37,7 +37,7 @@ from tests.common import (
     _COLOR_RESET,
     _COLOR_BOLD,
     _fetch_params,
-    _do_upgrade_level,
+    _do_subscribe,
     _docker_exec,
     _run_miraged,
     _miraged_cmd,
@@ -54,7 +54,7 @@ from tests.common import (
     check_pow_target,
     _difficulty_factor,
     _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw,
+    _canon_base_subscribe_raw,
     _canon_base_send_tokens_raw,
     _canon_base_award_raw,
     _canon_base_post_raw,
@@ -985,27 +985,27 @@ def test_validation(backend: str):
 
     # 11.14 Upgrade to invalid level (100) — rejected
     try:
-        resp = _do_upgrade_level(backend, free_wallet, 100)
+        resp = _do_subscribe(backend, free_wallet, 100)
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
         if not txh or "invalid" in err:
-            _pass("validation.upgrade_invalid_level_rejected")
+            _pass("validation.subscribe_invalid_level_rejected")
         else:
-            _pass("validation.upgrade_invalid_level submitted (chain may reject)")
+            _pass("validation.subscribe_invalid_level submitted (chain may reject)")
     except Exception as e:
-        _fail("validation.upgrade_invalid_level_rejected", str(e))
+        _fail("validation.subscribe_invalid_level_rejected", str(e))
 
     # 11.15 Upgrade to invalid level (3) — rejected (only 1 and 10 are valid)
     try:
-        resp = _do_upgrade_level(backend, free_wallet, 3)
+        resp = _do_subscribe(backend, free_wallet, 3)
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
         if not txh or "invalid" in err:
-            _pass("validation.upgrade_invalid_level_3_rejected")
+            _pass("validation.subscribe_invalid_level_3_rejected")
         else:
-            _pass("validation.upgrade_invalid_level_3 submitted (chain may reject)")
+            _pass("validation.subscribe_invalid_level_3 submitted (chain may reject)")
     except Exception as e:
-        _fail("validation.upgrade_invalid_level_3_rejected", str(e))
+        _fail("validation.subscribe_invalid_level_3_rejected", str(e))
 
     # ------ Report validation ------
 
