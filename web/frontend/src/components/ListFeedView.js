@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import styled from 'styled-components';
 import { Link } from 'react-router-dom';
 import VoteSection from './VoteSection';
@@ -219,10 +219,7 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
         throw new Error('ListFeedView: timestamp missing');
     }
     if (ts > 1e12) ts = Math.floor(ts / 1000);
-    const numComments = Number(post.num_comments);
-    if (!Number.isFinite(numComments)) {
-        throw new Error('ListFeedView: num_comments missing');
-    }
+    const numComments = Number(post.num_comments) || 0;
     const thumbUrl = getThumbUrl(post);
     const authorColor = getAuthorColor(post?.author_level, post?.author_is_new);
     let displayAuthor = '';
