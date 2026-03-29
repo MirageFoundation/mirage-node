@@ -3529,6 +3529,10 @@ def core_post():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        ts_ok, ts_err = _validate_envelope_timestamp(timestamp)
+        if not ts_ok:
+            log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
+            return ts_err[0], ts_err[1]
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             log_event(rid, "post.invalid_nonce", envelope_nonce=data.get("envelope_nonce"))
