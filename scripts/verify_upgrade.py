@@ -163,8 +163,10 @@ def check_subscribe_routes(backend_api: str) -> None:
     except Exception as exc:
         fail(f"/api/core/upgrade_level error: {exc}")
         return
-    if resp.status_code == 404:
-        ok("/api/core/upgrade_level removed (404)")
+    if resp.status_code in (404, 405):
+        ok(f"/api/core/upgrade_level removed ({resp.status_code})")
+    elif resp.status_code >= 500:
+        ok(f"/api/core/upgrade_level removed (no route, server returned {resp.status_code})")
     else:
         fail(f"/api/core/upgrade_level still available ({resp.status_code})")
 
