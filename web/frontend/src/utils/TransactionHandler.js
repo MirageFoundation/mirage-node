@@ -654,7 +654,6 @@ class TransactionHandler {
             let pow_base_bits = 0;
             let pow_factor = 0;
             if (userLevel === 0) {
-                updateNotification("Fetching transaction parameters");
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash;
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -705,7 +704,6 @@ class TransactionHandler {
             let pow_factor = 0;
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             if (userLevel === 0) {
-                updateNotification("Preparing username change");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
@@ -752,7 +750,6 @@ class TransactionHandler {
             let pow_factor = 0;
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             if (userLevel === 0) {
-                updateNotification("Preparing biography update");
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -1368,7 +1365,6 @@ class TransactionHandler {
             if (!txhashTrimmed) return this._fail("empty target");
             if (!why) return this._fail("empty reason");
 
-            updateNotification("Preparing report");
             const [statusData] = await Promise.all([
                 Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
             ]);
@@ -1801,7 +1797,6 @@ class TransactionHandler {
             let pow_base_bits_e = 0;
             let pow_factor_e = 0;
             if (userLevelE === 0) {
-                updateNotification("Preparing edit");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
@@ -2220,8 +2215,6 @@ class TransactionHandler {
             let pow_factor_relay = 0;
             const userLevelNow = Number(Storage.load('user_level', '0')) || 0;
             if (userLevelNow === 0) {
-                // Free tier: must fetch real block hash for PoW validation
-                updateNotification("Fetching transaction parameters");
                 try {
                     const addrNow = Storage.load('publicKey', '');
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined);
@@ -3795,7 +3788,6 @@ class TransactionHandler {
      */
     async handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, resolve) {
         await ensureCosmCrypto();
-        updateNotification("Preparing and broadcasting tx");
 
         // derive keys
         const privBytes = new Uint8Array(privateKeyHex.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
@@ -5709,8 +5701,6 @@ class TransactionHandler {
 
                 // Stop the interval for updating notifications
                 clearInterval(intervalId);
-
-                updateNotification("Preparing and broadcasting tx");
 
                 const workerData = e ? e.data : null;
                 if (workerData && typeof workerData === 'object' && workerData.error) {

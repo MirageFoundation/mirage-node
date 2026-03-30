@@ -95,7 +95,7 @@ export function useVoteHandler({ state, updatePost }) {
 
         const userLevel = Number(Storage.load('user_level', '0') || 0);
         if (userLevel === 0) {
-            updateNotification("Processing", 10);
+            updateNotification("Processing", 3);
         }
 
         try {

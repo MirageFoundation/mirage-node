@@ -34,14 +34,14 @@ const ToastContainer = styled.div`
 `;
 
 const ToastItem = styled.div`
-    background: ${({ alert }) => 
-        alert 
-            ? 'rgba(220, 38, 38, 0.95)' 
+    background: ${({ alert }) =>
+        alert
+            ? 'rgba(220, 38, 38, 0.95)'
             : 'linear-gradient(135deg, rgba(88, 86, 214, 0.95) 0%, rgba(130, 87, 229, 0.95) 100%)'};
     color: #fff;
-    border: 1px solid ${({ alert }) => 
-        alert 
-            ? 'rgba(220, 38, 38, 0.6)' 
+    border: 1px solid ${({ alert }) =>
+        alert
+            ? 'rgba(220, 38, 38, 0.6)'
             : 'rgba(130, 87, 229, 0.5)'};
     border-radius: 8px;
     padding: 0.5rem 0.9rem;
@@ -74,19 +74,19 @@ const Spinner = styled.div`
 // Check if message is a progress update (should replace existing toast)
 function isProgressMessage(msg) {
     const lower = (msg || '').toLowerCase();
-    return lower.includes('pow') || 
-           lower.includes('solving') || 
-           lower.includes('submitting') ||
-           lower.includes('performing') ||
-           lower.includes('fetching') ||
-           lower.includes('preparing');
+    return lower.includes('pow') ||
+        lower.includes('solving') ||
+        lower.includes('submitting') ||
+        lower.includes('performing') ||
+        lower.includes('fetching') ||
+        lower.includes('preparing');
 }
 
 function Toast() {
     const [toast, setToast] = useState(null);
     const timeoutRef = useRef(null);
 
-    const showToast = useCallback((message, timeout = 3.0, alert = false) => {
+    const showToast = useCallback((message, timeout = 1.5, alert = false) => {
         // Clear any pending timeout
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);

@@ -74,19 +74,19 @@ const Spinner = styled.div`
 // Check if message is a progress update (should replace existing toast)
 function isProgressMessage(msg) {
     const lower = (msg || '').toLowerCase();
-    return lower.includes('pow') || 
-           lower.includes('solving') || 
-           lower.includes('submitting') ||
-           lower.includes('performing') ||
-           lower.includes('fetching') ||
-           lower.includes('preparing');
+    return lower.includes('pow') ||
+        lower.includes('solving') ||
+        lower.includes('submitting') ||
+        lower.includes('performing') ||
+        lower.includes('fetching') ||
+        lower.includes('preparing');
 }
 
 function Toast() {
     const [toast, setToast] = useState(null);
     const timeoutRef = useRef(null);
 
-    const showToast = useCallback((message, timeout = 3.0, alert = false) => {
+    const showToast = useCallback((message, timeout = 1.5, alert = false) => {
         // Clear any pending timeout
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
