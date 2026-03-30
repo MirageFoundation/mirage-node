@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.21.0 (Gov Authority Protection)",
-    "summary": "Adds GovAuthorityDecorator to reject broadcast transactions that spoof governance module authority. Finalizes mandatory envelope nonce by removing all legacy compatibility branches. Refactors relay ante chain to use sdk.ChainAnteDecorators(). No state migration required.",
+    "title": "Upgrade to v1.22.0 (MsgSubscribe + Subscription Gifting)",
+    "summary": "Renames MsgUpgradeLevel to MsgSubscribe and adds subscription gifting. New 'target' field allows users to gift subscriptions to other addresses. Gift path charges the sender the period fee and extends the recipient's subscription by one period. Gifting to a higher-tier recipient is rejected. Recipient auto_renew is preserved. Only levels 1 (Subscriber) and 10 (Agent) are valid. No state migration required — wire-compatible rename with same field tags.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.21.0",
+                "name": "v1.22.0",
                 "height": "T+50",
                 "info": ""
             }

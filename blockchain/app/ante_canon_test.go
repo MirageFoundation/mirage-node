@@ -241,9 +241,9 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForEdit(v.(*coretypes.MsgEdit)) },
 		},
 		{
-			name: "MsgUpgradeLevel",
-			obj:  &coretypes.MsgUpgradeLevel{},
-			fn:   func(v interface{}) []byte { return buildCanonForUpgradeLevel(v.(*coretypes.MsgUpgradeLevel)) },
+			name: "MsgSubscribe",
+			obj:  &coretypes.MsgSubscribe{},
+			fn:   func(v interface{}) []byte { return buildCanonForSubscribe(v.(*coretypes.MsgSubscribe)) },
 		},
 		{
 			name: "MsgSetBiography",

@@ -32,6 +32,7 @@
     <meta name="twitter:image" content="%PUBLIC_URL%/logo.webp" />
     <!-- Smart App Banner (iOS Safari) -->
     <meta name="apple-itunes-app" content="app-id=6757619038">
+    <!-- data-theme-id is set from src/registry/bootstrapThemeId.js (same rules as themes/manifests.js) -->
     <!-- Prevent white flash before JS/styles load by matching system theme early -->
     <style>
         html,
@@ -47,6 +48,12 @@
                 background-color: #1A1A1A;
                 color: #FFFFFF;
             }
+
+            html[data-theme-id="oldreddit"],
+            html[data-theme-id="oldreddit"] body {
+                background-color: #1a1a1b;
+                color: #d7dadc;
+            }
         }
 
         @media (prefers-color-scheme: light) {
@@ -55,6 +62,12 @@
             body {
                 background-color: #FFFFFF;
                 color: #111827;
+            }
+
+            html[data-theme-id="oldreddit"],
+            html[data-theme-id="oldreddit"] body {
+                background-color: #dae0e6;
+                color: #1c1c1c;
             }
         }
     </style>

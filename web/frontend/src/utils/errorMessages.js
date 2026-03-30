@@ -68,7 +68,6 @@ const ERROR_MAP = {
     pow_not_allowed_agents: "Proof-of-work is not allowed for agents.",
     pow_not_allowed_for_award: "Proof-of-work is not allowed for awards.",
     pow_not_allowed_for_set_auto_renewal: "Proof-of-work is not allowed for auto-renewal.",
-    pow_not_allowed_for_subscribers: "Proof-of-work is not allowed for subscribers.",
     pow_required: "Proof-of-work is required.",
     invalid_pow_fields: "Invalid proof-of-work fields.",
     invalid_last_block_hash: "Invalid last block hash.",
@@ -110,11 +109,14 @@ const ERROR_MAP = {
     biography_too_long: "Your biography exceeds the maximum length.",
 
     // Blocks / follows
+    cannot_block_self: "You cannot block yourself.",
+    cannot_follow_self: "You cannot follow yourself.",
     post_already_blocked: "You already blocked this post.",
     user_already_blocked: "You already blocked this user.",
     topic_already_blocked: "You already blocked this topic.",
     user_already_followed: "You already follow this user.",
     topic_already_followed: "You already follow this topic.",
+    user_must_be_mirage1: "User must be a valid mirage1 address.",
     block_post_in_progress: "Block post request already in progress.",
     unblock_post_in_progress: "Unblock post request already in progress.",
     block_user_in_progress: "Block user request already in progress.",
@@ -268,4 +270,5 @@ export function isErrorCode(resp, code) {
     return (typeof resp === 'string' ? resp : resp.error_code) === code;
 }
 
-export default { formatError, isErrorCode };
+const errorMessages = { formatError, isErrorCode };
+export default errorMessages;

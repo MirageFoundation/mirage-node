@@ -234,13 +234,13 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 
 	for _, msg := range tx.GetMsgs() {
 		switch m := msg.(type) {
-		case *coretypes.MsgUpgradeLevel:
-			// MsgUpgradeLevel NEVER allows PoW - must pay with tokens
+		case *coretypes.MsgSubscribe:
+			// MsgSubscribe NEVER allows PoW - must pay with tokens
 			if m.EnvelopePow > 0 {
-				ctx.Logger().Error("PoW: MsgUpgradeLevel cannot use PoW, must pay with tokens")
-				return ctx, fmt.Errorf("MsgUpgradeLevel cannot use PoW, must pay with tokens")
+				ctx.Logger().Error("PoW: MsgSubscribe cannot use PoW, must pay with tokens")
+				return ctx, fmt.Errorf("MsgSubscribe cannot use PoW, must pay with tokens")
 			}
-			// Skip PoW validation entirely for upgrade level (handled by handler)
+			// Skip PoW validation entirely for subscribe (handled by handler)
 
 		case *coretypes.MsgSetAutoRenewal:
 			if m.Authority == govAuthority {
@@ -1134,15 +1134,18 @@ func buildCanonForEdit(m *coretypes.MsgEdit) []byte {
 	return cw.buf
 }
 
-func buildCanonForUpgradeLevel(m *coretypes.MsgUpgradeLevel) []byte {
-	cw := newCanonWriter("MsgUpgradeLevel")
+func buildCanonForSubscribe(m *coretypes.MsgSubscribe) []byte {
+	cw := newCanonWriter("MsgSubscribe")
 	cw.writeBytes(2, m.EnvelopePubkey)
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
-	// envelope_pow (field 5) is NOT used for upgrade level (no PoW allowed)
+	// envelope_pow (field 5) is NOT used for subscribe (no PoW allowed)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeUvarint(7, m.EnvelopeNonce)
 	cw.writeUvarint(100, uint64(m.Level))
+	if m.Target != "" {
+		cw.writeString(101, m.Target)
+	}
 	return cw.buf
 }
 

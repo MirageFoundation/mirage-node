@@ -18,12 +18,12 @@ from tests.common import (
     _fresh_nonce, _lb_bytes,
     WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
     _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_upgrade_level, _docker_exec, _run_miraged, _miraged_cmd,
+    _fetch_params, _do_subscribe, _docker_exec, _run_miraged, _miraged_cmd,
     _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
     DEFAULT_BACKEND,
     get_status, get_user_status, get_username_from_address, get_address_from_username,
     sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
+    _canon_base_subscribe_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
     _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
     _canon_base_set_username_raw, _canon_base_set_biography_raw,
     _canon_base_annotate_raw, _canon_base_report_raw,
@@ -46,6 +46,33 @@ from tests.backend_helpers import (
     _wait_comment_indexed,
     _rpc_latest_height, _wait_next_block,
 )
+
+
+def _expect_reject_4xx(test_name: str, code: int, resp: dict | None = None) -> None:
+    if 400 <= code < 500:
+        _pass(test_name)
+        return
+    if code >= 500:
+        _debug(f"{test_name} server error code={code} resp={resp}")
+        _fail(test_name, f"server_error={code} resp={resp}")
+        return
+    _fail(test_name, f"code={code} resp={resp}")
+
+
+def _expect_reject_or_submit(
+    test_name_reject: str,
+    test_name_submit: str,
+    code: int,
+    resp: dict | None = None,
+) -> None:
+    if 400 <= code < 500:
+        _pass(test_name_reject)
+        return
+    if code >= 500:
+        _debug(f"{test_name_reject} server error code={code} resp={resp}")
+        _fail(test_name_reject, f"server_error={code} resp={resp}")
+        return
+    _pass(test_name_submit)
 
 
 def test_edge_cases(backend: str):
@@ -80,11 +107,13 @@ def test_edge_cases(backend: str):
 
     # 9.1 Empty content rejected
     code, resp = _try_post("test", "Title", "")
-    if code >= 400:
-        _pass("edge.empty_content_rejected")
-    else:
-        # Some backends allow empty content — check tx result
-        _pass("edge.empty_content submitted (backend may allow)")
+    # Some backends allow empty content — check tx result
+    _expect_reject_or_submit(
+        "edge.empty_content_rejected",
+        "edge.empty_content submitted (backend may allow)",
+        code,
+        resp,
+    )
 
     # Re-fetch params (PoW is single-use)
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -92,38 +121,46 @@ def test_edge_cases(backend: str):
     # 9.2 Oversize content rejected
     huge = "x" * 100_001
     code, resp = _try_post("test", "Title", huge)
-    if code >= 400:
-        _pass("edge.oversize_content_rejected")
-    else:
-        _pass("edge.oversize_content submitted (chain may reject)")
+    _expect_reject_or_submit(
+        "edge.oversize_content_rejected",
+        "edge.oversize_content submitted (chain may reject)",
+        code,
+        resp,
+    )
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.3 Oversize title rejected
     huge_title = "T" * 500
     code, resp = _try_post("test", huge_title, "body")
-    if code >= 400:
-        _pass("edge.oversize_title_rejected")
-    else:
-        _pass("edge.oversize_title submitted (chain may reject)")
+    _expect_reject_or_submit(
+        "edge.oversize_title_rejected",
+        "edge.oversize_title submitted (chain may reject)",
+        code,
+        resp,
+    )
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.4 Invalid topic format rejected
     code, resp = _try_post("INVALID TOPIC!!!", "Title", "body")
-    if code >= 400:
-        _pass("edge.invalid_topic_rejected")
-    else:
-        _pass("edge.invalid_topic submitted (chain may reject)")
+    _expect_reject_or_submit(
+        "edge.invalid_topic_rejected",
+        "edge.invalid_topic submitted (chain may reject)",
+        code,
+        resp,
+    )
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.5 Missing topic for root post rejected
     code, resp = _try_post("", "Title", "body")
-    if code >= 400:
-        _pass("edge.missing_topic_rejected")
-    else:
-        _pass("edge.missing_topic submitted (chain may reject)")
+    _expect_reject_or_submit(
+        "edge.missing_topic_rejected",
+        "edge.missing_topic submitted (chain may reject)",
+        code,
+        resp,
+    )
 
     # 9.6 Timestamp too old rejected
     ts_old = _now_ms() - 120_000  # 2 minutes ago
@@ -147,11 +184,13 @@ def test_edge_cases(backend: str):
         "title": "Old ts",
         "content": "body",
     }
-    code_old, _ = _post(f"{backend}/api/core/post", payload_old)
-    if code_old >= 400:
-        _pass("edge.old_timestamp_rejected")
-    else:
-        _pass("edge.old_timestamp submitted (chain validates envelope age)")
+    code_old, resp_old = _post(f"{backend}/api/core/post", payload_old)
+    _expect_reject_or_submit(
+        "edge.old_timestamp_rejected",
+        "edge.old_timestamp submitted (chain validates envelope age)",
+        code_old,
+        resp_old,
+    )
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
@@ -177,11 +216,13 @@ def test_edge_cases(backend: str):
         "title": "future ts",
         "content": "body",
     }
-    code_fut, _ = _post(f"{backend}/api/core/post", payload_fut)
-    if code_fut >= 400:
-        _pass("edge.future_timestamp_rejected")
-    else:
-        _pass("edge.future_timestamp submitted (chain validates envelope age)")
+    code_fut, resp_fut = _post(f"{backend}/api/core/post", payload_fut)
+    _expect_reject_or_submit(
+        "edge.future_timestamp_rejected",
+        "edge.future_timestamp submitted (chain validates envelope age)",
+        code_fut,
+        resp_fut,
+    )
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
@@ -218,11 +259,8 @@ def test_edge_cases(backend: str):
         "title": "bad pk",
         "content": "body",
     }
-    code_bad, _ = _post(f"{backend}/api/core/post", payload_bad)
-    if code_bad >= 400:
-        _pass("edge.invalid_pubkey_rejected")
-    else:
-        _fail("edge.invalid_pubkey_rejected", f"code={code_bad}")
+    code_bad, resp_bad = _post(f"{backend}/api/core/post", payload_bad)
+    _expect_reject_4xx("edge.invalid_pubkey_rejected", code_bad, resp_bad)
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
@@ -251,10 +289,7 @@ def test_edge_cases(backend: str):
         "content": "body",
     }
     code_mis, resp_mis = _post(f"{backend}/api/core/post", payload_mis)
-    if code_mis >= 400:
-        _pass("edge.signature_mismatch_rejected")
-    else:
-        _fail("edge.signature_mismatch_rejected", f"code={code_mis}")
+    _expect_reject_4xx("edge.signature_mismatch_rejected", code_mis, resp_mis)
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
@@ -281,11 +316,8 @@ def test_edge_cases(backend: str):
         "title": "stale lb",
         "content": "body",
     }
-    code_stale, _ = _post(f"{backend}/api/core/post", payload_stale)
-    if code_stale >= 400:
-        _pass("edge.stale_block_hash_rejected")
-    else:
-        _fail("edge.stale_block_hash_rejected", f"code={code_stale}")
+    code_stale, resp_stale = _post(f"{backend}/api/core/post", payload_stale)
+    _expect_reject_4xx("edge.stale_block_hash_rejected", code_stale, resp_stale)
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
@@ -311,10 +343,7 @@ def test_edge_cases(backend: str):
         "content": "body",
     }
     code_no_nonce, resp_no_nonce = _post(f"{backend}/api/core/post", payload_no_nonce)
-    if code_no_nonce >= 400:
-        _pass("edge.missing_envelope_nonce_rejected")
-    else:
-        _fail("edge.missing_envelope_nonce_rejected", f"code={code_no_nonce} resp={resp_no_nonce}")
+    _expect_reject_4xx("edge.missing_envelope_nonce_rejected", code_no_nonce, resp_no_nonce)
 
     # 9.11c Zero envelope_nonce explicitly sent is still rejected
     ts_z = _now_ms()
@@ -336,10 +365,7 @@ def test_edge_cases(backend: str):
         "content": "body",
     }
     code_zero, resp_zero = _post(f"{backend}/api/core/post", payload_zero_nonce)
-    if code_zero >= 400:
-        _pass("edge.zero_envelope_nonce_rejected")
-    else:
-        _fail("edge.zero_envelope_nonce_rejected", f"code={code_zero} expected 400")
+    _expect_reject_4xx("edge.zero_envelope_nonce_rejected", code_zero, resp_zero)
 
     # 9.11c2 Garbage / invalid envelope_nonce values — must all be rejected (400)
     invalid_nonces_expect_reject = [
@@ -371,10 +397,7 @@ def test_edge_cases(backend: str):
             "content": "body",
         }
         code_bad, resp_bad = _post(f"{backend}/api/core/post", bad_payload)
-        if code_bad >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_bad} resp={resp_bad}")
+        _expect_reject_4xx(test_name, code_bad, resp_bad)
 
     # 9.11c3 Coercible values that resolve to a valid positive int — should be accepted
     #         (signature/PoW will fail downstream, but nonce parsing itself must succeed)
@@ -445,8 +468,7 @@ def test_edge_cases(backend: str):
 
     # ── 9.20 Garbage / invalid envelope fields (non-nonce) ────────────
     # For each field we submit a payload with ONE corrupted field and
-    # verify the backend returns >= 400 (ideally 400, but 500 for
-    # uncaught coercion failures is still a rejection).
+    # verify the backend returns a 4xx; 5xx is a server error and must fail.
 
     def _make_valid_payload() -> dict:
         """Build a structurally valid (but unsigned) payload for /api/core/post."""
@@ -483,10 +505,7 @@ def test_edge_cases(backend: str):
         else:
             p["timestamp"] = bad_val
         code_t, resp_t = _post(f"{backend}/api/core/post", p)
-        if code_t >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_t} resp={resp_t}")
+        _expect_reject_4xx(test_name, code_t, resp_t)
 
     # --- 9.20b: pubkey ---
     pubkey_cases_reject = [
@@ -507,10 +526,7 @@ def test_edge_cases(backend: str):
         else:
             p["pubkey"] = bad_val
         code_p, resp_p = _post(f"{backend}/api/core/post", p)
-        if code_p >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_p} resp={resp_p}")
+        _expect_reject_4xx(test_name, code_p, resp_p)
 
     # --- 9.20c: signature ---
     sig_cases_reject = [
@@ -530,10 +546,7 @@ def test_edge_cases(backend: str):
         else:
             p["signature"] = bad_val
         code_s, resp_s = _post(f"{backend}/api/core/post", p)
-        if code_s >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_s} resp={resp_s}")
+        _expect_reject_4xx(test_name, code_s, resp_s)
 
     # --- 9.20d: last_block_hash ---
     lbh_cases_reject = [
@@ -552,10 +565,7 @@ def test_edge_cases(backend: str):
         else:
             p["last_block_hash"] = bad_val
         code_l, resp_l = _post(f"{backend}/api/core/post", p)
-        if code_l >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_l} resp={resp_l}")
+        _expect_reject_4xx(test_name, code_l, resp_l)
 
     # --- 9.20e: pow_difficulty ---
     pwd_cases_reject = [
@@ -569,10 +579,7 @@ def test_edge_cases(backend: str):
         p = _make_valid_payload()
         p["pow_difficulty"] = bad_val
         code_d, resp_d = _post(f"{backend}/api/core/post", p)
-        if code_d >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_d} resp={resp_d}")
+        _expect_reject_4xx(test_name, code_d, resp_d)
 
     # --- 9.20f: pow ---
     pow_cases_reject = [
@@ -586,10 +593,7 @@ def test_edge_cases(backend: str):
         p = _make_valid_payload()
         p["pow"] = bad_val
         code_pw, resp_pw = _post(f"{backend}/api/core/post", p)
-        if code_pw >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_pw} resp={resp_pw}")
+        _expect_reject_4xx(test_name, code_pw, resp_pw)
 
     # --- 9.20g: topic ---
     topic_cases_reject = [
@@ -605,29 +609,20 @@ def test_edge_cases(backend: str):
         p = _make_valid_payload()
         p["topic"] = bad_val
         code_tp, resp_tp = _post(f"{backend}/api/core/post", p)
-        if code_tp >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_tp} resp={resp_tp}")
+        _expect_reject_4xx(test_name, code_tp, resp_tp)
 
     # --- 9.20h: title / content size limits ---
     title_oversize = "A" * 1000
     p_big_title = _make_valid_payload()
     p_big_title["title"] = title_oversize
     code_bt, resp_bt = _post(f"{backend}/api/core/post", p_big_title)
-    if code_bt >= 400:
-        _pass("edge.title_oversize_1k_rejected")
-    else:
-        _fail("edge.title_oversize_1k_rejected", f"code={code_bt} resp={resp_bt}")
+    _expect_reject_4xx("edge.title_oversize_1k_rejected", code_bt, resp_bt)
 
     content_oversize = "X" * 200_000
     p_big_content = _make_valid_payload()
     p_big_content["content"] = content_oversize
     code_bc, resp_bc = _post(f"{backend}/api/core/post", p_big_content)
-    if code_bc >= 400:
-        _pass("edge.content_oversize_200k_rejected")
-    else:
-        _fail("edge.content_oversize_200k_rejected", f"code={code_bc} resp={resp_bc}")
+    _expect_reject_4xx("edge.content_oversize_200k_rejected", code_bc, resp_bc)
 
     # --- 9.20i: media ---
     media_cases_reject = [
@@ -641,10 +636,7 @@ def test_edge_cases(backend: str):
         p = _make_valid_payload()
         p["media"] = bad_val
         code_m, resp_m = _post(f"{backend}/api/core/post", p)
-        if code_m >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_m} resp={resp_m}")
+        _expect_reject_4xx(test_name, code_m, resp_m)
 
     # --- 9.20j: tag ---
     tag_cases_reject = [
@@ -655,25 +647,16 @@ def test_edge_cases(backend: str):
         p = _make_valid_payload()
         p["tag"] = bad_val
         code_tg, resp_tg = _post(f"{backend}/api/core/post", p)
-        if code_tg >= 400:
-            _pass(test_name)
-        else:
-            _fail(test_name, f"code={code_tg} resp={resp_tg}")
+        _expect_reject_4xx(test_name, code_tg, resp_tg)
 
     # --- 9.20k: completely empty payload ---
     code_empty, resp_empty = _post(f"{backend}/api/core/post", {})
-    if code_empty >= 400:
-        _pass("edge.empty_payload_rejected")
-    else:
-        _fail("edge.empty_payload_rejected", f"code={code_empty} resp={resp_empty}")
+    _expect_reject_4xx("edge.empty_payload_rejected", code_empty, resp_empty)
 
     # --- 9.20l: completely bogus payload (random keys) ---
     bogus = {"foo": "bar", "baz": 42, "qux": [1, 2, 3]}
     code_bogus, resp_bogus = _post(f"{backend}/api/core/post", bogus)
-    if code_bogus >= 400:
-        _pass("edge.bogus_payload_rejected")
-    else:
-        _fail("edge.bogus_payload_rejected", f"code={code_bogus} resp={resp_bogus}")
+    _expect_reject_4xx("edge.bogus_payload_rejected", code_bogus, resp_bogus)
 
     # 9.12 XSS injection in content — should not cause server error
     xss_content = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
@@ -854,10 +837,7 @@ def test_edge_cases(backend: str):
             fields.get("content", ""),
             tag=fields.get("tag", ""),
         )
-        if code >= 400:
-            _pass(f"edge.{label}_rejected")
-        else:
-            _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
+        _expect_reject_4xx(f"edge.{label}_rejected", code, resp)
 
     # ── NUL / control chars in media URLs ─────────────────────────
     media_nul_cases = [
@@ -890,10 +870,7 @@ def test_edge_cases(backend: str):
             "media": bad_media,
         }
         code, resp = _post(f"{backend}/api/core/post", payload)
-        if code >= 400:
-            _pass(f"edge.{label}_rejected")
-        else:
-            _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
+        _expect_reject_4xx(f"edge.{label}_rejected", code, resp)
 
     # ── Unicode edge cases (should be accepted) ───────────────────
     unicode_cases = [
@@ -922,10 +899,7 @@ def test_edge_cases(backend: str):
     for label, topic in bad_unicode_topics:
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
         code, resp = _try_post(topic, "Title", "body")
-        if code >= 400:
-            _pass(f"edge.unicode_topic_{label}_rejected")
-        else:
-            _fail(f"edge.unicode_topic_{label}_rejected", f"code={code}")
+        _expect_reject_4xx(f"edge.unicode_topic_{label}_rejected", code, resp)
 
 
 # =========================================================================
@@ -1025,10 +999,12 @@ def test_frontend_bypass(backend: str):
                 "tag": tag,
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
-            if code >= 400:
-                _pass(f"bypass.tag_{label}_rejected")
-            else:
-                _pass(f"bypass.tag_{label} submitted (chain may reject)")
+            _expect_reject_or_submit(
+                f"bypass.tag_{label}_rejected",
+                f"bypass.tag_{label} submitted (chain may reject)",
+                code,
+                resp,
+            )
         except Exception as e:
             _pass(f"bypass.tag_{label} handled")
 
@@ -1203,10 +1179,7 @@ def test_frontend_bypass(backend: str):
             "amount": "not_a_number",
         }
         code, resp = _post(f"{backend}/api/core/send_tokens", raw_payload_str)
-        if code >= 400:
-            _pass("bypass.send_tokens_string_amount_rejected")
-        else:
-            _fail("bypass.send_tokens_string_amount_rejected", f"code={code}")
+        _expect_reject_4xx("bypass.send_tokens_string_amount_rejected", code, resp)
     except Exception as e:
         _pass("bypass.send_tokens_string_amount_rejected")
 
@@ -1221,25 +1194,27 @@ def test_frontend_bypass(backend: str):
             "amount": 1.5,
         }
         code, resp = _post(f"{backend}/api/core/send_tokens", raw_payload_float)
-        if code >= 400:
-            _pass("bypass.send_tokens_float_amount_rejected")
-        else:
-            _pass("bypass.send_tokens_float_amount submitted (chain may reject)")
+        _expect_reject_or_submit(
+            "bypass.send_tokens_float_amount_rejected",
+            "bypass.send_tokens_float_amount submitted (chain may reject)",
+            code,
+            resp,
+        )
     except Exception as e:
         _pass("bypass.send_tokens_float_amount_rejected")
 
     # ─── Upgrade level bypass ────────────────────────────────────────
     for level, label in [(0, "level_0"), (-1, "level_neg1"), (4, "level_4"), (99, "level_99")]:
         try:
-            resp = _do_upgrade_level(backend, free_wallet, level)
+            resp = _do_subscribe(backend, free_wallet, level)
             txh = str(resp.get("tx_hash", "")).lower()
             err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
             if not txh or "invalid" in err:
-                _pass(f"bypass.upgrade_{label}_rejected")
+                _pass(f"bypass.subscribe_{label}_rejected")
             else:
-                _pass(f"bypass.upgrade_{label} submitted (chain may reject)")
+                _pass(f"bypass.subscribe_{label} submitted (chain may reject)")
         except Exception as e:
-            _pass(f"bypass.upgrade_{label} handled")
+            _pass(f"bypass.subscribe_{label} handled")
 
 
 

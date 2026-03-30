@@ -453,6 +453,25 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
         for item in sorted(env_dir.iterdir()):
             if item.is_file():
                 run(["bash", "-lc", f"docker cp '{item}' mirage:/root/.mirage/env/"])
+        desired_snapshot_keep_recent = read_node_env_value("SNAPSHOT_KEEP_RECENT")
+        if not desired_snapshot_keep_recent.isdigit() or int(desired_snapshot_keep_recent) <= 0:
+            raise RuntimeError(
+                f"SNAPSHOT_KEEP_RECENT must be a positive integer (got {desired_snapshot_keep_recent!r})"
+            )
+        status(f"Enforcing SNAPSHOT_KEEP_RECENT={desired_snapshot_keep_recent} in container env...")
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage bash -lc "
+                f"'set -euo pipefail; "
+                'if ! grep -q "^SNAPSHOT_KEEP_RECENT=" /root/.mirage/env/node.env; then '
+                'echo "SNAPSHOT_KEEP_RECENT missing in /root/.mirage/env/node.env" >&2; exit 1; '
+                "fi; "
+                f'sed -i "s/^SNAPSHOT_KEEP_RECENT=.*/SNAPSHOT_KEEP_RECENT={desired_snapshot_keep_recent}/" '
+                "/root/.mirage/env/node.env'",
+            ]
+        )
         # Force backend-db-split migration to re-run (production backup has the
         # marker but the local backend DB is restored separately and may be empty)
         run(
@@ -462,6 +481,15 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
                 "docker exec mirage sed -i '/v1\\.21\\.10-migrate-backend-db-split/d' /root/.mirage/env/.migrations 2>/dev/null || true",
             ]
         )
+        if migrations_file.exists():
+            status("Forcing snapshot retention migration to re-run on startup...")
+            run(
+                [
+                    "bash",
+                    "-lc",
+                    "docker exec mirage sed -i '/v1\\.22\\.0-snapshot-keep-recent/d' /root/.mirage/env/.migrations",
+                ]
+            )
         # Clear DOMAIN to prevent entrypoint from attempting HTTPS/LetsEncrypt setup locally
         run(
             [
@@ -1045,16 +1073,17 @@ def prepare_local_node(genesis_json: str):
     shutil.rmtree(tmp, ignore_errors=True)
 
     # Copy identity files only (config is rendered fresh by entrypoint/init.sh from templates)
-    status("Copying identity files from backup ...")
+    # priv_validator_key.json: required (genesis references this validator's consensus key)
+    # node_key.json: NOT copied — CometBFT auto-generates a fresh one on startup,
+    #   giving the local testnet a unique P2P identity that can't collide with production
+    status("Copying identity files from backup (node_key.json will be auto-generated) ...")
     run(
         [
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
             "mkdir -p /root/.mirage/node/config; "
-            "for f in priv_validator_key.json node_key.json; do "
-            "  cp -f /root/.mirage/node.clone/config/$f /root/.mirage/node/config/ 2>/dev/null || true; "
-            "done; "
+            "cp -f /root/.mirage/node.clone/config/priv_validator_key.json /root/.mirage/node/config/; "
             "for d in /root/.mirage/node.clone/keyring-*; do "
             '  if [ -d "$d" ]; then cp -nR "$d" /root/.mirage/node/; fi; '
             "done'",

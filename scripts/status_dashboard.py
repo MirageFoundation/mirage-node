@@ -731,8 +731,10 @@ def check_retention() -> ServiceStatus:
     if snapshot_interval is not None and snapshot_keep_recent is not None:
         snapshot_retention = snapshot_interval * snapshot_keep_recent
 
+    # Blockstore retention is driven by min-retain-blocks (capped by evidence max age).
+    # Snapshot retention is independent — it only affects state-sync availability.
     effective = None
-    for candidate in (min_retain_blocks, evidence_max_age_blocks, snapshot_retention):
+    for candidate in (min_retain_blocks, evidence_max_age_blocks):
         effective = min_non_zero(effective, candidate)
 
     # Count actual snapshots on disk
@@ -779,8 +781,6 @@ def check_retention() -> ServiceStatus:
 
     mismatch = False
     if min_retain_blocks and evidence_max_age_blocks and evidence_max_age_blocks < min_retain_blocks:
-        mismatch = True
-    if min_retain_blocks and snapshot_retention and snapshot_retention < min_retain_blocks:
         mismatch = True
 
     if effective is None or retained is None:

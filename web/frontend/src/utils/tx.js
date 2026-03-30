@@ -108,6 +108,47 @@ export async function getPendingBlockInfo(type, target) {
     return h.getPendingBlockInfo(type, target);
 }
 
+// Send tokens tracking
+export async function addSendListener(fn) {
+    const h = await getHandler();
+    return h.addSendListener(fn);
+}
+
+export async function getPendingSends() {
+    const h = await getHandler();
+    return h.getPendingSends();
+}
+
+export async function isPendingSend(target) {
+    const h = await getHandler();
+    return h.isPendingSend(target);
+}
+
+export async function getPendingSendInfo(target) {
+    const h = await getHandler();
+    return h.getPendingSendInfo(target);
+}
+
+export async function addSubscribeListener(fn) {
+    const h = await getHandler();
+    return h.addSubscribeListener(fn);
+}
+
+export async function getPendingSubscribes() {
+    const h = await getHandler();
+    return h.getPendingSubscribes();
+}
+
+export async function isPendingSubscribe(target) {
+    const h = await getHandler();
+    return h.isPendingSubscribe(target);
+}
+
+export async function getPendingSubscribeInfo(target) {
+    const h = await getHandler();
+    return h.getPendingSubscribeInfo(target);
+}
+
 // Delete-account tracking
 export async function addDeleteListener(fn) {
     const h = await getHandler();
@@ -314,7 +355,7 @@ export function adjustBalanceOptimistic(deltaUmirage) {
 
 export async function refreshBalance() {
     const Storage = (await import('./Storage')).default;
-    const Api = (await import('../lib/api')).default;
+    const Api = (await import('./api')).default;
     const publicKey = Storage.load('publicKey', '');
     if (!publicKey) return;
     try {
@@ -345,9 +386,9 @@ export async function refreshBalance() {
     }
 }
 
-export async function upgradeLevel(level, monthlyFeeUmirage) {
+export async function subscribe(level, monthlyFeeUmirage, target) {
     const h = await getHandler();
-    return h.upgradeLevel(level, monthlyFeeUmirage);
+    return h.subscribe(level, monthlyFeeUmirage, target);
 }
 
 export async function setAutoRenewal(autoRenew) {
@@ -417,7 +458,7 @@ export async function pollTxStatus(txHash, options = {}) {
         console.debug('[pollTxStatus] Using custom interval schedule:', intervals);
     }
 
-    const Api = (await import('../lib/api')).default;
+    const Api = (await import('./api')).default;
     const Storage = (await import('./Storage')).default;
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

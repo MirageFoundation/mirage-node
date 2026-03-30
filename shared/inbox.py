@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import psycopg
 
 from shared.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_inbox_last_viewed_at(address: str, cur=None) -> int:
@@ -27,6 +31,96 @@ def fetch_inbox_last_viewed_at(address: str, cur=None) -> int:
     )
     row = cur.fetchone()
     return int(row[0]) if row and row[0] is not None else 0
+
+
+def follow_event_key(follower: str, target: str, tx_hash: str) -> str:
+    follower_lc = str(follower or "").strip().lower()
+    target_lc = str(target or "").strip().lower()
+    tx_lc = str(tx_hash or "").strip().lower()
+    if not follower_lc or not target_lc or not tx_lc:
+        raise RuntimeError("follow_event_key requires follower, target, and tx_hash")
+    return f"follow:{follower_lc}:{target_lc}:{tx_lc}"
+
+
+def donation_event_key(sender: str, recipient: str, tx_hash: str) -> str:
+    sender_lc = str(sender or "").strip().lower()
+    recipient_lc = str(recipient or "").strip().lower()
+    tx_lc = str(tx_hash or "").strip().lower()
+    if not sender_lc or not recipient_lc or not tx_lc:
+        raise RuntimeError("donation_event_key requires sender, recipient, and tx_hash")
+    return f"donation:{sender_lc}:{recipient_lc}:{tx_lc}"
+
+
+def subscription_gift_event_key(gifter: str, recipient: str, tx_hash: str) -> str:
+    gifter_lc = str(gifter or "").strip().lower()
+    recipient_lc = str(recipient or "").strip().lower()
+    tx_lc = str(tx_hash or "").strip().lower()
+    if not gifter_lc or not recipient_lc or not tx_lc:
+        raise RuntimeError("subscription_gift_event_key requires gifter, recipient, and tx_hash")
+    return f"subscription_gift:{gifter_lc}:{recipient_lc}:{tx_lc}"
+
+
+def record_inbox_event(
+    event_key: str,
+    recipient: str,
+    actor: str,
+    event_type: str,
+    created_at: int,
+    amount: int | None = None,
+    tx_hash: str | None = None,
+) -> bool:
+    if not event_key or not recipient or not actor or not event_type:
+        raise RuntimeError("record_inbox_event requires event_key, recipient, actor, and event_type")
+    recipient_lc = str(recipient).strip().lower()
+    actor_lc = str(actor).strip().lower()
+    if not recipient_lc or not actor_lc:
+        raise RuntimeError("record_inbox_event requires recipient and actor")
+    tx_lc = str(tx_hash or "").strip().lower() or None
+    created_at = int(created_at)
+    cfg = get_config()
+    url = cfg.get_backend_db_url()
+    with psycopg.connect(url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO inbox_events (event_key, recipient, actor, event_type, created_at, amount, tx_hash)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (event_key) DO NOTHING
+                """,
+                (event_key, recipient_lc, actor_lc, event_type, created_at, amount, tx_lc),
+            )
+            inserted = cur.rowcount == 1
+    logger.debug(
+        "inbox.event.record key=%s type=%s recipient=%s actor=%s inserted=%s",
+        event_key[:80],
+        event_type,
+        recipient_lc[:16],
+        actor_lc[:16],
+        inserted,
+    )
+    return inserted
+
+
+def _count_inbox_events(address: str, last_seen: int) -> int:
+    if not address or address.lower() == "guest":
+        return 0
+    viewer = address.lower()
+    cfg = get_config()
+    url = cfg.get_backend_db_url()
+    with psycopg.connect(url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM inbox_events
+                WHERE LOWER(recipient) = LOWER(%s)
+                  AND LOWER(actor) != LOWER(%s)
+                  AND created_at > %s
+                  AND event_type IN ('follow', 'donation', 'subscription_gift')
+                """,
+                (viewer, viewer, int(last_seen)),
+            )
+            row = cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
 
 
 def compute_unread_count(cur, address: str, last_seen: int) -> tuple[int, int]:
@@ -85,4 +179,5 @@ def compute_unread_count(cur, address: str, last_seen: int) -> tuple[int, int]:
     arow = cur.fetchone()
     award_count = int(arow[0]) if arow and arow[0] else 0
 
-    return reply_count + mention_count + award_count, last_seen
+    event_count = _count_inbox_events(viewer, last_seen)
+    return reply_count + mention_count + award_count + event_count, last_seen

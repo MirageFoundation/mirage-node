@@ -89,8 +89,8 @@ service Msg {
   // BurnTokens burns tokens from a target address (governance only).
   rpc BurnTokens(MsgBurnTokens) returns (MsgBurnTokensResponse);
 
-  // UpgradeLevel upgrades user tier (requires token payment, no PoW).
-  rpc UpgradeLevel(MsgUpgradeLevel) returns (MsgUpgradeLevelResponse);
+  // Subscribe subscribes a user to a paid tier, or gifts a subscription to another user.
+  rpc Subscribe(MsgSubscribe) returns (MsgSubscribeResponse);
 
   // SetAutoRenewal sets the auto_renew flag for a user's subscription.
   // Paid subscribers must pay via reserve; PoW is not allowed.
@@ -707,8 +707,10 @@ message MsgBurnTokens {
 
 message MsgBurnTokensResponse {}
 
-// MsgUpgradeLevel upgrades a user's tier subscription
-message MsgUpgradeLevel {
+// MsgSubscribe subscribes a user to a paid tier, or gifts a subscription to another user.
+// When target is set to a different address, the sender pays and the target receives the subscription.
+// Gifting to a recipient whose current level exceeds the requested level is rejected.
+message MsgSubscribe {
   option (cosmos.msg.v1.signer) = "authority";
 
   // REQUIRED: address of the signer (node or governance)
@@ -726,9 +728,12 @@ message MsgUpgradeLevel {
 
   // Payload
   uint32 level = 100;
+
+  // Optional: recipient address for gifting (omit or empty for self-subscribe)
+  string target = 101;
 }
 
-message MsgUpgradeLevelResponse {}
+message MsgSubscribeResponse {}
 
 // MsgSetAutoRenewal sets the auto_renew flag for a user's subscription
 message MsgSetAutoRenewal {

@@ -1,7 +1,5 @@
 ## Cursor Operational Rules
 
-Use these rules to avoid hanging sessions and enforce fail-fast behavior.
-
 ### #1 RULE: NEVER COMMIT OR PUSH TO GIT WITHOUT MY EXPLICIT APPROVAL.
 - Do NOT run `/commit-push` or `git commit`, `git push`, or any combined commit+push command unless I specifically tell you to.
 - After making code changes, STOP and wait for my go-ahead before committing.
@@ -57,6 +55,9 @@ Use these rules to avoid hanging sessions and enforce fail-fast behavior.
 - See `get_trusted_client_ip()` in `web/backend/client_ip.py`.
 
 ### Database Schema Changes
+
+- **Approval required**:
+  - Never create new tables or add columns without explicit confirmation from me.
 
 - **Do NOT create new tables when an existing table can be extended.** Add a column to an existing table instead.
 - Only create a new table when the data has a genuinely different primary key or lifecycle.

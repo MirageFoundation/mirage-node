@@ -292,7 +292,7 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 
 **Financial Messages:**
 - `MsgSendTokens`: Transfer MIRAGE tokens
-- `MsgUpgradeLevel`: Subscribe to paid tier
+- `MsgSubscribe`: Subscribe to paid tier
 - `MsgSetAutoRenewal`: Toggle subscription auto-renewal
 
 **Bridge Messages:**
@@ -382,7 +382,7 @@ The tier system serves multiple purposes:
 │                        Subscription Lifecycle                                │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-User calls MsgUpgradeLevel(level=1)
+User calls MsgSubscribe(level=1)
            │
            ▼
 ┌─────────────────────────────────────────┐

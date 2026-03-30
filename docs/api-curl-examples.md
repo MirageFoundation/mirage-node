@@ -407,7 +407,7 @@ python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC
 ```bash
 python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC}" upgrade-level \
   --level 1 \
-  | curl -X POST "${API_BASE}/core/upgrade_level" -H "Content-Type: application/json" -d @-
+  | curl -X POST "${API_BASE}/core/subscribe" -H "Content-Type: application/json" -d @-
 ```
 
 ### Set auto-renewal

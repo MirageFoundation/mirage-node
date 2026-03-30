@@ -14,37 +14,96 @@ from typing import Optional, Tuple
 import requests
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_upgrade_level, _docker_exec, _run_miraged, _miraged_cmd,
-    _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    FAUCET_AMOUNTS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _fetch_params,
+    _do_subscribe,
+    _docker_exec,
+    _run_miraged,
+    _miraged_cmd,
+    _keyring_backend,
+    _INSIDE_CONTAINER,
+    _check_local_docker,
     DEFAULT_BACKEND,
-    get_status, get_user_status, get_username_from_address, get_address_from_username,
-    sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_annotate_raw, _canon_base_report_raw,
+    get_status,
+    get_user_status,
+    get_username_from_address,
+    get_address_from_username,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
+    _difficulty_factor,
+    _BASE_DIFFICULTY_FACTOR,
+    _canon_base_subscribe_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_award_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_annotate_raw,
+    _canon_base_report_raw,
     canon_signed_with_pow,
-    _generate_wallet, _faucet, _resolve_validator_key_addr,
-    _get_spendable_balance, _required_sub1_spend_budget_umirage,
+    _generate_wallet,
+    _faucet,
+    _resolve_validator_key_addr,
+    _get_spendable_balance,
+    _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_post, _do_post_with_nonce, _do_post_with_media,
-    _do_vote, _do_vote_with_nonce,
-    _do_edit, _do_annotate, _do_delete, _do_delete_user,
-    _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
-    _do_set_username_raw, _do_set_biography, _do_report,
-    _do_enable_agent, _do_set_agents, _do_set_auto_renewal,
-    _do_send_tokens, _do_award,
-    _wait_indexed, _wait_username, _wait_list_count,
-    _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,
-    _wait_followed_user, _wait_followed_topic,
-    _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
+    _do_post,
+    _do_post_with_nonce,
+    _do_post_with_media,
+    _do_vote,
+    _do_vote_with_nonce,
+    _do_edit,
+    _do_annotate,
+    _do_delete,
+    _do_delete_user,
+    _do_follow_user,
+    _do_follow_topic,
+    _do_block,
+    _do_block_topic,
+    _do_set_username_raw,
+    _do_set_biography,
+    _do_report,
+    _do_enable_agent,
+    _do_set_agents,
+    _do_set_auto_renewal,
+    _do_send_tokens,
+    _do_award,
+    _wait_indexed,
+    _wait_username,
+    _wait_list_count,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_tx_deliver,
+    _wait_followed_user,
+    _wait_followed_topic,
+    _wait_blocked_user,
+    _wait_blocked_topic,
+    _wait_blocked_topic_state,
     _wait_comment_indexed,
-    _rpc_latest_height, _wait_next_block,
+    _rpc_latest_height,
+    _wait_next_block,
 )
 
 
@@ -85,6 +144,67 @@ def test_subscriber(backend: str):
                 _fail(f"tiers.{name}_level = {level}", f"actual={actual}")
         except Exception as e:
             _fail(f"tiers.{name}_level = {level}", str(e))
+
+    # 7.2b Gift subscription extends expiry and keeps auto_renew unchanged
+    try:
+        code, cfg = _get(f"{backend}/api/get_chain_config")
+        if code != 200 or not isinstance(cfg, dict):
+            _fail("tiers.gift_extends_expiry", f"get_chain_config code={code}")
+        else:
+            period_minutes = int(cfg.get("subscription_period", 0) or 0)
+            # Ensure recipient auto_renew is false to validate unchanged behavior
+            resp = _do_set_auto_renewal(backend, sub2_wallet, False)
+            txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+            if txh:
+                _wait_tx_deliver(txh)
+            time.sleep(2)
+            before = get_user_status(backend, sub2_addr)
+            before_exp = int(before.get("subscription_expiry", 0) or 0)
+            auto_before = bool(before.get("auto_renew", False))
+
+            resp = _do_subscribe(backend, sub1_wallet, 1, target=sub2_addr)
+            txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+            err = str(resp.get("error", "")) if resp else ""
+            if err:
+                _debug(f"gift subscribe error={err}")
+            if txh:
+                deliver = _wait_tx_deliver(txh)
+                if deliver and deliver[0] != 0:
+                    _debug(f"gift subscribe deliver failed code={deliver[0]} log={deliver[1][:200]}")
+
+            deadline = time.time() + 30
+            after_exp = before_exp
+            auto_after = auto_before
+            while time.time() < deadline:
+                after = get_user_status(backend, sub2_addr)
+                after_exp = int(after.get("subscription_expiry", 0) or 0)
+                auto_after = bool(after.get("auto_renew", False))
+                if after_exp > before_exp:
+                    break
+                time.sleep(2)
+
+            if after_exp <= before_exp:
+                _fail("tiers.gift_extends_expiry", f"before={before_exp} after={after_exp}")
+            elif auto_after != auto_before:
+                _fail("tiers.gift_auto_renew_unchanged", f"before={auto_before} after={auto_after}")
+            else:
+                if period_minutes > 0 and after_exp < before_exp + period_minutes * 60:
+                    _fail(
+                        "tiers.gift_extends_expiry", f"delta={after_exp - before_exp} expected>={period_minutes * 60}"
+                    )
+                else:
+                    _pass("tiers.gift_extends_expiry")
+                    _pass("tiers.gift_auto_renew_unchanged")
+            resp = _do_set_auto_renewal(backend, sub2_wallet, True)
+            txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+            if txh:
+                deliver = _wait_tx_deliver(txh)
+                if not deliver or deliver[0] != 0:
+                    _debug(f"Warning: failed to restore auto_renew for sub2: {deliver}")
+            else:
+                _debug(f"Warning: failed to submit auto_renew restore for sub2: {resp}")
+    except Exception as e:
+        _fail("tiers.gift_extends_expiry", str(e))
 
     # 7.3 Free user: post with PoW succeeds
     txh_free = _do_post(backend, free_wallet, "test", f"Free post {_rand_str(4)}", "free body", skip_pow=False)
@@ -139,7 +259,7 @@ def test_subscriber(backend: str):
             else:
                 _fail(f"tiers.{name}_vote_without_pow succeeds", f"resp={resp}")
 
-    # 7.7 Subscriber sending PoW should be REJECTED
+    # 7.7 Subscriber sending PoW should be ACCEPTED (PoW fields ignored)
     for level, name, w in [
         (1, "sub1", sub1_wallet),
         (1, "sub2", sub2_wallet),
@@ -171,12 +291,64 @@ def test_subscriber(backend: str):
                 "content": "body",
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
-            if code >= 400:
-                _pass(f"tiers.{name}_pow_rejected")
+            if code < 400:
+                _pass(f"tiers.{name}_pow_accepted")
             else:
-                _fail(f"tiers.{name}_pow_rejected", f"code={code}")
+                _fail(f"tiers.{name}_pow_accepted", f"code={code} resp={resp}")
         except Exception as e:
-            _fail(f"tiers.{name}_pow_rejected", str(e))
+            _fail(f"tiers.{name}_pow_accepted", str(e))
+
+    # 7.7b Subscriber vote with PoW should be ACCEPTED (PoW fields ignored)
+    txh_pow_vote_target = _do_post(
+        backend, free_wallet, "test", f"Pow vote target {_rand_str(4)}", "pow vote body", skip_pow=False
+    )
+    if txh_pow_vote_target:
+        for name, w in [
+            ("sub1", sub1_wallet),
+            ("sub2", sub2_wallet),
+            ("agent1", agent1_wallet),
+        ]:
+            try:
+                resp = _do_vote(backend, w, txh_pow_vote_target, 1, skip_pow=False)
+                txh_v = str(resp.get("tx_hash", "")).lower() if resp else ""
+                err = str(resp.get("error", "")).lower() if resp else ""
+                if txh_v:
+                    _pass(f"tiers.{name}_vote_pow_accepted")
+                elif "pow not allowed" in err:
+                    _fail(f"tiers.{name}_vote_pow_accepted", "old rejection still active")
+                else:
+                    _fail(f"tiers.{name}_vote_pow_accepted", f"err={err[:200]}")
+            except Exception as e:
+                _fail(f"tiers.{name}_vote_pow_accepted", str(e))
+    else:
+        _fail("tiers.vote_pow_target_post", "failed to create target post for pow vote")
+
+    # 7.7c Subscriber edit with PoW should be ACCEPTED (PoW fields ignored)
+    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
+        if name in tier_posts:
+            if _wait_indexed(backend, str(w.address()), tier_posts[name]):
+                try:
+                    resp = _do_edit(
+                        backend,
+                        w,
+                        tier_posts[name],
+                        "test",
+                        f"PowEdit {name} {_rand_str(4)}",
+                        f"pow edit body {name}",
+                        skip_pow=False,
+                    )
+                    txh_e = str(resp.get("tx_hash", "")).lower() if resp else ""
+                    err = str(resp.get("error", "")).lower() if resp else ""
+                    if txh_e:
+                        _pass(f"tiers.{name}_edit_pow_accepted")
+                    elif "pow not allowed" in err:
+                        _fail(f"tiers.{name}_edit_pow_accepted", "old rejection still active")
+                    else:
+                        _fail(f"tiers.{name}_edit_pow_accepted", f"err={err[:200]}")
+                except Exception as e:
+                    _fail(f"tiers.{name}_edit_pow_accepted", str(e))
+            else:
+                _fail(f"tiers.{name}_edit_pow_accepted", "post not indexed after timeout")
 
     # 7.8 Free user without PoW should be REJECTED
     try:
@@ -234,6 +406,7 @@ def test_subscriber(backend: str):
 # =========================================================================
 # Category 8: Search & Discovery
 # =========================================================================
+
 
 def test_auto_renewal(backend: str):
 
@@ -293,6 +466,7 @@ def test_auto_renewal(backend: str):
 # =========================================================================
 # Category 16: Reports
 # =========================================================================
+
 
 def test_tier_config_api(backend: str):
     """Verify tier configurations are correctly served through the API."""
@@ -437,5 +611,148 @@ def test_tier_config_api(backend: str):
 
 
 # =========================================================================
-# Category 21: Upgrade Level Validation (backend API)
+# Category 25: Subscribe Gift Validation (backend API)
+# =========================================================================
+
+
+def test_subscribe_gift_validation(backend: str):
+    """Test backend-level gift validation: invalid target, higher-tier rejection."""
+
+    sub1_wallet = WALLETS["sub1"]
+    agent1_wallet = WALLETS["agent1"]
+    agent1_addr = str(agent1_wallet.address())
+
+    # 25.1 Invalid target address should be rejected
+    try:
+        resp = _do_subscribe(backend, sub1_wallet, 1, target="not_a_valid_address")
+        err = str(resp.get("error", "")).lower() if resp else ""
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        if "target" in err and "valid" in err and not txh:
+            _pass("subscribe.invalid_target_rejected")
+        elif not txh and err:
+            _pass("subscribe.invalid_target_rejected")
+        else:
+            _fail("subscribe.invalid_target_rejected", f"txh={txh} err={err[:200]}")
+    except Exception as e:
+        _fail("subscribe.invalid_target_rejected", str(e))
+
+    # 25.2 Gift level 1 to agent1 (level 10) should be rejected at backend
+    try:
+        agent1_status = get_user_status(backend, agent1_addr)
+        if int(agent1_status.get("user_level", 0) or 0) < 10:
+            _skip("subscribe.gift_higher_tier_rejected", "agent1 is not level 10")
+        else:
+            resp = _do_subscribe(backend, sub1_wallet, 1, target=agent1_addr)
+            err = str(resp.get("error", "")).lower() if resp else ""
+            txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+            if "gift rejected" in err and not txh:
+                _pass("subscribe.gift_higher_tier_rejected")
+            elif not txh and ("reject" in err or "level" in err):
+                _pass("subscribe.gift_higher_tier_rejected")
+            else:
+                _fail("subscribe.gift_higher_tier_rejected", f"txh={txh} err={err[:200]}")
+    except Exception as e:
+        _fail("subscribe.gift_higher_tier_rejected", str(e))
+
+
+# =========================================================================
+# Category 26: Gift Agent Subscription (backend API)
+# =========================================================================
+
+
+def test_subscribe_gift_agent(backend: str):
+    """Test gifting level 10 (Agent) subscriptions via the backend API."""
+
+    agent2_wallet = WALLETS["agent2"]
+    agent1_wallet = WALLETS["agent1"]
+    agent1_addr = str(agent1_wallet.address())
+
+    # 26.1 Gift level 10 from agent2 to agent1 (already level 10) — should succeed
+    try:
+        before = get_user_status(backend, agent1_addr)
+        before_exp = int(before.get("subscription_expiry", 0) or 0)
+        _debug(f"subscribe.gift_agent.before agent1 exp={before_exp} level={before.get('user_level')}")
+
+        resp = _do_subscribe(backend, agent2_wallet, 10, target=agent1_addr)
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        err = str(resp.get("error", "")) if resp else ""
+        if err:
+            _debug(f"subscribe.gift_agent error={err}")
+            _fail("subscribe.gift_agent_succeeds", f"error={err[:200]}")
+        elif txh:
+            deliver = _wait_tx_deliver(txh)
+            if deliver and deliver[0] != 0:
+                _fail("subscribe.gift_agent_succeeds", f"deliver code={deliver[0]} log={deliver[1][:200]}")
+            else:
+                _pass("subscribe.gift_agent_succeeds")
+        else:
+            _fail("subscribe.gift_agent_succeeds", f"no txh or error: {resp}")
+    except Exception as e:
+        _fail("subscribe.gift_agent_succeeds", str(e))
+
+    # 26.2 Wait for indexer and verify expiry increased
+    try:
+        deadline = time.time() + 30
+        after_exp = before_exp
+        while time.time() < deadline:
+            after = get_user_status(backend, agent1_addr)
+            after_exp = int(after.get("subscription_expiry", 0) or 0)
+            if after_exp > before_exp:
+                break
+            time.sleep(2)
+        _debug(f"subscribe.gift_agent.after agent1 exp={after_exp}")
+        if after_exp > before_exp:
+            _pass("subscribe.gift_agent_extends_expiry")
+        else:
+            _fail("subscribe.gift_agent_extends_expiry", f"before={before_exp} after={after_exp}")
+    except Exception as e:
+        _fail("subscribe.gift_agent_extends_expiry", str(e))
+
+    # 26.3 Gift level 10 again — should extend expiry further
+    try:
+        before_exp2 = after_exp
+        resp = _do_subscribe(backend, agent2_wallet, 10, target=agent1_addr)
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        err = str(resp.get("error", "")) if resp else ""
+        if err:
+            _fail("subscribe.gift_agent_extends_again", f"error={err[:200]}")
+        elif txh:
+            deliver = _wait_tx_deliver(txh)
+            if deliver and deliver[0] != 0:
+                _fail("subscribe.gift_agent_extends_again", f"deliver code={deliver[0]}")
+            else:
+                deadline2 = time.time() + 30
+                after_exp2 = before_exp2
+                while time.time() < deadline2:
+                    st = get_user_status(backend, agent1_addr)
+                    after_exp2 = int(st.get("subscription_expiry", 0) or 0)
+                    if after_exp2 > before_exp2:
+                        break
+                    time.sleep(2)
+                if after_exp2 > before_exp2:
+                    _pass("subscribe.gift_agent_extends_again")
+                else:
+                    _fail("subscribe.gift_agent_extends_again", f"before={before_exp2} after={after_exp2}")
+        else:
+            _fail("subscribe.gift_agent_extends_again", f"no txh or error: {resp}")
+    except Exception as e:
+        _fail("subscribe.gift_agent_extends_again", str(e))
+
+    # 26.4 Gift level 1 to agent1 (level 10) — should be rejected
+    try:
+        resp = _do_subscribe(backend, agent2_wallet, 1, target=agent1_addr)
+        err = str(resp.get("error", "")).lower() if resp else ""
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        if "gift rejected" in err and not txh:
+            _pass("subscribe.gift_lower_tier_rejected")
+        elif not txh and ("reject" in err or "level" in err):
+            _pass("subscribe.gift_lower_tier_rejected")
+        else:
+            _fail("subscribe.gift_lower_tier_rejected", f"txh={txh} err={err[:200]}")
+    except Exception as e:
+        _fail("subscribe.gift_lower_tier_rejected", str(e))
+
+
+# =========================================================================
+# Category 21: Subscribe Validation (backend API)
 # =========================================================================

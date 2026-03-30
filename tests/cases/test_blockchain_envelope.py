@@ -31,7 +31,7 @@ from tests.common import (
     _canon_base_block_post_raw, _canon_base_unblock_post_raw,
     _canon_base_block_user_raw, _canon_base_unblock_user_raw,
     _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
-    _canon_base_send_tokens_raw, _canon_base_upgrade_level_raw,
+    _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
     _canon_base_annotate_raw,
     _request_with_retries,
@@ -47,7 +47,7 @@ from tests.blockchain_helpers import (
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
     _build_msg_edit, _build_msg_annotate,
     _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
-    _build_msg_upgrade_level,
+    _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
     _build_msg_follow_topic, _build_msg_unfollow_topic,
     _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
@@ -69,7 +69,7 @@ from shared.datatypes import (
     MsgSetLevel, MsgSetUsername, MsgSetBiography,
     MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
     MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgUpgradeLevel, MsgVote, MsgAnnotate,
+    MsgSubscribe, MsgVote, MsgAnnotate,
 )
 
 

@@ -23,6 +23,7 @@ from tests.common import (
     _debug,
     _get,
     _post,
+    _expect_http_error,
     _b64,
     _rand_str,
     _now_ms,
@@ -37,7 +38,7 @@ from tests.common import (
     _COLOR_RESET,
     _COLOR_BOLD,
     _fetch_params,
-    _do_upgrade_level,
+    _do_subscribe,
     _docker_exec,
     _run_miraged,
     _miraged_cmd,
@@ -54,7 +55,7 @@ from tests.common import (
     check_pow_target,
     _difficulty_factor,
     _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw,
+    _canon_base_subscribe_raw,
     _canon_base_send_tokens_raw,
     _canon_base_award_raw,
     _canon_base_post_raw,
@@ -166,11 +167,16 @@ def test_security(backend: str):
             "title": "Original",
             "content": "HACKED content",
         }
-        code, resp = _post(f"{backend}/api/core/post", payload)
-        if code >= 400:
+        _code, resp = _post(f"{backend}/api/core/post", payload)
+        err = str(resp.get("error", "")).lower()
+        http_status = int(resp.get("_http_status", 0) or 0)
+        if http_status == 400 and ("invalid signature" in err or "insufficient pow" in err):
             _pass("attack.replay_signature_rejected")
         else:
-            _fail("attack.replay_signature_rejected", f"code={code}")
+            _fail(
+                "attack.replay_signature_rejected",
+                f"expected 400 with signature/pow error, got http={http_status} error={err!r} resp={resp}",
+            )
     except Exception as e:
         _fail("attack.replay_signature_rejected", str(e))
 
@@ -210,11 +216,8 @@ def test_security(backend: str):
             "title": "Second",
             "content": "second content",
         }
-        code, resp = _post(f"{backend}/api/core/post", payload)
-        if code >= 400:
-            _pass("attack.pow_proof_reuse_rejected")
-        else:
-            _fail("attack.pow_proof_reuse_rejected", f"code={code}")
+        _code, resp = _post(f"{backend}/api/core/post", payload)
+        _expect_http_error("attack.pow_proof_reuse_rejected", resp, 400, "insufficient pow (precheck)")
     except Exception as e:
         _fail("attack.pow_proof_reuse_rejected", str(e))
 
@@ -229,14 +232,7 @@ def test_security(backend: str):
     # 10.3 Delete foreign post — sub1 tries to delete free's post → rejected
     if target_post:
         resp = _do_delete(backend, sub_wallet, target_post, skip_pow=True)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-        if not txh or "unauthorized" in err or "forbidden" in err:
-            _pass("attack.delete_foreign_post_rejected")
-        else:
-            # Tx was broadcast — wait and check if it actually failed on-chain
-            time.sleep(3)
-            _pass("attack.delete_foreign_post submitted (chain may reject)")
+        _expect_http_error("attack.delete_foreign_post_rejected", resp, 403, "forbidden")
 
     # 10.4 Edit foreign post — sub1 tries to edit free's post → rejected
     if target_post:
@@ -249,13 +245,7 @@ def test_security(backend: str):
             content="hacked body",
             skip_pow=True,
         )
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-        if not txh or "unauthorized" in err or "forbidden" in err:
-            _pass("attack.edit_foreign_post_rejected")
-        else:
-            time.sleep(3)
-            _pass("attack.edit_foreign_post submitted (chain may reject)")
+        _expect_http_error("attack.edit_foreign_post_rejected", resp, 403, "forbidden")
 
     # 10.5 Edit foreign comment — create comment by sub2, sub1 tries to edit it
     if target_post:
@@ -273,13 +263,7 @@ def test_security(backend: str):
                 target=target_post,
                 skip_pow=True,
             )
-            txh = str(resp.get("tx_hash", "")).lower()
-            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-            if not txh or "unauthorized" in err or "forbidden" in err:
-                _pass("attack.edit_foreign_comment_rejected")
-            else:
-                time.sleep(3)
-                _pass("attack.edit_foreign_comment submitted (chain may reject)")
+            _expect_http_error("attack.edit_foreign_comment_rejected", resp, 403, "forbidden")
         else:
             _fail("attack.edit_foreign_comment (setup failed)")
 
@@ -306,11 +290,8 @@ def test_security(backend: str):
             "target": sub_addr,
             "username": uname,
         }
-        code, resp = _post(f"{backend}/api/core/set_username", payload)
-        if code >= 400:
-            _pass("attack.set_foreign_username_rejected")
-        else:
-            _pass("attack.set_foreign_username submitted (chain may reject)")
+        _code, resp = _post(f"{backend}/api/core/set_username", payload)
+        _expect_http_error("attack.set_foreign_username_rejected", resp, 403, "unauthorized")
     except Exception as e:
         _fail("attack.set_foreign_username_rejected", str(e))
 
@@ -319,26 +300,20 @@ def test_security(backend: str):
     # 10.19 Delete foreign account — free tries to delete sub1's account → rejected (403)
     try:
         code, resp = _do_delete_user(backend, free_wallet, sub_addr, skip_pow=False)
-        err = str(resp.get("error", "")).lower()
-        if code == 403 or "unauthorized" in err:
+        if code == 403:
             _pass("attack.delete_foreign_account_rejected")
-        elif code >= 400:
-            _pass("attack.delete_foreign_account_rejected (other error)")
         else:
-            _fail("attack.delete_foreign_account_rejected", f"code={code} resp={resp}")
+            _fail("attack.delete_foreign_account_rejected", f"expected http=403 got http={code} resp={resp}")
     except Exception as e:
         _fail("attack.delete_foreign_account_rejected", str(e))
 
     # 10.20 Delete foreign account — sub1 tries to delete free's account → rejected (403)
     try:
         code, resp = _do_delete_user(backend, sub_wallet, free_addr, skip_pow=True)
-        err = str(resp.get("error", "")).lower()
-        if code == 403 or "unauthorized" in err:
+        if code == 403:
             _pass("attack.delete_foreign_account_sub_rejected")
-        elif code >= 400:
-            _pass("attack.delete_foreign_account_sub_rejected (other error)")
         else:
-            _fail("attack.delete_foreign_account_sub_rejected", f"code={code} resp={resp}")
+            _fail("attack.delete_foreign_account_sub_rejected", f"expected http=403 got http={code} resp={resp}")
     except Exception as e:
         _fail("attack.delete_foreign_account_sub_rejected", str(e))
 
@@ -363,74 +338,47 @@ def test_security(backend: str):
 
     # 10.22 Delete account with empty target → rejected (400)
     try:
-        code, resp = _do_delete_user(backend, free_wallet, "", skip_pow=True)
-        err = str(resp.get("error", "")).lower()
-        if code >= 400:
-            _pass("attack.delete_account_empty_target_rejected")
-        else:
-            _fail("attack.delete_account_empty_target_rejected", f"code={code}")
+        _code, resp = _do_delete_user(backend, free_wallet, "", skip_pow=True)
+        _expect_http_error("attack.delete_account_empty_target_rejected", resp, 400, "missing required fields")
     except Exception as e:
-        _pass("attack.delete_account_empty_target_rejected (exception)")
+        _fail("attack.delete_account_empty_target_rejected", str(e))
 
     # 10.23 Delete account with invalid address → rejected (400)
     try:
-        code, resp = _do_delete_user(backend, free_wallet, "not_an_address", skip_pow=True)
-        err = str(resp.get("error", "")).lower()
-        if code >= 400:
-            _pass("attack.delete_account_invalid_target_rejected")
-        else:
-            _fail("attack.delete_account_invalid_target_rejected", f"code={code}")
+        _code, resp = _do_delete_user(backend, free_wallet, "not_an_address", skip_pow=True)
+        _expect_http_error(
+            "attack.delete_account_invalid_target_rejected", resp, 400, "target must be a valid mirage1 address"
+        )
     except Exception as e:
-        _pass("attack.delete_account_invalid_target_rejected (exception)")
+        _fail("attack.delete_account_invalid_target_rejected", str(e))
 
     # ------ Award attacks ------
     if target_post:
         # 10.24 Self-award rejected
         try:
-            code, resp = _do_award(backend, free_wallet, target_post, "quality_post")
-            err = str(resp.get("error", "")).lower()
-            if code >= 400 and ("own post" in err or "self" in err):
-                _pass("attack.award_self_rejected")
-            elif code >= 400:
-                _pass("attack.award_self_rejected (other error)")
-            else:
-                _fail("attack.award_self_rejected", f"code={code} resp={resp}")
+            _code, resp = _do_award(backend, free_wallet, target_post, "quality_post")
+            _expect_http_error("attack.award_self_rejected", resp, 400, "cannot award your own post")
         except Exception as e:
             _fail("attack.award_self_rejected", str(e))
 
         # 10.26 Unknown award type rejected
         try:
-            code, resp = _do_award(backend, sub_wallet, target_post, "not_a_real_award")
-            err = str(resp.get("error", "")).lower()
-            if code >= 400 and "unknown award_type" in err:
-                _pass("attack.award_unknown_type_rejected")
-            elif code >= 400:
-                _pass("attack.award_unknown_type_rejected (other error)")
-            else:
-                _fail("attack.award_unknown_type_rejected", f"code={code} resp={resp}")
+            _code, resp = _do_award(backend, sub_wallet, target_post, "not_a_real_award")
+            _expect_http_error("attack.award_unknown_type_rejected", resp, 400, "unknown award type")
         except Exception as e:
             _fail("attack.award_unknown_type_rejected", str(e))
 
         # 10.27 Invalid target rejected
         try:
-            code, resp = _do_award(backend, sub_wallet, "not_a_hash", "quality_post")
-            if code >= 400:
-                _pass("attack.award_invalid_target_rejected")
-            else:
-                _fail("attack.award_invalid_target_rejected", f"code={code} resp={resp}")
+            _code, resp = _do_award(backend, sub_wallet, "not_a_hash", "quality_post")
+            _expect_http_error("attack.award_invalid_target_rejected", resp, 400, "invalid target")
         except Exception as e:
             _fail("attack.award_invalid_target_rejected", str(e))
 
         # 10.28 PoW provided for award rejected
         try:
-            code, resp = _do_award(backend, sub_wallet, target_post, "quality_post", pow_difficulty=1, pow=1)
-            err = str(resp.get("error", "")).lower()
-            if code >= 400 and "pow" in err:
-                _pass("attack.award_pow_rejected")
-            elif code >= 400:
-                _pass("attack.award_pow_rejected (other error)")
-            else:
-                _fail("attack.award_pow_rejected", f"code={code} resp={resp}")
+            _code, resp = _do_award(backend, sub_wallet, target_post, "quality_post", pow_difficulty=1, pow=1)
+            _expect_http_error("attack.award_pow_rejected", resp, 400, "pow not allowed for award")
         except Exception as e:
             _fail("attack.award_pow_rejected", str(e))
 
@@ -454,11 +402,8 @@ def test_security(backend: str):
                 "target": target_post,
                 "award_type": "based",
             }
-            code, resp = _post(f"{backend}/api/core/award", payload)
-            if code >= 400:
-                _pass("attack.award_signature_replay_rejected")
-            else:
-                _fail("attack.award_signature_replay_rejected", f"code={code} resp={resp}")
+            _code, resp = _post(f"{backend}/api/core/award", payload)
+            _expect_http_error("attack.award_signature_replay_rejected", resp, 400, "invalid signature")
         except Exception as e:
             _fail("attack.award_signature_replay_rejected", str(e))
 
@@ -482,11 +427,8 @@ def test_security(backend: str):
                 "target": target_post,
                 "award_type": "quality_post",
             }
-            code, resp = _post(f"{backend}/api/core/award", payload)
-            if code >= 400:
-                _pass("attack.award_invalid_pubkey_rejected")
-            else:
-                _fail("attack.award_invalid_pubkey_rejected", f"code={code} resp={resp}")
+            _code, resp = _post(f"{backend}/api/core/award", payload)
+            _expect_http_error("attack.award_invalid_pubkey_rejected", resp, 400, "invalid relay fields")
         except Exception as e:
             _fail("attack.award_invalid_pubkey_rejected", str(e))
 
@@ -585,49 +527,30 @@ def test_security(backend: str):
     # 10.13 Block self — attempt to block own address
     try:
         resp = _do_block(backend, free_wallet, free_addr, "user", block=True)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower()
-        if not txh or "self" in err:
-            _pass("attack.block_self_rejected")
-        else:
-            _pass("attack.block_self submitted (chain decides)")
+        _expect_http_error("attack.block_self_rejected", resp, 400, "cannot block yourself")
     except Exception as e:
-        _pass("attack.block_self handled")
+        _fail("attack.block_self_rejected", str(e))
 
     # 10.14 Follow self user
     try:
         resp = _do_follow_user(backend, free_wallet, free_addr, follow=True)
-        txh = str(resp.get("tx_hash", "")).lower()
-        if txh:
-            _pass("attack.follow_self_user submitted (chain decides)")
-        else:
-            _pass("attack.follow_self_user_rejected")
+        _expect_http_error("attack.follow_self_user_rejected", resp, 400, "cannot follow yourself")
     except Exception as e:
-        _pass("attack.follow_self_user handled")
+        _fail("attack.follow_self_user_rejected", str(e))
 
     # 10.15 Empty target for block_user
     try:
         resp = _do_block(backend, free_wallet, "", "user", block=True)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower()
-        if not txh or "invalid" in err or "empty" in err:
-            _pass("attack.empty_block_target_rejected")
-        else:
-            _pass("attack.empty_block_target submitted (chain may reject)")
+        _expect_http_error("attack.empty_block_target_rejected", resp, 400, "missing required fields")
     except Exception as e:
-        _pass("attack.empty_block_target handled")
+        _fail("attack.empty_block_target_rejected", str(e))
 
     # 10.16 Very long follow target (64KB address)
     try:
         resp = _do_follow_user(backend, free_wallet, "x" * 65536, follow=True)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower()
-        if not txh or "invalid" in err:
-            _pass("attack.very_long_follow_target_rejected")
-        else:
-            _pass("attack.very_long_follow_target submitted (chain may reject)")
+        _expect_http_error("attack.very_long_follow_target_rejected", resp, 400, "user must be a valid mirage1 address")
     except Exception as e:
-        _pass("attack.very_long_follow_target_rejected")
+        _fail("attack.very_long_follow_target_rejected", str(e))
 
     # 10.17 Binary content in post
     try:
@@ -644,14 +567,9 @@ def test_security(backend: str):
     if (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False:
         try:
             resp = _do_set_username_raw(backend, free_wallet, "user\x00evil")
-            txh = str(resp.get("tx_hash", "")).lower()
-            err = str(resp.get("error", "")).lower()
-            if not txh or "invalid" in err:
-                _pass("attack.null_bytes_username_rejected")
-            else:
-                _pass("attack.null_bytes_username submitted (chain may reject)")
+            _expect_http_error("attack.null_bytes_username_rejected", resp, 400, "invalid control characters")
         except Exception as e:
-            _pass("attack.null_bytes_username handled")
+            _fail("attack.null_bytes_username_rejected", str(e))
     else:
         _pass("attack.null_bytes_username skipped (registration disabled)")
 
@@ -681,10 +599,12 @@ def test_security(backend: str):
                 "platform": "ios",
             }
             code, resp = _post(f"{backend}/api/core/register_push_token", payload)
-            if code >= 400:
+            if code == 400:
                 _pass("attack.push_register_invalid_signature_rejected")
             else:
-                _fail("attack.push_register_invalid_signature_rejected", f"code={code}")
+                _fail(
+                    "attack.push_register_invalid_signature_rejected", f"expected http=400 got http={code} resp={resp}"
+                )
         except Exception as e:
             _fail("attack.push_register_invalid_signature_rejected", str(e))
 
@@ -718,11 +638,10 @@ def test_security(backend: str):
                     "platform": "ios",
                 }
                 code2, resp2 = _post(f"{backend}/api/core/register_push_token", payload2)
-                err2 = str(resp2.get("error", "")).lower()
-                if code2 == 409 or "already registered" in err2:
+                if code2 == 409:
                     _pass("attack.push_token_hijack_rejected")
                 else:
-                    _fail("attack.push_token_hijack_rejected", f"code={code2}")
+                    _fail("attack.push_token_hijack_rejected", f"expected http=409 got http={code2} resp={resp2}")
 
             # 10.21 Unauthorized unregister should not release token
             ts3 = _now_ms()
@@ -749,11 +668,10 @@ def test_security(backend: str):
                 "platform": "ios",
             }
             code4, resp4 = _post(f"{backend}/api/core/register_push_token", payload4)
-            err4 = str(resp4.get("error", "")).lower()
-            if code4 == 409 or "already registered" in err4:
+            if code4 == 409:
                 _pass("attack.push_unreg_foreign_token_rejected")
             else:
-                _fail("attack.push_unreg_foreign_token_rejected", f"code={code4}")
+                _fail("attack.push_unreg_foreign_token_rejected", f"expected http=409 got http={code4} resp={resp4}")
         except Exception as e:
             _fail("attack.push_token_hijack_rejected", str(e))
 
@@ -774,7 +692,7 @@ def test_security(backend: str):
                 f"window_start={now}, sent_count=5, suppressed_count=3, cooldown_until={cooldown_until};"
             )
             rc, out = _docker_exec(
-                f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql}\\\" 2>&1\"",
+                f'su - postgres -c "psql -d {db_name} -tAc \\"{sql}\\" 2>&1"',
                 timeout=10,
             )
             if rc != 0:
@@ -797,9 +715,11 @@ def test_security(backend: str):
                 if code != 200:
                     _fail("attack.mark_inbox_viewed_clears_push_cooldown", f"code={code} resp={resp}")
                 else:
-                    sql2 = f"SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner='{owner_lc}' LIMIT 1;"
+                    sql2 = (
+                        f"SELECT cooldown_until, suppressed_count FROM push_throttle WHERE owner='{owner_lc}' LIMIT 1;"
+                    )
                     rc2, out2 = _docker_exec(
-                        f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql2}\\\" 2>&1\"",
+                        f'su - postgres -c "psql -d {db_name} -tAc \\"{sql2}\\" 2>&1"',
                         timeout=10,
                     )
                     if rc2 != 0:
@@ -814,7 +734,7 @@ def test_security(backend: str):
 
                     sql3 = f"SELECT inbox_last_viewed_at FROM user_inbox_state WHERE owner='{owner_lc}' LIMIT 1;"
                     rc3, out3 = _docker_exec(
-                        f"su - postgres -c \"psql -d {db_name} -tAc \\\"{sql3}\\\" 2>&1\"",
+                        f'su - postgres -c "psql -d {db_name} -tAc \\"{sql3}\\" 2>&1"',
                         timeout=10,
                     )
                     if rc3 != 0:
@@ -850,11 +770,8 @@ def test_security(backend: str):
             "envelope_nonce": str(nonce),
             "address": str(sub_wallet.address()),
         }
-        code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
-        if code >= 400:
-            _pass("attack.mark_inbox_viewed_mismatch_rejected")
-        else:
-            _fail("attack.mark_inbox_viewed_mismatch_rejected", f"code={code}")
+        _code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
+        _expect_http_error("attack.mark_inbox_viewed_mismatch_rejected", resp, 400, "address does not match pubkey")
     except Exception as e:
         _fail("attack.mark_inbox_viewed_mismatch_rejected", str(e))
 
@@ -877,26 +794,21 @@ def test_validation(backend: str):
     # ------ Username validation ------
 
     invalid_usernames = [
-        ("ab", "too_short"),
-        ("a" * 50, "too_long"),
-        ("user name", "space"),
-        ("user.name", "dot"),
-        ("user@name", "symbol"),
-        ("\U0001f642user", "emoji"),
+        ("ab", "too_short", "username too short"),
+        ("a" * 50, "too_long", "username too long"),
+        ("user name", "space", "invalid username format"),
+        ("user.name", "dot", "invalid username format"),
+        ("user@name", "symbol", "invalid username format"),
+        ("\U0001f642user", "emoji", "invalid username format"),
     ]
 
-    for uname, label in invalid_usernames:
+    for uname, label, expected in invalid_usernames:
         if not reg_enabled:
             _pass(f"validation.username_{label} skipped (registration disabled)")
             continue
         try:
             resp = _do_set_username_raw(backend, free_wallet, uname)
-            txh = str(resp.get("tx_hash", "")).lower()
-            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-            if not txh or "invalid" in err or "too short" in err or "too long" in err:
-                _pass(f"validation.username_{label}_rejected")
-            else:
-                _pass(f"validation.username_{label} submitted (chain may reject)")
+            _expect_http_error(f"validation.username_{label}_rejected", resp, 400, expected)
         except Exception as e:
             _fail(f"validation.username_{label}_rejected", str(e))
 
@@ -925,14 +837,14 @@ def test_validation(backend: str):
     # ------ Content tag validation ------
 
     invalid_tags = [
-        ("invalid", "unknown_tag"),
-        ("SENSITIVE", "uppercase_tag"),
-        ("nsfw", "nsfw_instead_of_sensitive"),
-        ("adult", "adult_instead_of_porn"),
-        ("Porn", "mixed_case_tag"),
+        ("invalid", "unknown_tag", "invalid tag"),
+        ("SENSITIVE", "uppercase_tag", "invalid tag"),
+        ("nsfw", "nsfw_instead_of_sensitive", "invalid tag"),
+        ("adult", "adult_instead_of_porn", "invalid tag"),
+        ("Porn", "mixed_case_tag", "invalid tag"),
     ]
 
-    for tag, label in invalid_tags:
+    for tag, label, expected in invalid_tags:
         try:
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
             pub = free_wallet.public_key().public_key_bytes
@@ -959,11 +871,8 @@ def test_validation(backend: str):
                 "content": "body",
                 "tag": tag,
             }
-            code, resp = _post(f"{backend}/api/core/post", payload)
-            if code >= 400:
-                _pass(f"validation.tag_{label}_rejected")
-            else:
-                _pass(f"validation.tag_{label} submitted (chain may reject)")
+            _code, resp = _post(f"{backend}/api/core/post", payload)
+            _expect_http_error(f"validation.tag_{label}_rejected", resp, 400, expected)
         except Exception as e:
             _fail(f"validation.tag_{label}_rejected", str(e))
 
@@ -972,12 +881,7 @@ def test_validation(backend: str):
     # 11.13 Send tokens with insufficient funds — free wallet tries to send more than it has
     try:
         resp = _do_send_tokens(backend, free_wallet, str(sub_wallet.address()), 999_999_999_999_999)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-        if not txh or "insufficient" in err:
-            _pass("validation.send_tokens_insufficient_rejected")
-        else:
-            _pass("validation.send_tokens_insufficient submitted (chain may reject)")
+        _expect_http_error("validation.send_tokens_insufficient_rejected", resp, 400, "insufficient balance")
     except Exception as e:
         _fail("validation.send_tokens_insufficient_rejected", str(e))
 
@@ -985,27 +889,17 @@ def test_validation(backend: str):
 
     # 11.14 Upgrade to invalid level (100) — rejected
     try:
-        resp = _do_upgrade_level(backend, free_wallet, 100)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-        if not txh or "invalid" in err:
-            _pass("validation.upgrade_invalid_level_rejected")
-        else:
-            _pass("validation.upgrade_invalid_level submitted (chain may reject)")
+        resp = _do_subscribe(backend, free_wallet, 100)
+        _expect_http_error("validation.subscribe_invalid_level_rejected", resp, 400, "invalid level")
     except Exception as e:
-        _fail("validation.upgrade_invalid_level_rejected", str(e))
+        _fail("validation.subscribe_invalid_level_rejected", str(e))
 
     # 11.15 Upgrade to invalid level (3) — rejected (only 1 and 10 are valid)
     try:
-        resp = _do_upgrade_level(backend, free_wallet, 3)
-        txh = str(resp.get("tx_hash", "")).lower()
-        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-        if not txh or "invalid" in err:
-            _pass("validation.upgrade_invalid_level_3_rejected")
-        else:
-            _pass("validation.upgrade_invalid_level_3 submitted (chain may reject)")
+        resp = _do_subscribe(backend, free_wallet, 3)
+        _expect_http_error("validation.subscribe_invalid_level_3_rejected", resp, 400, "invalid level")
     except Exception as e:
-        _fail("validation.upgrade_invalid_level_3_rejected", str(e))
+        _fail("validation.subscribe_invalid_level_3_rejected", str(e))
 
     # ------ Report validation ------
 
@@ -1015,20 +909,15 @@ def test_validation(backend: str):
         _wait_indexed(backend, free_addr, test_post)
         try:
             resp = _do_report(backend, free_wallet, test_post, "x" * 2000)
-            txh = str(resp.get("tx_hash", "")).lower()
-            err = str(resp.get("error", "")).lower()
-            if not txh or "too long" in err or "invalid" in err:
-                _pass("validation.report_reason_too_long_rejected")
-            else:
-                _pass("validation.report_reason_too_long submitted (chain may reject)")
+            _expect_http_error("validation.report_reason_too_long_rejected", resp, 400, "reason too long")
         except Exception as e:
             _fail("validation.report_reason_too_long_rejected", str(e))
     else:
         _fail("validation.report_reason_too_long (setup failed)")
 
-    # ------ Subscriber PoW rejection across all endpoints ------
+    # ------ Subscriber PoW acceptance across key endpoints ------
 
-    # 11.17–11.20 Subscriber using PoW should be rejected for various actions
+    # 11.17–11.20 Subscriber using PoW should be allowed (no "pow not allowed" rejection)
     sub_endpoints = [
         ("vote", lambda: _do_vote(backend, sub_wallet, "bb" * 32, 1, skip_pow=False)),
         ("set_username", lambda: _do_set_username_raw(backend, sub_wallet, f"powtest-{_rand_str(4)}")),
@@ -1037,19 +926,18 @@ def test_validation(backend: str):
     for endpoint_name, action_fn in sub_endpoints:
         try:
             resp = action_fn()
-            txh = str(resp.get("tx_hash", "")).lower()
-            err = str(resp.get("error", "")).lower()
-            code_val = int(resp.get("code", 0) or 0)
-            if not txh or code_val != 0 or "not allowed" in err or "subscriber" in err:
-                _pass(f"validation.subscriber_pow_{endpoint_name}_rejected")
+            err = str((resp or {}).get("error", "")).lower()
+            http_status = int((resp or {}).get("_http_status", 0) or 0)
+            if (http_status == 0 and err == "internal server error") or http_status >= 500:
+                _fail(
+                    f"validation.subscriber_pow_{endpoint_name}_allowed", f"http={http_status} err={err!r} resp={resp}"
+                )
+            elif "pow not allowed" in err:
+                _fail(f"validation.subscriber_pow_{endpoint_name}_allowed", f"pow still rejected err={err!r}")
             else:
-                _pass(f"validation.subscriber_pow_{endpoint_name} submitted (chain may reject)")
+                _pass(f"validation.subscriber_pow_{endpoint_name}_allowed")
         except Exception as e:
-            err_str = str(e).lower()
-            if "400" in err_str or "not allowed" in err_str:
-                _pass(f"validation.subscriber_pow_{endpoint_name}_rejected")
-            else:
-                _fail(f"validation.subscriber_pow_{endpoint_name}_rejected", str(e))
+            _fail(f"validation.subscriber_pow_{endpoint_name}_allowed", str(e))
 
 
 # =========================================================================

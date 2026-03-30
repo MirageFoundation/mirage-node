@@ -19,7 +19,12 @@
                     "/topics",
                     "/settings",
                     "/subscription",
-                    "/agents"
+                    "/agents",
+                    "/referrals",
+                    "/blocks",
+                    "/login",
+                    "/follows",
+                    "/"
                 ]
             }
         ]

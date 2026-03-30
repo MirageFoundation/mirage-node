@@ -36,7 +36,7 @@ from tests.common import (
     _COLOR_RESET,
     _COLOR_BOLD,
     _fetch_params,
-    _do_upgrade_level,
+    _do_subscribe,
     _docker_exec,
     _run_miraged,
     _miraged_cmd,
@@ -53,7 +53,7 @@ from tests.common import (
     check_pow_target,
     _difficulty_factor,
     _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw,
+    _canon_base_subscribe_raw,
     _canon_base_send_tokens_raw,
     _canon_base_award_raw,
     _canon_base_post_raw,
@@ -212,7 +212,7 @@ def test_agents(backend: str):
     except Exception as e:
         _fail("agents.set_agents_happy_path", str(e))
 
-    time.sleep(3)
+    _wait_list_count(backend, sub1_addr, "enabled_agents", 2)
 
     # 13.7b Verify order in get_user_followed
     code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})

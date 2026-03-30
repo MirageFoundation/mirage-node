@@ -2,8 +2,21 @@
 
 // Nonce: (Date.now() * 1_000_000) + rand32. Must be >0, <=2^53-1 (JS safe int).
 export function generateEnvelopeNonce() {
-    let nonce = Math.floor(Date.now() * 1_000_000) + ((Math.random() * 0xFFFFFFFF) >>> 0);
-    if (nonce <= 0 || !Number.isSafeInteger(nonce)) nonce = Date.now() * 1000 + ((Math.random() * 999) >>> 0) + 1;
+    const cryptoApi = (typeof window !== 'undefined' && window.crypto) ? window.crypto : null;
+    if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+        throw new Error('Secure random source unavailable');
+    }
+    const rand = new Uint32Array(1);
+    cryptoApi.getRandomValues(rand);
+    const randomPart = rand[0] >>> 0;
+    const base = Math.floor(Date.now() * 1_000_000);
+    let nonce = base + randomPart;
+    if (nonce <= 0 || !Number.isSafeInteger(nonce)) {
+        nonce = (Date.now() * 1000) + (randomPart % 1000) + 1;
+    }
+    if (nonce <= 0 || !Number.isSafeInteger(nonce)) {
+        throw new Error('Failed to generate valid envelope nonce');
+    }
     return nonce;
 }
 
@@ -34,7 +47,9 @@ export function encBytes(arr) {
 
 export function hexToBytes(hex) {
     const h = (hex || "").replace(/^0x/i, "");
-    if (!h || h.length % 2) return new Uint8Array(0);
+    if (!h) return new Uint8Array(0);
+    if (h.length % 2) throw new Error('Invalid hex length');
+    if (!/^[0-9a-fA-F]+$/.test(h)) throw new Error('Invalid hex characters');
     const arr = new Uint8Array(h.length / 2);
     for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
     return arr;

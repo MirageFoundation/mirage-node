@@ -17,6 +17,7 @@ import os
 import re
 import threading
 import time
+from decimal import Decimal
 from typing import Optional
 
 import psycopg
@@ -542,6 +543,140 @@ def _do_award_push(
     data = {"type": "award", "rootPostId": target_txhash, "replyId": ""}
 
     _send_push_to_user(post_owner, title, body, data)
+    _check_old_receipts()
+
+
+def send_push_for_follow(
+    follower_addr: str,
+    follower_username: str,
+    target_owner: str,
+) -> None:
+    """Fire push for a follow. Called after successful broadcast."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping follow push for %s", follower_addr[:16])
+        return
+    if target_owner == follower_addr.lower():
+        return
+    logger.info(
+        "[Push] Firing follow push: follower=%s recipient=%s",
+        follower_addr[:16],
+        target_owner[:16],
+    )
+    _fire_and_forget(_do_follow_push, follower_addr, follower_username, target_owner)
+    _maybe_flush_pending_summaries()
+
+
+def _do_follow_push(
+    follower_addr: str,
+    follower_username: str,
+    target_owner: str,
+) -> None:
+    display_name = f"@{follower_username}" if follower_username else follower_addr[:12]
+    title = f"{display_name} followed you"
+    body = "Tap to view their profile"
+    data = {"type": "follow", "user": follower_addr.lower()}
+    _send_push_to_user(target_owner, title, body, data)
+    _check_old_receipts()
+
+
+def _format_mirage_amount(amount_umirage: int) -> str:
+    amount_int = int(amount_umirage)
+    if amount_int < 0:
+        raise RuntimeError("amount must be non-negative")
+    value = Decimal(amount_int) / Decimal(1_000_000)
+    quantized = value.quantize(Decimal("0.000001"))
+    text = format(quantized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    if "." in text:
+        int_part, dec_part = text.split(".", 1)
+    else:
+        int_part, dec_part = text, ""
+    int_part_fmt = f"{int(int_part):,}"
+    if dec_part:
+        return f"{int_part_fmt}.{dec_part}"
+    return int_part_fmt
+
+
+def send_push_for_donation(
+    sender_addr: str,
+    sender_username: str,
+    recipient_addr: str,
+    amount: int,
+) -> None:
+    """Fire push for a donation. Called after successful broadcast."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping donation push for %s", sender_addr[:16])
+        return
+    if recipient_addr == sender_addr.lower():
+        return
+    logger.info(
+        "[Push] Firing donation push: sender=%s recipient=%s amount=%s",
+        sender_addr[:16],
+        recipient_addr[:16],
+        amount,
+    )
+    _fire_and_forget(_do_donation_push, sender_addr, sender_username, recipient_addr, amount)
+    _maybe_flush_pending_summaries()
+
+
+def send_push_for_subscription_gift(
+    gifter_addr: str,
+    gifter_username: str,
+    recipient_addr: str,
+    level: int,
+    was_subscriber: bool,
+) -> None:
+    """Fire push for a gifted subscription. Called after successful broadcast."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping subscription gift push for %s", gifter_addr[:16])
+        return
+    if recipient_addr == gifter_addr.lower():
+        return
+    logger.info(
+        "[Push] Firing subscription gift push: gifter=%s recipient=%s level=%s was_sub=%s",
+        gifter_addr[:16],
+        recipient_addr[:16],
+        level,
+        was_subscriber,
+    )
+    _fire_and_forget(_do_subscription_gift_push, gifter_addr, gifter_username, recipient_addr, level, was_subscriber)
+    _maybe_flush_pending_summaries()
+
+
+def _do_subscription_gift_push(
+    gifter_addr: str,
+    gifter_username: str,
+    recipient_addr: str,
+    level: int,
+    was_subscriber: bool,
+) -> None:
+    display_name = f"@{gifter_username}" if gifter_username else gifter_addr[:12]
+    tier = "agent subscription" if int(level) == 10 else "subscription"
+    if was_subscriber:
+        title = f"{display_name} extended your {tier}"
+        body = "Your subscription has been extended"
+    else:
+        title = f"{display_name} gifted you a {tier}"
+        body = "Welcome to Mirage"
+    data = {"type": "subscription_gift", "user": gifter_addr.lower(), "level": int(level)}
+    _send_push_to_user(recipient_addr, title, body, data)
+    _check_old_receipts()
+
+
+def _do_donation_push(
+    sender_addr: str,
+    sender_username: str,
+    recipient_addr: str,
+    amount: int,
+) -> None:
+    amount_int = int(amount)
+    display_name = f"@{sender_username}" if sender_username else sender_addr[:12]
+    amount_display = _format_mirage_amount(amount_int)
+    title = f"{display_name} donated {amount_display} MIRAGE"
+    body = "You received a donation"
+    data = {"type": "donation", "user": sender_addr.lower(), "amount": amount_int}
+    _send_push_to_user(recipient_addr, title, body, data)
     _check_old_receipts()
 
 

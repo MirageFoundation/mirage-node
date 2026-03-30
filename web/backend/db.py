@@ -525,6 +525,54 @@ def init_backend_schema() -> None:
             """
             )
 
+            # ── Inbox events (follow + donation notifications) ───────────
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS inbox_events (
+                    event_key TEXT PRIMARY KEY,
+                    recipient TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    created_at BIGINT NOT NULL,
+                    amount BIGINT,
+                    tx_hash TEXT
+                )
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_recipient_lower ON inbox_events(LOWER(recipient))")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_created_at ON inbox_events(created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_type ON inbox_events(event_type)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_inbox_events_recipient_created ON inbox_events(LOWER(recipient), created_at DESC)"
+            )
+            _assert_table_schema(
+                "inbox_events",
+                {"event_key", "recipient", "actor", "event_type", "created_at", "amount", "tx_hash"},
+            )
+
+            # ── Fix SERIAL sequences after data migration ─────────────────
+            # The DB-split migration inserts rows with explicit id values but
+            # doesn't advance the sequences.  Reset each SERIAL sequence to
+            # MAX(id) so the next INSERT without an explicit id won't collide.
+            _SERIAL_TABLES = [
+                ("pending_rewards", "id"),
+                ("referral_pending_rewards", "id"),
+                ("referral_analysis", "id"),
+                ("reports", "id"),
+                ("push_tokens", "id"),
+                ("push_receipts", "id"),
+                ("push_nonces", "id"),
+            ]
+            for table, col in _SERIAL_TABLES:
+                seq_name = f"{table}_{col}_seq"
+                cur.execute(
+                    f"SELECT setval(pg_get_serial_sequence(%s, %s), GREATEST(COALESCE((SELECT MAX({col}) FROM {table}), 0), 1))",
+                    (table, col),
+                )
+                new_val = cur.fetchone()[0]
+                if new_val > 1:
+                    logger.info("backend.schema.seq_reset table=%s seq=%s val=%s", table, seq_name, new_val)
+
         logger.debug("backend.schema.init.ok")
         logger.info("Backend schema initialized successfully")
     finally:

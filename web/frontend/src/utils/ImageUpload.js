@@ -1,4 +1,18 @@
-import Api from '../lib/api';
+import Api from './api';
+
+function assertAllowedUploadUrl(uploadUrl) {
+    let parsed;
+    try {
+        parsed = new URL(String(uploadUrl || ''));
+    } catch (_) {
+        throw new Error('Invalid upload URL');
+    }
+    const host = parsed.hostname.toLowerCase();
+    const isAllowedHost = host.endsWith('imagedelivery.net');
+    if (parsed.protocol !== 'https:' || !isAllowedHost) {
+        throw new Error('Upload URL host is not allowed');
+    }
+}
 
 /**
  * Downscale an image to a maximum size while maintaining aspect ratio
@@ -132,6 +146,12 @@ export async function getUploadUrl(type = 'image') {
  */
 export async function uploadToCloudflare(file, uploadUrl, accountHash, onProgress, originalExtension = '') {
     return new Promise((resolve, reject) => {
+        try {
+            assertAllowedUploadUrl(uploadUrl);
+        } catch (e) {
+            reject(e);
+            return;
+        }
         const xhr = new XMLHttpRequest();
         
         xhr.upload.addEventListener('progress', (e) => {

@@ -16,37 +16,96 @@ from cosmpy.crypto.keypairs import PrivateKey
 from cosmpy.aerial.wallet import LocalWallet
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_upgrade_level, _docker_exec, _run_miraged, _miraged_cmd,
-    _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    FAUCET_AMOUNTS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _fetch_params,
+    _do_subscribe,
+    _docker_exec,
+    _run_miraged,
+    _miraged_cmd,
+    _keyring_backend,
+    _INSIDE_CONTAINER,
+    _check_local_docker,
     DEFAULT_BACKEND,
-    get_status, get_user_status, get_username_from_address, get_address_from_username,
-    sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_upgrade_level_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_annotate_raw, _canon_base_report_raw,
+    get_status,
+    get_user_status,
+    get_username_from_address,
+    get_address_from_username,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
+    _difficulty_factor,
+    _BASE_DIFFICULTY_FACTOR,
+    _canon_base_subscribe_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_award_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_annotate_raw,
+    _canon_base_report_raw,
     canon_signed_with_pow,
-    _generate_wallet, _faucet, _resolve_validator_key_addr,
-    _get_spendable_balance, _required_sub1_spend_budget_umirage,
+    _generate_wallet,
+    _faucet,
+    _resolve_validator_key_addr,
+    _get_spendable_balance,
+    _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_post, _do_post_with_nonce, _do_post_with_media,
-    _do_vote, _do_vote_with_nonce,
-    _do_edit, _do_annotate, _do_delete, _do_delete_user,
-    _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
-    _do_set_username_raw, _do_set_biography, _do_report,
-    _do_enable_agent, _do_set_agents, _do_set_auto_renewal,
-    _do_send_tokens, _do_award,
-    _wait_indexed, _wait_username, _wait_list_count,
-    _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,
-    _wait_followed_user, _wait_followed_topic,
-    _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
+    _do_post,
+    _do_post_with_nonce,
+    _do_post_with_media,
+    _do_vote,
+    _do_vote_with_nonce,
+    _do_edit,
+    _do_annotate,
+    _do_delete,
+    _do_delete_user,
+    _do_follow_user,
+    _do_follow_topic,
+    _do_block,
+    _do_block_topic,
+    _do_set_username_raw,
+    _do_set_biography,
+    _do_report,
+    _do_enable_agent,
+    _do_set_agents,
+    _do_set_auto_renewal,
+    _do_send_tokens,
+    _do_award,
+    _wait_indexed,
+    _wait_username,
+    _wait_list_count,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_tx_deliver,
+    _wait_followed_user,
+    _wait_followed_topic,
+    _wait_blocked_user,
+    _wait_blocked_topic,
+    _wait_blocked_topic_state,
     _wait_comment_indexed,
-    _rpc_latest_height, _wait_next_block,
+    _rpc_latest_height,
+    _wait_next_block,
 )
 
 
@@ -480,6 +539,7 @@ def test_social_graph(backend: str):
 # Category 6: Proof-of-Work
 # =========================================================================
 
+
 def test_hard_cap_vs_deque(backend: str):
     """Test that follow/enable lists reject at limit (hard cap) while
     block lists evict oldest (deque) through the backend API."""
@@ -673,6 +733,7 @@ def test_hard_cap_vs_deque(backend: str):
 # Category 20: Tier Configuration Verification (backend API)
 # =========================================================================
 
+
 def test_indexer_deque_storage(backend: str):
     """Test that the indexer stores blocked_* entries beyond the chain limit."""
 
@@ -702,21 +763,31 @@ def test_indexer_deque_storage(backend: str):
     else:
         _pass(f"indexer_deque.block_users ({test_count} blocked)")
 
-    time.sleep(5)
+    def _wait_indexer_blocked(kind: str, expected: list[str], min_match: int, timeout: float) -> tuple[int, int]:
+        deadline = time.perf_counter() + timeout
+        last_matched = 0
+        last_total = 0
+        while time.perf_counter() < deadline:
+            code, blocked_data = _get(f"{backend}/api/get_user_blocked", {"address": sub1_addr})
+            if code == 200:
+                if kind == "users":
+                    indexer_vals = [str(u).lower() for u in ((blocked_data or {}).get("blocked_users") or [])]
+                else:
+                    indexer_vals = [str(t).lower() for t in ((blocked_data or {}).get("blocked_topics") or [])]
+                last_total = len(indexer_vals)
+                last_matched = sum(1 for item in expected if item in indexer_vals)
+                if last_matched >= min_match:
+                    return last_matched, last_total
+            time.sleep(1.0)
+        _debug(f"indexer_deque.wait_{kind} matched={last_matched} total={last_total}")
+        return last_matched, last_total
 
     # Verify the indexer has all of them (or at least most via get_user_blocked)
-    code, blocked_data = _get(f"{backend}/api/get_user_blocked", {"address": sub1_addr})
-    if code != 200:
-        _fail("indexer_deque.get_blocked", f"code={code}")
-        return
-
-    indexer_blocked = [str(u).lower() for u in ((blocked_data or {}).get("blocked_users") or [])]
-    # The indexer should have all (or more than chain limit) blocked users
-    matched = sum(1 for a in blocked_addrs if a in indexer_blocked)
+    matched, total = _wait_indexer_blocked("users", blocked_addrs, test_count - 2, INDEX_TIMEOUT_SEC)
     if matched >= test_count - 2:
         _pass(f"indexer_deque.blocked_users_stored ({matched}/{test_count})")
     else:
-        _fail(f"indexer_deque.blocked_users_stored", f"matched={matched}/{test_count}")
+        _fail("indexer_deque.blocked_users_stored", f"matched={matched}/{test_count} total={total}")
 
     # Block some topics too
     test_topic_count = 10
@@ -732,16 +803,11 @@ def test_indexer_deque_storage(backend: str):
     else:
         _pass(f"indexer_deque.block_topics ({test_topic_count} blocked)")
 
-    time.sleep(3)
-
-    code, blocked_data = _get(f"{backend}/api/get_user_blocked", {"address": sub1_addr})
-    if code == 200:
-        indexer_topics = [str(t).lower() for t in ((blocked_data or {}).get("blocked_topics") or [])]
-        matched = sum(1 for t in blocked_topics if t in indexer_topics)
-        if matched >= test_topic_count - 1:
-            _pass(f"indexer_deque.blocked_topics_stored ({matched}/{test_topic_count})")
-        else:
-            _fail(f"indexer_deque.blocked_topics_stored", f"matched={matched}/{test_topic_count}")
+    matched, total = _wait_indexer_blocked("topics", blocked_topics, test_topic_count - 1, INDEX_TIMEOUT_SEC)
+    if matched >= test_topic_count - 1:
+        _pass(f"indexer_deque.blocked_topics_stored ({matched}/{test_topic_count})")
+    else:
+        _fail("indexer_deque.blocked_topics_stored", f"matched={matched}/{test_topic_count} total={total}")
 
 
 # =========================================================================

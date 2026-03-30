@@ -1,15 +1,13 @@
 import React, { Component } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
-import { GlobalStyle } from './styled/GlobalStyle';
 import { ThemeProvider } from 'styled-components';
-import styled from 'styled-components';
 import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
-import Api from './lib/api';
+import Api from './utils/api';
 import * as tx from './utils/tx';
+import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
-import MobileBottomNav from './components/MobileBottomNav';
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
 
@@ -74,63 +72,6 @@ const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
-const darkTheme = {
-    name: 'dark',
-    colors: {
-        bg: '#1A1A1A',
-        text: '#FFFFFF',
-        subtleText: '#CCCCCC',
-        panel: '#23272C',
-        panelAlt: '#33373C',
-        border: '#444',
-        accent: '#2E3238',
-        accentHover: '#3A3F46',
-        accentDisabled: '#4A4F55',
-        buttonText: '#FFFFFF',
-        link: '#FFFFFF',
-        linkHover: '#CCCCCC',
-        scrollbar: '#CCCCCC',
-    }
-};
-
-const lightTheme = {
-    name: 'light',
-    colors: {
-        bg: '#FFFFFF',
-        text: '#111827',
-        subtleText: '#4B5563',
-        panel: '#F7F7F8',
-        panelAlt: '#EFEFF1',
-        border: '#D1D5DB',
-        accent: '#E5E7EB',
-        accentHover: '#D1D5DB',
-        accentDisabled: '#F3F4F6',
-        buttonText: '#111827',
-        link: '#111827',
-        linkHover: '#374151',
-        scrollbar: '#9CA3AF',
-    }
-};
-
-// Hoist styled component out of render to keep component identity stable across renders
-const SiteContainer = styled.div`
-            width: 100%;
-            max-width: 100%;
-            margin: 0 auto;
-            padding: 0 1rem;
-            padding-bottom: 3rem;
-            @media (max-width: 1000px) {
-                padding: 0 0.25rem;
-                padding-bottom: 3rem;
-            }
-            @media (min-width: 1000px) {
-                max-width: 80%;
-            }
-            /* Extra bottom padding on mobile for bottom nav */
-            @media (max-width: 600px) {
-                padding-bottom: 80px;
-            }
-        `;
 
 // Routes that should not be saved/restored
 const excludedRoutes = [
@@ -267,6 +208,12 @@ class App extends Component {
 
         this.setCredentials = this.setCredentials.bind(this);
         this.setWarnOnLeave = this.setWarnOnLeave.bind(this);
+        {
+            const raw = Storage.load('theme_id', DEFAULT_THEME_ID);
+            const themeId = normalizeThemeId(raw);
+            if (themeId !== raw) Storage.save('theme_id', themeId);
+            this.state.themeId = themeId;
+        }
         this.state.themeMode = Storage.load('theme_mode', 'time');
         this.state.theme = this.calculateTheme(this.state.themeMode);
     }
@@ -400,19 +347,6 @@ class App extends Component {
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
         try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
 
-        // Initialize full width mode CSS custom properties
-        try {
-            const fullWidthMode = Storage.load('full_width_mode', false) === true;
-            const root = document.documentElement;
-            if (fullWidthMode) {
-                root.style.setProperty('--content-max-width', 'none');
-                root.style.setProperty('--feed-max-width', 'none');
-            } else {
-                root.style.setProperty('--content-max-width', '1240px');
-                root.style.setProperty('--feed-max-width', '1000px');
-            }
-        } catch (_) { }
-
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
             if ((e.ctrlKey || e.metaKey) && (e.key === '.' || e.code === 'Period')) {
@@ -421,6 +355,14 @@ class App extends Component {
             }
         };
         window.addEventListener('keydown', this._onKeyDown);
+
+        // Listen for theme id changes from SettingsView
+        this._onThemeIdChange = (e) => {
+            const newId = normalizeThemeId(e.detail?.themeId || DEFAULT_THEME_ID);
+            try { document.documentElement.setAttribute('data-theme-id', newId); } catch (_) { }
+            this.setState({ themeId: newId });
+        };
+        window.addEventListener('themeIdChanged', this._onThemeIdChange);
 
         // Listen for theme mode changes from SettingsView
         this._onThemeModeChange = (e) => {
@@ -521,6 +463,7 @@ class App extends Component {
         try { window.removeEventListener('keydown', this._onKeyDown); } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
         try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
+        try { window.removeEventListener('themeIdChanged', this._onThemeIdChange); } catch (_) { }
         try { window.removeEventListener('themeModeChanged', this._onThemeModeChange); } catch (_) { }
         try {
             if (this._themeMql && this._themeMql.removeEventListener) {
@@ -827,12 +770,15 @@ class App extends Component {
     };
 
     render() {
-        const themeObj = this.state.theme === 'light' ? lightTheme : darkTheme;
+        const themeObj = getResolvedTheme({ themeId: this.state.themeId, themeMode: this.state.theme });
+        const family = getThemeFamily(this.state.themeId);
+        const Shell = family.Shell;
+        const Style = family.Style;
         return (
             <HelmetProvider>
                 <ThemeProvider theme={themeObj}>
                     <div>
-                        <GlobalStyle state={this.state} />
+                        <Style />
                         <Toast />
 
                         {this.state.vaultLocked && (
@@ -845,10 +791,9 @@ class App extends Component {
 
                         <BrowserRouter>
                             <RouteTracker>
-                                <SiteContainer>
+                                <Shell state={this.state}>
                                     <React.Suspense fallback={null}>
                                         <Routes>
-                                            {/* MobileBottomNav renders in its own Suspense below */}
                                             <Route
                                                 path="/"
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="home" />}
@@ -872,7 +817,6 @@ class App extends Component {
                                             <Route path="/welcome" element={<WelcomeView state={this.state} />} />
                                             <Route path="/change_username" element={<ChangeUsernameView state={this.state} />} />
                                             <Route path="/sign_out" element={<SignOutView state={this.state} setCredentials={this.setCredentials} />} />
-                                            {/* New clean URL routes */}
                                             <Route path="/p/:postId" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/u/:identity" element={<ProfileView state={this.state} />} />
                                             <Route path="/profile" element={<ProfileView state={this.state} />} />
@@ -894,8 +838,7 @@ class App extends Component {
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>
-                                </SiteContainer>
-                                <MobileBottomNav state={this.state} />
+                                </Shell>
                             </RouteTracker>
                         </BrowserRouter>
                     </div>

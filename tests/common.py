@@ -61,7 +61,7 @@ from shared.canon import (  # noqa: E402
     canon_base_block_topic as _canon_base_block_topic_raw,
     canon_base_unblock_topic as _canon_base_unblock_topic_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
-    canon_base_upgrade_level as _canon_base_upgrade_level_raw,
+    canon_base_subscribe as _canon_base_subscribe_raw,
     canon_base_report as _canon_base_report_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
@@ -167,7 +167,7 @@ def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
-        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:
                 delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
@@ -177,10 +177,25 @@ def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
+        if r.status_code == 500 and attempt < max_retries:
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if body and ("error" in body or "raw_log" in body or "message" in body):
+                return r.status_code, body
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry GET {url} status=500 attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
         try:
-            return r.status_code, r.json()
+            body = r.json()
         except Exception:
-            return r.status_code, {}
+            body = {}
+        if isinstance(body, dict):
+            body.setdefault("_http_status", r.status_code)
+        return r.status_code, body
 
     return 599, {}
 
@@ -198,7 +213,7 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
-        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:
                 delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
@@ -208,13 +223,39 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             time.sleep(delay)
             continue
 
+        if r.status_code == 500 and attempt < max_retries:
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if body and ("error" in body or "raw_log" in body or "message" in body):
+                return r.status_code, body
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry POST {url} status=500 attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
         try:
             body = r.json()
         except Exception:
             body = {}
+        if isinstance(body, dict):
+            body.setdefault("_http_status", r.status_code)
         return r.status_code, body
 
     return 599, {}
+
+
+def _expect_http_error(label: str, resp: dict, status: int, contains: str | None = None) -> None:
+    http_status = int(resp.get("_http_status", 0) or 0)
+    err = str(resp.get("error", "")).lower()
+    if http_status != status:
+        _fail(label, f"expected http={status}, got http={http_status} error={err!r} resp={resp}")
+        return
+    if contains and contains.lower() not in err:
+        _fail(label, f"expected error~={contains!r}, got error={err!r} resp={resp}")
+        return
+    _pass(label)
 
 
 # ---------------------------------------------------------------------------
@@ -530,8 +571,8 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     return False
 
 
-def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
-    """Upgrade a wallet's subscription to the given level (1=Subscriber, 10=Agent)."""
+def _do_subscribe(backend: str, wallet: LocalWallet, level: int, target: str = "") -> dict:
+    """Subscribe a wallet to the given level (1=Subscriber, 10=Agent), optionally gifting to target."""
     addr = str(wallet.address())
     st = get_status(backend, address=addr)
     lb = str(st.get("last_block_hash", ""))
@@ -539,8 +580,8 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
     ts = _now_ms()
     nonce = _fresh_nonce()
 
-    # upgrade_level: difficulty=0, proof=0 (no PoW)
-    base = _canon_base_upgrade_level_raw(pub, _lb_bytes(lb), 0, ts, level, nonce)
+    # subscribe: difficulty=0, proof=0 (no PoW)
+    base = _canon_base_subscribe_raw(pub, _lb_bytes(lb), 0, ts, level, target=target, nonce=nonce)
     signed = canon_signed_with_pow(base, 0)
     sig = sign_canonical(wallet, signed)
     payload = {
@@ -551,7 +592,9 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
         "envelope_nonce": str(nonce),
         "level": level,
     }
-    code, resp = _post(f"{backend}/api/core/upgrade_level", payload)
+    if target:
+        payload["target"] = target
+    code, resp = _post(f"{backend}/api/core/subscribe", payload)
     return resp
 
 
@@ -562,6 +605,7 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
     - post award: quality_post
     - comment award: receipts
     - token send happy path: 1000 umirage
+    - gift subscription to sub2: one period_fee for level 1
     """
     code, cfg = _get(f"{backend}/api/get_chain_config")
     if code != 200 or not isinstance(cfg, dict):
@@ -588,11 +632,26 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
     if missing:
         raise RuntimeError(f"required award types missing from chain config: {missing}")
 
+    gift_fee = int(cfg.get("subscription_period_fee", 0) or 0)
+    if gift_fee <= 0:
+        tiers = cfg.get("tiers") or []
+        if isinstance(tiers, list) and len(tiers) > 1:
+            gift_fee = int((tiers[1] or {}).get("period_fee", 0) or 0)
+    if gift_fee <= 0:
+        gift_fee = 100_000_000_000
+
     token_send_amount = 1000  # test_tokens.happy_path
     indexer_transfer_test = 1  # test_backend_indexer.balance_after_transfer
     # Fee buffer: sub1 sends many txs across backend tests (posts/votes/etc).
     fee_buffer = 25_000_000_000  # 25k MIRAGE in umirage
-    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount + indexer_transfer_test + fee_buffer
+    return (
+        int(costs["quality_post"])
+        + int(costs["receipts"])
+        + token_send_amount
+        + indexer_transfer_test
+        + gift_fee
+        + fee_buffer
+    )
 
 
 def setup_test_wallets(backend: str) -> bool:
@@ -685,7 +744,7 @@ def setup_test_wallets(backend: str) -> bool:
             "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
             "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
             "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-            "agent2": 500_000_000_000,  # 500,000 MIRAGE (Agent fee)
+            "agent2": 1_500_000_000_000,  # 1,500,000 MIRAGE (Agent fee + 2 agent gifts)
         }
     )
     try:
@@ -744,7 +803,7 @@ def setup_test_wallets(backend: str) -> bool:
     # Subscribe wallets: sub1,sub2 -> level 1, agent1/agent2 -> level 10
     for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
-        resp = _do_upgrade_level(backend, w, level)
+        resp = _do_subscribe(backend, w, level)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
             print(f"  Subscribed {name} to level {level} (tx: {txh[:16]}...)")

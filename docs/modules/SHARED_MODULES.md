@@ -151,7 +151,7 @@ MsgBlockPost, MsgUnblockPost
 MsgBlockUser, MsgUnblockUser
 
 # Subscription messages
-MsgUpgradeLevel, MsgSetAutoRenewal, MsgSetLevel
+MsgSubscribe, MsgSetAutoRenewal, MsgSetLevel
 
 # Bridge messages
 MsgBridgeBurn

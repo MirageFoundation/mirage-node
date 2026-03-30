@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import threading
 import time
@@ -8,7 +9,14 @@ import time
 from db import connect_backend_db, connect_db
 from logging_utils import logger
 from settings import require_bool_env
-from shared.push import send_push_for_award, send_push_for_mentions, send_push_for_reply, _extract_mentions
+from shared.inbox import donation_event_key, record_inbox_event
+from shared.push import (
+    send_push_for_award,
+    send_push_for_donation,
+    send_push_for_mentions,
+    send_push_for_reply,
+    _extract_mentions,
+)
 from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
 
 
@@ -64,6 +72,7 @@ def _poll_once() -> int:
     total = 0
     total += _poll_posts()
     total += _poll_awards()
+    total += _poll_send_tokens()
     _maybe_cleanup_seen()
     logger().debug("push.listener.poll total=%d", total)
     return total
@@ -107,7 +116,7 @@ def _bootstrap_cursor(event_type: str) -> tuple[int, str]:
             )
             row = cur.fetchone()
         if row:
-            return int(row[0] or 0), str(row[1] or "")
+            return int(row[0]), str(row[1])
         return 0, ""
     if event_type == "awards":
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
@@ -117,6 +126,21 @@ def _bootstrap_cursor(event_type: str) -> tuple[int, str]:
                 SELECT created_at, id
                 FROM awards
                 ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+        if row:
+            return int(row[0] or 0), str(row[1] or "")
+        return 0, ""
+    if event_type == "send_tokens":
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT created_at, txhash
+                FROM tx_index
+                ORDER BY created_at DESC, txhash DESC
                 LIMIT 1
                 """
             )
@@ -244,6 +268,204 @@ def _poll_awards() -> int:
 
     _update_cursor("awards", last_ts, str(last_award_id))
     logger().debug("push.listener.awards processed=%d last_ts=%d", processed, last_ts)
+    return processed
+
+
+def _get_username_for_owner(owner: str, cache: dict[str, str]) -> str:
+    if owner is None:
+        return ""
+    owner_lc = str(owner).strip().lower()
+    if not owner_lc:
+        return ""
+    if owner_lc in cache:
+        return cache[owner_lc]
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT username FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (owner_lc,))
+        row = cur.fetchone()
+    if not row or not row[0]:
+        cache[owner_lc] = ""
+        return ""
+    username = str(row[0]).strip()
+    cache[owner_lc] = username
+    return username
+
+
+def _event_attrs(event: dict) -> dict[str, str]:
+    attrs = event.get("attributes")
+    if not isinstance(attrs, list):
+        return {}
+    out: dict[str, str] = {}
+    for attr in attrs:
+        if not isinstance(attr, dict):
+            continue
+        key = attr.get("key")
+        value = attr.get("value")
+        if key is None or value is None:
+            continue
+        out[str(key)] = str(value)
+    return out
+
+
+def _extract_action(events: list[dict]) -> str:
+    for event in events:
+        if event.get("type") == "message":
+            attrs = _event_attrs(event)
+            action = attrs.get("action")
+            if action:
+                return str(action)
+    return ""
+
+
+def _is_send_tokens_action(action: str) -> bool:
+    value = str(action).strip()
+    if not value:
+        return False
+    return value in {
+        "/mirage.core.v1.MsgSendTokens",
+        "mirage.core.v1.MsgSendTokens",
+        "send_tokens",
+        "SendTokens",
+    }
+
+
+def _parse_umirage_amount(amount_str: str, tx_hash: str) -> int:
+    if amount_str is None:
+        raise RuntimeError(f"send_tokens amount missing in log tx={tx_hash}")
+    raw = str(amount_str).strip()
+    if not raw:
+        raise RuntimeError(f"send_tokens amount missing in log tx={tx_hash}")
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    for part in parts:
+        if part.endswith("umirage"):
+            num = part[: -len("umirage")]
+            if not num.isdigit():
+                raise RuntimeError(f"send_tokens amount malformed in log tx={tx_hash}")
+            amount = int(num)
+            if amount <= 0:
+                raise RuntimeError(f"send_tokens amount invalid in log tx={tx_hash}")
+            return amount
+    raise RuntimeError(f"send_tokens amount missing umirage denom tx={tx_hash}")
+
+
+def _extract_send_tokens_transfers(raw_log: str, tx_hash: str) -> list[dict]:
+    if raw_log is None or raw_log == "":
+        raise RuntimeError(f"send_tokens raw_log missing tx={tx_hash}")
+    try:
+        parsed = json.loads(raw_log)
+    except Exception as exc:
+        raise RuntimeError(f"send_tokens raw_log invalid json tx={tx_hash}") from exc
+    if not isinstance(parsed, list):
+        raise RuntimeError(f"send_tokens raw_log unexpected format tx={tx_hash}")
+    transfers: list[dict] = []
+    for entry in parsed:
+        if not isinstance(entry, dict):
+            continue
+        events = entry.get("events")
+        if not isinstance(events, list):
+            continue
+        action = _extract_action(events)
+        if not _is_send_tokens_action(action):
+            continue
+        transfer_events = [ev for ev in events if isinstance(ev, dict) and ev.get("type") == "transfer"]
+        if not transfer_events:
+            raise RuntimeError(f"send_tokens transfer event missing tx={tx_hash}")
+        for ev in transfer_events:
+            attrs = _event_attrs(ev)
+            sender = attrs.get("sender")
+            recipient = attrs.get("recipient")
+            if not recipient:
+                recipient = attrs.get("receiver")
+            amount_str = attrs.get("amount")
+            if not sender or not recipient or not amount_str:
+                raise RuntimeError(f"send_tokens transfer missing fields tx={tx_hash}")
+            amount = _parse_umirage_amount(amount_str, tx_hash)
+            transfers.append(
+                {
+                    "sender": str(sender).strip().lower(),
+                    "recipient": str(recipient).strip().lower(),
+                    "amount": amount,
+                }
+            )
+    return transfers
+
+
+def _poll_send_tokens() -> int:
+    last_ts, last_id = _load_cursor("send_tokens")
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT txhash, tx_type, raw_log, created_at
+            FROM tx_index
+            WHERE code = 0
+              AND (created_at > %s OR (created_at = %s AND txhash > %s))
+              AND tx_type IN ('send_tokens', 'multi')
+            ORDER BY created_at ASC, txhash ASC
+            LIMIT %s
+            """,
+            (last_ts, last_ts, last_id, PUSH_LISTENER_BATCH_SIZE),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return 0
+
+    processed = 0
+    username_cache: dict[str, str] = {}
+    for txhash, tx_type, raw_log, created_at in rows:
+        if txhash is None:
+            raise RuntimeError("send_tokens tx_index row missing txhash")
+        txhash_lc = str(txhash).strip().lower()
+        if not txhash_lc:
+            raise RuntimeError("send_tokens tx_index row missing txhash")
+        created_ts = int(created_at)
+        transfers = _extract_send_tokens_transfers(raw_log, txhash_lc)
+        if not transfers:
+            if str(tx_type).strip().lower() == "send_tokens":
+                raise RuntimeError(f"send_tokens log missing transfer tx={txhash_lc}")
+            logger().debug("push.listener.send_tokens.skip tx=%s type=%s", txhash_lc[:16], tx_type)
+            processed += 1
+            last_ts = created_ts
+            last_id = txhash_lc
+            continue
+        for transfer in transfers:
+            sender = transfer["sender"]
+            recipient = transfer["recipient"]
+            amount = int(transfer["amount"])
+            if sender == recipient:
+                continue
+            event_key = donation_event_key(sender, recipient, txhash_lc)
+            inserted = record_inbox_event(
+                event_key=event_key,
+                recipient=recipient,
+                actor=sender,
+                event_type="donation",
+                created_at=created_ts,
+                amount=amount,
+                tx_hash=txhash_lc,
+            )
+            logger().debug(
+                "push.listener.send_tokens.event sender=%s recipient=%s amount=%s inserted=%s tx=%s",
+                sender[:16],
+                recipient[:16],
+                amount,
+                inserted,
+                txhash_lc[:16],
+            )
+            if inserted:
+                sender_username = _get_username_for_owner(sender, username_cache)
+                if mark_push_event_seen(event_key, "donation", created_ts):
+                    send_push_for_donation(sender, sender_username, recipient, amount)
+                from routes.public import _invalidate_inbox_cache
+
+                _invalidate_inbox_cache(recipient)
+        processed += 1
+        last_ts = created_ts
+        last_id = txhash_lc
+
+    _update_cursor("send_tokens", last_ts, last_id)
+    logger().debug("push.listener.send_tokens processed=%d last_ts=%d", processed, last_ts)
     return processed
 
 

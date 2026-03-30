@@ -145,7 +145,7 @@ func isRelayMessage(m sdk.Msg) bool {
 		*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
 		*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
 		*coretypes.MsgDelete, *coretypes.MsgDeleteUser, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-		*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+		*coretypes.MsgSubscribe, *coretypes.MsgSetAutoRenewal,
 		*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
 		*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
 		return true

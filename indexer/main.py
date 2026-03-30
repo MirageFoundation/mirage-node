@@ -46,6 +46,50 @@ from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
 logger = logging.getLogger(__name__)
 
 
+def _synthesize_raw_log(tx_result: dict, height: int, tx_hash: str) -> str:
+    """Build raw_log JSON from the events array when the log field is empty.
+
+    CometBFT sometimes returns an empty ``log`` for successful txs while
+    the structured events are still present in ``events``.  The push
+    listener expects ``[{"events": [...]}]`` format, so we wrap the flat
+    events list into that shape.
+    """
+    events = tx_result.get("events")
+    if not events:
+        raise RuntimeError(f"tx_index raw_log missing (empty log AND no events) height={height} txhash={tx_hash}")
+    # CometBFT events use base64-encoded attribute values; decode them so
+    # downstream JSON consumers (push_listener) see plain strings.
+    decoded_events: list[dict] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        attrs_raw = ev.get("attributes") or []
+        attrs: list[dict] = []
+        for attr in attrs_raw:
+            if not isinstance(attr, dict):
+                continue
+            k = attr.get("key", "")
+            v = attr.get("value", "")
+            try:
+                k = base64.b64decode(k).decode() if k else ""
+            except Exception:
+                pass
+            try:
+                v = base64.b64decode(v).decode() if v else ""
+            except Exception:
+                pass
+            attrs.append({"key": k, "value": v})
+        decoded_events.append({"type": ev.get("type", ""), "attributes": attrs})
+    synthesized = json.dumps([{"events": decoded_events}])
+    logger.debug(
+        "tx_index.raw_log synthesized from events height=%s txhash=%s events=%d",
+        height,
+        tx_hash,
+        len(decoded_events),
+    )
+    return synthesized
+
+
 def _resolve_validator_address() -> str:
     """Resolve the local validator's account address from the keyring."""
     try:
@@ -267,11 +311,28 @@ class Indexer:
                             tx_type = type_url_to_tx_type(core_types[0])
                         else:
                             tx_type = "multi"
+                        raw_entry = None
+                        if idx < len(txs_results):
+                            raw_entry = txs_results[idx].get("log")
+                        raw_log = "" if raw_entry is None else str(raw_entry)
+                        if tx_type in ("send_tokens", "multi"):
+                            if idx >= len(txs_results):
+                                logger.error(
+                                    "tx_index.raw_log_missing no_tx_result height=%s txhash=%s type=%s",
+                                    height,
+                                    tx_hash,
+                                    tx_type,
+                                )
+                                raise RuntimeError(
+                                    f"tx_index raw_log missing (no tx_result) height={height} txhash={tx_hash}"
+                                )
+                            if raw_log == "":
+                                raw_log = _synthesize_raw_log(txs_results[idx], height, tx_hash)
                         self.db.upsert_tx_index(
                             tx_hash,
                             tx_type,
                             0,
-                            "",
+                            raw_log,
                             height,
                             ts,
                         )
@@ -919,23 +980,27 @@ class Indexer:
             owner = str(p.get("owner", "")).strip().lower()
             if not owner:
                 continue
-            batch.append((
-                owner,
-                p.get("username") or None,
-                int(p.get("level", 0) or 0),
-                int(p.get("created_at", 0) or 0),
-                int(p.get("subscription_expiry", 0) or 0),
-                bool(p.get("auto_renew", False)),
-                str(p.get("biography", "") or ""),
-                str(p.get("avatar", "") or ""),
-                str(p.get("banner", "") or ""),
-                str(p.get("flair", "") or ""),
-                int(p.get("reserve_funds", 0) or 0),
-            ))
+            batch.append(
+                (
+                    owner,
+                    p.get("username") or None,
+                    int(p.get("level", 0) or 0),
+                    int(p.get("created_at", 0) or 0),
+                    int(p.get("subscription_expiry", 0) or 0),
+                    bool(p.get("auto_renew", False)),
+                    str(p.get("biography", "") or ""),
+                    str(p.get("avatar", "") or ""),
+                    str(p.get("banner", "") or ""),
+                    str(p.get("flair", "") or ""),
+                    int(p.get("reserve_funds", 0) or 0),
+                )
+            )
 
         self.db.upsert_profiles_batch(batch, now)
         t_upsert = time.time()
-        logger.info("KV Sync: Upserted %d profiles in %.1fs (total %.1fs)", len(batch), t_upsert - t_fetch, t_upsert - t0)
+        logger.info(
+            "KV Sync: Upserted %d profiles in %.1fs (total %.1fs)", len(batch), t_upsert - t_fetch, t_upsert - t0
+        )
 
 
 if __name__ == "__main__":

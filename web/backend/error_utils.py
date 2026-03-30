@@ -28,13 +28,11 @@ ERRORS = {
     "invite_code_invalid_format": "invalid code format",
     "invite_codes_not_required": "invite codes not required on this node",
     "invite_codes_main_site_only": "invite codes only work on mirage.talk",
-
     # Username
     "username_required": "username required",
     "username_too_short": "username too short",
     "username_too_long": "username too long",
     "username_invalid_format": "invalid username format",
-
     # Referrals
     "referral_requires_invite_codes": "referral links require invite codes",
     "referrer_not_found": "referrer not found",
@@ -45,7 +43,6 @@ ERRORS = {
     "referrer_username_invalid_format": "invalid referrer username format",
     "referrer_check_failed": "failed to validate referrer",
     "self_referral": "self-referral is not allowed",
-
     # Auth / envelope
     "missing_fields": "missing required fields",
     "invalid_pubkey": "invalid pubkey",
@@ -68,24 +65,20 @@ ERRORS = {
     "unauthorized": "unauthorized access",
     "enabled_must_be_boolean": "enabled must be boolean",
     "owner_required": "owner required",
-
     # Server state
     "node_catching_up": "node is catching up",
     "backend_not_initialized": "backend not initialized",
     "indexer_unavailable": "indexer DB unavailable",
     "internal_error": "internal server error",
     "debug_localhost_only": "debug endpoints only available on localhost",
-
     # PoW
     "insufficient_pow_precheck": "insufficient pow (precheck)",
     "pow_not_allowed_agents": "pow not allowed for agents",
     "pow_not_allowed_for_award": "pow not allowed for award",
     "pow_not_allowed_for_set_auto_renewal": "pow not allowed for set_auto_renewal",
-    "pow_not_allowed_for_subscribers": "pow not allowed for subscribers",
     "pow_required": "proof of work required",
     "invalid_pow_fields": "invalid pow fields",
     "invalid_last_block_hash": "invalid last_block_hash",
-
     # Content / posts
     "title_too_long": "title exceeds limit",
     "content_too_long": "content exceeds limit",
@@ -108,24 +101,23 @@ ERRORS = {
     "post_id_required": "post_id is required",
     "comment_id_required": "comment_id is required",
     "invalid_hash": "invalid or missing hash",
-
     # Media
     "media_not_list": "media must be a list",
     "media_limit_exceeded": "media exceeds limit",
     "media_item_too_long": "media item exceeds length limit",
     "media_must_use_https": "media must use https",
     "media_control_characters": "media contains invalid control characters",
-
     # Biography
     "biography_too_long": "biography too long",
-
     # Blocks / follows
+    "cannot_block_self": "cannot block yourself",
+    "cannot_follow_self": "cannot follow yourself",
     "post_already_blocked": "post is already blocked",
     "user_already_blocked": "user is already blocked",
     "topic_already_blocked": "topic is already blocked",
     "user_already_followed": "user is already followed",
     "topic_already_followed": "topic is already followed",
-
+    "user_must_be_mirage1": "user must be a valid mirage1 address",
     # Agents
     "invalid_agent_address": "invalid agent address",
     "duplicate_agent": "duplicate agent",
@@ -139,7 +131,6 @@ ERRORS = {
     "missing_profile_level": "missing profile level",
     "missing_max_agents": "missing max_enabled_agents",
     "invalid_user_level": "invalid user level",
-
     # Subscription
     "not_subscriber": "active subscription required",
     "invalid_level": "invalid level (must be 1 or 10; use set_auto_renewal to change auto-renewal)",
@@ -147,27 +138,25 @@ ERRORS = {
     "admin_insufficient_balance": "admin insufficient balance",
     "insufficient_funds": "insufficient funds",
     "auto_renew_required": "auto_renew required",
-
+    "gift_rejected_higher_tier": "gift rejected: recipient has a higher tier than requested",
+    "gift_invalid_target": "target must be a valid mirage1 address",
     # Awards
     "cannot_award_own_post": "cannot award your own post",
     "already_awarded": "already awarded this post",
     "award_eligibility_failed": "unable to verify award eligibility",
     "unknown_award_type": "unknown award type",
-
     # Push notifications
     "push_disabled": "push notifications not enabled on this node",
     "push_invalid_token": "invalid expo push token format",
     "push_token_length": "invalid expo push token length",
     "push_invalid_platform": "platform must be ios or android",
     "push_token_other_account": "push token already registered to another account",
-
     # Reports / moderation
     "reason_too_long": "reason too long (max 200 chars)",
     "admin_required": "admin required",
     "admin_and_target_required": "admin and target required",
     "admin_target_duration_reason_required": "admin, target, duration_days, and reason required",
     "suspended": "account suspended",
-
     # Search / query
     "query_required": "q parameter is required",
     "count_must_be_non_negative": "count must be >= 0",
@@ -177,7 +166,6 @@ ERRORS = {
     "invalid_month_format": "invalid month format, use YYYY-MM",
     "invalid_max_depth": "invalid max_depth",
     "unsupported_sort_mode": "unsupported sort mode",
-
     # Quests
     "quest_id_required": "quest_id required",
     "unknown_quest_id": "unknown quest_id",
@@ -189,7 +177,6 @@ ERRORS = {
     "stats_event_disabled": "stats events disabled",
     "retry": "please retry",
     "not_configured": "service not configured",
-
     # Bridge / upload
     "destination_chain_required": "destination_chain required",
     "destination_address_required": "destination_address required",
@@ -210,7 +197,6 @@ ERRORS = {
     "cloudflare_stream_no_url": "no stream upload URL received from cloudflare",
     "image_type_only": "only 'image' type is supported",
     "invalid_video_uid": "invalid video uid",
-
     # Chain rejects (from classify_reject)
     "transaction_rejected": "transaction rejected",
     "out_of_gas": "out of gas",

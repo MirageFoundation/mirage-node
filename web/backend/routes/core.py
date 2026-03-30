@@ -53,18 +53,20 @@ from shared.datatypes import (
     MsgVote,
     MsgEdit,
     MsgAnnotate,
-    MsgUpgradeLevel,
+    MsgSubscribe,
     MsgSetAutoRenewal,
     MsgAward,
 )
 
 from logging_utils import log_event, next_request_id, logger
-from error_utils import api_error_code
+from error_utils import api_error_code, get_message
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
 from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
+from shared.inbox import record_inbox_event, follow_event_key, donation_event_key, subscription_gift_event_key
+from shared.push import send_push_for_donation, send_push_for_follow, send_push_for_subscription_gift
 from pow import (
     argon2_digest,
     canon_base_post,
@@ -90,7 +92,7 @@ from pow import (
     canon_base_delete,
     canon_base_delete_user,
     canon_base_send_tokens,
-    canon_base_upgrade_level,
+    canon_base_subscribe,
     canon_base_set_auto_renewal,
     canon_base_award,
     check_pow_target,
@@ -142,6 +144,7 @@ def derive_address_from_pubkey(pub_dec: bytes) -> str:
 GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
+ENVELOPE_TIMESTAMP_SKEW_MS = 90 * 1000
 
 
 # ── Quest tracker (lazy singleton, backend-owned DB) ────────────────────────
@@ -386,6 +389,16 @@ def _guard_push_request(owner: str, action: str, timestamp_ms: int, nonce: int):
         return False, (jsonify({"error": "indexer DB unavailable"}), 503)
 
 
+def _validate_envelope_timestamp(timestamp_ms: int):
+    """Reject envelope timestamps outside the allowed window."""
+    if timestamp_ms < 10_000_000_000:
+        return False, api_error_code("timestamp_must_be_millis")
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - timestamp_ms) > ENVELOPE_TIMESTAMP_SKEW_MS:
+        return False, api_error_code("timestamp_outside_window")
+    return True, None
+
+
 def _hex_to_bytes(s: str) -> bytes:
     """Convert hex string to bytes for envelope_block_hash."""
     try:
@@ -426,6 +439,24 @@ def _effective_difficulty(declared: int) -> int:
     if eff < min_required:
         eff = min_required
     return eff
+
+
+def _log_subscriber_pow_ignored(
+    rid: str,
+    action: str,
+    difficulty: int,
+    proof: int,
+    has_difficulty: bool | None = None,
+    has_pow: bool | None = None,
+) -> None:
+    if int(difficulty) <= 0 and int(proof) <= 0 and not (has_difficulty or has_pow):
+        return
+    payload = {"difficulty": int(difficulty), "proof": int(proof)}
+    if has_difficulty is not None:
+        payload["has_difficulty"] = bool(has_difficulty)
+    if has_pow is not None:
+        payload["has_pow"] = bool(has_pow)
+    log_event(rid, f"{action}.pow_ignored", **payload)
 
 
 def _pow_factor() -> float:
@@ -491,6 +522,22 @@ def _classify_exception(err_str: str):
     low = err_str.lower()
     if "admin insufficient balance" in low:
         return "admin insufficient balance", 400
+    if "gift rejected" in low and "level" in low:
+        return get_message("gift_rejected_higher_tier"), 400
+    if "insufficient balance" in low or "insufficient funds" in low:
+        return "insufficient balance", 400
+    # Input parsing errors (int(), base64, type coercion)
+    if "invalid literal for int()" in low:
+        return "invalid input type", 400
+    if "int() argument must be" in low:
+        return "invalid input type", 400
+    if "base64" in low or "incorrect padding" in low:
+        return "invalid base64 encoding", 400
+    # Chain simulation / broadcast rejections (HTTP 400 from chain = client error)
+    if "simulate_gas http 400" in low:
+        return "transaction rejected", 400
+    if "simulate_gas http 4" in low:
+        return "transaction rejected", 400
     return "internal server error", 500
 
 
@@ -628,6 +675,14 @@ def core_set_username():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        ts_ok, ts_err = _validate_envelope_timestamp(timestamp)
+        if not ts_ok:
+            log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
+            return ts_err[0], ts_err[1]
+        ts_ok, ts_err = _validate_envelope_timestamp(timestamp)
+        if not ts_ok:
+            log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
+            return ts_err[0], ts_err[1]
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]
@@ -670,6 +725,10 @@ def core_set_username():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        target = str(data.get("target", "")).strip().lower()
+        if target and target != user_addr.lower():
+            return api_error_code("unauthorized", 403)
+
         validator_addr = require_runtime().validator_payer_addr
 
         # Username validation handled below; no title/content checks here
@@ -697,7 +756,7 @@ def core_set_username():
         if raw_referrer and not re.fullmatch(r"[A-Za-z0-9-]+", raw_referrer):
             return api_error_code("referrer_username_invalid_format")
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -719,8 +778,7 @@ def core_set_username():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "set_username", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
         try:
             base = canon_base_set_username(
@@ -1063,7 +1121,7 @@ def core_set_biography():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -1085,8 +1143,7 @@ def core_set_biography():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "set_biography", difficulty, proof, has_difficulty, has_pow)
 
         # Verify signature over canonical signed bytes
         try:
@@ -1226,8 +1283,7 @@ def core_enable_agent():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "enable_agent", difficulty, proof, has_difficulty, has_pow)
 
         msg = MsgEnableAgent()
         msg.authority = validator_addr
@@ -1329,8 +1385,7 @@ def core_disable_agent():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "disable_agent", difficulty, proof)
 
         msg = MsgDisableAgent()
         msg.authority = validator_addr
@@ -1474,8 +1529,7 @@ def core_set_agents():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "set_agents", difficulty, proof)
 
         msg = MsgSetAgents()
         msg.authority = validator_addr
@@ -1601,8 +1655,7 @@ def core_block_post():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "block_post", difficulty, proof)
 
         msg = MsgBlockPost()
         msg.authority = validator_addr
@@ -1701,6 +1754,10 @@ def core_block_user():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if user_addr.lower() == target.lower():
+            log_event(rid, "block_user.self_block", user_addr=user_addr)
+            return api_error_code("cannot_block_self")
+
         # Check if user is already blocked (indexer DB)
         try:
             if _db_list_contains("blocked_users", user_addr, "target", target):
@@ -1723,8 +1780,7 @@ def core_block_user():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "block_user", difficulty, proof)
 
         msg = MsgBlockUser()
         msg.authority = validator_addr
@@ -1817,8 +1873,7 @@ def core_unblock_post():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "unblock_post", difficulty, proof)
 
         msg = MsgUnblockPost()
         msg.authority = validator_addr
@@ -1911,8 +1966,7 @@ def core_unblock_user():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "unblock_user", difficulty, proof)
 
         msg = MsgUnblockUser()
         msg.authority = validator_addr
@@ -2036,8 +2090,7 @@ def core_block_topic():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "block_topic", difficulty, proof)
 
         msg = MsgBlockTopic()
         msg.authority = validator_addr
@@ -2131,8 +2184,7 @@ def core_unblock_topic():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "unblock_topic", difficulty, proof)
 
         msg = MsgUnblockTopic()
         msg.authority = validator_addr
@@ -2212,6 +2264,15 @@ def core_follow_user():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if not _is_valid_mirage_addr(target):
+            return api_error_code("target_must_be_mirage1")
+        if not _is_valid_mirage_addr(user):
+            return api_error_code("user_must_be_mirage1")
+
+        if user_addr.lower() == user.lower():
+            log_event(rid, "follow_user.self_follow", user_addr=user_addr)
+            return api_error_code("cannot_follow_self")
+
         # Check if user is already followed (indexer DB)
         try:
             if _db_list_contains("followed_users", user_addr, "target", user):
@@ -2268,6 +2329,31 @@ def core_follow_user():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/follow_user", "MsgFollowUser", code, tx_hash, raw_log, extra)
+        log_event(rid, "follow_user.success", tx_hash=tx_hash, target=user)
+        if user_addr.lower() != user.lower():
+            event_key = follow_event_key(user_addr, user, tx_hash)
+            inserted = record_inbox_event(
+                event_key=event_key,
+                recipient=user,
+                actor=user_addr,
+                event_type="follow",
+                created_at=int(time.time()),
+                tx_hash=tx_hash,
+            )
+            log_event(
+                rid,
+                "follow_user.notify",
+                recipient=user,
+                actor=user_addr,
+                tx_hash=tx_hash,
+                inserted=inserted,
+            )
+            if inserted:
+                follower_username = _get_username_for_owner(user_addr)
+                send_push_for_follow(user_addr, follower_username, user)
+            from routes.public import _invalidate_inbox_cache
+
+            _invalidate_inbox_cache(user)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_user.err", error=str(e))
@@ -3090,7 +3176,7 @@ def core_edit():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -3118,8 +3204,7 @@ def core_edit():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "edit", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
         topic_for_canon = topic if (topic and not is_comment) else ""
         try:
@@ -3428,16 +3513,26 @@ def core_post():
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
         has_difficulty = "pow_difficulty" in data
         has_pow = "pow" in data
+        try:
+            difficulty = int(data.get("pow_difficulty", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow_difficulty", "error_code": "invalid_input"}), 400
+        try:
+            proof = int(data.get("pow", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow", "error_code": "invalid_input"}), 400
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        ts_ok, ts_err = _validate_envelope_timestamp(timestamp)
+        if not ts_ok:
+            log_event(rid, "post.timestamp_invalid", timestamp=timestamp, now_ms=int(time.time() * 1000))
+            return ts_err[0], ts_err[1]
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             log_event(rid, "post.invalid_nonce", envelope_nonce=data.get("envelope_nonce"))
@@ -3508,8 +3603,14 @@ def core_post():
             if not re.fullmatch(r"[a-z0-9]+", topic):
                 return jsonify({"error": "invalid topic format"}), 400
 
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
+        try:
+            pub_dec = base64.b64decode(pub_b64)
+        except Exception:
+            return jsonify({"error": "invalid pubkey encoding", "error_code": "invalid_input"}), 400
+        try:
+            sig_dec = base64.b64decode(sig_b64)
+        except Exception:
+            return jsonify({"error": "invalid signature encoding", "error_code": "invalid_input"}), 400
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
@@ -3571,7 +3672,7 @@ def core_post():
                     400,
                 )
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -3605,8 +3706,7 @@ def core_post():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "post", difficulty, proof, has_difficulty, has_pow)
 
         # Verify signature over canonical signed bytes
         try:
@@ -3739,12 +3839,21 @@ def core_vote():
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
         has_difficulty = "pow_difficulty" in data
         has_pow = "pow" in data
+        try:
+            difficulty = int(data.get("pow_difficulty", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow_difficulty", "error_code": "invalid_input"}), 400
+        try:
+            proof = int(data.get("pow", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow", "error_code": "invalid_input"}), 400
         target = str(data.get("target", ""))
-        direction = int(data.get("direction", 0))
+        try:
+            direction = int(data.get("direction", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid direction", "error_code": "invalid_input"}), 400
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -3776,8 +3885,14 @@ def core_vote():
         if not _is_hex64(target.strip()):
             return jsonify({"error": "invalid target"}), 400
 
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
+        try:
+            pub_dec = base64.b64decode(pub_b64)
+        except Exception:
+            return jsonify({"error": "invalid pubkey encoding", "error_code": "invalid_input"}), 400
+        try:
+            sig_dec = base64.b64decode(sig_b64)
+        except Exception:
+            return jsonify({"error": "invalid signature encoding", "error_code": "invalid_input"}), 400
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
@@ -3789,7 +3904,7 @@ def core_vote():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         user_is_sub = is_subscriber(user_addr)
         log_event(
             rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty
@@ -3874,8 +3989,7 @@ def core_vote():
                 log_event(rid, "vote.sig_exception", error=str(sig_err))
                 return jsonify({"error": "invalid signature"}), 400
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "vote", difficulty, proof, has_difficulty, has_pow)
             # Subscribers: skip backend signature verification - chain verifies via ante handler
         msg = MsgVote()
         # authority is the validator/node address relaying this transaction, NOT the user's address
@@ -3960,12 +4074,21 @@ def core_send_tokens():
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
         has_difficulty = "pow_difficulty" in data
         has_pow = "pow" in data
+        try:
+            difficulty = int(data.get("pow_difficulty", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow_difficulty", "error_code": "invalid_input"}), 400
+        try:
+            proof = int(data.get("pow", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pow", "error_code": "invalid_input"}), 400
         target = str(data.get("target", "")).strip().lower()
-        amount = int(data.get("amount", 0))
+        try:
+            amount = int(data.get("amount", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid amount", "error_code": "invalid_input"}), 400
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -3987,8 +4110,14 @@ def core_send_tokens():
         if not target.startswith("mirage1"):
             return jsonify({"error": "target must be a valid mirage1 address"}), 400
 
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
+        try:
+            pub_dec = base64.b64decode(pub_b64)
+        except Exception:
+            return jsonify({"error": "invalid pubkey encoding", "error_code": "invalid_input"}), 400
+        try:
+            sig_dec = base64.b64decode(sig_b64)
+        except Exception:
+            return jsonify({"error": "invalid signature encoding", "error_code": "invalid_input"}), 400
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
@@ -4011,7 +4140,7 @@ def core_send_tokens():
         if int(amount) > have:
             return jsonify({"error": "insufficient balance", "balance": have, "needed": int(amount)}), 400
 
-        # Free users require PoW; subscribers must NOT use PoW
+        # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
@@ -4034,8 +4163,7 @@ def core_send_tokens():
             except Exception:
                 pass
         else:
-            if int(difficulty) > 0 or int(proof) > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+            _log_subscriber_pow_ignored(rid, "send_tokens", difficulty, proof, has_difficulty, has_pow)
 
         # Backend signature verification (first line of defense)
         try:
@@ -4095,6 +4223,32 @@ def core_send_tokens():
             return _tx_error(rid, "core/send_tokens", "MsgSendTokens", code, tx_hash, raw_log, extra)
 
         log_event(rid, "send_tokens.success", tx_hash=tx_hash)
+        if user_addr.lower() != target.lower():
+            event_key = donation_event_key(user_addr, target, tx_hash)
+            inserted = record_inbox_event(
+                event_key=event_key,
+                recipient=target,
+                actor=user_addr,
+                event_type="donation",
+                created_at=int(time.time()),
+                amount=int(amount),
+                tx_hash=tx_hash,
+            )
+            log_event(
+                rid,
+                "send_tokens.notify",
+                recipient=target,
+                actor=user_addr,
+                amount=int(amount),
+                tx_hash=tx_hash,
+                inserted=inserted,
+            )
+            if inserted:
+                sender_username = _get_username_for_owner(user_addr)
+                send_push_for_donation(user_addr, sender_username, target, int(amount))
+            from routes.public import _invalidate_inbox_cache
+
+            _invalidate_inbox_cache(target)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "send_tokens.err", error=str(e))
@@ -4102,9 +4256,9 @@ def core_send_tokens():
         return jsonify({"error": msg}), status
 
 
-@core_bp.route("/api/core/upgrade_level", methods=["POST"])
-def core_upgrade_level():
-    """Upgrade user subscription level (tier).
+@core_bp.route("/api/core/subscribe", methods=["POST"])
+def core_subscribe():
+    """Subscribe to a paid tier (self or gift).
 
     Required fields:
     - pubkey: Base64 encoded compressed public key
@@ -4112,22 +4266,24 @@ def core_upgrade_level():
     - last_block_hash: Recent block hash for replay protection
     - level: Target paid subscription level (1=Subscriber, 10=Agent)
 
+    Optional fields:
+    - target: Recipient address for gifting (omit or empty for self-subscribe)
+
     Note:
-    - PoW is NOT allowed for MsgUpgradeLevel. Users must pay with tokens.
+    - PoW is NOT allowed for MsgSubscribe. Users must pay with tokens.
     - To change auto-renewal without changing tier, use /api/core/set_auto_renewal instead.
     """
     rid = next_request_id()
-    log_event(rid, "upgrade_level.begin")
+    log_event(rid, "subscribe.begin")
     try:
         if is_node_catching_up():
             return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
-        log_event(rid, "upgrade_level.data", data=data)
+        log_event(rid, "subscribe.data", data=data)
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        # PoW is not used for upgrade_level; difficulty/pow must be zero.
-        # Client MUST provide timestamp for replay protection; no backend fallback.
+        target = str(data.get("target", "")).strip().lower()
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -4138,9 +4294,7 @@ def core_upgrade_level():
         if err is not None:
             return err[0], err[1]
         level = int(data.get("level", 0))
-        # no client-provided fees
 
-        # Minimal fields; last_block_hash is optional (no PoW for upgrade)
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
 
@@ -4161,16 +4315,27 @@ def core_upgrade_level():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if target and not _is_valid_mirage_addr(target):
+            return api_error_code("gift_invalid_target")
+
+        is_gift = bool(target and target != user_addr)
+        if is_gift:
+            log_event(rid, "subscribe.gift", payer=user_addr, recipient=target)
+            try:
+                recipient_level = _db_get_profile_level(target) or 0
+            except Exception as db_err:
+                log_event(rid, "subscribe.db_error", error=str(db_err))
+                return api_error_code("indexer_unavailable", 503)
+            if recipient_level > level:
+                return api_error_code("gift_rejected_higher_tier")
+
         validator_addr = require_runtime().validator_payer_addr
 
-        # PoW is NOT allowed for upgrade_level - must pay with tokens. No upfront fee field required.
-
-        # Backend precheck: ensure user has enough balance for the target tier's period fee
+        # Backend precheck: ensure payer has enough balance
         p = expect_params()
         period_fee = 0
         try:
             tiers = p.get("tiers") or []
-            # Map user level to tier array index: 0->0, 1->1, 10->2
             tier_idx = {0: 0, 1: 1, 10: 2}.get(level, -1)
             if isinstance(tiers, list) and 0 <= tier_idx < len(tiers):
                 tf = tiers[tier_idx] or {}
@@ -4182,19 +4347,19 @@ def core_upgrade_level():
                 bal = get_balance(user_addr)
                 have = int(bal)
             except Exception as db_err:
-                log_event(rid, "upgrade_level.db_error", error=str(db_err))
+                log_event(rid, "subscribe.db_error", error=str(db_err))
                 return api_error_code("indexer_unavailable", 503)
             if have < period_fee:
                 return api_error_code("insufficient_balance", balance=have, needed=int(period_fee))
 
-        # Verify relay signature matches shared canonical bytes (with timestamp)
         try:
-            base = canon_base_upgrade_level(
+            base = canon_base_subscribe(
                 pub_dec,
                 last_block_hash,
-                0,  # difficulty always 0 for upgrade_level
+                0,
                 timestamp,
                 level,
+                target=target if is_gift else "",
                 nonce=nonce,
             )
             signed = canon_signed_with_pow(base, 0)
@@ -4203,20 +4368,21 @@ def core_upgrade_level():
         except Exception:
             return jsonify({"error": "invalid signature"}), 400
 
-        msg = MsgUpgradeLevel()
+        msg = MsgSubscribe()
         msg.authority = validator_addr
         msg.envelope_pubkey = pub_dec
-        # Use client-provided last_block_hash (may be empty); no PoW for upgrade
         msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = 0  # No PoW for upgrade
-        msg.envelope_pow = 0  # No PoW for upgrade
+        msg.envelope_difficulty = 0
+        msg.envelope_pow = 0
         msg.envelope_timestamp = int(timestamp)
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.level = level
+        if is_gift:
+            msg.target = target
 
         any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgUpgradeLevel"
+        any_msg.type_url = "/mirage.core.v1.MsgSubscribe"
         any_msg.value = msg.SerializeToString()
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
@@ -4233,13 +4399,58 @@ def core_upgrade_level():
                 "user_addr": user_addr,
                 "level": int(level),
                 "last_block_hash": last_block_hash,
+                "target": target,
             }
-            return _tx_error(rid, "core/upgrade_level", "MsgUpgradeLevel", code, tx_hash, raw_log, extra)
+            return _tx_error(rid, "core/subscribe", "MsgSubscribe", code, tx_hash, raw_log, extra)
 
-        log_event(rid, "upgrade_level.success", tx_hash=tx_hash)
+        log_event(rid, "subscribe.success", tx_hash=tx_hash, is_gift=is_gift)
+        if is_gift and user_addr.lower() != target.lower():
+            try:
+                target_level = _db_get_profile_level(target) or 0
+                was_subscriber = target_level >= 1
+                gifter_username = _get_username_for_owner(user_addr)
+                event_key = subscription_gift_event_key(user_addr, target, tx_hash)
+                inserted = record_inbox_event(
+                    event_key=event_key,
+                    recipient=target,
+                    actor=user_addr,
+                    event_type="subscription_gift",
+                    created_at=int(time.time()),
+                    tx_hash=tx_hash,
+                )
+                log_event(
+                    rid,
+                    "subscribe.inbox",
+                    recipient=target,
+                    actor=user_addr,
+                    level=int(level),
+                    was_subscriber=was_subscriber,
+                    inserted=inserted,
+                )
+                if inserted:
+                    send_push_for_subscription_gift(
+                        user_addr,
+                        gifter_username,
+                        target,
+                        int(level),
+                        was_subscriber,
+                    )
+                    log_event(
+                        rid,
+                        "subscribe.notify",
+                        recipient=target,
+                        actor=user_addr,
+                        level=int(level),
+                        was_subscriber=was_subscriber,
+                    )
+                from routes.public import _invalidate_inbox_cache
+
+                _invalidate_inbox_cache(target)
+            except Exception as push_err:
+                log_event(rid, "subscribe.push_err", error=str(push_err))
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
-        log_event(rid, "upgrade_level.err", error=str(e))
+        log_event(rid, "subscribe.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 

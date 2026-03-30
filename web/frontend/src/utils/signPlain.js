@@ -26,7 +26,6 @@ export async function signPlainPayload(payloadFn) {
     const nonce = generateEnvelopeNonce();
 
     const payload = payloadFn(timestamp, nonce);
-    console.debug("[signPlainPayload] signing payload", { length: payload.length });
     const payloadBytes = new TextEncoder().encode(payload);
     const digest = sha256(payloadBytes);
     const sigCompact = await Secp256k1.createSignature(digest, privBytes);
