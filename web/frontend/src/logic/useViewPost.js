@@ -400,11 +400,11 @@ export function useViewPost({
                     next.delete(author);
                     return next;
                 });
-                updateNotification(`Unfollowed user ${author.slice(0, 12)}...`, 3);
+                updateNotification(`Unfollowed user ${author.slice(0, 12)}...`);
             } else {
                 await followAuthor(viewerAddress, author);
                 setFollowedAuthorsSet(prev => new Set([...prev, author]));
-                updateNotification(`Now following user ${author.slice(0, 12)}...`, 3);
+                updateNotification(`Now following user ${author.slice(0, 12)}...`);
             }
             invalidateFollowCache();
             setSubToggleTick(x => x + 1);
@@ -432,10 +432,10 @@ export function useViewPost({
         try {
             if (wasSubscribed) {
                 await unsubscribe(viewerAddress, topic);
-                updateNotification(`Unfollowed topic #${t}`, 3);
+                updateNotification(`Unfollowed topic #${t}`);
             } else {
                 await subscribe(viewerAddress, topic);
-                updateNotification(`Now following topic #${t}`, 3);
+                updateNotification(`Now following topic #${t}`);
             }
             invalidateTopicsCache();
             setSubToggleTick(x => x + 1);
