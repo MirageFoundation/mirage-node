@@ -512,154 +512,6 @@ export default function SettingsView({
                 <TabbedContainer>
                     <ContainerTab>Settings</ContainerTab>
                     <ContainerBody>
-                        {/* ── Security rows (top of settings) ──────────── */}
-                        {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
-                            Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
-                        </SecurityBanner>}
-
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Seed phrase storage:</Label>
-                            <ValueBox>
-                                <RadioGroup>
-                                    <RadioLabel>
-                                        <RadioInput name="seed_mode" value="insecure" checked={seedMode === 'insecure' && secPending !== 'password'} onChange={() => handleModeSelect('insecure')} disabled={secBusy} />
-                                        <span>
-                                            Unencrypted (default)
-                                            <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-                                    {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
-
-                                    <RadioLabel>
-                                        <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
-                                        <span>
-                                            Password encrypted
-                                            <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-
-                                    {secPending === 'password' && <div style={{
-                                        paddingLeft: '1.3rem'
-                                    }}>
-                                        <InlinePasswordRow>
-                                            <PasswordInput type="password" placeholder="Password" value={secPassword} onChange={e => {
-                                                setSecPassword(e.target.value);
-                                                setSecError('');
-                                            }} disabled={secBusy} autoFocus />
-                                        </InlinePasswordRow>
-                                        <InlinePasswordRow>
-                                            <PasswordInput type="password" placeholder="Confirm password" value={secPasswordConfirm} onChange={e => {
-                                                setSecPasswordConfirm(e.target.value);
-                                                setSecError('');
-                                            }} disabled={secBusy} onKeyDown={e => {
-                                                if (e.key === 'Enter') {
-                                                    e.preventDefault();
-                                                    if (secPassword !== secPasswordConfirm) {
-                                                        setSecError('Passwords do not match.');
-                                                    } else {
-                                                        commitModeSwitch('password', secPassword);
-                                                    }
-                                                }
-                                            }} />
-                                            <SmallButton disabled={secBusy || !secPassword.trim()} onClick={() => {
-                                                if (secPassword !== secPasswordConfirm) {
-                                                    setSecError('Passwords do not match.');
-                                                } else {
-                                                    commitModeSwitch('password', secPassword);
-                                                }
-                                            }}>
-                                                {secBusy ? 'Encrypting...' : 'Set Password'}
-                                            </SmallButton>
-                                        </InlinePasswordRow>
-                                        {secError && <SecurityError>{secError}</SecurityError>}
-                                    </div>}
-                                    {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
-
-                                    <RadioLabel>
-                                        <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
-                                        <span>
-                                            Memory only
-                                            <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-                                    {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
-
-                                    <RadioLabel $disabled={!prfSupported}>
-                                        <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
-                                        <span>
-                                            Passkey (Touch ID / Face ID / Security Key)
-                                            <RadioDescription>
-                                                {prfSupported ? 'Seed encrypted with your passkey. Authenticate to unlock each session.' : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
-                                            </RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-                                    {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
-                                </RadioGroup>
-
-                                {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
-                            </ValueBox>
-                        </Row>
-
-                        {state.publicKey && <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Recovery phrase:</Label>
-                            <ValueBox>
-                                {!seedRevealed ? <>
-                                    <SmallButton onClick={() => {
-                                        const s = seedVault.getSeed();
-                                        if (!s) {
-                                            setSecError('No seed phrase available. Please sign in first.');
-                                            return;
-                                        }
-                                        setSeedRevealed(true);
-                                        setSeedCopied(false);
-                                    }}>
-                                        Reveal Recovery Phrase
-                                    </SmallButton>
-                                    <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
-                                </> : <>
-                                    <SeedWarning>
-                                        Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.
-                                    </SeedWarning>
-                                    <SeedGrid>
-                                        {(seedVault.getSeed() || '').split(' ').map((word, i) => <SeedWord key={i} data-index={i + 1}>
-                                            {word}
-                                        </SeedWord>)}
-                                    </SeedGrid>
-                                    <div style={{
-                                        display: 'flex',
-                                        gap: '0.5rem',
-                                        marginTop: '0.35rem'
-                                    }}>
-                                        <SmallButton onClick={async () => {
-                                            try {
-                                                await navigator.clipboard.writeText(seedVault.getSeed() || '');
-                                                setSeedCopied(true);
-                                                setTimeout(() => setSeedCopied(false), 2000);
-                                            } catch (_) { }
-                                        }}>
-                                            {seedCopied ? 'Copied!' : 'Copy'}
-                                        </SmallButton>
-                                        <SmallButton onClick={() => {
-                                            setSeedRevealed(false);
-                                            setSeedCopied(false);
-                                        }} style={{
-                                            background: 'transparent',
-                                            border: '1px solid #555',
-                                            color: '#ccc'
-                                        }}>
-                                            Hide
-                                        </SmallButton>
-                                    </div>
-                                </>}
-                            </ValueBox>
-                        </Row>}
-
-                        <Divider />
-
                         <Row>
                             <Label>Theme:</Label>
                             <ValueBox>
@@ -901,6 +753,153 @@ export default function SettingsView({
                                 </CheckboxLabel>
                             </ValueBox>
                         </Row>
+
+                        <Divider />
+
+                        {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
+                            Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
+                        </SecurityBanner>}
+
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Seed phrase storage:</Label>
+                            <ValueBox>
+                                <RadioGroup>
+                                    <RadioLabel>
+                                        <RadioInput name="seed_mode" value="insecure" checked={seedMode === 'insecure' && secPending !== 'password'} onChange={() => handleModeSelect('insecure')} disabled={secBusy} />
+                                        <span>
+                                            Unencrypted (default)
+                                            <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+                                    {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+
+                                    <RadioLabel>
+                                        <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
+                                        <span>
+                                            Password encrypted
+                                            <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+
+                                    {secPending === 'password' && <div style={{
+                                        paddingLeft: '1.3rem'
+                                    }}>
+                                        <InlinePasswordRow>
+                                            <PasswordInput type="password" placeholder="Password" value={secPassword} onChange={e => {
+                                                setSecPassword(e.target.value);
+                                                setSecError('');
+                                            }} disabled={secBusy} autoFocus />
+                                        </InlinePasswordRow>
+                                        <InlinePasswordRow>
+                                            <PasswordInput type="password" placeholder="Confirm password" value={secPasswordConfirm} onChange={e => {
+                                                setSecPasswordConfirm(e.target.value);
+                                                setSecError('');
+                                            }} disabled={secBusy} onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    if (secPassword !== secPasswordConfirm) {
+                                                        setSecError('Passwords do not match.');
+                                                    } else {
+                                                        commitModeSwitch('password', secPassword);
+                                                    }
+                                                }
+                                            }} />
+                                            <SmallButton disabled={secBusy || !secPassword.trim()} onClick={() => {
+                                                if (secPassword !== secPasswordConfirm) {
+                                                    setSecError('Passwords do not match.');
+                                                } else {
+                                                    commitModeSwitch('password', secPassword);
+                                                }
+                                            }}>
+                                                {secBusy ? 'Encrypting...' : 'Set Password'}
+                                            </SmallButton>
+                                        </InlinePasswordRow>
+                                        {secError && <SecurityError>{secError}</SecurityError>}
+                                    </div>}
+                                    {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+
+                                    <RadioLabel>
+                                        <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
+                                        <span>
+                                            Memory only
+                                            <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+                                    {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+
+                                    <RadioLabel $disabled={!prfSupported}>
+                                        <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
+                                        <span>
+                                            Passkey (Touch ID / Face ID / Security Key)
+                                            <RadioDescription>
+                                                {prfSupported ? 'Seed encrypted with your passkey. Authenticate to unlock each session.' : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
+                                            </RadioDescription>
+                                        </span>
+                                    </RadioLabel>
+                                    {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                </RadioGroup>
+
+                                {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
+                            </ValueBox>
+                        </Row>
+
+                        {state.publicKey && <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Recovery phrase:</Label>
+                            <ValueBox>
+                                {!seedRevealed ? <>
+                                    <SmallButton onClick={() => {
+                                        const s = seedVault.getSeed();
+                                        if (!s) {
+                                            setSecError('No seed phrase available. Please sign in first.');
+                                            return;
+                                        }
+                                        setSeedRevealed(true);
+                                        setSeedCopied(false);
+                                    }}>
+                                        Reveal Recovery Phrase
+                                    </SmallButton>
+                                    <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
+                                </> : <>
+                                    <SeedWarning>
+                                        Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.
+                                    </SeedWarning>
+                                    <SeedGrid>
+                                        {(seedVault.getSeed() || '').split(' ').map((word, i) => <SeedWord key={i} data-index={i + 1}>
+                                            {word}
+                                        </SeedWord>)}
+                                    </SeedGrid>
+                                    <div style={{
+                                        display: 'flex',
+                                        gap: '0.5rem',
+                                        marginTop: '0.35rem'
+                                    }}>
+                                        <SmallButton onClick={async () => {
+                                            try {
+                                                await navigator.clipboard.writeText(seedVault.getSeed() || '');
+                                                setSeedCopied(true);
+                                                setTimeout(() => setSeedCopied(false), 2000);
+                                            } catch (_) { }
+                                        }}>
+                                            {seedCopied ? 'Copied!' : 'Copy'}
+                                        </SmallButton>
+                                        <SmallButton onClick={() => {
+                                            setSeedRevealed(false);
+                                            setSeedCopied(false);
+                                        }} style={{
+                                            background: 'transparent',
+                                            border: '1px solid #555',
+                                            color: '#ccc'
+                                        }}>
+                                            Hide
+                                        </SmallButton>
+                                    </div>
+                                </>}
+                            </ValueBox>
+                        </Row>}
 
                         <Divider />
 
