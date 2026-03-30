@@ -86,7 +86,7 @@ function Toast() {
     const [toast, setToast] = useState(null);
     const timeoutRef = useRef(null);
 
-    const showToast = useCallback((message, timeout = 1.5, alert = false) => {
+    const showToast = useCallback((message, timeout = 0.5, alert = false) => {
         // Clear any pending timeout
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);

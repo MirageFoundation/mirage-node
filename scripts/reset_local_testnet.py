@@ -1073,16 +1073,17 @@ def prepare_local_node(genesis_json: str):
     shutil.rmtree(tmp, ignore_errors=True)
 
     # Copy identity files only (config is rendered fresh by entrypoint/init.sh from templates)
-    status("Copying identity files from backup ...")
+    # priv_validator_key.json: required (genesis references this validator's consensus key)
+    # node_key.json: NOT copied — CometBFT auto-generates a fresh one on startup,
+    #   giving the local testnet a unique P2P identity that can't collide with production
+    status("Copying identity files from backup (node_key.json will be auto-generated) ...")
     run(
         [
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
             "mkdir -p /root/.mirage/node/config; "
-            "for f in priv_validator_key.json node_key.json; do "
-            "  cp -f /root/.mirage/node.clone/config/$f /root/.mirage/node/config/ 2>/dev/null || true; "
-            "done; "
+            "cp -f /root/.mirage/node.clone/config/priv_validator_key.json /root/.mirage/node/config/; "
             "for d in /root/.mirage/node.clone/keyring-*; do "
             '  if [ -d "$d" ]; then cp -nR "$d" /root/.mirage/node/; fi; '
             "done'",
