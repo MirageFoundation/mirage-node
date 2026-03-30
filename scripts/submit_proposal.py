@@ -93,7 +93,7 @@ def get_submission_account() -> str:
 
 # RPC endpoints
 LOCAL_RPC_ENDPOINT = "http://127.0.0.1:26657"
-REMOTE_RPC_ENDPOINT = "http://159.203.114.27:26657"
+REMOTE_RPC_ENDPOINT = "http://mirage.talk:26657"
 
 # Create a minimal temp config dir for keyring operations (miraged needs config to start)
 # Keys are stored in OS credential store, not in this directory
