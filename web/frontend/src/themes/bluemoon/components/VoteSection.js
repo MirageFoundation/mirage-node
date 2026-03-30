@@ -50,12 +50,12 @@ const VoteButton = styled.button`
     appearance: none;
     background: ${({ $active, $up, theme }) =>
         $active
-            ? ($up ? 'rgba(22, 163, 74, 0.16)' : 'rgba(220, 38, 38, 0.16)')
+            ? ($up ? theme.colors.voteUpBg : theme.colors.voteDownBg)
             : theme.layout.voteButtonBgInactive};
     color: ${({ $active, $up, theme }) =>
         $active
             ? ($up ? theme.colors.voteUp : theme.colors.voteDown)
-            : theme.colors.subtleText};
+            : ($up ? theme.colors.voteUpMuted : theme.colors.voteDownMuted)};
     border: ${({ theme }) => theme.layout.voteButtonBorder};
     border-radius: ${({ theme }) => theme.layout.voteButtonRadius};
     width: ${({ $compact, theme }) => $compact ? theme.layout.voteButtonSizeCompact : theme.layout.voteButtonSize};
@@ -68,7 +68,7 @@ const VoteButton = styled.button`
     padding: 0;
 
     &:hover {
-        background: ${({ $up }) => $up ? 'rgba(22, 163, 74, 0.12)' : 'rgba(220, 38, 38, 0.12)'};
+        background: ${({ $up, theme }) => $up ? theme.colors.voteUpBg : theme.colors.voteDownBg};
         color: ${({ $up, theme }) => $up ? theme.colors.voteUp : theme.colors.voteDown};
         transform: ${({ theme }) => theme.layout.voteButtonHoverTransform};
     }
