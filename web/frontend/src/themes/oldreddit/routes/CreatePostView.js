@@ -4,11 +4,12 @@ import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody, CappedPageColumn } from "../Layout";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost";
+
 const Row = styled.div`
     display: grid;
     grid-template-columns: 5.5rem minmax(0, 1fr);
@@ -84,6 +85,7 @@ const StyledInputBox = styled.input`
     font-size: ${({
     theme
 }) => theme.layout.inputSize};
+    line-height: 1.25;
     padding: ${({
     theme
 }) => theme.layout.inputPadding};
@@ -132,6 +134,7 @@ const StyledSelect = styled.select`
     font-size: ${({
     theme
 }) => theme.layout.inputSize};
+    line-height: 1.25;
     padding: ${({
     theme
 }) => theme.layout.inputPadding};
@@ -186,15 +189,13 @@ const GlobalDropOverlay = styled.div`
     pointer-events: none;
     z-index: 5;
     color: #667eea;
-    font-size: 0.9rem;
+    font-size: ${({ theme }) => theme.layout.bodySize};
     font-weight: 600;
 `;
 const HelpText = styled.div`
-    font-size: 0.65rem;
+    font-size: ${({ theme }) => theme.layout.smallSize};
     font-style: italic;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-top: 0.35rem;
     margin-left: 0.2rem;
     margin-right: 0.2rem;
@@ -235,16 +236,17 @@ const CharCounter = styled.span`
 const TagToggle = styled.label`
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.9rem;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    gap: 0.4rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    line-height: 1.25;
+    font-weight: 400;
+    color: ${({ theme }) => theme.colors.text};
 
     input {
         accent-color: #667eea;
-        width: 1rem;
-        height: 1rem;
+        width: 0.85rem;
+        height: 0.85rem;
+        flex-shrink: 0;
     }
 `;
 function CreatePostView({
@@ -302,7 +304,7 @@ function CreatePostView({
         <Helmet>
             <title>{isEditMode ? 'Edit Post' : 'Create Post'} | Mirage</title>
         </Helmet>
-        <div>
+        <CappedPageColumn>
             <ModernPostFeed>
                 <MobileHeader />
                 <TabbedContainer>
@@ -593,7 +595,7 @@ function CreatePostView({
                     </ContainerBody>
                 </TabbedContainer>
             </ModernPostFeed>
-        </div>
+        </CappedPageColumn>
     </ContentGrid>;
 }
 export default CreatePostView;

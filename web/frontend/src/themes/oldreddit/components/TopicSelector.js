@@ -15,15 +15,22 @@ const SelectorButton = styled.button`
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: 0.5rem 0.75rem;
+    padding: ${({ theme }) => theme.layout.inputPadding};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
     background-color: ${({ theme }) => theme.colors.panelAlt};
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    font-weight: 400;
+    font-family: inherit;
+    line-height: 1.25;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
+    box-sizing: border-box;
+    appearance: none;
+    margin: 0;
+    vertical-align: middle;
 
     &:hover:not(:disabled) {
         border-color: ${({ theme }) => theme.colors.subtleText};
@@ -32,7 +39,7 @@ const SelectorButton = styled.button`
     &:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 
     &:disabled {
@@ -49,23 +56,29 @@ const ButtonContent = styled.div`
     overflow: hidden;
 `;
 
+/** Must match control font size — a larger # was stretching the row vs placeholder-only / title input. */
 const TopicIcon = styled.span`
-    font-size: 0.9rem;
+    font-size: inherit;
+    line-height: inherit;
     flex-shrink: 0;
 `;
 
 const TopicName = styled.span`
+    font-size: inherit;
+    line-height: inherit;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 `;
 
 const Placeholder = styled.span`
+    font-size: inherit;
+    line-height: inherit;
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const ChevronIcon = styled.span`
-    font-size: 0.6rem;
+    font-size: ${({ theme }) => theme.layout.tinySize};
     flex-shrink: 0;
     margin-left: 0.5rem;
 `;
@@ -77,14 +90,18 @@ const SearchInputWrapper = styled.div`
 
 const SearchInput = styled.input`
     width: 100%;
-    padding: 0.5rem 0.75rem;
+    padding: ${({ theme }) => theme.layout.inputPadding};
     border: 1px solid #667eea;
-    border-radius: 8px;
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
     background-color: ${({ theme }) => theme.colors.panelAlt};
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    font-weight: 400;
+    font-family: inherit;
+    line-height: 1.25;
     outline: none;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    box-sizing: border-box;
+    box-shadow: ${({ theme }) => theme.layout.focusRing};
 
     &::placeholder {
         color: ${({ theme }) => theme.colors.subtleText};
@@ -98,7 +115,7 @@ const Dropdown = styled.div`
     right: 0;
     background-color: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     z-index: 1000;
     max-height: 280px;
@@ -113,8 +130,8 @@ const ResultsContainer = styled.div`
 `;
 
 const SectionHeader = styled.div`
-    padding: 0.4rem 0.75rem;
-    font-size: 0.65rem;
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    font-size: ${({ theme }) => theme.layout.smallSize};
     font-weight: 600;
     color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
@@ -128,7 +145,7 @@ const TopicItem = styled.div`
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    padding: 0.5rem 0.75rem;
+    padding: ${({ theme }) => theme.layout.inputPadding};
     cursor: pointer;
     transition: background-color 0.15s ease;
     background-color: ${({ $highlighted, theme }) =>
@@ -140,17 +157,17 @@ const TopicItem = styled.div`
 `;
 
 const TopicItemIcon = styled.span`
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const TopicItemName = styled.span`
-    font-size: 0.85rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
     color: ${({ theme }) => theme.colors.text};
 `;
 
 const TopicItemMeta = styled.span`
-    font-size: 0.7rem;
+    font-size: ${({ theme }) => theme.layout.smallSize};
     color: ${({ theme }) => theme.colors.subtleText};
     margin-left: auto;
 `;
@@ -184,16 +201,16 @@ const CreateNewItem = styled(TopicItem)`
 `;
 
 const CreateNewLabel = styled.span`
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
     color: #667eea;
     font-weight: 500;
 `;
 
 const EmptyState = styled.div`
-    padding: 1rem 0.75rem;
+    padding: ${({ theme }) => theme.layout.inputPadding};
     text-align: center;
     color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.8rem;
+    font-size: ${({ theme }) => theme.layout.inputSize};
 `;
 
 const CACHE_TTL_MS = 60 * 1000; // short-term cache for topics

@@ -1,5 +1,7 @@
 # `src/themes` — full UI families (not skins)
 
+**Convention (this repo):** product UI feedback that does not name a theme targets **`oldreddit`** only. Change **`bluemoon`** only when asked or when the work must apply to every theme.
+
 A **theme** is a complete visual and structural implementation: layout, typography, navigation, route screens, styled-components, global CSS (`Style`), tokens, shell, feed, and vote UI. Switching `theme_id` swaps that entire tree. Shared **behavior** (API, txs, crypto, storage) stays in **`src/logic/`**, **`src/utils/`**, and **`src/views/`** facades.
 
 ---

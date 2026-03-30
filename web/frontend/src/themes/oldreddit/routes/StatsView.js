@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
 import { useStats, TIER_NAMES, TIER_COLORS, InfoIcon } from "../../../logic/useStats";
 const Row = styled.div`
@@ -57,6 +57,9 @@ const ValueBox = styled.div`
     box-sizing: border-box;
     overflow-x: auto;
     text-align: left;
+`;
+const StatsTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
 `;
 const SectionTitle = styled.div`
     color: ${({
@@ -368,24 +371,28 @@ export default function StatsView() {
                 <div>
                     <ModernPostFeed>
                         <MobileHeader />
-                        <TabbedContainer>
-                            <TabsRow>
-                                <ClickableTab $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
-                                    Overview
-                                </ClickableTab>
-                                <ClickableTab $active={activeTab === 'signups'} onClick={() => setActiveTab('signups')}>
-                                    Signups
-                                </ClickableTab>
-                                <ClickableTab $active={activeTab === 'subscribers'} onClick={() => setActiveTab('subscribers')}>
-                                    Subscribers
-                                </ClickableTab>
-                                <ClickableTab $active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')}>
-                                    Accounts
-                                </ClickableTab>
-                                <ClickableTab $active={activeTab === 'rewards'} onClick={() => setActiveTab('rewards')}>
-                                    Rewards
-                                </ClickableTab>
-                            </TabsRow>
+                        <OldRedditContentBleed>
+                            <OldRedditTabsStrip>
+                                <OldRedditTabsRow role="tablist" aria-label="Stats sections">
+                                    <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'overview'} $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
+                                        Overview
+                                    </OldRedditTab>
+                                    <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'signups'} $active={activeTab === 'signups'} onClick={() => setActiveTab('signups')}>
+                                        Signups
+                                    </OldRedditTab>
+                                    <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'subscribers'} $active={activeTab === 'subscribers'} onClick={() => setActiveTab('subscribers')}>
+                                        Subscribers
+                                    </OldRedditTab>
+                                    <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'accounts'} $active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')}>
+                                        Accounts
+                                    </OldRedditTab>
+                                    <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'rewards'} $active={activeTab === 'rewards'} onClick={() => setActiveTab('rewards')}>
+                                        Rewards
+                                    </OldRedditTab>
+                                </OldRedditTabsRow>
+                            </OldRedditTabsStrip>
+                        </OldRedditContentBleed>
+                        <StatsTabbedContainer>
                             <ContainerBody>
                                 {loading && !error && <ValueBox style={{
                 textAlign: 'center',
@@ -397,7 +404,7 @@ export default function StatsView() {
                                     </ValueBox>}
                                 {!loading && error && <ErrorMessage>{error}</ErrorMessage>}
                             </ContainerBody>
-                        </TabbedContainer>
+                        </StatsTabbedContainer>
                     </ModernPostFeed>
                 </div>
             </ContentGrid>;
@@ -485,24 +492,28 @@ export default function StatsView() {
             <div>
                 <ModernPostFeed>
                     <MobileHeader />
-                    <TabbedContainer>
-                        <TabsRow>
-                            <ClickableTab $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
-                                Overview
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'signups'} onClick={() => setActiveTab('signups')}>
-                                Signups
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'subscribers'} onClick={() => setActiveTab('subscribers')}>
-                                Subscribers
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')}>
-                                Accounts
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'rewards'} onClick={() => setActiveTab('rewards')}>
-                                Rewards
-                            </ClickableTab>
-                        </TabsRow>
+                    <OldRedditContentBleed>
+                        <OldRedditTabsStrip>
+                            <OldRedditTabsRow role="tablist" aria-label="Stats sections">
+                                <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'overview'} $active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
+                                    Overview
+                                </OldRedditTab>
+                                <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'signups'} $active={activeTab === 'signups'} onClick={() => setActiveTab('signups')}>
+                                    Signups
+                                </OldRedditTab>
+                                <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'subscribers'} $active={activeTab === 'subscribers'} onClick={() => setActiveTab('subscribers')}>
+                                    Subscribers
+                                </OldRedditTab>
+                                <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'accounts'} $active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')}>
+                                    Accounts
+                                </OldRedditTab>
+                                <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'rewards'} $active={activeTab === 'rewards'} onClick={() => setActiveTab('rewards')}>
+                                    Rewards
+                                </OldRedditTab>
+                            </OldRedditTabsRow>
+                        </OldRedditTabsStrip>
+                    </OldRedditContentBleed>
+                    <StatsTabbedContainer>
                         <ContainerBody>
                             {/* Overview Tab */}
                             {activeTab === 'overview' && mergedStats && <>
@@ -1256,7 +1267,7 @@ export default function StatsView() {
                                         </ValueBox> : <SectionNote>No rewards recorded yet.</SectionNote>}
                                 </>}
                         </ContainerBody>
-                    </TabbedContainer>
+                    </StatsTabbedContainer>
                 </ModernPostFeed>
             </div>
         </ContentGrid>;

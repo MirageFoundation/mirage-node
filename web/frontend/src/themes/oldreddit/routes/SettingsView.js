@@ -5,7 +5,7 @@ import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
 import { THEMES } from "../../../registry/theme";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn, OldRedditContentBleed } from "../Layout";
 import { useSettings, CheckboxInput, RadioInput } from "../../../logic/useSettings";
 const Row = styled.div`
     display: grid;
@@ -420,15 +420,23 @@ const SeedWarning = styled.div`
     line-height: 1.35;
     margin-bottom: 0.5rem;
 `;
-const Divider = styled.hr`
-    border: none;
-    border-top: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    margin: ${({
-    theme
-}) => theme.layout.dividerMargin};
+const SettingsTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
 `;
+
+const SettingsShellBody = styled(ContainerBody)`
+    padding: 0.35rem 0 0.75rem;
+    border: none;
+    border-radius: 0;
+`;
+
+/** Cancels shell horizontal padding so the rule spans the full feed width (same as Discover topics). */
+const SettingsFullBleedRule = styled.div`
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    width: 100%;
+    box-sizing: border-box;
+`;
+
 export default function SettingsView({
     state
 }) {
@@ -501,12 +509,11 @@ export default function SettingsView({
         <Helmet>
             <title>Settings | Mirage</title>
         </Helmet>
-        <div>
-            <ModernPostFeed>
-                <MobileHeader />
-                <TabbedContainer>
-                    <ContainerTab>Settings</ContainerTab>
-                    <ContainerBody>
+        <ModernPostFeed>
+            <MobileHeader />
+            <CappedPageColumn>
+                <SettingsTabbedContainer>
+                    <SettingsShellBody>
                         {/* ── Security rows (top of settings) ──────────── */}
                         {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
                             Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
@@ -653,7 +660,9 @@ export default function SettingsView({
                             </ValueBox>
                         </Row>}
 
-                        <Divider />
+                        <OldRedditContentBleed>
+                            <SettingsFullBleedRule aria-hidden="true" />
+                        </OldRedditContentBleed>
 
                         <Row>
                             <Label>Theme:</Label>
@@ -897,7 +906,9 @@ export default function SettingsView({
                             </ValueBox>
                         </Row>
 
-                        <Divider />
+                        <OldRedditContentBleed>
+                            <SettingsFullBleedRule aria-hidden="true" />
+                        </OldRedditContentBleed>
 
                         <Row>
                             <Label style={{
@@ -927,9 +938,9 @@ export default function SettingsView({
                             </ValueBox>
                         </Row>
 
-                    </ContainerBody>
-                </TabbedContainer>
-            </ModernPostFeed>
-        </div>
+                    </SettingsShellBody>
+                </SettingsTabbedContainer>
+            </CappedPageColumn>
+        </ModernPostFeed>
     </ContentGrid>;
 }

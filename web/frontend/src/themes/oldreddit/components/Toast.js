@@ -34,22 +34,22 @@ const ToastContainer = styled.div`
 `;
 
 const ToastItem = styled.div`
-    background: ${({ alert }) => 
-        alert 
-            ? 'rgba(220, 38, 38, 0.95)' 
-            : 'linear-gradient(135deg, rgba(88, 86, 214, 0.95) 0%, rgba(130, 87, 229, 0.95) 100%)'};
-    color: #fff;
-    border: 1px solid ${({ alert }) => 
-        alert 
-            ? 'rgba(220, 38, 38, 0.6)' 
-            : 'rgba(130, 87, 229, 0.5)'};
-    border-radius: 8px;
-    padding: 0.5rem 0.9rem;
-    font-size: 0.8rem;
-    font-weight: 600;
-    box-shadow: 0 4px 16px rgba(88, 86, 214, 0.4);
+    background: ${({ theme, $alert }) =>
+        $alert ? theme.colors.panelAlt : theme.colors.panel};
+    color: ${({ theme, $alert }) => {
+        if (!$alert) return theme.colors.text;
+        return theme.name === 'light' ? '#b91c1c' : '#fecaca';
+    }};
+    border: 1px solid ${({ theme, $alert }) =>
+        $alert ? theme.colors.buttonDangerBorder : theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.inputRadius};
+    padding: 0.45rem 0.75rem;
+    font-size: ${({ theme }) => theme.layout.bodySize};
+    font-weight: 700;
+    font-family: ${({ theme }) => theme.layout.fontFamily};
+    box-shadow: none;
     pointer-events: auto;
-    animation: ${({ exiting }) => exiting ? slideOut : slideIn} 0.2s ease-out forwards;
+    animation: ${({ $exiting }) => ($exiting ? slideOut : slideIn)} 0.2s ease-out forwards;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -60,8 +60,8 @@ const Spinner = styled.div`
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #fff;
+    border: 2px solid ${({ theme }) => theme.colors.border};
+    border-top-color: ${({ theme }) => theme.colors.text};
     animation: toast-spin 0.8s linear infinite;
     flex-shrink: 0;
 
@@ -118,7 +118,7 @@ function Toast() {
 
     return (
         <ToastContainer>
-            <ToastItem alert={toast.alert} exiting={toast.exiting}>
+            <ToastItem $alert={toast.alert} $exiting={toast.exiting}>
                 {toast.showSpinner && <Spinner />}
                 {toast.message}
             </ToastItem>

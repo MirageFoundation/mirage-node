@@ -23,22 +23,43 @@ const MIN_WIDTH_PRESETS = {
     follow: '8.5rem',
 };
 
+/** In flat mode: `subtle` uses success tint (e.g. Following). Dismiss/neutral actions should use `ghost`, not `subtle`. */
 const flatModeOverride = css`
-    ${({ theme }) => theme.layout.flatMode && css`
-        background: ${theme.colors.panelAlt} !important;
-        color: ${theme.colors.text} !important;
-        border: 1px solid ${theme.colors.border} !important;
+    ${({ theme, $variant }) => theme.layout.flatMode && css`
         border-radius: ${theme.layout.buttonRadius} !important;
         box-shadow: none !important;
         transform: none !important;
         font-size: ${theme.layout.buttonSize} !important;
         padding: ${theme.layout.buttonPadding} !important;
 
-        &:hover:not(:disabled) {
-            background: ${theme.colors.accent} !important;
-            box-shadow: none !important;
-            transform: none !important;
-        }
+        ${$variant === 'subtle' ? css`
+            background: ${theme.colors.buttonSuccessBg} !important;
+            color: ${theme.colors.text} !important;
+            border: 1px solid ${theme.colors.buttonSuccessBorder} !important;
+            &:hover:not(:disabled) {
+                background: ${theme.colors.buttonSuccessHoverBg} !important;
+                box-shadow: none !important;
+                transform: none !important;
+            }
+        ` : $variant === 'primaryDanger' ? css`
+            background: ${theme.colors.buttonDangerBg} !important;
+            color: ${theme.colors.text} !important;
+            border: 1px solid ${theme.colors.buttonDangerBorder} !important;
+            &:hover:not(:disabled) {
+                background: ${theme.colors.buttonDangerHoverBg} !important;
+                box-shadow: none !important;
+                transform: none !important;
+            }
+        ` : css`
+            background: ${theme.colors.panelAlt} !important;
+            color: ${theme.colors.text} !important;
+            border: 1px solid ${theme.colors.border} !important;
+            &:hover:not(:disabled) {
+                background: ${theme.colors.accent} !important;
+                box-shadow: none !important;
+                transform: none !important;
+            }
+        `}
     `}
 `;
 

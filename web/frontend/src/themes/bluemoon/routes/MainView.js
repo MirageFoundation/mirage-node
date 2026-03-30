@@ -1635,10 +1635,15 @@ const MainView = ({
                             Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
                         </InviteOnlyHeroDescription>
                         <InviteOnlyHeroDescription>
+                            <a href="https://www.youtube.com/watch?v=TOvP32ihQ0M" target="_blank" rel="noopener noreferrer" style={{
+                                color: 'inherit',
+                                textDecoration: 'underline'
+                            }}><strong>Watch Introduction (YouTube)</strong></a>
+                            {' · '}
                             <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{
                                 color: 'inherit',
                                 textDecoration: 'underline'
-                            }}>Learn more about our mission</a>
+                            }}>Learn More</a>
                         </InviteOnlyHeroDescription>
                         {welcomeStats && welcomeStats.userCount > 0 && <WelcomeStatsGrid>
                             <WelcomeStatItem>

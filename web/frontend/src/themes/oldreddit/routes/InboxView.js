@@ -16,6 +16,12 @@ const HeaderRow = styled.div`
 }) => theme.layout.containerPadding};
 `;
 
+const InboxMutedText = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: ${({ theme }) => theme.layout.smallSize};
+    padding: ${({ theme }) => theme.layout.cardPadding};
+`;
+
 // Using <a> tag so right-click "Open in new window" works natively
 const ReplyItem = styled.a`
     display: block;
@@ -283,7 +289,7 @@ export default function InboxView({
         return <Navigate to="/home" replace />;
     }
     if (loading) {
-        return renderShell(<div>Loading…</div>, 'Inbox');
+        return renderShell(<InboxMutedText>Loading…</InboxMutedText>, 'Inbox');
     }
     if (error) {
         return renderShell(<div style={{
@@ -294,7 +300,7 @@ export default function InboxView({
         <HeaderRow>
             {replies.length > 0 && <Button variant={unreadCount > 0 ? "subtle" : "ghost"} size="sm" onClick={handleMarkAllAsRead}>Mark all as read</Button>}
         </HeaderRow>
-        {replies.length === 0 && <div>No notifications yet.</div>}
+        {replies.length === 0 && <InboxMutedText>No notifications yet.</InboxMutedText>}
         {replies.map(reply => {
             const isUnread = !viewedReplyIds.includes(reply.reply_id);
             const displayUsername = `@${reply.reply_username || shortenAddress(reply.reply_owner)}`;

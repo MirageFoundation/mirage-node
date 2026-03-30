@@ -2,7 +2,7 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { useReferrals, PERIODS } from "../../../logic/useReferrals";
 const ShareBox = styled.div`
     background: ${({
@@ -120,6 +120,9 @@ const Badge = styled.span`
   $real
 }) => $real ? '#66bb6a' : '#90a4ae'};
 `;
+const ReferralsTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
+`;
 const EmptyState = styled.div`
     text-align: center;
     padding: ${({
@@ -201,12 +204,16 @@ function ReferralsView({
             <div>
                 <ModernPostFeed>
                     <MobileHeader />
-                    <TabbedContainer>
-                        <TabsRow>
-                            {PERIODS.map(p => <ClickableTab key={p.key} $active={period === p.key} onClick={() => setPeriod(p.key)}>
-                                    {p.label}
-                                </ClickableTab>)}
-                        </TabsRow>
+                    <OldRedditContentBleed>
+                        <OldRedditTabsStrip>
+                            <OldRedditTabsRow role="tablist" aria-label="Referral periods">
+                                {PERIODS.map(p => <OldRedditTab key={p.key} type="button" role="tab" aria-selected={period === p.key} $active={period === p.key} onClick={() => setPeriod(p.key)}>
+                                        {p.label}
+                                    </OldRedditTab>)}
+                            </OldRedditTabsRow>
+                        </OldRedditTabsStrip>
+                    </OldRedditContentBleed>
+                    <ReferralsTabbedContainer>
                         <ContainerBody>
                             {username && shareUrl && <ShareBox>
                                     <ShareUrl value={shareUrl} readOnly onClick={e => e.target.select()} />
@@ -270,7 +277,7 @@ function ReferralsView({
                                         </div>}
                                 </>}
                         </ContainerBody>
-                    </TabbedContainer>
+                    </ReferralsTabbedContainer>
                 </ModernPostFeed>
             </div>
         </ContentGrid>;

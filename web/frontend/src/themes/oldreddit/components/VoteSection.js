@@ -15,6 +15,7 @@ const VoteButton = styled.button`
     background: transparent;
     border: none;
     padding: 0;
+    margin: 0;
     cursor: pointer;
     color: ${({ $active, $up, theme }) =>
         $active
@@ -23,16 +24,18 @@ const VoteButton = styled.button`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    line-height: 0;
+    width: 34px;
+    height: 28px;
 
     &:hover {
         color: ${({ $up, theme }) => $up ? theme.colors.voteUp : theme.colors.voteDown};
     }
 
     svg {
-        width: 27px;
-        height: 27px;
+        display: block;
+        width: 25px;
+        height: 25px;
         fill: currentColor;
     }
 `;
@@ -43,6 +46,8 @@ const VoteCount = styled.div`
     color: ${({ theme }) => theme.colors.text};
     line-height: 1;
     text-align: center;
+    margin: -0.12rem 0;
+    padding: 0;
 `;
 
 const InlineVoteArea = styled.div`

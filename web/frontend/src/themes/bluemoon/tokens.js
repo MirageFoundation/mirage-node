@@ -154,14 +154,13 @@ function buildLayout(colors) {
         // Content grid (sidebar + main area)
         contentGridCols: '200px minmax(0, 1fr)',
         contentGridGap: '0.5rem',
-        // Full horizontal width for this theme (per-theme; not global Storage/CSS vars)
-        contentMaxWidth: 'none',
+        contentMaxWidth: '1240px',
         contentMargin: '0 auto',
         contentPadding: '0 0.5rem',
         contentPaddingTablet: '0 0.25rem',
 
         // Feed container
-        feedMaxWidth: 'none',
+        feedMaxWidth: '1000px',
         feedMargin: '0 auto',
         feedPadding: '0 0.75rem',
         feedGap: 'var(--card-gap, 0.5rem)',
@@ -181,7 +180,7 @@ function buildLayout(colors) {
         containerBodyPaddingMobile: '1rem',
 
         // Search
-        searchMaxWidth: 'none',
+        searchMaxWidth: '1000px',
         searchMargin: '0.75rem auto',
         searchPadding: '0 0.75rem',
         searchMarginTablet: '0.5rem auto',

@@ -98,6 +98,12 @@ const oldredditLightColors = {
     inboxReplyUnreadBorder: '#D1D5DB',
     inboxReplyReadBorder: '#D1D5DB',
 
+    buttonDangerBg: 'rgba(220, 38, 38, 0.12)',
+    buttonDangerBorder: '#dc2626',
+    buttonDangerHoverBg: 'rgba(220, 38, 38, 0.2)',
+    buttonSuccessBg: 'rgba(22, 163, 74, 0.12)',
+    buttonSuccessBorder: '#16a34a',
+    buttonSuccessHoverBg: 'rgba(22, 163, 74, 0.2)',
 };
 
 function buildLayout(colors) {
@@ -113,7 +119,7 @@ function buildLayout(colors) {
         // Labels
         labelSize: '0.7rem',
         labelWeight: '700',
-        labelPaddingTop: '0',
+        labelPaddingTop: '0.22rem',
 
         // Value containers (settings rows, profile fields)
         containerBg: 'transparent',
@@ -242,13 +248,13 @@ function buildLayout(colors) {
         voteAreaHeightCompact: 'auto',
 
         // Vote buttons
-        voteButtonSize: '36px',
-        voteButtonSizeCompact: '36px',
+        voteButtonSize: '34px',
+        voteButtonSizeCompact: '34px',
         voteButtonBgInactive: 'transparent',
         voteButtonBorder: 'none',
         voteButtonRadius: '0',
         voteButtonHoverTransform: 'none',
-        voteIconSize: '27px',
+        voteIconSize: '25px',
 
         // Vote count display
         voteFontSize: '0.7rem',

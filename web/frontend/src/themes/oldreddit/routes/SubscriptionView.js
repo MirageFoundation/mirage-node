@@ -3,32 +3,36 @@ import styled from "styled-components";
 import { formatMirage, formatMirageCompact } from "../../../utils/formatters";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from "../../../logic/useSubscription";
+
+const SubscriptionTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
+`;
+
+const SubscriptionShellBody = styled(ContainerBody)`
+    padding: 0;
+    border: none;
+    border-radius: 0;
+`;
+
+const SubscriptionInner = styled.div`
+    padding: 0.5rem 0 0.75rem;
+    box-sizing: border-box;
+`;
+
 const CurrentTierBanner = styled.div`
-    background: ${({
-    theme
-}) => theme.layout.containerBg};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: ${({
-    theme
-}) => theme.layout.containerRadius};
-    padding: ${({
-    theme
-}) => theme.layout.containerPadding};
-    margin-bottom: ${({
-    theme
-}) => theme.layout.sectionMarginTop};
     display: grid;
     grid-template-columns: 1fr;
-    gap: 1.25rem;
-    box-shadow: ${({
-    theme
-}) => theme.caps.flatMode ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.2)'};
-    
+    gap: 1rem;
+    padding: 0.5rem 0 0.85rem;
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginTop};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+
     @media (min-width: 600px) {
         grid-template-columns: auto 1fr;
         align-items: stretch;
@@ -38,23 +42,15 @@ const TierSection = styled.div`
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding-right: ${({
-    theme
-}) => theme.layout.containerPadding};
-    border-right: 1px solid ${({
-    theme
-}) => theme.colors.border};
+    padding-right: 1rem;
+    border-right: 1px solid ${({ theme }) => theme.colors.border};
     min-width: 180px;
 
     @media (max-width: 600px) {
         border-right: none;
-        border-bottom: 1px solid ${({
-    theme
-}) => theme.colors.border};
+        border-bottom: 1px solid ${({ theme }) => theme.colors.border};
         padding-right: 0;
-        padding-bottom: ${({
-    theme
-}) => theme.layout.sectionMarginTop};
+        padding-bottom: 0.75rem;
         align-items: center;
         text-align: center;
     }
@@ -121,12 +117,8 @@ const StatusBadge = styled.div`
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: ${({
-    theme
-}) => theme.layout.buttonPadding};
-    border-radius: ${({
-    theme
-}) => theme.layout.buttonRadius};
+    padding: ${({ theme }) => theme.layout.buttonPadding};
+    border-radius: ${({ theme }) => theme.layout.buttonRadius};
     font-size: 0.75rem;
     font-weight: 600;
     width: fit-content;
@@ -137,17 +129,12 @@ const StatusBadge = styled.div`
     cursor: ${props => props.$clickable && !props.$disabled ? 'pointer' : 'default'};
     opacity: ${props => props.$disabled ? 0.5 : 1};
     pointer-events: ${props => props.$disabled ? 'none' : 'auto'};
-    transition: all 0.2s ease;
-    
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+
     &:hover {
         ${props => props.$clickable && !props.$disabled ? `
-            background: ${props.$active ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)'};
-            transform: translateY(-1px);
+            background: ${props.$active ? 'rgba(34, 197, 94, 0.22)' : 'rgba(239, 68, 68, 0.22)'};
         ` : ''}
-    }
-    
-    &:active {
-        ${props => props.$clickable && !props.$disabled ? 'transform: translateY(0);' : ''}
     }
 `;
 const StatusIndicator = styled.span`
@@ -173,7 +160,7 @@ const TimeHighlight = styled.span`
 `;
 const HorizontalDivider = styled.div`
     height: 1px;
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: ${({ theme }) => theme.colors.border};
     width: 100%;
 `;
 const SectionSeparator = styled.div`
@@ -190,25 +177,23 @@ const SectionSeparator = styled.div`
 const BalanceSection = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    background: ${({
-    theme
-}) => theme.layout.containerBg};
-    border-radius: ${({
-    theme
-}) => theme.layout.bannerRadius};
-    padding: ${({
-    theme
-}) => theme.layout.bannerPadding};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
+    gap: 0.35rem;
+    padding: 0.35rem 0 0.35rem 1rem;
+    border-left: 1px solid ${({ theme }) => theme.colors.border};
     min-width: 180px;
     margin-left: auto;
+    background: transparent;
+
+    @media (max-width: 599px) {
+        border-left: none;
+        border-top: 1px solid ${({ theme }) => theme.colors.border};
+        padding: 0.75rem 0 0;
+        margin-left: 0;
+    }
 `;
 const BalanceItem = styled.div`
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
     gap: 0.75rem;
 `;
@@ -241,15 +226,14 @@ const BalanceValueDisplay = styled.div`
 `;
 const BalanceLabel = styled.div`
     font-size: 0.6rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
     display: flex;
     align-items: center;
     gap: 0.25rem;
+    padding-top: ${({ theme }) => theme.layout.labelPaddingTop};
     ${tooltipStyles()}
 `;
 const TiersGrid = styled.div`
@@ -268,20 +252,15 @@ const TierCard = styled.div`
         }
         return $isActive ? theme.colors.panelAlt : theme.colors.panel;
     }};
-    border: 2px solid ${props => props.$isActive ? props.$color : props.theme.colors.border};
-    border-radius: ${({
-        theme
-    }) => theme.layout.cardRadius};
-    padding: ${({
-        theme
-    }) => theme.layout.cardPadding};
+    border: ${props => props.$isActive ? '2px' : '1px'} solid ${props => props.$isActive ? props.$color : props.theme.colors.border};
+    border-radius: ${({ theme }) => theme.layout.cardRadius};
+    padding: ${({ theme }) => theme.layout.cardPadding};
     display: flex;
     flex-direction: column;
-    transition: border-color 0.2s, transform 0.1s;
-    
+    transition: border-color 0.15s ease;
+
     &:hover {
         border-color: ${props => props.$color};
-        transform: translateY(-2px);
     }
 `;
 const TierHeader = styled.div`
@@ -345,31 +324,12 @@ const TierFeatures = styled.ul`
     }
 `;
 const TierDetailsPanel = styled.div`
-    margin-top: ${({
-    theme
-}) => theme.layout.sectionMarginTop};
-    padding: ${({
-    theme
-}) => theme.layout.containerPadding};
-    border-radius: ${({
-    theme
-}) => theme.layout.containerRadius};
-    background: ${({
-    theme
-}) => theme.layout.containerBg};
-    border: 2px solid ${props => props.$color || 'rgba(255, 255, 255, 0.1)'};
-    animation: slideDown 0.3s ease-out;
-
-    @keyframes slideDown {
-        from { 
-            opacity: 0; 
-            transform: translateY(-10px);
-        }
-        to { 
-            opacity: 1; 
-            transform: translateY(0);
-        }
-    }
+    margin-top: ${({ theme }) => theme.layout.sectionMarginTop};
+    padding: ${({ theme }) => theme.layout.containerPadding};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-left: 3px solid ${props => props.$color};
 `;
 const TierDetailsHeader = styled.div`
     display: flex;
@@ -387,11 +347,9 @@ const TierDetailsHeader = styled.div`
 `;
 const TierDetailsTitle = styled.h3`
     margin: 0;
-    font-size: ${({
-    theme
-}) => theme.layout.sectionSize};
+    font-size: ${({ theme }) => theme.layout.sectionSize};
     font-weight: 700;
-    color: ${props => props.$color || '#fff'};
+    color: ${props => props.$color};
 `;
 const TierDetailsContent = styled.div`
     display: grid;
@@ -454,6 +412,29 @@ const ErrorMessageBox = styled.div`
     theme
 }) => theme.layout.inputSize};
 `;
+
+function SubscriptionPageShell({
+    children
+}) {
+    return <ContentGrid>
+        <Helmet>
+            <title>Subscription | Mirage</title>
+        </Helmet>
+        <ModernPostFeed>
+            <MobileHeader />
+            <CappedPageColumn>
+                <SubscriptionTabbedContainer>
+                    <SubscriptionShellBody>
+                        <SubscriptionInner>
+                            {children}
+                        </SubscriptionInner>
+                    </SubscriptionShellBody>
+                </SubscriptionTabbedContainer>
+            </CappedPageColumn>
+        </ModernPostFeed>
+    </ContentGrid>;
+}
+
 export default function SubscriptionView({
     state
 }) {
@@ -488,48 +469,18 @@ export default function SubscriptionView({
         state
     });
     if (isLoading) {
-        return <ContentGrid>
-            <Helmet>
-                <title>Subscription | Mirage</title>
-            </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <MobileHeader />
-                    <TabbedContainer>
-                        <TabsRow>
-                            <ClickableTab $active={true}>Subscription</ClickableTab>
-                        </TabsRow>
-                        <ContainerBody>
-                            <Mono style={{
-                                color: '#888'
-                            }}>Loading subscription info...</Mono>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
-        </ContentGrid>;
+        return <SubscriptionPageShell>
+            <Mono style={{
+                color: theme.colors.subtleText
+            }}>Loading subscription info...</Mono>
+        </SubscriptionPageShell>;
     }
     if (tierConfig.length === 0) {
-        return <ContentGrid>
-            <Helmet>
-                <title>Subscription | Mirage</title>
-            </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <MobileHeader />
-                    <TabbedContainer>
-                        <TabsRow>
-                            <ClickableTab $active={true}>Subscription</ClickableTab>
-                        </TabsRow>
-                        <ContainerBody>
-                            <Mono style={{
-                                color: '#888'
-                            }}>Failed to load tier configuration from blockchain.</Mono>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
-        </ContentGrid>;
+        return <SubscriptionPageShell>
+            <Mono style={{
+                color: theme.colors.subtleText
+            }}>Failed to load tier configuration from blockchain.</Mono>
+        </SubscriptionPageShell>;
     }
     const currentColor = getTierColor(userLevel);
     const displayAutoRenew = isUpgrading ? autoRenewDisplayRef.current : autoRenew;
@@ -537,199 +488,182 @@ export default function SubscriptionView({
     const exactTime = formatExactTime(subscriptionExpiry);
     const userIsAdmin = isAdmin(userLevel);
     const periodLabel = formatPeriodLabel(subscriptionPeriodMinutes);
-    return <ContentGrid>
-        <Helmet>
-            <title>Subscription | Mirage</title>
-        </Helmet>
-        <div>
-            <ModernPostFeed>
-                <MobileHeader />
-                <TabbedContainer>
-                    <TabsRow>
-                        <ClickableTab $active={true}>
-                            Subscription
-                        </ClickableTab>
-                    </TabsRow>
-                    <ContainerBody>
-                        {!address ? <>
-                            <InfoText style={{
-                                marginTop: '0',
-                                marginBottom: '1rem'
-                            }}>
-                                Sign in to manage your subscription.
-                            </InfoText>
-                            <TiersGrid>
-                                {tierConfig.map((tier, idx) => {
-                                    const color = TIER_COLORS[tier.level] || TIER_COLORS[0];
-                                    return <TierCard key={tier.level} $isActive={false} $color={color}>
-                                        <TierHeader>
-                                            <TierName $color={color}>{tier.name}</TierName>
-                                        </TierHeader>
-                                        <TierPrice>
-                                            {tier.periodFeeUmirage === 0 ? 'Free' : <>{formatMirageCompact(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>}
-                                        </TierPrice>
-                                        <TierFeatures $color={color}>
-                                            {tier.features.map((feature, i) => <li key={i}>{feature}</li>)}
-                                        </TierFeatures>
-                                        <Button variant="link" size="xs" onClick={() => setExpandedTierLevel(expandedTierLevel === tier.level ? null : tier.level)} style={{
-                                            alignSelf: 'flex-start',
-                                            margin: '0.5rem 0'
-                                        }}>
-                                            {expandedTierLevel === tier.level ? 'Hide details' : 'See all details'}
-                                        </Button>
-                                    </TierCard>;
-                                })}
-                            </TiersGrid>
-                            {expandedTierLevel !== null && (() => {
-                                const selectedTier = tierConfig.find(t => t.level === expandedTierLevel);
-                                if (!selectedTier) return null;
-                                const tierIdx = selectedTier.level;
-                                const tierColor = TIER_COLORS[tierIdx] || TIER_COLORS[0];
-                                const details = buildTierDetails(selectedTier, periodLabel);
-                                return <TierDetailsPanel ref={detailsPanelRef} $color={tierColor}>
-                                    <TierDetailsHeader>
-                                        <TierDetailsTitle $color={tierColor}>
-                                            {selectedTier.name} Plan - Full Details
-                                        </TierDetailsTitle>
-                                        <Button variant="ghost" size="xs" onClick={() => setExpandedTierLevel(null)}>
-                                            Close
-                                        </Button>
-                                    </TierDetailsHeader>
-                                    <TierDetailsContent>
-                                        {details.map((detail, i) => <TierDetailItem key={i} $color={tierColor}>{detail}</TierDetailItem>)}
-                                    </TierDetailsContent>
-                                </TierDetailsPanel>;
-                            })()}
-                        </> : <>
-                            <CurrentTierBanner>
-                                <TierSection>
-                                    <CurrentPlanLabel>{isMobile ? 'Active Plan' : 'Active'}</CurrentPlanLabel>
-                                    <TierNameDisplay $color={currentColor}>
-                                        {getTierName(userLevel)}
-                                    </TierNameDisplay>
-                                </TierSection>
+    return <SubscriptionPageShell>
+        {!address ? <>
+            <InfoText style={{
+                marginTop: '0',
+                marginBottom: '1rem'
+            }}>
+                Sign in to manage your subscription.
+            </InfoText>
+            <TiersGrid>
+                {tierConfig.map((tier, idx) => {
+                    const color = TIER_COLORS[tier.level] || TIER_COLORS[0];
+                    return <TierCard key={tier.level} $isActive={false} $color={color}>
+                        <TierHeader>
+                            <TierName $color={color}>{tier.name}</TierName>
+                        </TierHeader>
+                        <TierPrice>
+                            {tier.periodFeeUmirage === 0 ? 'Free' : <>{formatMirageCompact(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>}
+                        </TierPrice>
+                        <TierFeatures $color={color}>
+                            {tier.features.map((feature, i) => <li key={i}>{feature}</li>)}
+                        </TierFeatures>
+                        <Button variant="link" size="xs" onClick={() => setExpandedTierLevel(expandedTierLevel === tier.level ? null : tier.level)} style={{
+                            alignSelf: 'flex-start',
+                            margin: '0.5rem 0'
+                        }}>
+                            {expandedTierLevel === tier.level ? 'Hide details' : 'See all details'}
+                        </Button>
+                    </TierCard>;
+                })}
+            </TiersGrid>
+            {expandedTierLevel !== null && (() => {
+                const selectedTier = tierConfig.find(t => t.level === expandedTierLevel);
+                if (!selectedTier) return null;
+                const tierIdx = selectedTier.level;
+                const tierColor = TIER_COLORS[tierIdx] || TIER_COLORS[0];
+                const details = buildTierDetails(selectedTier, periodLabel);
+                return <TierDetailsPanel ref={detailsPanelRef} $color={tierColor}>
+                    <TierDetailsHeader>
+                        <TierDetailsTitle $color={tierColor}>
+                            {selectedTier.name} Plan - Full Details
+                        </TierDetailsTitle>
+                        <Button variant="ghost" size="xs" onClick={() => setExpandedTierLevel(null)}>
+                            Close
+                        </Button>
+                    </TierDetailsHeader>
+                    <TierDetailsContent>
+                        {details.map((detail, i) => <TierDetailItem key={i} $color={tierColor}>{detail}</TierDetailItem>)}
+                    </TierDetailsContent>
+                </TierDetailsPanel>;
+            })()}
+        </> : <>
+            <CurrentTierBanner>
+                <TierSection>
+                    <CurrentPlanLabel>{isMobile ? 'Active Plan' : 'Active'}</CurrentPlanLabel>
+                    <TierNameDisplay $color={currentColor}>
+                        {getTierName(userLevel)}
+                    </TierNameDisplay>
+                </TierSection>
 
-                                <InfoSection>
-                                    {userLevel > 0 && userLevel < 100 && <>
-                                        <StatusSection>
-                                            <StatusBadge $active={isUpgrading ? autoRenewDisplayRef.current : autoRenew} $clickable={true} $disabled={isUpgrading} onClick={handleCancelAutoRenew} title={isUpgrading ? 'Processing subscription change...' : autoRenew ? 'Click to cancel auto-renewal' : 'Click to re-enable auto-renewal'}>
-                                                <StatusIndicator />
-                                                {isUpgrading ? 'Processing' : autoRenew ? 'Auto-renewing' : 'Not renewing'}
-                                            </StatusBadge>
-                                            {timeRemainingText && <RenewalTime>
-                                                {timeRemainingText.prefix}
-                                                {timeRemainingText.highlight && <TimeHighlight data-tooltip={exactTime || ''}>
-                                                    {timeRemainingText.highlight}
-                                                </TimeHighlight>}
-                                            </RenewalTime>}
-                                        </StatusSection>
-                                        <SectionSeparator />
-                                    </>}
+                <InfoSection>
+                    {userLevel > 0 && userLevel < 100 && <>
+                        <StatusSection>
+                            <StatusBadge $active={isUpgrading ? autoRenewDisplayRef.current : autoRenew} $clickable={true} $disabled={isUpgrading} onClick={handleCancelAutoRenew} title={isUpgrading ? 'Processing subscription change...' : autoRenew ? 'Click to cancel auto-renewal' : 'Click to re-enable auto-renewal'}>
+                                <StatusIndicator />
+                                {isUpgrading ? 'Processing' : autoRenew ? 'Auto-renewing' : 'Not renewing'}
+                            </StatusBadge>
+                            {timeRemainingText && <RenewalTime>
+                                {timeRemainingText.prefix}
+                                {timeRemainingText.highlight && <TimeHighlight data-tooltip={exactTime || ''}>
+                                    {timeRemainingText.highlight}
+                                </TimeHighlight>}
+                            </RenewalTime>}
+                        </StatusSection>
+                        <SectionSeparator />
+                    </>}
 
-                                    <BalanceSection>
-                                        <BalanceItem>
-                                            <BalanceLabel data-tooltip={`Spendable wallet balance in MIRAGE.
+                    <BalanceSection>
+                        <BalanceItem>
+                            <BalanceLabel data-tooltip={`Spendable wallet balance in MIRAGE.
 
 This is what a subscription will be paid with.`}>
-                                                Balance
-                                            </BalanceLabel>
-                                            <BalanceValueDisplay>{formatMirage(balance)} <span>MIRAGE</span></BalanceValueDisplay>
-                                        </BalanceItem>
-                                        <HorizontalDivider />
-                                        <BalanceItem>
-                                            <BalanceLabel data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.
+                                Balance
+                            </BalanceLabel>
+                            <BalanceValueDisplay>{formatMirage(balance)} <span>MIRAGE</span></BalanceValueDisplay>
+                        </BalanceItem>
+                        <HorizontalDivider />
+                        <BalanceItem>
+                            <BalanceLabel data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.
 
 Held internally by the blockchain and used to process all transactions while subscribed.
 
 Not directly spendable and will get burned if not used.`}>
-                                                Reserve
-                                            </BalanceLabel>
-                                            <BalanceValueDisplay $small>{formatMirage(reserveFunds)} <span>MIRAGE</span></BalanceValueDisplay>
-                                        </BalanceItem>
-                                    </BalanceSection>
-                                </InfoSection>
-                            </CurrentTierBanner>
+                                Reserve
+                            </BalanceLabel>
+                            <BalanceValueDisplay $small>{formatMirage(reserveFunds)} <span>MIRAGE</span></BalanceValueDisplay>
+                        </BalanceItem>
+                    </BalanceSection>
+                </InfoSection>
+            </CurrentTierBanner>
 
-                            {error && <ErrorMessageBox>
-                                {error}
-                            </ErrorMessageBox>}
+            {error && <ErrorMessageBox>
+                {error}
+            </ErrorMessageBox>}
 
-                            {userIsAdmin ? <InfoText style={{
-                                marginTop: '0'
+            {userIsAdmin ? <InfoText style={{
+                marginTop: '0'
+            }}>
+                Admin accounts have full access to all features and cannot be downgraded through this interface.
+                Admin status is managed via governance proposals.
+            </InfoText> : <>
+                <TiersGrid>
+                    {tierConfig.map((tier, idx) => {
+                        const isActive = tier.level === userLevel;
+                        const color = TIER_COLORS[tier.level] || TIER_COLORS[0];
+                        const affordable = tier.level === 0 || canAfford(tier);
+                        return <TierCard key={tier.level} $isActive={isActive} $color={color}>
+                            <TierHeader>
+                                <TierName $color={color}>{tier.name}</TierName>
+                            </TierHeader>
+
+                            <TierPrice>
+                                {tier.periodFeeUmirage === 0 ? 'Free' : <>{formatMirageCompact(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>}
+                            </TierPrice>
+
+                            <TierFeatures $color={color}>
+                                {tier.features.map((feature, i) => <li key={i}>{feature}</li>)}
+                            </TierFeatures>
+                            <Button variant="link" size="xs" onClick={() => setExpandedTierLevel(expandedTierLevel === tier.level ? null : tier.level)} style={{
+                                alignSelf: 'flex-start',
+                                margin: '0.5rem 0'
                             }}>
-                                Admin accounts have full access to all features and cannot be downgraded through this interface.
-                                Admin status is managed via governance proposals.
-                            </InfoText> : <>
-                                <TiersGrid>
-                                    {tierConfig.map((tier, idx) => {
-                                        const isActive = tier.level === userLevel;
-                                        const color = TIER_COLORS[tier.level] || TIER_COLORS[0];
-                                        const affordable = tier.level === 0 || canAfford(tier);
-                                        return <TierCard key={tier.level} $isActive={isActive} $color={color}>
-                                            <TierHeader>
-                                                <TierName $color={color}>{tier.name}</TierName>
-                                            </TierHeader>
+                                See all details
+                            </Button>
 
-                                            <TierPrice>
-                                                {tier.periodFeeUmirage === 0 ? 'Free' : <>{formatMirageCompact(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>}
-                                            </TierPrice>
+                            <Button variant={isActive ? 'ghost' : 'primary'} size="sm" onClick={() => handleUpgrade(tier)} disabled={isActive || isUpgrading || isSubscribePending(address) || (!affordable && tier.level > 0)} style={{
+                                marginTop: 'auto',
+                                ...(isActive ? {} : theme.caps.flatMode ? {
+                                    background: theme.colors.panelAlt,
+                                    borderColor: color
+                                } : {
+                                    background: `linear-gradient(135deg, ${color}, ${color}CC)`,
+                                    borderColor: color
+                                })
+                            }}>
+                                {isActive ? isMobile ? 'Active Plan' : 'Active' : tier.level < userLevel ? 'Downgrade' : !affordable ? isMobile ? 'Insufficient Funds' : 'No Funds' : formatSubscribeStatus(address) || 'Subscribe'}
+                            </Button>
+                        </TierCard>;
+                    })}
+                </TiersGrid>
+                {expandedTierLevel !== null && (() => {
+                    const selectedTier = tierConfig.find(t => t.level === expandedTierLevel);
+                    if (!selectedTier) return null;
+                    const tierIdx = selectedTier.level;
+                    const tierColor = TIER_COLORS[tierIdx] || TIER_COLORS[0];
+                    const details = buildTierDetails(selectedTier, periodLabel);
+                    return <TierDetailsPanel ref={detailsPanelRef} $color={tierColor}>
+                        <TierDetailsHeader>
+                            <TierDetailsTitle $color={tierColor}>
+                                {selectedTier.name} Plan - Full Details
+                            </TierDetailsTitle>
+                            <Button variant="ghost" size="xs" onClick={() => setExpandedTierLevel(null)}>
+                                Close
+                            </Button>
+                        </TierDetailsHeader>
+                        <TierDetailsContent>
+                            {details.map((detail, i) => <TierDetailItem key={i} $color={tierColor}>{detail}</TierDetailItem>)}
+                        </TierDetailsContent>
+                    </TierDetailsPanel>;
+                })()}
 
-                                            <TierFeatures $color={color}>
-                                                {tier.features.map((feature, i) => <li key={i}>{feature}</li>)}
-                                            </TierFeatures>
-                                            <Button variant="link" size="xs" onClick={() => setExpandedTierLevel(expandedTierLevel === tier.level ? null : tier.level)} style={{
-                                                alignSelf: 'flex-start',
-                                                margin: '0.5rem 0'
-                                            }}>
-                                                See all details
-                                            </Button>
-
-                                            <Button variant={isActive ? 'ghost' : 'primary'} size="sm" onClick={() => handleUpgrade(tier)} disabled={isActive || isUpgrading || isSubscribePending(address) || (!affordable && tier.level > 0)} style={{
-                                                marginTop: 'auto',
-                                                ...(isActive ? {} : theme.caps.flatMode ? {
-                                                    background: theme.colors.panelAlt,
-                                                    borderColor: color
-                                                } : {
-                                                    background: `linear-gradient(135deg, ${color}, ${color}CC)`,
-                                                    borderColor: color
-                                                })
-                                            }}>
-                                                {isActive ? isMobile ? 'Active Plan' : 'Active' : tier.level < userLevel ? 'Downgrade' : !affordable ? isMobile ? 'Insufficient Funds' : 'No Funds' : formatSubscribeStatus(address) || 'Subscribe'}
-                                            </Button>
-                                        </TierCard>;
-                                    })}
-                                </TiersGrid>
-                                {expandedTierLevel !== null && (() => {
-                                    const selectedTier = tierConfig.find(t => t.level === expandedTierLevel);
-                                    if (!selectedTier) return null;
-                                    const tierIdx = selectedTier.level;
-                                    const tierColor = TIER_COLORS[tierIdx] || TIER_COLORS[0];
-                                    const details = buildTierDetails(selectedTier, periodLabel);
-                                    return <TierDetailsPanel ref={detailsPanelRef} $color={tierColor}>
-                                        <TierDetailsHeader>
-                                            <TierDetailsTitle $color={tierColor}>
-                                                {selectedTier.name} Plan - Full Details
-                                            </TierDetailsTitle>
-                                            <Button variant="ghost" size="xs" onClick={() => setExpandedTierLevel(null)}>
-                                                Close
-                                            </Button>
-                                        </TierDetailsHeader>
-                                        <TierDetailsContent>
-                                            {details.map((detail, i) => <TierDetailItem key={i} $color={tierColor}>{detail}</TierDetailItem>)}
-                                        </TierDetailsContent>
-                                    </TierDetailsPanel>;
-                                })()}
-
-                                <InfoText>
-                                    Subscriptions are billed every {periodLabel} in MIRAGE tokens.
-                                    Tokens are burned on payment.
-                                    If renewal fails due to insufficient balance, you will be downgraded to Free.
-                                </InfoText>
-                            </>}
-                        </>}
-                    </ContainerBody>
-                </TabbedContainer>
-            </ModernPostFeed>
-        </div>
-    </ContentGrid>;
+                <InfoText>
+                    Subscriptions are billed every {periodLabel} in MIRAGE tokens.
+                    Tokens are burned on payment.
+                    If renewal fails due to insufficient balance, you will be downgraded to Free.
+                </InfoText>
+            </>}
+        </>}
+    </SubscriptionPageShell>;
 }

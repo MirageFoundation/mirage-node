@@ -46,6 +46,7 @@ const PageTitle = styled.span`
 
 const Nav = styled.div`
     display: flex;
+    align-items: center;
     gap: 0.5rem;
     margin-left: auto;
 `;
@@ -60,6 +61,49 @@ const NavLink = styled(Link)`
     }
 `;
 
+const InboxNavLink = styled(Link)`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 1.05rem;
+    height: 1.05rem;
+    color: ${({ theme, $active }) => ($active ? theme.colors.text : theme.colors.subtleText)};
+    text-decoration: none;
+    font-weight: 600;
+    &:hover {
+        color: ${({ theme }) => theme.colors.text};
+    }
+`;
+
+const InboxIcon = styled.svg`
+    display: block;
+    width: 0.9rem;
+    height: 0.9rem;
+    fill: currentColor;
+    flex-shrink: 0;
+`;
+
+const formatBadgeCount = (n) => n > 99 ? '99+' : String(n);
+
+const InboxBadge = styled.span`
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    background: #FF3B30;
+    border-radius: 8px;
+    border: 1px solid ${({ theme }) => theme.colors.panel};
+    color: #fff;
+    font-size: 0.55rem;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-sizing: border-box;
+`;
+
 const NavSep = styled.span`
     color: ${({ theme }) => theme.colors.subtleText};
     user-select: none;
@@ -69,7 +113,7 @@ const NavSep = styled.span`
 const UserMenuWrapper = styled.div`
     position: relative;
     display: inline-flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.35rem;
 `;
 
@@ -108,7 +152,7 @@ const UserDropdown = styled.div`
 const PAGE_TITLES = {
     '/home': 'home',
     '/following': 'following',
-    '/create_post': 'submit',
+    '/create_post': 'create',
     '/inbox': 'inbox',
     '/profile': 'profile',
     '/settings': 'settings',
@@ -226,14 +270,33 @@ export default function OldRedditShell({ children, state }) {
     const location = useLocation();
     const path = location.pathname;
     const isHome = path === '/' || path === '/home' || path.startsWith('/t/');
-    const isFollowing = path === '/following';
+    const isFeeds = isHome || path === '/following';
     const isTopics = path === '/topics';
     const isSettings = path === '/settings';
     const isSubmit = path === '/create_post';
     const isInbox = path === '/inbox';
     const isLoggedIn = !!(state && state.publicKey);
+    const [inboxCount, setInboxCount] = useState(() => {
+        try {
+            const stored = localStorage.getItem('inbox_count');
+            return stored ? Math.max(0, parseInt(stored, 10) || 0) : 0;
+        } catch (_) { return 0; }
+    });
 
     const pageTitle = getPageTitle(path);
+
+    useEffect(() => {
+        if (!isLoggedIn) {
+            setInboxCount(0);
+            return;
+        }
+        const handleInboxCount = (e) => {
+            const count = typeof e.detail === 'number' ? Math.max(0, e.detail) : 0;
+            setInboxCount(count);
+        };
+        window.addEventListener('inboxCount', handleInboxCount);
+        return () => window.removeEventListener('inboxCount', handleInboxCount);
+    }, [isLoggedIn]);
 
     return (
         <>
@@ -241,13 +304,20 @@ export default function OldRedditShell({ children, state }) {
                 <Brand to="/home">MIRAGE</Brand>
                 {pageTitle && <PageTitle>{pageTitle}</PageTitle>}
                 <Nav>
-                    <NavLink to="/home" $active={isHome}>home</NavLink>
-                    <NavLink to="/following" $active={isFollowing}>following</NavLink>
+                    <NavLink to="/home" $active={isFeeds}>feeds</NavLink>
                     <NavLink to="/topics" $active={isTopics}>topics</NavLink>
                     {isLoggedIn && (
                         <>
-                            <NavLink to="/create_post" $active={isSubmit}>submit</NavLink>
-                            <NavLink to="/inbox" $active={isInbox}>inbox</NavLink>
+                            <NavLink to="/create_post" $active={isSubmit}>create</NavLink>
+                            <InboxNavLink to="/inbox" $active={isInbox} aria-label={inboxCount > 0 ? `Inbox - ${inboxCount} unread` : 'Inbox'}>
+                                <InboxIcon viewBox="0 0 24 24" aria-hidden="true">
+                                    {isInbox
+                                        ? <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+                                        : <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z" />
+                                    }
+                                </InboxIcon>
+                                {inboxCount > 0 && <InboxBadge aria-hidden="true">{formatBadgeCount(inboxCount)}</InboxBadge>}
+                            </InboxNavLink>
                             <ShellUserMenu state={state} />
                         </>
                     )}

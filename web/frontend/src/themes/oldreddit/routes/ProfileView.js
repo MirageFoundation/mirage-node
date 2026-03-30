@@ -2,32 +2,9 @@ import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useProfile } from "../../../logic/useProfile";
-const Row = styled.div`
-    display: grid;
-    grid-template-columns: ${({
-    theme
-}) => theme.layout.formRowColumns};
-    gap: ${({
-    theme
-}) => theme.layout.formRowGap};
-    align-items: ${({
-    theme
-}) => theme.layout.formRowAlign};
-    margin: ${({
-    theme
-}) => theme.layout.formRowMargin};
-    @media (max-width: 1000px) {
-        grid-template-columns: 1fr;
-        gap: 0.35rem;
-        align-items: stretch;
-    }
-`;
-const RowCentered = styled(Row)`
-    align-items: center;
-`;
 const Label = styled.div`
     color: ${({
     theme
@@ -39,6 +16,7 @@ const Label = styled.div`
     theme
 }) => theme.layout.labelSize};
     white-space: nowrap;
+    padding-top: ${({ theme }) => theme.layout.labelPaddingTop};
     @media (max-width: 1000px) {
         margin-bottom: 0.1rem;
     }
@@ -109,20 +87,6 @@ const BioTextarea = styled.textarea`
     &:focus { outline: none; border-color: ${({
     theme
 }) => theme.colors.accent}; }
-`;
-const ValueBoxWithButton = styled(ValueBox)`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: ${({
-    theme
-}) => theme.layout.containerGap};
-    flex-wrap: nowrap;
-    overflow: hidden;
-    @media (max-width: 1000px) {
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
 `;
 const SectionTitle = styled.div`
     margin-top: ${({
@@ -296,11 +260,84 @@ const LoadingRow = styled.div`
     align-items: center;
     gap: 0.5rem;
     margin: 0.5rem 0 0.75rem;
-    padding: 0.5rem;
+    padding: 0.5rem ${OLDREDDIT_SHELL_INSET_X};
     color: ${({
     theme
 }) => theme.colors.subtleText};
 `;
+
+/** Horizontal inset for non-list copy on posts/algo tabs when the shell body no longer adds padding (list rows keep their own inset). */
+const ProfilePostsTabGutter = styled.div`
+    padding: 0 ${OLDREDDIT_SHELL_INSET_X};
+`;
+
+/** Cancels shell horizontal padding so row borders span the same width as list feeds; parent is `ProfileShellBody` inside `CappedPageColumn`. */
+const ProfileInfoShell = styled.div`
+    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    max-width: none;
+    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    min-width: 0;
+    align-self: stretch;
+    box-sizing: border-box;
+    background: ${({ theme }) => theme.colors.panel};
+
+    & > :last-child {
+        border-bottom: none !important;
+    }
+`;
+
+/** Borders span full bleeded width (`ProfileInfoShell`); horizontal padding insets labels/values only — not flush to the viewport. */
+const ProfileFieldRow = styled.div`
+    display: grid;
+    grid-template-columns: ${({ theme }) => theme.layout.formRowColumns};
+    gap: ${({ theme }) => theme.layout.formRowGap};
+    align-items: start;
+    padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+
+    @media (max-width: 1000px) {
+        grid-template-columns: 1fr;
+        gap: 0.35rem;
+        align-items: stretch;
+    }
+`;
+
+const ProfileFieldValue = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem;
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+
+    @media (max-width: 1000px) {
+        flex-wrap: wrap;
+    }
+`;
+
+const ProfileFieldValuePlain = styled.div`
+    min-width: 0;
+`;
+
+/** Full-bleed tab strip with a left-aligned capped inner row. */
+const ProfileTabsRow = styled(OldRedditTabsRow)`
+    max-width: 1200px;
+    margin-left: 0;
+    margin-right: auto;
+`;
+
+const ProfileTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
+`;
+
+const ProfileShellBody = styled(ContainerBody)``;
+
+const ProfileSortTab = styled(OldRedditTab).attrs({ type: 'button' })``;
 
 // (no footer actions here; sign out moved to header menu)
 
@@ -412,9 +449,9 @@ export default function ProfileView({
             <Helmet>
                 <title>{routeIdentity ? `@${routeIdentity}` : 'Profile'} | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <MobileHeader />
+            <ModernPostFeed>
+                <MobileHeader />
+                <CappedPageColumn>
                     <TabbedContainer>
                         <ContainerBody style={{
                             display: 'flex',
@@ -433,38 +470,42 @@ export default function ProfileView({
                             }}>{usernameResolutionError}</span>}
                         </ContainerBody>
                     </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+                </CappedPageColumn>
+            </ModernPostFeed>
         </ContentGrid>;
     }
     return <ContentGrid>
         <Helmet>
             <title>{profileTitle} | Mirage</title>
         </Helmet>
-        <div>
-            <ModernPostFeed>
-                <MobileHeader />
-                <TabbedContainer>
-                    <TabsRow>
-                        {VALID_TABS.map(tab => <ClickableTab key={tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
+        <ModernPostFeed>
+            <MobileHeader />
+            <OldRedditContentBleed>
+                <OldRedditTabsStrip>
+                    <ProfileTabsRow role="tablist" aria-label="Profile sections">
+                        {VALID_TABS.map(tab => <ProfileSortTab key={tab} role="tab" aria-selected={activeTab === tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
                             {tab}
-                        </ClickableTab>)}
-                    </TabsRow>
-                    <ContainerBody $fullWidth={profilePostsFullWidth && isPostsTab}>
-                        {activeTab === 'profile' && <>
-                            <RowCentered>
+                        </ProfileSortTab>)}
+                    </ProfileTabsRow>
+                </OldRedditTabsStrip>
+            </OldRedditContentBleed>
+            <CappedPageColumn>
+                <ProfileTabbedContainer>
+                    <ProfileShellBody $fullWidth={profilePostsFullWidth && isPostsTab}>
+                        {activeTab === 'profile' && <ProfileInfoShell>
+                            <ProfileFieldRow>
                                 <Label>Username:</Label>
-                                <ValueBoxWithButton>
+                                <ProfileFieldValue>
                                     <InlineMono title={profileUsername}>{usernameDisplay}</InlineMono>
                                     {canEditProfile && <Button onClick={() => navigate('/change_username')} size="sm" minWidth="copy" mobileFullWidth>Change</Button>}
                                     {!isOwnProfile && address && <Button variant={(isFollowingProfile && followHover) || isUnfollowAction ? 'primaryDanger' : isFollowingProfile ? 'subtle' : 'primary'} size="sm" minWidth="follow" onMouseEnter={() => setFollowHover(true)} onMouseLeave={() => setFollowHover(false)} disabled={isFollowInProgress} loading={isFollowInProgress} onClick={handleFollowToggle} mobileFullWidth>
                                         {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
                                     </Button>}
-                                </ValueBoxWithButton>
-                            </RowCentered>
-                            <RowCentered>
+                                </ProfileFieldValue>
+                            </ProfileFieldRow>
+                            <ProfileFieldRow>
                                 <Label>Address:</Label>
-                                <ValueBoxWithButton>
+                                <ProfileFieldValue>
                                     <InlineMono title={profileAddress}>{profileAddress || '(unavailable)'}</InlineMono>
                                     {profileAddress && <Button onClick={() => {
                                         navigator.clipboard.writeText(profileAddress);
@@ -473,11 +514,11 @@ export default function ProfileView({
                                     }} size="sm" minWidth="copy" copied={addressCopied} mobileFullWidth>
                                         {addressCopied ? 'Copied!' : 'Copy'}
                                     </Button>}
-                                </ValueBoxWithButton>
-                            </RowCentered>
-                            <RowCentered>
+                                </ProfileFieldValue>
+                            </ProfileFieldRow>
+                            <ProfileFieldRow>
                                 <Label>Tier:</Label>
-                                <ValueBox>
+                                <ProfileFieldValuePlain>
                                     <Mono style={{
                                         color: getTierColor(userLevel)
                                     }}>
@@ -490,31 +531,32 @@ export default function ProfileView({
                                     }}>
                                         ({formatSubscriptionExpiry(subscriptionExpiry)})
                                     </span>}
-                                </ValueBox>
-                            </RowCentered>
-                            <RowCentered>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>
+                            <ProfileFieldRow>
                                 <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
                                     Balance:
                                 </HoverableLabel>
-                                <ValueBoxWithButton>
+                                <ProfileFieldValue>
                                     <Mono>{balanceDisplay}</Mono>
                                     {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="copy" mobileFullWidth onClick={handleDonate} disabled={donatePending}>
                                         {donatePending ? donateStatus || 'Sending...' : 'Donate'}
                                     </Button>}
-                                </ValueBoxWithButton>
-                            </RowCentered>
-                            {confirmDonate && <Row>
-                                <div />
-                                <ValueBox style={{
-                                    background: 'rgba(251, 191, 36, 0.1)',
-                                    borderColor: '#f59e0b'
-                                }}>
+                                </ProfileFieldValue>
+                            </ProfileFieldRow>
+                            {confirmDonate && <ProfileFieldRow>
+                                <div aria-hidden="true" />
+                                <ProfileFieldValuePlain>
                                     <div style={{
                                         display: 'flex',
                                         alignItems: 'center',
                                         gap: '0.6rem',
                                         width: '100%',
-                                        flexWrap: 'wrap'
+                                        flexWrap: 'wrap',
+                                        background: 'rgba(251, 191, 36, 0.1)',
+                                        border: '1px solid #f59e0b',
+                                        padding: '0.5rem 0.6rem',
+                                        boxSizing: 'border-box'
                                     }}>
                                         <span style={{
                                             whiteSpace: 'nowrap',
@@ -558,42 +600,44 @@ export default function ProfileView({
                                             <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                                         </div>
                                     </div>
-                                </ValueBox>
-                            </Row>}
-                            {donateMessage && <Row>
-                                <div />
-                                <div style={{
-                                    background: donateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                    border: donateMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
-                                    borderRadius: '8px',
-                                    padding: '0.6rem 0.85rem',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    color: donateMessage.type === 'success' ? '#16a34a' : '#ef4444',
-                                    fontSize: '0.8rem'
-                                }}>
-                                    <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
-                                    {donateMessage.message}
-                                </div>
-                            </Row>}
-                            <RowCentered>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>}
+                            {donateMessage && <ProfileFieldRow>
+                                <div aria-hidden="true" />
+                                <ProfileFieldValuePlain>
+                                    <div style={{
+                                        background: donateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                        border: donateMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                                        padding: '0.6rem 0.85rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        color: donateMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                                        fontSize: '0.8rem',
+                                        boxSizing: 'border-box'
+                                    }}>
+                                        <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                        {donateMessage.message}
+                                    </div>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>}
+                            <ProfileFieldRow>
                                 <HoverableLabel tabIndex={0} data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
                                     Reserve:
                                 </HoverableLabel>
-                                <ValueBox>
+                                <ProfileFieldValuePlain>
                                     <Mono>{reserveDisplay}</Mono>
-                                </ValueBox>
-                            </RowCentered>
-                            <RowCentered>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>
+                            <ProfileFieldRow>
                                 <Label>Registered:</Label>
-                                <ValueBox>
+                                <ProfileFieldValuePlain>
                                     <Mono>{registeredDisplay}</Mono>
-                                </ValueBox>
-                            </RowCentered>
-                            <Row>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>
+                            <ProfileFieldRow>
                                 <Label>Biography:</Label>
-                                <div style={{
+                                <ProfileFieldValuePlain style={{
                                     width: '100%'
                                 }}>
                                     {bioEditing ? <div style={{
@@ -619,7 +663,7 @@ export default function ProfileView({
                                                 display: 'flex',
                                                 gap: '0.5rem'
                                             }}>
-                                                <Button size="sm" variant="subtle" disabled={bioSaving} onClick={() => {
+                                                <Button size="sm" variant="ghost" disabled={bioSaving} onClick={() => {
                                                     setBioEditing(false);
                                                     setBioError('');
                                                     setBioDraft(biography);
@@ -635,7 +679,7 @@ export default function ProfileView({
                                             fontSize: '0.75rem',
                                             color: '#f87171'
                                         }}>{bioError}</span>}
-                                    </div> : <ValueBoxWithButton>
+                                    </div> : <ProfileFieldValue>
                                         <Mono style={{
                                             whiteSpace: 'pre-wrap',
                                             wordBreak: 'break-word',
@@ -654,28 +698,28 @@ export default function ProfileView({
                                         {isOwnProfile && !canHaveBiography && <Button size="sm" variant="subtle" mobileFullWidth onClick={() => navigate('/subscription')}>
                                             Upgrade
                                         </Button>}
-                                    </ValueBoxWithButton>}
-                                </div>
-                            </Row>
-                        </>}
+                                    </ProfileFieldValue>}
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>
+                        </ProfileInfoShell>}
 
                         {isPostsTab && profileUsesListFeed && <>
                             {isLoadingRecentPosts && recentPosts.length === 0 && <LoadingRow>
                                 <LoadingSpinner />
                                 <SubtleMono>Loading posts...</SubtleMono>
                             </LoadingRow>}
-                            {!isLoadingRecentPosts && recentPostsError && <Mono style={{
+                            {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
                                 color: '#f87171'
-                            }}>{recentPostsError}</Mono>}
-                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono>}
-                            {recentPosts.length > 0 && <FeedComponent posts={recentPosts} state={state} showSortTabs={false} />}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && <SubtleMono style={{
+                            }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
+                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
+                            {recentPosts.length > 0 && <FeedComponent posts={recentPosts} state={state} showSortTabs={false} bleedShell={false} />}
+                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && <ProfilePostsTabGutter><SubtleMono style={{
                                 display: 'block',
                                 marginTop: '0.5rem',
                                 fontStyle: 'italic'
                             }}>
                                 Loading more...
-                            </SubtleMono>}
+                            </SubtleMono></ProfilePostsTabGutter>}
                             <div ref={recentBottomSentinelRef} style={{
                                 width: '100%',
                                 height: '20px',
@@ -684,32 +728,32 @@ export default function ProfileView({
                         </>}
 
                         {isPostsTab && !profileUsesListFeed && <>
-                            {!profileHideFilterSelect && profileAddress && <FilterSelect value={recentPostsFilter} onChange={e => setRecentPostsFilter(e.target.value)}>
+                            {!profileHideFilterSelect && profileAddress && <ProfilePostsTabGutter><FilterSelect value={recentPostsFilter} onChange={e => setRecentPostsFilter(e.target.value)}>
                                 <option value="all">All</option>
                                 <option value="submissions">Submissions</option>
                                 <option value="comments">Comments</option>
-                            </FilterSelect>}
+                            </FilterSelect></ProfilePostsTabGutter>}
                             {isLoadingRecentPosts && <LoadingRow>
                                 <LoadingSpinner />
                                 <SubtleMono>Loading posts...</SubtleMono>
                             </LoadingRow>}
-                            {!isLoadingRecentPosts && recentPostsError && <Mono style={{
+                            {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
                                 color: '#f87171'
-                            }}>{recentPostsError}</Mono>}
-                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono>}
+                            }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
+                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
                             {!recentPostsError && recentPosts.length > 0 && <PostsList>
                                 {recentPosts.map(post => <PostItem key={post.post_id} href={getPostUrl(post)} isActive={activeRecentPost === post.post_id} onClick={e => handleRecentPostClick(post, e)}>
                                     <PostPreview>{renderPostPreview(post)}</PostPreview>
                                     <PostMeta>{buildMetaLine(post)}</PostMeta>
                                 </PostItem>)}
                             </PostsList>}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && <SubtleMono style={{
+                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && <ProfilePostsTabGutter><SubtleMono style={{
                                 display: 'block',
                                 marginTop: '0.5rem',
                                 fontStyle: 'italic'
                             }}>
                                 Loading more...
-                            </SubtleMono>}
+                            </SubtleMono></ProfilePostsTabGutter>}
                             <div ref={recentBottomSentinelRef} style={{
                                 width: '100%',
                                 height: '20px',
@@ -717,7 +761,7 @@ export default function ProfileView({
                             }} />
                         </>}
 
-                        {activeTab === 'algo' && <>
+                        {activeTab === 'algo' && <ProfilePostsTabGutter>
                             <SectionTitle $first>Topic preferences</SectionTitle>
                             <ValueBox style={{
                                 padding: '0.25rem 0.5rem'
@@ -929,11 +973,11 @@ export default function ProfileView({
                                     </div>}
                                 </div>}
                             </ValueBox>
-                        </>}
+                        </ProfilePostsTabGutter>}
 
-                    </ContainerBody>
-                </TabbedContainer>
-            </ModernPostFeed>
-        </div>
+                    </ProfileShellBody>
+                </ProfileTabbedContainer>
+            </CappedPageColumn>
+        </ModernPostFeed>
     </ContentGrid>;
 }

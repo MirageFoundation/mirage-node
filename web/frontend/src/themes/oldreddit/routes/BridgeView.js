@@ -2,7 +2,7 @@ import { Helmet } from "react-helmet-async";
 import styled, { keyframes, css } from "styled-components";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useSolanaBridgeInFlow, useBridgeInPanel, useBridge, NETWORKS, truncateAddress, SOURCE_NETWORKS } from "../../../logic/useBridge";
 // Responsive address component - shows truncated on mobile, full on desktop
@@ -18,6 +18,9 @@ const ResponsiveAddress = ({
         <span className="address-truncated">{truncated}</span>
     </>;
 };
+const BridgeTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
+`;
 
 // Animations
 const fadeIn = keyframes`
@@ -1655,15 +1658,19 @@ export default function BridgeView({
         <div>
             <ModernPostFeed>
                 <MobileHeader />
-                <TabbedContainer>
-                    <TabsRow>
-                        <ClickableTab type="button" role="tab" aria-selected={activeTab === 'out'} $active={activeTab === 'out'} onClick={() => handleTabChange('out')}>
-                            Bridge Out
-                        </ClickableTab>
-                        <ClickableTab type="button" role="tab" aria-selected={activeTab === 'in'} $active={activeTab === 'in'} onClick={() => handleTabChange('in')}>
-                            Bridge In
-                        </ClickableTab>
-                    </TabsRow>
+                <OldRedditContentBleed>
+                    <OldRedditTabsStrip>
+                        <OldRedditTabsRow role="tablist" aria-label="Bridge sections">
+                            <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'out'} $active={activeTab === 'out'} onClick={() => handleTabChange('out')}>
+                                bridge out
+                            </OldRedditTab>
+                            <OldRedditTab type="button" role="tab" aria-selected={activeTab === 'in'} $active={activeTab === 'in'} onClick={() => handleTabChange('in')}>
+                                bridge in
+                            </OldRedditTab>
+                        </OldRedditTabsRow>
+                    </OldRedditTabsStrip>
+                </OldRedditContentBleed>
+                <BridgeTabbedContainer>
                     <ContainerBody>
                         {activeTab === 'out' && (!address ? <InfoBanner>
                             <InfoIcon>ℹ️</InfoIcon>
@@ -1968,7 +1975,7 @@ export default function BridgeView({
                             </BridgeContainer>)}
                         {activeTab === 'in' && <BridgeInPanel address={address} chainConfigs={chainConfigs} attestationThresholdBps={attestationThresholdBps} balance={balance} balanceLoading={balanceLoading} balanceError={balanceError} refreshBalance={refreshBalance} formatBalance={formatBalance} />}
                     </ContainerBody>
-                </TabbedContainer>
+                </BridgeTabbedContainer>
             </ModernPostFeed>
         </div>
     </ContentGrid>;

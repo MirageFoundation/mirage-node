@@ -27,9 +27,6 @@ const Row = styled.div`
         align-items: stretch;
     }
 `;
-const RowCentered = styled(Row)`
-    align-items: center;
-`;
 const Label = styled.div`
     color: ${({
     theme
@@ -115,7 +112,7 @@ const BioTextarea = styled.textarea`
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     gap: ${({
     theme
 }) => theme.layout.containerGap};
@@ -459,7 +456,7 @@ export default function ProfileView({
                     </TabsRow>
                     <ContainerBody $fullWidth={profilePostsFullWidth && isPostsTab}>
                         {activeTab === 'profile' && <>
-                            <RowCentered>
+                            <Row>
                                 <Label>Username:</Label>
                                 <ValueBoxWithButton>
                                     <InlineMono title={profileUsername}>{usernameDisplay}</InlineMono>
@@ -468,8 +465,8 @@ export default function ProfileView({
                                         {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
                                     </Button>}
                                 </ValueBoxWithButton>
-                            </RowCentered>
-                            <RowCentered>
+                            </Row>
+                            <Row>
                                 <Label>Address:</Label>
                                 <ValueBoxWithButton>
                                     <InlineMono title={profileAddress}>{profileAddress || '(unavailable)'}</InlineMono>
@@ -481,8 +478,8 @@ export default function ProfileView({
                                         {addressCopied ? 'Copied!' : 'Copy'}
                                     </Button>}
                                 </ValueBoxWithButton>
-                            </RowCentered>
-                            <RowCentered>
+                            </Row>
+                            <Row>
                                 <Label>Tier:</Label>
                                 <ValueBox>
                                     <Mono style={{
@@ -498,8 +495,8 @@ export default function ProfileView({
                                         ({formatSubscriptionExpiry(subscriptionExpiry)})
                                     </span>}
                                 </ValueBox>
-                            </RowCentered>
-                            <RowCentered>
+                            </Row>
+                            <Row>
                                 <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
                                     Balance:
                                 </HoverableLabel>
@@ -509,7 +506,7 @@ export default function ProfileView({
                                         {donatePending ? donateStatus || 'Sending...' : 'Donate'}
                                     </Button>}
                                 </ValueBoxWithButton>
-                            </RowCentered>
+                            </Row>
                             {confirmDonate && <Row>
                                 <div />
                                 <ValueBox style={{
@@ -584,20 +581,20 @@ export default function ProfileView({
                                     {donateMessage.message}
                                 </div>
                             </Row>}
-                            <RowCentered>
+                            <Row>
                                 <HoverableLabel tabIndex={0} data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
                                     Reserve:
                                 </HoverableLabel>
                                 <ValueBox>
                                     <Mono>{reserveDisplay}</Mono>
                                 </ValueBox>
-                            </RowCentered>
-                            <RowCentered>
+                            </Row>
+                            <Row>
                                 <Label>Registered:</Label>
                                 <ValueBox>
                                     <Mono>{registeredDisplay}</Mono>
                                 </ValueBox>
-                            </RowCentered>
+                            </Row>
                             <Row>
                                 <Label>Biography:</Label>
                                 <div style={{
@@ -626,7 +623,7 @@ export default function ProfileView({
                                                 display: 'flex',
                                                 gap: '0.5rem'
                                             }}>
-                                                <Button size="sm" variant="subtle" disabled={bioSaving} onClick={() => {
+                                                <Button size="sm" variant="ghost" disabled={bioSaving} onClick={() => {
                                                     setBioEditing(false);
                                                     setBioError('');
                                                     setBioDraft(biography);

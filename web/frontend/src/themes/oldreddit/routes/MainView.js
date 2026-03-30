@@ -11,167 +11,82 @@ import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } fro
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
 
-// Invite-only hero for logged-out users on the front page
+// Invite-only hero — flat, left-aligned (classic old.reddit density, not a marketing card)
 const InviteOnlyHero = styled.div`
-    margin-top: 1rem;
-    background: ${({
-    theme
-}) => theme.name === 'light' ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)' : 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)'};
-    border: 1px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.3)' : 'rgba(102, 126, 234, 0.35)'};
-    border-radius: 16px;
-    padding: 2rem 2.5rem;
+    margin-top: 0.35rem;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    padding: 0.35rem ${OLDREDDIT_SHELL_INSET_X} 0.45rem;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 1rem;
-
-    @media (max-width: 1000px) {
-        border-radius: 12px;
-        padding: 1.5rem 1.25rem;
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 10px;
-        padding: 1.25rem 1rem;
-        gap: 0.75rem;
-    }
-`;
-const InviteOnlyHeroEmoji = styled.span`
-    font-size: 2.5rem;
-    line-height: 1;
-    display: block;
-    margin-bottom: 0.25rem;
-
-    @media (max-width: 768px) {
-        font-size: 2rem;
-    }
+    align-items: flex-start;
+    text-align: left;
+    gap: 0.3rem;
+    width: 100%;
+    box-sizing: border-box;
 `;
 const InviteOnlyHeroTitle = styled.h1`
-    font-size: 1.5rem;
+    font-size: 0.8rem;
     font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
-    line-height: 1.2;
-
-    @media (max-width: 1000px) {
-        font-size: 1.25rem;
-    }
-
-    @media (max-width: 768px) {
-        font-size: 1.1rem;
-    }
+    line-height: 1.25;
+    text-transform: none;
 `;
 const InviteOnlyHeroSubtitle = styled.div`
-    font-size: 0.95rem;
+    font-size: 0.6rem;
     font-weight: 600;
-    color: #667eea;
-    margin-top: -0.25rem;
-
-    @media (max-width: 1000px) {
-        font-size: 0.8rem;
-    }
-
-    @media (max-width: 768px) {
-        font-size: 0.7rem;
-    }
+    color: ${({ theme }) => theme.colors.link};
 `;
 const InviteOnlyHeroDescription = styled.p`
-    font-size: 0.85rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    line-height: 1.6;
+    font-size: 0.65rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    line-height: 1.45;
     margin: 0;
-    max-width: 500px;
+    max-width: none;
+`;
+const InviteOnlyHeroStats = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.6rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+const InviteOnlyHeroStat = styled.span`
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.subtleText};
 
-    @media (max-width: 1000px) {
-        font-size: 0.7rem;
+    strong {
+        color: ${({ theme }) => theme.colors.text};
+        font-weight: 700;
     }
+`;
+const InviteOnlyHeroLinks = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.subtleText};
 
-    @media (max-width: 768px) {
-        font-size: 0.65rem;
-        line-height: 1.5;
+    a {
+        color: ${({ theme }) => theme.colors.link};
+        text-decoration: underline;
+        font-weight: 600;
     }
+`;
+const InviteOnlyHeroSep = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 const InviteOnlyHeroButtons = styled.div`
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
-
-    @media (max-width: 768px) {
-        grid-template-columns: 1fr;
-        width: 100%;
-        max-width: 280px;
-        gap: 0.5rem;
-    }
-`;
-
-// Stats display for welcome hero (logged-out users)
-const WelcomeStatsGrid = styled.div`
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin: 0.5rem 0;
-    padding: 0.75rem 0;
-    border-top: 1px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.2)' : 'rgba(102, 126, 234, 0.25)'};
-    border-bottom: 1px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.2)' : 'rgba(102, 126, 234, 0.25)'};
-    width: 100%;
-
-    @media (max-width: 768px) {
-        gap: 0.5rem;
-    }
-`;
-const WelcomeStatItem = styled.div`
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     align-items: center;
-    text-align: center;
-    gap: 0.15rem;
-    flex: 1;
-    min-width: 0;
-`;
-const WelcomeStatValue = styled.div`
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-variant-numeric: tabular-nums;
-
-    @media (max-width: 1000px) {
-        font-size: 1.1rem;
-    }
-
-    @media (max-width: 768px) {
-        font-size: 1rem;
-    }
-`;
-const WelcomeStatLabel = styled.div`
-    font-size: 0.65rem;
-    font-weight: 500;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-
-    @media (max-width: 1000px) {
-        font-size: 0.6rem;
-    }
-
-    @media (max-width: 768px) {
-        font-size: 0.55rem;
-    }
+    gap: 0.35rem;
+    margin-top: 0.2rem;
 `;
 
 // Mobile header branding for home/following feeds
@@ -1399,6 +1314,9 @@ const MainView = ({
 
         // Full-width main column + shell header (no left sidebar; old Reddit style)
         const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : `#${urlTopic}`;
+        const noPostsMessage = urlTopic === 'following'
+            ? 'No posts available. Follow people or topics to populate this feed.'
+            : 'No posts available';
         return <ContentGrid>
             <Helmet>
                 <title>{pageTitle} | Mirage</title>
@@ -1553,14 +1471,6 @@ const MainView = ({
                                     <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
                                 </HomeFeedInfoTitle>
                                 <HomeFeedModeInline>
-                                    <HomeFeedModeSelect value={homeSortMode} onChange={e => {
-                                        const mode = e.target.value;
-                                        setHomeSortMode(mode);
-                                        Storage.save('home_sort_mode', mode);
-                                    }}>
-                                        <option value="magic">Magic</option>
-                                        <option value="newest">Newest</option>
-                                    </HomeFeedModeSelect>
                                     <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
                                         <option value="large">Large</option>
                                         {!isMobile && <option value="compact">Compact</option>}
@@ -1580,14 +1490,6 @@ const MainView = ({
                                     <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
                                 </HomeFeedInfoTitle>
                                 <HomeFeedModeInline>
-                                    <HomeFeedModeSelect value={homeSortMode} onChange={e => {
-                                        const mode = e.target.value;
-                                        setHomeSortMode(mode);
-                                        Storage.save('home_sort_mode', mode);
-                                    }}>
-                                        <option value="magic">Magic</option>
-                                        <option value="newest">Newest</option>
-                                    </HomeFeedModeSelect>
                                     <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
                                         <option value="large">Large</option>
                                         {!isMobile && <option value="compact">Compact</option>}
@@ -1611,51 +1513,43 @@ const MainView = ({
 
                         {/* No posts available - only show to logged-in users */}
                         {isLoggedIn && showNoPostsAvailable && <LoadingCard $size={cardSize}>
-                            <LoadingText>No posts available</LoadingText>
+                            <LoadingText>{noPostsMessage}</LoadingText>
                         </LoadingCard>}
 
                         {/* Invite-only hero - shown to logged-out users on all feeds */}
                         {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
-                            <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
                             <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
-                                fontSize: '0.5em',
-                                marginLeft: '0.3em',
+                                fontSize: '0.55em',
+                                marginLeft: '0.25em',
                                 verticalAlign: 'super',
-                                opacity: 0.8
+                                opacity: 0.75
                             }}>BETA</sup></InviteOnlyHeroTitle>
                             <InviteOnlyHeroSubtitle>Currently in Private Beta — Invite Only</InviteOnlyHeroSubtitle>
                             <InviteOnlyHeroDescription>
                                 Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
                             </InviteOnlyHeroDescription>
-                            <InviteOnlyHeroDescription>
-                                <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{
-                                    color: 'inherit',
-                                    textDecoration: 'underline'
-                                }}>Learn more about our mission</a>
-                            </InviteOnlyHeroDescription>
-                            {welcomeStats && welcomeStats.userCount > 0 && <WelcomeStatsGrid>
-                                <WelcomeStatItem>
-                                    <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
-                                    <WelcomeStatLabel>Users</WelcomeStatLabel>
-                                </WelcomeStatItem>
-                                <WelcomeStatItem>
-                                    <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
-                                    <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
-                                </WelcomeStatItem>
-                                <WelcomeStatItem>
-                                    <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
-                                    <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
-                                </WelcomeStatItem>
-                            </WelcomeStatsGrid>}
-                            <InviteOnlyHeroDescription>
-                                Have an invite code? Join the community today.
-                            </InviteOnlyHeroDescription>
+                            {welcomeStats && welcomeStats.userCount > 0 && <InviteOnlyHeroStats>
+                                <InviteOnlyHeroStat>
+                                    <strong>Users:</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}
+                                </InviteOnlyHeroStat>
+                                <InviteOnlyHeroStat>
+                                    <strong>Active (24h):</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}
+                                </InviteOnlyHeroStat>
+                                <InviteOnlyHeroStat>
+                                    <strong>Posts (24h):</strong> {welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}
+                                </InviteOnlyHeroStat>
+                            </InviteOnlyHeroStats>}
+                            <InviteOnlyHeroLinks>
+                                <a href="https://www.youtube.com/watch?v=TOvP32ihQ0M" target="_blank" rel="noopener noreferrer"><strong>Watch Introduction (YouTube)</strong></a>
+                                <InviteOnlyHeroSep aria-hidden="true">·</InviteOnlyHeroSep>
+                                <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer">Learn More</a>
+                            </InviteOnlyHeroLinks>
                             <InviteOnlyHeroButtons>
-                                <Button to="/signup" size="md">
-                                    Create Account
+                                <Button to="/signup" size="xs">
+                                    Create account
                                 </Button>
-                                <Button to="/login" variant="ghost" size="md">
-                                    Sign In
+                                <Button to="/login" variant="ghost" size="xs">
+                                    Sign in
                                 </Button>
                             </InviteOnlyHeroButtons>
                         </InviteOnlyHero>}
@@ -1669,7 +1563,7 @@ const MainView = ({
                                 const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
                                 return hasValidTitle && hasValidTopic && !p.deleted;
                             });
-                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} />;
+                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} />;
                         })()}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}

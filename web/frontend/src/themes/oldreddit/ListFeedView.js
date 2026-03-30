@@ -1,27 +1,37 @@
 import React, { memo, useCallback, useState, useEffect } from 'react';
-import styled from 'styled-components';
+import styled, { css } from 'styled-components';
 import { Link } from 'react-router-dom';
 import VoteSection from './components/VoteSection';
 import { buildPhotonUrl, isLikelyImageUrl } from '../../utils/media';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
-import { OLDREDDIT_SHELL_INSET_X } from './Layout';
+import { OLDREDDIT_SHELL_INSET_X, OldRedditTab } from './Layout';
 
+/** Home/following: negate shell padding. Profile posts tabs: parent has no horizontal padding — do not bleed or borders stay inset. */
 const ListContainer = styled.div`
     display: flex;
     flex-direction: column;
     background: ${({ theme }) => theme.colors.panel};
-    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
     max-width: none;
     box-sizing: border-box;
+    ${({ $bleedShell }) =>
+        $bleedShell
+            ? css`
+                  margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+                  margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+                  width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+              `
+            : css`
+                  width: 100%;
+                  margin-left: 0;
+                  margin-right: 0;
+              `}
 `;
 
 const Row = styled.div`
     display: flex;
     align-items: center;
-    padding: 0.15rem  1rem;
+    padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     gap: 0.4rem;
     min-height: 52px;
@@ -174,26 +184,56 @@ const ActionButton = styled.button`
     }
 `;
 
-const SortTabs = styled.div`
+const FeedToolbar = styled.div`
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
     gap: 0.5rem;
+    row-gap: 0.35rem;
     padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
 `;
 
-const SortTab = styled.button`
-    background: ${({ $active, theme }) => ($active ? theme.colors.panelAlt : 'transparent')};
-    border: 1px solid ${({ $active, theme }) => ($active ? theme.colors.border : 'transparent')};
-    color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.subtleText)};
+const FeedNavGroup = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+`;
+
+const FeedNavTab = styled(OldRedditTab)`
+    padding: 0.25rem 0.35rem 0.1rem;
+
+    &:first-child {
+        padding-left: 2px;
+    }
+`;
+
+const FeedToolbarSep = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: 600;
     font-size: 0.65rem;
-    font-weight: 700;
-    padding: 0.15rem 0.4rem;
-    text-transform: lowercase;
+    user-select: none;
+`;
+
+const FeedSortSelect = styled.select`
+    font-size: 0.65rem;
+    padding: 0.2rem 0.4rem 0.1rem;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.subtleText};
+    outline: none;
     cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    max-width: 100%;
+
     &:hover {
         color: ${({ theme }) => theme.colors.text};
-        border-color: ${({ theme }) => theme.colors.border};
     }
 `;
 
@@ -322,9 +362,17 @@ const MemoizedRow = memo(ListRow, (prev, next) => {
     );
 });
 
-const SORT_TABS = ['best', 'new'];
-
-export default function ListFeedView({ posts, state, updatePost, startRank = 1, sortMode, onSortChange, showSortTabs }) {
+export default function ListFeedView({
+    posts,
+    state,
+    updatePost,
+    startRank = 1,
+    sortMode,
+    onSortChange,
+    showSortTabs,
+    feedNavTopic,
+    bleedShell = true
+}) {
     const [blurSensitive, setBlurSensitive] = useState(() => {
         const val = Storage.load('blur_sensitive_media', true);
         return val !== false;
@@ -394,22 +442,27 @@ export default function ListFeedView({ posts, state, updatePost, startRank = 1, 
     if (!posts || posts.length === 0) return null;
 
     return (
-        <ListContainer>
+        <ListContainer $bleedShell={bleedShell}>
             {showSortTabs && (
-                <SortTabs role="tablist" aria-label="Sort posts">
-                    {SORT_TABS.map((tab) => (
-                        <SortTab
-                            key={tab}
-                            type="button"
-                            $active={tab === sortMode}
-                            onClick={() => onSortChange(tab)}
-                            role="tab"
-                            aria-selected={tab === sortMode}
+                <FeedToolbar aria-label="Feed navigation and sort">
+                    <FeedNavGroup>
+                        <FeedNavTab as={Link} to="/home" $active={feedNavTopic === 'home'}>
+                            home
+                        </FeedNavTab>
+                        <FeedNavTab as={Link} to="/following" $active={feedNavTopic === 'following'}>
+                            following
+                        </FeedNavTab>
+                        <FeedToolbarSep aria-hidden="true">|</FeedToolbarSep>
+                        <FeedSortSelect
+                            value={sortMode}
+                            onChange={(e) => onSortChange(e.target.value)}
+                            aria-label="Sort posts"
                         >
-                            {tab}
-                        </SortTab>
-                    ))}
-                </SortTabs>
+                            <option value="best">best</option>
+                            <option value="new">new</option>
+                        </FeedSortSelect>
+                    </FeedNavGroup>
+                </FeedToolbar>
             )}
             {posts.map((post, i) => {
                 const saved = post && post.post_id
