@@ -118,6 +118,8 @@ export function useRewards() {
                     ...q,
                     progress: newQuests[i].progress,
                     completed: newQuests[i].completed,
+                    upvotes: newQuests[i].upvotes,
+                    downvotes: newQuests[i].downvotes,
                 }));
             });
 

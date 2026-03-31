@@ -8,33 +8,24 @@ import { useRewards } from '../../../logic/useQuests';
 import Api from '../../../utils/api';
 import Storage from '../../../utils/Storage';
 import { requireThemeColor } from '../../../utils/themeColor';
+import { OLDREDDIT_SHELL_INSET_X } from '../Layout';
 
-// Container styling matching invite codes card (blue/indigo theme)
+/** Flat feed strip — same surface and bleed as ListFeedView rows */
 const QuestCardContainer = styled.div`
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
-        : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
-    border: 2px solid ${({ theme }) => theme.name === 'light'
-        ? 'rgba(59, 130, 246, 0.5)'
-        : 'rgba(59, 130, 246, 0.5)'};
-    border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
-    padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
+    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    max-width: none;
+    box-sizing: border-box;
+    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
+    border: none;
+    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 0;
+    padding: ${({ $size }) => $size === 'compact' ? '0.35rem' : '0.45rem'} ${OLDREDDIT_SHELL_INSET_X};
     display: flex;
     flex-direction: column;
-    gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-    box-shadow: ${({ theme }) => theme.name === 'light'
-        ? '0 4px 12px rgba(59, 130, 246, 0.15)'
-        : '0 4px 12px rgba(59, 130, 246, 0.25)'};
-
-    @media (max-width: 1000px) {
-        border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
-        padding: ${({ $size }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 6px;
-        padding: 0.4rem 0.6rem;
-    }
+    gap: ${({ $size }) => $size === 'compact' ? '0.2rem' : '0.3rem'};
+    box-shadow: none;
 `;
 
 const QuestHeader = styled.div`
@@ -46,77 +37,41 @@ const QuestHeader = styled.div`
 `;
 
 const QuestTitle = styled.div`
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: lowercase;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    line-height: 1;
-
-    @media (max-width: 1000px) {
-        font-size: 0.6rem;
-    }
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    line-height: 1.2;
 `;
 
-const ResetTimer = styled.div`
-    font-size: 0.6rem;
+const ResetTimer = styled.span`
+    font-size: 0.65rem;
+    font-weight: 400;
+    text-transform: none;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.05)'
-        : 'rgba(255, 255, 255, 0.08)'};
-    padding: 0.15rem 0.35rem;
-    border-radius: 4px;
     font-variant-numeric: tabular-nums;
-
-    @media (max-width: 768px) {
-        font-size: 0.5rem;
-    }
 `;
 
 const QuestList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0;
 `;
 
 const QuestItem = styled.div`
     display: flex;
     align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    background: ${({ theme, $completed }) => {
-        if ($completed) {
-            return theme.name === 'light'
-                ? 'rgba(34, 197, 94, 0.1)'
-                : 'rgba(34, 197, 94, 0.12)';
-        }
-        return theme.name === 'light'
-            ? 'rgba(0, 0, 0, 0.03)'
-            : 'rgba(255, 255, 255, 0.04)';
-    }};
-    border-radius: 6px;
-    transition: background 0.2s ease;
+    gap: 0.35rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    background: transparent;
 
-    @media (max-width: 768px) {
-        padding: 0.35rem 0.4rem;
-        gap: 0.4rem;
-    }
-`;
-
-const QuestIcon = styled.div`
-    font-size: 0.9rem;
-    width: 1.4rem;
-    height: 1.4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-
-    @media (max-width: 768px) {
-        font-size: 0.75rem;
-        width: 1.2rem;
-        height: 1.2rem;
+    &:last-child {
+        border-bottom: none;
     }
 `;
 
@@ -126,24 +81,24 @@ const QuestDetails = styled.div`
 `;
 
 const QuestName = styled.div`
-    font-size: 0.65rem;
-    font-weight: 600;
+    font-size: 0.8rem;
+    font-weight: 400;
     color: ${({ theme, $completed }) => $completed
-        ? '#22c55e'
-        : requireThemeColor(theme, 'text')};
+        ? requireThemeColor(theme, 'subtleText')
+        : requireThemeColor(theme, 'link')};
+    text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 
     @media (max-width: 768px) {
-        font-size: 0.55rem;
         white-space: normal;
         overflow: visible;
     }
 `;
 
 const QuestDescription = styled.div`
-    font-size: 0.6rem;
+    font-size: 0.7rem;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     white-space: nowrap;
     overflow: hidden;
@@ -156,14 +111,18 @@ const QuestDescription = styled.div`
     }
 `;
 
-const QuestReward = styled.div`
-    font-size: 0.5rem;
-    color: #f59e0b;
-    font-weight: 600;
+const QuestReward = styled.span`
+    font-size: 0.65rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
+    font-weight: 400;
+`;
 
-    @media (max-width: 768px) {
-        font-size: 0.45rem;
-    }
+const FlashBadge = styled.span`
+    margin-left: 0.35rem;
+    font-size: 0.55rem;
+    font-weight: 700;
+    text-transform: lowercase;
+    color: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
 `;
 
 const QuestRequirements = styled.ul`
@@ -183,62 +142,33 @@ const QuestRequirements = styled.ul`
 `;
 
 const LoyaltyBonusText = styled.div`
-    font-size: 0.5rem;
-    color: #60a5fa;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
+    font-size: 0.65rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
     cursor: default;
-    transition: color 0.15s ease;
-    margin-top: 0.15rem;
+    margin-top: 0;
 
     &:hover {
-        color: #93c5fd;
-    }
-
-    @media (max-width: 768px) {
-        font-size: 0.45rem;
+        text-decoration: underline;
     }
 `;
 
 const ProgressContainer = styled.div`
-    width: 45px;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 0.15rem;
+    justify-content: flex-start;
     flex-shrink: 0;
-
-    @media (max-width: 768px) {
-        width: 40px;
-    }
-`;
-
-const ProgressBar = styled.div`
-    width: 100%;
-    height: 4px;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.1)'
-        : 'rgba(255, 255, 255, 0.1)'};
-    border-radius: 2px;
-    overflow: hidden;
-`;
-
-const ProgressFill = styled.div`
-    height: 100%;
-    width: ${props => Math.min(100, (props.$progress / props.$target) * 100)}%;
-    background: ${props => props.$completed ? '#22c55e' : '#60a5fa'};
-    border-radius: 2px;
-    transition: width 0.3s ease;
+    min-width: 2.75rem;
 `;
 
 const ProgressText = styled.div`
-    font-size: 0.5rem;
+    font-size: 0.7rem;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-variant-numeric: tabular-nums;
 `;
 
 const BalancedProgressText = styled.div`
-    font-size: 0.45rem;
+    font-size: 0.65rem;
     font-variant-numeric: tabular-nums;
     display: flex;
     flex-direction: column;
@@ -256,75 +186,51 @@ const BalancedProgressRow = styled.span`
     font-weight: ${({ $met }) => $met ? '600' : '400'};
 `;
 
-const CheckMark = styled.div`
-    width: 1.1rem;
-    height: 1.1rem;
-    background: #22c55e;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 0.55rem;
-    font-weight: bold;
+const CheckMark = styled.span`
     flex-shrink: 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'buttonSuccessBorder')};
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    padding-top: 0.1rem;
 `;
 
 const ClaimSection = styled.div`
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    padding-top: 0.4rem;
-    border-top: 1px solid ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.08)'
-        : 'rgba(255, 255, 255, 0.08)'};
-`;
-
-const pulseAnimation = keyframes`
-    0% { transform: scale(1); }
-    50% { transform: scale(1.02); }
-    100% { transform: scale(1); }
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
 `;
 
 const ClaimButton = styled.button`
-    padding: 0.3rem 0.6rem;
-    border: none;
-    border-radius: 6px;
-    font-size: 0.6rem;
-    font-weight: 600;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+    font-family: inherit;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
 
     ${props => props.$hasRewards ? css`
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        color: white;
-        animation: ${pulseAnimation} 2s infinite;
+        background: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
+        color: #fff;
+        border: 1px solid ${({ theme }) => requireThemeColor(theme, 'voteUpHover')};
 
-        &:hover {
-            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-            transform: translateY(-1px);
-        }
-
-        &:active {
-            transform: translateY(0);
+        &:hover:not(:disabled) {
+            background: ${({ theme }) => requireThemeColor(theme, 'voteUpHover')};
         }
     ` : css`
-        background: ${({ theme }) => theme.name === 'light'
-            ? 'rgba(0, 0, 0, 0.08)'
-            : 'rgba(255, 255, 255, 0.1)'};
+        background: ${({ theme }) => requireThemeColor(theme, 'panelAlt')};
         color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+        border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
         cursor: not-allowed;
     `}
 
     &:disabled {
         cursor: not-allowed;
-        animation: none;
-        opacity: 0.7;
-    }
-
-    @media (max-width: 768px) {
-        padding: 0.25rem 0.5rem;
-        font-size: 0.5rem;
+        opacity: 0.85;
     }
 `;
 
@@ -428,13 +334,11 @@ const ConfettiPiece = styled.div`
 `;
 
 const SuspendedBanner = styled.div`
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 6px;
-    padding: 0.4rem 0.6rem;
-    text-align: center;
-    color: #ef4444;
-    font-size: 0.6rem;
+    padding: 0.25rem 0;
+    text-align: left;
+    color: ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
+    font-size: 0.7rem;
+    line-height: 1.35;
 `;
 
 const EmptyState = styled.div`
@@ -459,24 +363,6 @@ function formatTime(seconds) {
         return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
     return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-/**
- * Get icon for quest action type
- */
-function getQuestIcon(actionType) {
-    const icons = {
-        'post': '📝',
-        'comment': '💬',
-        'vote': '👍',
-        'balanced_vote': '⚖️',
-        'upvotes_received': '⭐',
-        'comment_upvotes_received': '🌟',
-        'unique_topic_post': '🗺️',
-        'invite_recruit': '👥',
-        'claim_only': '🎁',
-    };
-    return icons[actionType] || '🎯';
 }
 
 /**
@@ -801,9 +687,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
+                        Daily Quests
                         {collapsed && (
-                            <span style={{ fontWeight: 'normal' }}>
+                            <span style={{ fontWeight: 'normal', textTransform: 'none' }}>
                                 {' '}— Loading...
                             </span>
                         )}
@@ -827,7 +713,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚫</span> Quests Suspended
+                        Quests suspended
                     </QuestTitle>
                     {onToggleCollapse && (
                         <CollapseButton onClick={onToggleCollapse}>
@@ -863,9 +749,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
+                        Daily Quests
                         {collapsed && (
-                            <span style={{ fontWeight: 'normal' }}>
+                            <span style={{ fontWeight: 'normal', textTransform: 'none' }}>
                                 {' '}— None available
                             </span>
                         )}
@@ -879,7 +765,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 {!collapsed && (
                     <EmptyState>
                         {questsError
-                            ? `⚠️ ${typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.'}`
+                            ? (typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.')
                             : 'No quests available yet. Check back soon!'}
                     </EmptyState>
                 )}
@@ -890,16 +776,15 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
     const flashTarget = flashQuest?.target || 0;
     const flashProgress = flashQuest ? Math.min(flashQuest.progress || 0, flashTarget) : 0;
-    const flashProgressTarget = flashTarget > 0 ? flashTarget : 1;
 
     return (
         <>
             <QuestCardContainer $size={size} role="region" aria-label="Daily Quests">
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
+                        Daily Quests
                         {collapsed && (
-                            <span style={{ fontWeight: 'normal' }}>
+                            <span style={{ fontWeight: 'normal', textTransform: 'none' }}>
                                 {' '}— {dailyQuests.filter(q => !q.completed).length} available
                             </span>
                         )}
@@ -925,7 +810,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             const targetDownvotes = quest.target_downvotes || 0;
                             const target = quest.target || 0;
                             const clampedProgress = Math.min(quest.progress || 0, target);
-                            const progressTarget = target > 0 ? target : 1;
                             const clampedUpvotes = Math.min(upvotes, targetUpvotes);
                             const clampedDownvotes = Math.min(downvotes, targetDownvotes);
                             if (
@@ -941,8 +825,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                 });
                             }
                             return (
-                                <QuestItem key={quest.id} $completed={quest.completed}>
-                                    <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
+                                <QuestItem key={quest.id}>
                                     <QuestDetails>
                                         <QuestName $completed={quest.completed}>
                                             {quest.title}
@@ -962,33 +845,24 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                     {quest.completed ? (
                                         <CheckMark aria-label="Completed">✓</CheckMark>
                                     ) : (
-                                        <>
-                                            <ProgressContainer>
-                                                <ProgressBar>
-                                                    <ProgressFill
-                                                        $progress={clampedProgress}
-                                                        $target={progressTarget}
-                                                        $completed={quest.completed}
-                                                    />
-                                                </ProgressBar>
-                                                {quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined ? (
-                                                    <BalancedProgressText
-                                                        title={`Need ${quest.target_upvotes} upvotes and ${quest.target_downvotes} downvotes`}
-                                                    >
-                                                        <BalancedProgressRow $met={upvotes >= targetUpvotes}>
-                                                            ↑{clampedUpvotes}/{quest.target_upvotes}
-                                                        </BalancedProgressRow>
-                                                        <BalancedProgressRow $met={downvotes >= targetDownvotes}>
-                                                            ↓{clampedDownvotes}/{quest.target_downvotes}
-                                                        </BalancedProgressRow>
-                                                    </BalancedProgressText>
-                                                ) : (
-                                                    <ProgressText>
-                                                        {clampedProgress}/{quest.target}
-                                                    </ProgressText>
-                                                )}
-                                            </ProgressContainer>
-                                        </>
+                                        <ProgressContainer>
+                                            {quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined ? (
+                                                <BalancedProgressText
+                                                    title={`Need ${quest.target_upvotes} upvotes and ${quest.target_downvotes} downvotes`}
+                                                >
+                                                    <BalancedProgressRow $met={upvotes >= targetUpvotes}>
+                                                        ↑{clampedUpvotes}/{quest.target_upvotes}
+                                                    </BalancedProgressRow>
+                                                    <BalancedProgressRow $met={downvotes >= targetDownvotes}>
+                                                        ↓{clampedDownvotes}/{quest.target_downvotes}
+                                                    </BalancedProgressRow>
+                                                </BalancedProgressText>
+                                            ) : (
+                                                <ProgressText>
+                                                    {clampedProgress}/{quest.target}
+                                                </ProgressText>
+                                            )}
+                                        </ProgressContainer>
                                     )}
                                 </QuestItem>
                             );
@@ -996,14 +870,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
                         {/* Flash quest if active */}
                         {flashQuest && flashQuest.seconds_remaining > 0 && (
-                            <QuestItem $completed={flashQuest.completed} style={{ borderLeft: '2px solid #f59e0b' }}>
-                                <QuestIcon>⚡</QuestIcon>
+                            <QuestItem>
                                 <QuestDetails>
                                     <QuestName $completed={flashQuest.completed}>
                                         {flashQuest.title}
-                                        <span style={{ color: '#f59e0b', fontSize: '0.5rem', marginLeft: '0.3rem' }}>
-                                            FLASH
-                                        </span>
+                                        <FlashBadge>flash</FlashBadge>
                                         <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
                                             {getQuestRewardDisplay(flashQuest.rewards, rewardMultiplier)}
                                         </QuestReward>
@@ -1023,13 +894,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                     <CheckMark aria-label="Completed">✓</CheckMark>
                                 ) : (
                                     <ProgressContainer>
-                                        <ProgressBar>
-                                            <ProgressFill
-                                                $progress={flashProgress}
-                                                $target={flashProgressTarget}
-                                                $completed={flashQuest.completed}
-                                            />
-                                        </ProgressBar>
                                         <ProgressText>
                                             {flashProgress}/{flashQuest.target}
                                         </ProgressText>
@@ -1046,7 +910,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             <LoyaltyBonusText
                                 as="div"
                                 title="Loyalty multiplier increases from 1.0x to 5.0x over your first 50 completed quests"
-                                style={{ marginTop: 0, fontSize: '0.55rem', fontWeight: 600 }}
+                                style={{ marginTop: 0, fontWeight: 600 }}
                             >
                                 {rewardMultiplier.toFixed(2)}x loyalty multiplier
                             </LoyaltyBonusText>
