@@ -14,6 +14,7 @@ Endpoints:
 - GET /api/get_comments: Root post and nested comments tree.
 """
 
+import bisect
 import json
 import logging
 import os
@@ -8226,8 +8227,8 @@ def referrals_summary():
         with connect_backend_db() as bconn:
             bcur = bconn.cursor()
             bcur.execute(
-                "SELECT COUNT(*) FROM referral_links WHERE LOWER(referrer_address) = %s",
-                (address,),
+                "SELECT COUNT(*) FROM referral_links WHERE LOWER(referrer_address) = %s AND referred_at <= %s",
+                (address, week_end),
             )
             total = int(bcur.fetchone()[0] or 0)
 
@@ -8235,11 +8236,11 @@ def referrals_summary():
                 """
                 SELECT user_address, referred_at
                 FROM referral_links
-                WHERE LOWER(referrer_address) = %s
+                WHERE LOWER(referrer_address) = %s AND referred_at <= %s
                 ORDER BY referred_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                (address, limit, offset),
+                (address, week_end, limit, offset),
             )
             page_referrals = bcur.fetchall()
 
@@ -8249,7 +8250,23 @@ def referrals_summary():
             )
             all_referrals = bcur.fetchall()
 
-        all_addrs = [r[0] for r in all_referrals]
+        referred_at_by_owner = {}
+        missing_referred = []
+        for addr, referred_at in all_referrals:
+            if not isinstance(referred_at, (int, float)) or referred_at <= 0:
+                missing_referred.append(addr)
+                continue
+            referred_at_by_owner[addr] = int(referred_at)
+        if missing_referred:
+            log_event(
+                rid,
+                "referrals.summary.missing_referred_at",
+                address=address,
+                missing_count=len(missing_referred),
+            )
+            return jsonify({"error": "referral data missing referred_at"}), 500
+
+        all_addrs = list(referred_at_by_owner.keys())
         page_addrs = [r[0] for r in page_referrals]
         referred_at_map = {r[0]: r[1] for r in page_referrals}
 
@@ -8273,16 +8290,8 @@ def referrals_summary():
                 }
             )
 
-        referred_ts = [r[1] for r in all_referrals if isinstance(r[1], (int, float)) and r[1] > 0]
-        if not referred_ts:
-            log_event(
-                rid,
-                "referrals.summary.missing_referred_at",
-                address=address,
-                week=week_str,
-            )
-            return jsonify({"error": "referral data missing referred_at"}), 500
-        earliest_referred = int(min(referred_ts))
+        referred_ts = sorted(referred_at_by_owner.values())
+        earliest_referred = int(referred_ts[0])
 
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
@@ -8342,7 +8351,17 @@ def referrals_summary():
             )
             weekly_user_counts: dict[str, dict[str, int]] = {}
             weekly_totals: dict[str, dict[str, int]] = {}
+            week_bounds_cache: dict[str, int] = {}
             for wk, owner, post_cnt, comment_cnt in cur.fetchall():
+                referred_at = referred_at_by_owner.get(owner)
+                if not referred_at:
+                    continue
+                if wk not in week_bounds_cache:
+                    _, wk_end = _iso_week_bounds(wk)
+                    week_bounds_cache[wk] = wk_end
+                wk_end = week_bounds_cache[wk]
+                if wk_end < referred_at:
+                    continue
                 posts = int(post_cnt or 0)
                 comments = int(comment_cnt or 0)
                 total_actions = posts + comments
@@ -8394,6 +8413,7 @@ def referrals_summary():
             totals = weekly_totals.get(wk_label, {"posts": 0, "comments": 0, "total_actions": 0})
             wk_start = int(cursor_monday.timestamp())
             wk_end = int((cursor_monday + timedelta(days=6, hours=23, minutes=59, seconds=59)).timestamp())
+            total_referrals = bisect.bisect_right(referred_ts, wk_end)
             active_history.append(
                 {
                     "week": wk_label,
@@ -8403,7 +8423,7 @@ def referrals_summary():
                     "posts": totals["posts"],
                     "comments": totals["comments"],
                     "total_actions": totals["total_actions"],
-                    "total_referrals": len(all_addrs),
+                    "total_referrals": total_referrals,
                 }
             )
             cursor_monday += timedelta(weeks=1)

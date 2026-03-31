@@ -3,9 +3,10 @@ import styled from "styled-components";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
+import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody } from "../Layout";
-import { useReferrals } from "../../../logic/useReferrals";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../Layout";
+import { useReferrals, compareISOWeeks, shiftISOWeek, formatWeekRange } from "../../../logic/useReferrals";
 
 const ShareBox = styled.div`
     background: ${({ theme }) => theme.layout.containerBg};
@@ -30,17 +31,42 @@ const ShareUrl = styled.input`
     font-size: ${({ theme }) => theme.layout.inputSize};
     font-family: monospace;
 `;
-const CopyBtn = styled.button`
-    background: ${({ $copied, theme }) => $copied ? '#4caf50' : theme.colors.accent};
-    color: white;
-    border: none;
+const ControlsBox = styled.div`
+    background-color: ${({ theme }) => theme.layout.containerBg};
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPaddingCompact};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+`;
+const ControlsRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+`;
+const WeekSelect = styled.select`
+    background: ${({ theme }) => theme.layout.containerBg};
+    color: ${({ theme }) => theme.colors.text};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: ${({ theme }) => theme.layout.inputRadius};
-    padding: ${({ theme }) => theme.layout.buttonPadding};
-    font-size: ${({ theme }) => theme.layout.buttonSize};
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.2s;
-    &:hover { opacity: 0.9; }
+    padding: ${({ theme }) => theme.layout.inputPadding};
+    font-size: ${({ theme }) => theme.layout.inputSize};
+    font-family: inherit;
+    min-width: 12rem;
+`;
+const ControlsMeta = styled.div`
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+`;
+const MutedNote = styled.span`
+    font-size: ${({ theme }) => theme.layout.tinySize};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 const Table = styled.table`
     width: 100%;
@@ -101,32 +127,6 @@ const SummaryLabel = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
     margin-top: 0.15rem;
 `;
-const WeekPickerRow = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: ${({ theme }) => theme.layout.containerPadding};
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    flex-wrap: wrap;
-`;
-const WeekInput = styled.input`
-    background: ${({ theme }) => theme.layout.containerBg};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: ${({ theme }) => theme.layout.inputRadius};
-    padding: ${({ theme }) => theme.layout.inputPadding};
-    font-size: ${({ theme }) => theme.layout.inputSize};
-    font-family: inherit;
-    cursor: pointer;
-    &::-webkit-calendar-picker-indicator {
-        filter: invert(0.7);
-        cursor: pointer;
-    }
-`;
-const WeekHint = styled.span`
-    font-size: ${({ theme }) => theme.layout.tinySize};
-    color: ${({ theme }) => theme.colors.subtleText};
-`;
 const ActiveInfo = styled.div`
     font-size: ${({ theme }) => theme.layout.tinySize};
     color: ${({ theme }) => theme.colors.subtleText};
@@ -155,7 +155,7 @@ function ActiveChart({ history }) {
     if (!history || history.length < 2) {
         return <ChartWrapper>
             <ChartContainer>
-                <WeekHint>(chart available after more data is collected)</WeekHint>
+                <MutedNote>(chart available after more data is collected)</MutedNote>
             </ChartContainer>
         </ChartWrapper>;
     }
@@ -207,6 +207,25 @@ function ReferralsView({ state }) {
         handleLoadMore,
         handleCopy,
     } = useReferrals({ state });
+    const history = Array.isArray(data?.active_history) ? data.active_history : [];
+    const selectedWeek = history.find(h => h.week === week);
+    const weekRange = selectedWeek ? formatWeekRange(selectedWeek.week_start, selectedWeek.week_end) : '';
+    const weekOptions = history.length ? [...history].reverse().map(item => ({
+        value: item.week,
+        range: formatWeekRange(item.week_start, item.week_end),
+    })) : [{ value: week, range: '' }];
+    const minWeek = history[0]?.week;
+    const maxWeek = history[history.length - 1]?.week;
+    const canPrev = minWeek ? compareISOWeeks(week, minWeek) > 0 : true;
+    const canNext = maxWeek ? compareISOWeeks(week, maxWeek) < 0 : true;
+    const handlePrevWeek = () => {
+        const nextWeek = shiftISOWeek(week, -1);
+        if (nextWeek) setWeek(nextWeek);
+    };
+    const handleNextWeek = () => {
+        const nextWeek = shiftISOWeek(week, 1);
+        if (nextWeek) setWeek(nextWeek);
+    };
 
     return <ContentGrid>
         <Helmet><title>Referrals | Mirage</title></Helmet>
@@ -216,16 +235,36 @@ function ReferralsView({ state }) {
             <ModernPostFeed>
                 <MobileHeader />
                 <TabbedContainer>
-                    <WeekPickerRow>
-                        <WeekInput type="week" value={week} onChange={e => setWeek(e.target.value)} />
-                        <WeekHint>UTC weeks (Mon–Sun)</WeekHint>
-                    </WeekPickerRow>
+                    <TabsRow>
+                        <ClickableTab $active>Referrals</ClickableTab>
+                    </TabsRow>
                     <ContainerBody>
+                        <ControlsBox>
+                            <ControlsRow>
+                                <Button variant="ghost" size="sm" onClick={handlePrevWeek} disabled={!canPrev}>
+                                    Prev
+                                </Button>
+                                <WeekSelect value={week} onChange={e => setWeek(e.target.value)}>
+                                    {weekOptions.map(option => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.range ? `${option.value} (${option.range})` : option.value}
+                                        </option>
+                                    ))}
+                                </WeekSelect>
+                                <Button variant="ghost" size="sm" onClick={handleNextWeek} disabled={!canNext}>
+                                    Next
+                                </Button>
+                            </ControlsRow>
+                            <ControlsMeta>
+                                {weekRange && <MutedNote>{weekRange}</MutedNote>}
+                                <MutedNote>UTC weeks (Mon–Sun)</MutedNote>
+                            </ControlsMeta>
+                        </ControlsBox>
                         {username && shareUrl && <ShareBox>
                             <ShareUrl value={shareUrl} readOnly onClick={e => e.target.select()} />
-                            <CopyBtn $copied={copied} onClick={handleCopy}>
+                            <Button variant="ghost" size="sm" copied={copied} onClick={handleCopy}>
                                 {copied ? "Copied!" : "Copy Link"}
-                            </CopyBtn>
+                            </Button>
                         </ShareBox>}
 
                         {!publicKey ? <EmptyState>Sign in to view your referrals.</EmptyState> : loading ? <EmptyState>Loading...</EmptyState> : error ? <EmptyState>{error}</EmptyState> : referrals.length === 0 && !data?.total ? <EmptyState>No referrals yet. Share your link above to get started.</EmptyState> : <>
@@ -273,9 +312,9 @@ function ReferralsView({ state }) {
                                 </tbody>
                             </Table>
                             {hasMore && <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.75rem' }}>
-                                <CopyBtn onClick={handleLoadMore} $copied={loadingMore}>
+                                <Button variant="ghost" size="sm" onClick={handleLoadMore} loading={loadingMore}>
                                     {loadingMore ? "Loading..." : "Load more"}
-                                </CopyBtn>
+                                </Button>
                             </div>}
                         </>}
                     </ContainerBody>

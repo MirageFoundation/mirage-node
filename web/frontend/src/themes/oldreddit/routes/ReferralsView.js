@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Link } from "react-router-dom";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed } from "../Layout";
-import { useReferrals } from "../../../logic/useReferrals";
+import { useReferrals, compareISOWeeks, shiftISOWeek, formatWeekRange } from "../../../logic/useReferrals";
 
 const ShareBox = styled.div`
     background: ${({ theme }) => theme.layout.containerBg};
@@ -102,15 +102,24 @@ const SummaryLabel = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
     margin-top: 0.15rem;
 `;
-const WeekPickerRow = styled.div`
+const ControlsBox = styled.div`
+    background-color: ${({ theme }) => theme.layout.containerBg};
+    border: ${({ theme }) => theme.layout.containerBorder};
+    border-bottom: ${({ theme }) => theme.layout.containerBorderBottom};
+    border-radius: ${({ theme }) => theme.layout.containerRadius};
+    padding: ${({ theme }) => theme.layout.containerPaddingCompact};
+    margin-bottom: ${({ theme }) => theme.layout.sectionMarginBottom};
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+`;
+const ControlsRow = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: ${({ theme }) => theme.layout.containerPadding};
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    gap: 0.5rem;
     flex-wrap: wrap;
 `;
-const WeekInput = styled.input`
+const WeekSelect = styled.select`
     background: ${({ theme }) => theme.layout.containerBg};
     color: ${({ theme }) => theme.colors.text};
     border: 1px solid ${({ theme }) => theme.colors.border};
@@ -118,13 +127,15 @@ const WeekInput = styled.input`
     padding: ${({ theme }) => theme.layout.inputPadding};
     font-size: ${({ theme }) => theme.layout.inputSize};
     font-family: inherit;
-    cursor: pointer;
-    &::-webkit-calendar-picker-indicator {
-        filter: invert(0.7);
-        cursor: pointer;
-    }
+    min-width: 12rem;
 `;
-const WeekHint = styled.span`
+const ControlsMeta = styled.div`
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+`;
+const MutedNote = styled.span`
     font-size: ${({ theme }) => theme.layout.tinySize};
     color: ${({ theme }) => theme.colors.subtleText};
 `;
@@ -156,7 +167,7 @@ function ActiveChart({ history }) {
     if (!history || history.length < 2) {
         return <ChartWrapper>
             <ChartContainer>
-                <WeekHint>(chart available after more data is collected)</WeekHint>
+                <MutedNote>(chart available after more data is collected)</MutedNote>
             </ChartContainer>
         </ChartWrapper>;
     }
@@ -207,6 +218,25 @@ function ReferralsView({ state }) {
         handleLoadMore,
         handleCopy,
     } = useReferrals({ state });
+    const history = Array.isArray(data?.active_history) ? data.active_history : [];
+    const selectedWeek = history.find(h => h.week === week);
+    const weekRange = selectedWeek ? formatWeekRange(selectedWeek.week_start, selectedWeek.week_end) : '';
+    const weekOptions = history.length ? [...history].reverse().map(item => ({
+        value: item.week,
+        range: formatWeekRange(item.week_start, item.week_end),
+    })) : [{ value: week, range: '' }];
+    const minWeek = history[0]?.week;
+    const maxWeek = history[history.length - 1]?.week;
+    const canPrev = minWeek ? compareISOWeeks(week, minWeek) > 0 : true;
+    const canNext = maxWeek ? compareISOWeeks(week, maxWeek) < 0 : true;
+    const handlePrevWeek = () => {
+        const nextWeek = shiftISOWeek(week, -1);
+        if (nextWeek) setWeek(nextWeek);
+    };
+    const handleNextWeek = () => {
+        const nextWeek = shiftISOWeek(week, 1);
+        if (nextWeek) setWeek(nextWeek);
+    };
 
     return <ContentGrid>
         <Helmet><title>Referrals | Mirage</title></Helmet>
@@ -214,10 +244,27 @@ function ReferralsView({ state }) {
             <ModernPostFeed>
                 <MobileHeader />
                 <OldRedditContentBleed>
-                    <WeekPickerRow>
-                        <WeekInput type="week" value={week} onChange={e => setWeek(e.target.value)} />
-                        <WeekHint>UTC weeks (Mon–Sun)</WeekHint>
-                    </WeekPickerRow>
+                    <ControlsBox>
+                        <ControlsRow>
+                            <CopyBtn onClick={handlePrevWeek} disabled={!canPrev}>
+                                Prev
+                            </CopyBtn>
+                            <WeekSelect value={week} onChange={e => setWeek(e.target.value)}>
+                                {weekOptions.map(option => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.range ? `${option.value} (${option.range})` : option.value}
+                                    </option>
+                                ))}
+                            </WeekSelect>
+                            <CopyBtn onClick={handleNextWeek} disabled={!canNext}>
+                                Next
+                            </CopyBtn>
+                        </ControlsRow>
+                        <ControlsMeta>
+                            {weekRange && <MutedNote>{weekRange}</MutedNote>}
+                            <MutedNote>UTC weeks (Mon–Sun)</MutedNote>
+                        </ControlsMeta>
+                    </ControlsBox>
                 </OldRedditContentBleed>
                 <ReferralsTabbedContainer>
                     <ContainerBody>

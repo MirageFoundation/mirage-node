@@ -5,14 +5,59 @@ import Api from "../utils/api";
 
 export const PAGE_SIZE = 50;
 
+export function getISOWeekFromDate(date) {
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((utc - yearStart) / 86400000 + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
 export function getCurrentISOWeek() {
-    const now = new Date();
-    const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const dayNum = utc.getUTCDay() || 7;
-    utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil(((utc - yearStart) / 86400000 + 1) / 7);
-    return `${utc.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+  return getISOWeekFromDate(new Date());
+}
+
+export function parseISOWeek(weekStr) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(String(weekStr || '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  if (!year || !week) return null;
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const week1Monday = new Date(jan4);
+  week1Monday.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+  const monday = new Date(week1Monday);
+  monday.setUTCDate(week1Monday.getUTCDate() + (week - 1) * 7);
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday;
+}
+
+export function shiftISOWeek(weekStr, deltaWeeks) {
+  const start = parseISOWeek(weekStr);
+  if (!start || !Number.isFinite(deltaWeeks)) return null;
+  const next = new Date(start);
+  next.setUTCDate(next.getUTCDate() + deltaWeeks * 7);
+  return getISOWeekFromDate(next);
+}
+
+export function compareISOWeeks(a, b) {
+  const dateA = parseISOWeek(a);
+  const dateB = parseISOWeek(b);
+  if (!dateA || !dateB) return 0;
+  if (dateA.getTime() === dateB.getTime()) return 0;
+  return dateA.getTime() > dateB.getTime() ? 1 : -1;
+}
+
+export function formatWeekRange(weekStartTs, weekEndTs) {
+  const start = new Date(Number(weekStartTs) * 1000);
+  const end = new Date(Number(weekEndTs) * 1000);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return '';
+  const opts = { month: 'short', day: '2-digit', timeZone: 'UTC' };
+  const startLabel = start.toLocaleDateString('en-US', opts);
+  const endLabel = end.toLocaleDateString('en-US', opts);
+  return `${startLabel} - ${endLabel}`;
 }
 
 export function useReferrals({ state }) {
@@ -117,17 +162,12 @@ export function useReferrals({ state }) {
         } catch (_) { }
     };
 
-    const setWeekSafe = useCallback((nextWeek) => {
-        const cleaned = typeof nextWeek === 'string' ? nextWeek.trim() : '';
-        setWeek(cleaned || getCurrentISOWeek());
-    }, []);
-
     return {
         location,
         publicKey,
         username,
         week,
-        setWeek: setWeekSafe,
+    setWeek,
         data,
         referrals,
         hasMore,
