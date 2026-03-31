@@ -273,7 +273,6 @@ export default function OldRedditShell({ children, state }) {
     const isFeeds = isHome || path === '/following';
     const isTopics = path === '/topics';
     const isSettings = path === '/settings';
-    const isSubmit = path === '/create_post';
     const isInbox = path === '/inbox';
     const isLoggedIn = !!(state && state.publicKey);
     const [inboxCount, setInboxCount] = useState(() => {
@@ -308,7 +307,6 @@ export default function OldRedditShell({ children, state }) {
                     <NavLink to="/topics" $active={isTopics}>topics</NavLink>
                     {isLoggedIn && (
                         <>
-                            <NavLink to="/create_post" $active={isSubmit}>create</NavLink>
                             <InboxNavLink to="/inbox" $active={isInbox} aria-label={inboxCount > 0 ? `Inbox - ${inboxCount} unread` : 'Inbox'}>
                                 <InboxIcon viewBox="0 0 24 24" aria-hidden="true">
                                     {isInbox

@@ -7,10 +7,11 @@ import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
 import { OLDREDDIT_SHELL_INSET_X, OldRedditTab } from './Layout';
 
-/** Home/following: negate shell padding. Profile posts tabs: parent has no horizontal padding — do not bleed or borders stay inset. */
+/** Home/following: negate shell padding. Profile posts tabs: parent has no horizontal padding — do not bleed or borders stay inset.
+ *  Uses display:block (not flex) so float:right sidebar works correctly. */
 const ListContainer = styled.div`
-    display: flex;
-    flex-direction: column;
+    display: block;
+    overflow: hidden;
     background: ${({ theme }) => theme.colors.panel};
     max-width: none;
     box-sizing: border-box;
@@ -32,12 +33,24 @@ const Row = styled.div`
     display: flex;
     align-items: center;
     padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    position: relative;
     gap: 0.4rem;
     min-height: 52px;
 
-    &:last-child {
-        border-bottom: none;
+    /* Pseudo-element border extends full container width, passing under the float sidebar */
+    &::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: -400px;
+        bottom: 0;
+        height: 1px;
+        background: ${({ theme }) => theme.colors.border};
+        pointer-events: none;
+    }
+
+    &:last-child::after {
+        display: none;
     }
 
     &:hover {
@@ -371,7 +384,8 @@ export default function ListFeedView({
     onSortChange,
     showSortTabs,
     feedNavTopic,
-    bleedShell = true
+    bleedShell = true,
+    sidebar,
 }) {
     const [blurSensitive, setBlurSensitive] = useState(() => {
         const val = Storage.load('blur_sensitive_media', true);
@@ -464,6 +478,7 @@ export default function ListFeedView({
                     </FeedNavGroup>
                 </FeedToolbar>
             )}
+            {sidebar}
             {posts.map((post, i) => {
                 const saved = post && post.post_id
                     ? savedSet.has(String(post.post_id).trim().toLowerCase())

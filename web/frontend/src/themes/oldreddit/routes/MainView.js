@@ -884,6 +884,53 @@ const MainFeedPanel = styled.div`
     background: ${({ theme }) => theme.colors.panel};
 `;
 
+/** Sidebar floats right inside the ListContainer, below the toolbar.
+ *  Feed row borders extend full-width underneath it. */
+const SidebarFloat = styled.aside`
+    float: right;
+    width: 18rem;
+    margin: 0.35rem ${OLDREDDIT_SHELL_INSET_X} 0.5rem 0.75rem;
+    position: relative;
+    z-index: 5;
+
+    @media (max-width: 1000px) {
+        display: none;
+    }
+`;
+
+/** Single bordered sidebar widget containing quests + submit */
+const SidebarBox = styled.div`
+    box-sizing: border-box;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    display: flex;
+    flex-direction: column;
+`;
+
+/** Sidebar action link — same visual weight as the quest header strip */
+const SidebarAction = styled(Link)`
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.6rem;
+    font-weight: 700;
+    font-family: inherit;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    text-align: left;
+    color: ${({ theme }) => theme.colors.text};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: none;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    cursor: pointer;
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.link};
+    }
+`;
+
 const LoadingMoreIndicator = styled.div`
     width: 100%;
     margin-top: 0.5rem;
@@ -1402,9 +1449,6 @@ const MainView = ({
                             </InviteBannerContentWrapper>}
                         </InviteOnlyBanner>}
 
-                        {/* Quest hero card - only when quests are enabled on this node */}
-                        {isLoggedIn && questsEnabled && (urlTopic === 'home' || urlTopic === 'following') && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} size={cardSize} />}
-
                         {/* Android app banner - shown once for Android users until dismissed */}
                         {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
                             <AndroidHeroTitle>
@@ -1563,7 +1607,19 @@ const MainView = ({
                                 const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
                                 return hasValidTitle && hasValidTopic && !p.deleted;
                             });
-                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} />;
+                            const isTopicFeed = urlTopic && urlTopic !== 'home' && urlTopic !== 'following';
+                            const createPostLink = isTopicFeed
+                                ? `/create_post?topic=${encodeURIComponent(urlTopic)}`
+                                : '/create_post';
+                            const sidebarContent = (
+                                <SidebarFloat>
+                                    <SidebarBox>
+                                        {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
+                                        <SidebarAction to={createPostLink}>Create a new post</SidebarAction>
+                                    </SidebarBox>
+                                </SidebarFloat>
+                            );
+                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} sidebar={sidebarContent} />;
                         })()}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
