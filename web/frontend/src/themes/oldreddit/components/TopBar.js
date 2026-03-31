@@ -96,12 +96,6 @@ const TabletNavItem = styled(Link)`
     }
 `;
 
-const CreateButtonHideMobile = styled.div`
-    @media (max-width: 600px) {
-        display: none;
-    }
-`;
-
 const InboxLink = styled.a`
     display: inline-flex;
     align-items: center;
@@ -378,16 +372,6 @@ function TopBar({ state }) {
         return () => { mountedRef.current = false; };
     }, []);
 
-    const currentTopic = React.useMemo(() => {
-        try {
-            const m = pathname.match(/^\/t\/([^/]+)/);
-            const t = m && m[1] ? decodeURIComponent(m[1]) : 'all';
-            return t || 'all';
-        } catch (_) {
-            return 'all';
-        }
-    }, [pathname]);
-
     // Track viewport changes to toggle mobile state
     useEffect(() => {
         const updateIsMobile = () => {
@@ -501,17 +485,6 @@ function TopBar({ state }) {
                 )}
                 {hasPublicKey && (
                     <UserControls>
-                        <CreateButtonHideMobile>
-                            <Button
-                                to={currentTopic && currentTopic !== 'all'
-                                    ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
-                                    : "/create_post"}
-                                variant="primary"
-                                size="pill"
-                            >
-                                + Create
-                            </Button>
-                        </CreateButtonHideMobile>
                         <InboxLink
                             href="/inbox"
                             $hasUnread={inboxCount > 0}

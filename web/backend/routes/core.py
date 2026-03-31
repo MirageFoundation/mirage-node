@@ -597,6 +597,28 @@ def _get_post_owner(txhash: str) -> str | None:
         return None
 
 
+def _get_post_quest_info(txhash: str) -> dict | None:
+    """Return quest-relevant info (owner, topic, root_post_id) for a post, or None on error."""
+    try:
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT owner, COALESCE(root_topic, topic, ''), COALESCE(root_post_id, txhash) "
+                "FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1",
+                (txhash,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "owner": (row[0] or "").strip().lower(),
+                "topic": (row[1] or "").strip().lower(),
+                "root_post_id": (row[2] or "").strip().lower(),
+            }
+    except Exception:
+        return None
+
+
 def _is_hex64(s: str) -> bool:
     import re as _re
 
@@ -3787,14 +3809,17 @@ def core_post():
 
         now_ts = int(time.time())
         quest_action = "comment" if target else "post"
-        _track_quest_progress(
-            user_addr,
-            quest_action,
-            now_ts,
+        comment_quest_kwargs = dict(
             topic=topic,
             target_topic=topic,
             content_length=len(content),
         )
+        if target:
+            parent_info = _get_post_quest_info(target)
+            if parent_info:
+                comment_quest_kwargs["root_post_id"] = parent_info["root_post_id"]
+                comment_quest_kwargs["target_owner"] = parent_info["owner"]
+        _track_quest_progress(user_addr, quest_action, now_ts, **comment_quest_kwargs)
         if not target and topic:
             _track_quest_progress(
                 user_addr,
@@ -4037,22 +4062,17 @@ def core_vote():
             pass
 
         now_ts = int(time.time())
-        _track_quest_progress(
-            user_addr,
-            "vote",
-            now_ts,
+        post_info = _get_post_quest_info(target)
+        vote_quest_kwargs = dict(
             target=target,
             vote_direction=int(direction),
             vote_is_change=False,
         )
-        _track_quest_progress(
-            user_addr,
-            "balanced_vote",
-            now_ts,
-            target=target,
-            vote_direction=int(direction),
-            vote_is_change=False,
-        )
+        if post_info:
+            vote_quest_kwargs["target_topic"] = post_info["topic"]
+            vote_quest_kwargs["target_owner"] = post_info["owner"]
+        _track_quest_progress(user_addr, "vote", now_ts, **vote_quest_kwargs)
+        _track_quest_progress(user_addr, "balanced_vote", now_ts, **vote_quest_kwargs)
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:

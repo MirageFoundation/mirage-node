@@ -2,157 +2,181 @@ import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
-export const PERIODS = [{
-  key: "7d",
-  label: "Last 7 Days"
-}, {
-  key: "30d",
-  label: "Last 30 Days"
-}, {
-  key: "month",
-  label: "This Month"
-}, {
-  key: "prev_month",
-  label: "Last Month"
-}];
+
 export const PAGE_SIZE = 50;
-export function getMonthStr(offset = 0) {
-  const d = new Date();
-  d.setDate(1);
-  d.setMonth(d.getMonth() + offset);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+export function getISOWeekFromDate(date) {
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((utc - yearStart) / 86400000 + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
-export function useReferrals({
-  state
-}) {
-  const location = useLocation();
-  const publicKey = state && state.publicKey ? state.publicKey : Storage.load("publicKey", "");
-  const username = state && state.username ? state.username : Storage.load("username", "");
-  const precheckEnabled = Storage.load('referral_precheck_enabled', false) === true;
-  const [period, setPeriod] = useState("7d");
-  const [data, setData] = useState(null);
-  const [referrals, setReferrals] = useState([]);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [inviteCodes, setInviteCodes] = useState([]);
-  useEffect(() => {
-    if (!publicKey) return;
-    let cancelled = false;
-    Api.get('get_invite_codes', {
-      address: publicKey
-    }).then(resp => {
-      if (cancelled) return;
-      if (resp && Array.isArray(resp.codes)) setInviteCodes(resp.codes);
-    }).catch(() => {});
-    return () => {
-      cancelled = true;
+
+export function getCurrentISOWeek() {
+  return getISOWeekFromDate(new Date());
+}
+
+export function parseISOWeek(weekStr) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(String(weekStr || '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  if (!year || !week) return null;
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const week1Monday = new Date(jan4);
+  week1Monday.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+  const monday = new Date(week1Monday);
+  monday.setUTCDate(week1Monday.getUTCDate() + (week - 1) * 7);
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday;
+}
+
+export function shiftISOWeek(weekStr, deltaWeeks) {
+  const start = parseISOWeek(weekStr);
+  if (!start || !Number.isFinite(deltaWeeks)) return null;
+  const next = new Date(start);
+  next.setUTCDate(next.getUTCDate() + deltaWeeks * 7);
+  return getISOWeekFromDate(next);
+}
+
+export function compareISOWeeks(a, b) {
+  const dateA = parseISOWeek(a);
+  const dateB = parseISOWeek(b);
+  if (!dateA || !dateB) return 0;
+  if (dateA.getTime() === dateB.getTime()) return 0;
+  return dateA.getTime() > dateB.getTime() ? 1 : -1;
+}
+
+export function formatWeekRange(weekStartTs, weekEndTs) {
+  const start = new Date(Number(weekStartTs) * 1000);
+  const end = new Date(Number(weekEndTs) * 1000);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return '';
+  const opts = { month: 'short', day: '2-digit', timeZone: 'UTC' };
+  const startLabel = start.toLocaleDateString('en-US', opts);
+  const endLabel = end.toLocaleDateString('en-US', opts);
+  return `${startLabel} - ${endLabel}`;
+}
+
+export function useReferrals({ state }) {
+    const location = useLocation();
+    const publicKey = state && state.publicKey ? state.publicKey : Storage.load("publicKey", "");
+    const username = state && state.username ? state.username : Storage.load("username", "");
+    const precheckEnabled = Storage.load('referral_precheck_enabled', false) === true;
+
+    const [week, setWeek] = useState(() => getCurrentISOWeek());
+    const [data, setData] = useState(null);
+    const [referrals, setReferrals] = useState([]);
+    const [offset, setOffset] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [error, setError] = useState("");
+    const [copied, setCopied] = useState(false);
+    const [inviteCodes, setInviteCodes] = useState([]);
+
+    useEffect(() => {
+        if (!publicKey) return;
+        let cancelled = false;
+        Api.get('get_invite_codes', { address: publicKey }).then(resp => {
+            if (cancelled) return;
+            if (resp && Array.isArray(resp.codes)) setInviteCodes(resp.codes);
+        }).catch(() => { });
+        return () => { cancelled = true; };
+    }, [publicKey]);
+
+    const nextAvailableCode = inviteCodes.find(c => !c.is_used);
+
+    const getShareUrl = () => {
+        if (!username) return '';
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        if (precheckEnabled) {
+            return `${origin}/signup?ref=${encodeURIComponent(username)}`;
+        }
+        if (nextAvailableCode) {
+            return `${origin}/signup?invite=${nextAvailableCode.code}`;
+        }
+        return '';
     };
-  }, [publicKey]);
-  const nextAvailableCode = inviteCodes.find(c => !c.is_used);
-  const getShareUrl = () => {
-    if (!username) return '';
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    if (precheckEnabled) {
-      return `${origin}/signup?ref=${encodeURIComponent(username)}`;
-    }
-    if (nextAvailableCode) {
-      return `${origin}/signup?invite=${nextAvailableCode.code}`;
-    }
-    return '';
-  };
-  const shareUrl = getShareUrl();
-  const fetchSummary = useCallback(async ({
-    append = false,
-    offset: offsetParam
-  } = {}) => {
-    if (!publicKey) {
-      setLoading(false);
-      setLoadingMore(false);
-      setData(null);
-      setReferrals([]);
-      setHasMore(false);
-      setOffset(0);
-      return;
-    }
-    const baseOffset = Number.isFinite(offsetParam) ? offsetParam : 0;
-    if (append) {
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-    }
-    setError("");
-    try {
-      const params = {
-        address: publicKey,
-        limit: PAGE_SIZE,
-        offset: baseOffset
-      };
-      if (period === "month") {
-        params.period = "month";
-        params.month = getMonthStr(0);
-      } else if (period === "prev_month") {
-        params.period = "month";
-        params.month = getMonthStr(-1);
-      } else {
-        params.period = period;
-      }
-      const resp = await Api.get('referrals/summary', params);
-      const incoming = Array.isArray(resp?.referrals) ? resp.referrals : [];
-      setData(resp);
-      setReferrals(prev => append ? [...prev, ...incoming] : incoming);
-      setHasMore(!!resp?.has_more);
-      setOffset(baseOffset + incoming.length);
-    } catch (_) {
-      if (!append) {
-        setReferrals([]);
-        setData(null);
-      }
-      setHasMore(false);
-      setError(append ? "Failed to load more." : "Could not load referral data.");
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, [publicKey, period]);
-  useEffect(() => {
-    fetchSummary({
-      append: false,
-      offset: 0
-    });
-  }, [fetchSummary]);
-  const handleLoadMore = () => {
-    if (loadingMore || !hasMore) return;
-    fetchSummary({
-      append: true,
-      offset
-    });
-  };
-  const handleCopy = () => {
-    try {
-      navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (_) {}
-  };
-  return {
-    location,
-    publicKey,
-    username,
-    period,
-    setPeriod,
-    data,
-    referrals,
-    hasMore,
-    loading,
-    loadingMore,
-    error,
-    copied,
-    shareUrl,
-    handleLoadMore,
-    handleCopy
-  };
+    const shareUrl = getShareUrl();
+
+    const fetchSummary = useCallback(async ({ append = false, offset: offsetParam } = {}) => {
+        if (!publicKey) {
+            setLoading(false);
+            setLoadingMore(false);
+            setData(null);
+            setReferrals([]);
+            setHasMore(false);
+            setOffset(0);
+            return;
+        }
+        const baseOffset = Number.isFinite(offsetParam) ? offsetParam : 0;
+        if (append) {
+            setLoadingMore(true);
+        } else {
+            setLoading(true);
+        }
+        setError("");
+        try {
+            const params = {
+                address: publicKey,
+                week,
+                limit: PAGE_SIZE,
+                offset: baseOffset,
+            };
+            const resp = await Api.get('referrals/summary', params);
+            const incoming = Array.isArray(resp?.referrals) ? resp.referrals : [];
+            setData(resp);
+            setReferrals(prev => append ? [...prev, ...incoming] : incoming);
+            setHasMore(!!resp?.has_more);
+            setOffset(baseOffset + incoming.length);
+        } catch (_) {
+            if (!append) {
+                setReferrals([]);
+                setData(null);
+            }
+            setHasMore(false);
+            setError(append ? "Failed to load more." : "Could not load referral data.");
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    }, [publicKey, week]);
+
+    useEffect(() => {
+        fetchSummary({ append: false, offset: 0 });
+    }, [fetchSummary]);
+
+    const handleLoadMore = () => {
+        if (loadingMore || !hasMore) return;
+        fetchSummary({ append: true, offset });
+    };
+
+    const handleCopy = () => {
+        try {
+            navigator.clipboard.writeText(shareUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (_) { }
+    };
+
+    return {
+        location,
+        publicKey,
+        username,
+        week,
+    setWeek,
+        data,
+        referrals,
+        hasMore,
+        loading,
+        loadingMore,
+        error,
+        copied,
+        shareUrl,
+        handleLoadMore,
+        handleCopy,
+    };
 }

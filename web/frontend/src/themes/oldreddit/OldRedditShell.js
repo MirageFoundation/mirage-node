@@ -12,7 +12,7 @@ const Container = styled.div`
     padding: 0 ${OLDREDDIT_SHELL_INSET_X};
     padding-bottom: 3rem;
     @media (max-width: 600px) {
-        padding-bottom: 80px;
+        padding-bottom: 52px;
     }
 `;
 
@@ -25,6 +25,11 @@ const TopBar = styled.div`
     font-size: 0.7rem;
     gap: 0.75rem;
     flex-wrap: wrap;
+
+    @media (max-width: 600px) {
+        padding: 0.35rem 0.5rem 0.25rem;
+        gap: 0.5rem;
+    }
 `;
 
 const Brand = styled(Link)`
@@ -35,6 +40,10 @@ const Brand = styled(Link)`
     letter-spacing: 0.05em;
     line-height: 1;
     flex-shrink: 0;
+
+    @media (max-width: 600px) {
+        font-size: 1rem;
+    }
 `;
 
 const PageTitle = styled.span`
@@ -49,6 +58,10 @@ const Nav = styled.div`
     align-items: center;
     gap: 0.5rem;
     margin-left: auto;
+
+    @media (max-width: 600px) {
+        display: none;
+    }
 `;
 
 const NavLink = styled(Link)`
@@ -273,7 +286,6 @@ export default function OldRedditShell({ children, state }) {
     const isFeeds = isHome || path === '/following';
     const isTopics = path === '/topics';
     const isSettings = path === '/settings';
-    const isSubmit = path === '/create_post';
     const isInbox = path === '/inbox';
     const isLoggedIn = !!(state && state.publicKey);
     const [inboxCount, setInboxCount] = useState(() => {
@@ -308,7 +320,6 @@ export default function OldRedditShell({ children, state }) {
                     <NavLink to="/topics" $active={isTopics}>topics</NavLink>
                     {isLoggedIn && (
                         <>
-                            <NavLink to="/create_post" $active={isSubmit}>create</NavLink>
                             <InboxNavLink to="/inbox" $active={isInbox} aria-label={inboxCount > 0 ? `Inbox - ${inboxCount} unread` : 'Inbox'}>
                                 <InboxIcon viewBox="0 0 24 24" aria-hidden="true">
                                     {isInbox

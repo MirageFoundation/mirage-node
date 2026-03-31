@@ -144,7 +144,7 @@ export function useViewPost({
             return null;
         }
     }, [nodeConfigTick]);
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
     // reliably return to the originating feed route (including /t/:topic).

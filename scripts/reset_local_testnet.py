@@ -491,11 +491,15 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
                 ]
             )
         # Clear DOMAIN to prevent entrypoint from attempting HTTPS/LetsEncrypt setup locally
+        # Clear PERSISTENT_PEERS so the local testnet is fully isolated from the real network
         run(
             [
                 "bash",
                 "-lc",
-                "docker exec mirage sed -i 's/^DOMAIN=.*/DOMAIN=/' /root/.mirage/env/node.env 2>/dev/null || true",
+                "docker exec mirage sed -i "
+                "'s/^DOMAIN=.*/DOMAIN=/; "
+                "s/^PERSISTENT_PEERS=.*/PERSISTENT_PEERS=/' "
+                "/root/.mirage/env/node.env 2>/dev/null || true",
             ]
         )
         # Enable open registration without invite codes for local testnet

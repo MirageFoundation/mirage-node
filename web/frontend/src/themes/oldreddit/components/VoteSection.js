@@ -38,6 +38,16 @@ const VoteButton = styled.button`
         height: 25px;
         fill: currentColor;
     }
+
+    @media (max-width: 600px) {
+        width: 24px;
+        height: 20px;
+
+        svg {
+            width: 18px;
+            height: 18px;
+        }
+    }
 `;
 
 const VoteCount = styled.div`
@@ -48,6 +58,10 @@ const VoteCount = styled.div`
     text-align: center;
     margin: -0.12rem 0;
     padding: 0;
+
+    @media (max-width: 600px) {
+        font-size: 0.6rem;
+    }
 `;
 
 const InlineVoteArea = styled.div`

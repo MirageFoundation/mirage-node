@@ -42,6 +42,7 @@ from db import connect_backend_db, connect_db
 from error_utils import api_error_code, safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
+from quest_multiplier import get_reward_multiplier
 from reward_distributor import get_distributor
 from routes.core import get_user_level
 from settings import QUESTS_ENABLED, require_bool_env
@@ -102,8 +103,7 @@ def _load_quest_definitions() -> Dict[str, Any]:
 
 def _get_user_reward_multiplier(owner: str) -> float:
     """Calculate reward multiplier based on completed quest count (1x at 0, 5x at 50)."""
-    completed = _get_completed_quest_count(owner)
-    return 1.0 + min(4.0, completed * 4.0 / 50.0)
+    return get_reward_multiplier(owner)
 
 
 def _is_user_suspended(owner: str, ts: int) -> bool:

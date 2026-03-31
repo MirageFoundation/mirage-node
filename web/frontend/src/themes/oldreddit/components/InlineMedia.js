@@ -76,6 +76,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
     const dragStartXRef = React.useRef(0);
     const dragStartWidthRef = React.useRef(0);
     const isDraggingRef = React.useRef(false);
+    const hasManuallyResizedRef = React.useRef(false);
     const mountedRef = React.useRef(true);
     const videoRef = React.useRef(null);
     const hlsInstanceRef = React.useRef(null);
@@ -133,6 +134,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         if (isMobile) return;
         e.preventDefault();
         isDraggingRef.current = true;
+        hasManuallyResizedRef.current = true;
         dragStartXRef.current = e.clientX;
         dragStartWidthRef.current = displayWidth || computeInitialWidth();
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { }
@@ -360,13 +362,14 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         };
 
         const maxHeight = variant === 'root_post' ? MAX_INITIAL_HEIGHT_ROOT : MAX_INITIAL_HEIGHT_COMMENT;
+        const userResized = hasManuallyResizedRef.current;
         const dimensionsKnown = naturalWidth && naturalHeight;
         const mediaStyle = {
             width: dimensionsKnown ? `${currentWidth}px` : 'auto',
             maxWidth: '100%',
-            maxHeight: `${maxHeight}px`,
+            maxHeight: userResized ? undefined : `${maxHeight}px`,
             aspectRatio: dimensionsKnown ? `${naturalWidth} / ${naturalHeight}` : undefined,
-            objectFit: 'cover',
+            objectFit: userResized ? 'contain' : 'cover',
             borderRadius: '4px',
             cursor: isMobile ? 'auto' : 'ew-resize',
             userSelect: 'none',

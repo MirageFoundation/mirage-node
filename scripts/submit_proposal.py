@@ -93,7 +93,9 @@ def get_submission_account() -> str:
 
 # RPC endpoints
 LOCAL_RPC_ENDPOINT = "http://127.0.0.1:26657"
-REMOTE_RPC_ENDPOINT = "http://159.203.114.27:26657"
+REMOTE_RPC_ENDPOINT = (
+    "http://159.203.114.27:26657"  # direct IP — mirage.talk goes through Cloudflare which doesn't proxy port 26657
+)
 
 # Create a minimal temp config dir for keyring operations (miraged needs config to start)
 # Keys are stored in OS credential store, not in this directory
@@ -727,10 +729,9 @@ def main():
     bin_path = str(miraged) if miraged else "miraged"
     run_miraged_cmd(["keys", "list", "--keyring-backend", get_keyring_backend(), "--home", get_keyring_home()])
 
-    # Query validators
+    # Query validators (single RPC call — response already contains tokens + status)
     validators_data = query_json_rpc(rpc_endpoint, ["q", "staking", "validators"])
     chain_validators = validators_data.get("validators", [])
-    log_debug(f"Found {len(chain_validators)} validators")
 
     # Get keys from keyring
     list_result = run_miraged_cmd(
@@ -751,7 +752,21 @@ def main():
 
     log_debug(f"Found {len(address_to_keyname)} keys in keyring")
 
-    # Calculate voting power
+    # Build delegation index: query all delegations per key address (1 RPC call per key)
+    # instead of querying each key×validator pair individually.
+    # key_delegations: valoper_addr -> (key_addr, key_name)
+    key_delegations: dict[str, tuple[str, str]] = {}
+    for key_addr, key_name in address_to_keyname.items():
+        try:
+            deleg_data = query_json_rpc(rpc_endpoint, ["q", "staking", "delegations", key_addr], fatal=False)
+            for dr in deleg_data.get("delegation_responses", []):
+                valoper = (dr.get("delegation") or {}).get("validator_address", "")
+                if valoper:
+                    key_delegations[valoper] = (key_addr, key_name)
+        except (QueryError, Exception) as e:
+            log(f"Could not query delegations for {key_name} ({key_addr}): {e}")
+
+    # Calculate voting power from the already-fetched validators list
     total_voting_power = 0
     controlled_voting_power = 0
     validator_accounts = []
@@ -763,54 +778,23 @@ def main():
         if not val_operator_addr:
             continue
 
-        try:
-            val_details = query_json_rpc(rpc_endpoint, ["q", "staking", "validator", val_operator_addr])
-            val_info = val_details.get("validator", {})
-            moniker = val_info.get("description", {}).get("moniker", "")
-            tokens = int(val_info.get("tokens", "0"))
-            status = val_info.get("status", "")
+        moniker = (validator.get("description") or {}).get("moniker", "")
+        tokens = int(validator.get("tokens", "0"))
+        status = validator.get("status", "")
 
-            if status != "BOND_STATUS_BONDED":
-                continue
+        if status != "BOND_STATUS_BONDED":
+            continue
 
-            total_voting_power += tokens
-            found_key = False
+        total_voting_power += tokens
 
-            for key_addr, key_name in address_to_keyname.items():
-                try:
-                    delegation_args = [
-                        "q",
-                        "staking",
-                        "delegation",
-                        key_addr,
-                        val_operator_addr,
-                        "--node",
-                        rpc_endpoint,
-                        "-o",
-                        "json",
-                    ]
-                    if _is_local_mode:
-                        delegation_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + delegation_args
-                    else:
-                        delegation_cmd = [bin_path] + delegation_args
-                    delegation_result = subprocess.run(delegation_cmd, capture_output=True, text=True, check=False)
-                    if delegation_result.returncode == 0:
-                        delegation = json.loads(delegation_result.stdout)
-                        if delegation.get("delegation_response"):
-                            if key_name not in validator_accounts:
-                                validator_accounts.append(key_name)
-                                controlled_voting_power += tokens
-                                validators_controlled.append((moniker, tokens, key_name))
-                                found_key = True
-                                break
-                except Exception:
-                    pass
-
-            if not found_key:
-                validators_not_controlled.append((moniker, tokens, val_operator_addr))
-
-        except Exception as e:
-            log(f"Error checking validator {val_operator_addr}: {e}")
+        if val_operator_addr in key_delegations:
+            _, key_name = key_delegations[val_operator_addr]
+            if key_name not in validator_accounts:
+                validator_accounts.append(key_name)
+            controlled_voting_power += tokens
+            validators_controlled.append((moniker, tokens, key_name))
+        else:
+            validators_not_controlled.append((moniker, tokens, val_operator_addr))
 
     controlled_pct = (controlled_voting_power / total_voting_power * 100) if total_voting_power > 0 else 0
 

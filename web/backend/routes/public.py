@@ -14,6 +14,7 @@ Endpoints:
 - GET /api/get_comments: Root post and nested comments tree.
 """
 
+import bisect
 import json
 import logging
 import os
@@ -8157,16 +8158,52 @@ def referrals_precheck_opt_in():
         return safe_error(e)
 
 
+REFERRAL_ACTIVE_THRESHOLD = 10
+REFERRAL_ACTIVE_DEFINITION = "At least 10 posts or comments in the week"
+
+
+def _iso_week_bounds(week_str: str):
+    """Parse 'YYYY-Www' and return (week_start_ts, week_end_ts) in UTC.
+
+    week_start = Monday 00:00:00 UTC, week_end = Sunday 23:59:59 UTC.
+    Raises ValueError on bad format.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if not re.match(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$", week_str):
+        raise ValueError(f"bad ISO week format: {week_str}")
+    monday = datetime.strptime(week_str + "-1", "%G-W%V-%u").replace(tzinfo=timezone.utc)
+    sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
+    return int(monday.timestamp()), int(sunday.timestamp())
+
+
+def _current_iso_week() -> str:
+    """Return the current UTC ISO week as 'YYYY-Www'."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    return now.strftime("%G-W%V")
+
+
 @public_bp.route("/api/referrals/summary", methods=["GET"])
 def referrals_summary():
-    """Return referred users with action counts for the authenticated referrer."""
+    """Return referred users with weekly activity counts for the authenticated referrer.
+
+    Query params:
+      address (required) - referrer wallet address
+      week    (optional) - ISO week string YYYY-Www (default: current UTC week)
+      limit   (optional) - page size, max 200 (default 50)
+      offset  (optional) - pagination offset (default 0)
+    """
     rid = next_request_id()
     address = request.args.get("address", "").strip().lower()
     if not address:
         return api_error_code("address_required")
 
-    period = request.args.get("period", "7d").strip()
-    month = request.args.get("month", "").strip()
+    week_str = request.args.get("week", "").strip()
+    if not week_str:
+        week_str = _current_iso_week()
+
     limit = request.args.get("limit", 50, type=int)
     offset = request.args.get("offset", 0, type=int)
     if limit is None:
@@ -8176,119 +8213,247 @@ def referrals_summary():
     limit = min(max(1, limit), 200)
     offset = max(0, offset)
 
-    log_event(rid, "referrals.summary.begin", address=address, period=period, month=month, limit=limit, offset=offset)
-    try:
-        now_ts = int(time.time())
-        if period == "month" and month:
-            try:
-                start_dt = dt.strptime(month, "%Y-%m")
-                _, last_day = calendar.monthrange(start_dt.year, start_dt.month)
-                period_start = int(start_dt.timestamp())
-                period_end = int(start_dt.replace(day=last_day, hour=23, minute=59, second=59).timestamp())
-            except ValueError:
-                return jsonify({"error": "invalid month format, use YYYY-MM"}), 400
-        else:
-            days = 7
-            if period.endswith("d"):
-                try:
-                    days = int(period[:-1])
-                except ValueError:
-                    days = 7
-            period_start = now_ts - (days * 86400)
-            period_end = now_ts
+    log_event(rid, "referrals.summary.begin", address=address, week=week_str, limit=limit, offset=offset)
 
+    try:
+        week_start, week_end = _iso_week_bounds(week_str)
+    except ValueError:
+        return jsonify({"error": "invalid week format, use YYYY-Www (e.g. 2026-W13)"}), 400
+
+    log_event(rid, "referrals.summary.week_parsed", week=week_str, week_start=week_start, week_end=week_end)
+
+    try:
+        # ── Fetch all referred addresses (for history) and paginated slice ──
         with connect_backend_db() as bconn:
             bcur = bconn.cursor()
             bcur.execute(
-                "SELECT COUNT(*) FROM referral_links WHERE LOWER(referrer_address) = %s",
-                (address,),
+                "SELECT COUNT(*) FROM referral_links WHERE LOWER(referrer_address) = %s AND referred_at <= %s",
+                (address, week_end),
             )
             total = int(bcur.fetchone()[0] or 0)
+
             bcur.execute(
                 """
                 SELECT user_address, referred_at
                 FROM referral_links
-                WHERE LOWER(referrer_address) = %s
+                WHERE LOWER(referrer_address) = %s AND referred_at <= %s
                 ORDER BY referred_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                (address, limit, offset),
+                (address, week_end, limit, offset),
             )
-            referrals = bcur.fetchall()
+            page_referrals = bcur.fetchall()
 
-        if not referrals:
+            bcur.execute(
+                "SELECT user_address, referred_at FROM referral_links WHERE LOWER(referrer_address) = %s",
+                (address,),
+            )
+            all_referrals = bcur.fetchall()
+
+        referred_at_by_owner = {}
+        missing_referred = []
+        for addr, referred_at in all_referrals:
+            if not isinstance(referred_at, (int, float)) or referred_at <= 0:
+                missing_referred.append(addr)
+                continue
+            referred_at_by_owner[addr] = int(referred_at)
+        if missing_referred:
+            log_event(
+                rid,
+                "referrals.summary.missing_referred_at",
+                address=address,
+                missing_count=len(missing_referred),
+            )
+            return jsonify({"error": "referral data missing referred_at"}), 500
+
+        all_addrs = list(referred_at_by_owner.keys())
+        page_addrs = [r[0] for r in page_referrals]
+        referred_at_map = {r[0]: r[1] for r in page_referrals}
+
+        # ── Empty-referrals fast path ──
+        if not all_addrs:
             log_event(rid, "referrals.summary.empty", address=address)
             return jsonify(
                 {
                     "referrals": [],
-                    "total": total,
-                    "period_start": period_start,
-                    "period_end": period_end,
+                    "total": 0,
+                    "week": week_str,
+                    "week_start": week_start,
+                    "week_end": week_end,
+                    "active_threshold": REFERRAL_ACTIVE_THRESHOLD,
+                    "active_definition": REFERRAL_ACTIVE_DEFINITION,
+                    "active_count": 0,
+                    "active_history": [],
                     "limit": limit,
                     "offset": offset,
                     "has_more": False,
                 }
             )
 
-        referred_addrs = [r[0] for r in referrals]
-        referred_at_map = {r[0]: r[1] for r in referrals}
+        referred_ts = sorted(referred_at_by_owner.values())
+        earliest_referred = int(referred_ts[0])
 
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
 
+            # ── Per-user counts for the selected week (page only) ──
+            post_counts = {}
+            comment_counts = {}
+            usernames = {}
+            if page_addrs:
+                cur.execute(
+                    """
+                    SELECT owner, COUNT(*) FROM posts
+                    WHERE owner = ANY(%s)
+                      AND deleted = FALSE
+                      AND COALESCE(target, '') = ''
+                      AND created_at >= %s AND created_at <= %s
+                    GROUP BY owner
+                    """,
+                    (page_addrs, week_start, week_end),
+                )
+                post_counts = {r[0]: r[1] for r in cur.fetchall()}
+
+                cur.execute(
+                    """
+                    SELECT owner, COUNT(*) FROM posts
+                    WHERE owner = ANY(%s)
+                      AND deleted = FALSE
+                      AND LENGTH(COALESCE(target, '')) > 0
+                      AND created_at >= %s AND created_at <= %s
+                    GROUP BY owner
+                    """,
+                    (page_addrs, week_start, week_end),
+                )
+                comment_counts = {r[0]: r[1] for r in cur.fetchall()}
+
+                cur.execute(
+                    "SELECT owner, username FROM profiles WHERE owner = ANY(%s)",
+                    (page_addrs,),
+                )
+                usernames = {r[0]: r[1] for r in cur.fetchall()}
+
+            # ── Weekly active history (all referrals, all weeks) ──
             cur.execute(
                 """
-                SELECT owner, COUNT(*) FROM posts
+                SELECT
+                    TO_CHAR(date_trunc('week', to_timestamp(created_at) AT TIME ZONE 'UTC'), 'IYYY-"W"IW') AS wk,
+                    owner,
+                    SUM(CASE WHEN COALESCE(target, '') = '' THEN 1 ELSE 0 END) AS post_count,
+                    SUM(CASE WHEN LENGTH(COALESCE(target, '')) > 0 THEN 1 ELSE 0 END) AS comment_count
+                FROM posts
                 WHERE owner = ANY(%s)
                   AND deleted = FALSE
-                  AND created_at >= %s AND created_at <= %s
-                GROUP BY owner
+                  AND created_at >= %s
+                GROUP BY wk, owner
                 """,
-                (referred_addrs, period_start, period_end),
+                (all_addrs, earliest_referred),
             )
-            post_counts = {r[0]: r[1] for r in cur.fetchall()}
+            weekly_user_counts: dict[str, dict[str, int]] = {}
+            weekly_totals: dict[str, dict[str, int]] = {}
+            week_bounds_cache: dict[str, int] = {}
+            for wk, owner, post_cnt, comment_cnt in cur.fetchall():
+                referred_at = referred_at_by_owner.get(owner)
+                if not referred_at:
+                    continue
+                if wk not in week_bounds_cache:
+                    _, wk_end = _iso_week_bounds(wk)
+                    week_bounds_cache[wk] = wk_end
+                wk_end = week_bounds_cache[wk]
+                if wk_end < referred_at:
+                    continue
+                posts = int(post_cnt or 0)
+                comments = int(comment_cnt or 0)
+                total_actions = posts + comments
+                weekly_user_counts.setdefault(wk, {})[owner] = total_actions
+                totals = weekly_totals.setdefault(
+                    wk,
+                    {"posts": 0, "comments": 0, "total_actions": 0},
+                )
+                totals["posts"] += posts
+                totals["comments"] += comments
+                totals["total_actions"] += total_actions
 
-            cur.execute(
-                """
-                SELECT owner, COUNT(*) FROM votes
-                WHERE owner = ANY(%s)
-                  AND created_at >= %s AND created_at <= %s
-                GROUP BY owner
-                """,
-                (referred_addrs, period_start, period_end),
-            )
-            vote_counts = {r[0]: r[1] for r in cur.fetchall()}
-
-            cur.execute(
-                "SELECT owner, username FROM profiles WHERE owner = ANY(%s)",
-                (referred_addrs,),
-            )
-            usernames = {r[0]: r[1] for r in cur.fetchall()}
-
+        # ── Build per-user results for the page ──
         results = []
-        for addr in referred_addrs:
+        for addr in page_addrs:
             posts = post_counts.get(addr, 0)
-            votes = vote_counts.get(addr, 0)
-            total_actions = posts + votes
+            comments = comment_counts.get(addr, 0)
+            total_actions = posts + comments
+            is_active = total_actions >= REFERRAL_ACTIVE_THRESHOLD
             results.append(
                 {
                     "address": addr,
                     "username": usernames.get(addr, ""),
                     "referred_at": referred_at_map.get(addr, 0),
                     "posts": posts,
-                    "votes": votes,
+                    "comments": comments,
                     "total_actions": total_actions,
+                    "active": is_active,
                 }
             )
 
+        # ── Build active_history: count of active users per week ──
+        from datetime import datetime, timezone, timedelta
+
+        first_monday = datetime.utcfromtimestamp(earliest_referred).replace(tzinfo=timezone.utc)
+        first_monday = first_monday - timedelta(days=first_monday.weekday())
+        first_monday = first_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        now_utc = datetime.now(timezone.utc)
+        current_monday = now_utc - timedelta(days=now_utc.weekday())
+        current_monday = current_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        active_history = []
+        cursor_monday = first_monday
+        while cursor_monday <= current_monday:
+            wk_label = cursor_monday.strftime("%G-W%V")
+            user_counts = weekly_user_counts.get(wk_label, {})
+            active_users = sum(1 for cnt in user_counts.values() if cnt >= REFERRAL_ACTIVE_THRESHOLD)
+            totals = weekly_totals.get(wk_label, {"posts": 0, "comments": 0, "total_actions": 0})
+            wk_start = int(cursor_monday.timestamp())
+            wk_end = int((cursor_monday + timedelta(days=6, hours=23, minutes=59, seconds=59)).timestamp())
+            total_referrals = bisect.bisect_right(referred_ts, wk_end)
+            active_history.append(
+                {
+                    "week": wk_label,
+                    "week_start": wk_start,
+                    "week_end": wk_end,
+                    "active_count": active_users,
+                    "posts": totals["posts"],
+                    "comments": totals["comments"],
+                    "total_actions": totals["total_actions"],
+                    "total_referrals": total_referrals,
+                }
+            )
+            cursor_monday += timedelta(weeks=1)
+
+        # Also compute full active_count for the selected week across ALL referrals
+        selected_user_counts = weekly_user_counts.get(week_str, {})
+        full_active_count = sum(1 for cnt in selected_user_counts.values() if cnt >= REFERRAL_ACTIVE_THRESHOLD)
+
         has_more = (offset + len(results)) < total
-        log_event(rid, "referrals.summary.ok", address=address, total=len(results), has_more=has_more)
+        log_event(
+            rid,
+            "referrals.summary.ok",
+            address=address,
+            week=week_str,
+            page_count=len(results),
+            active_count=full_active_count,
+            history_weeks=len(active_history),
+            has_more=has_more,
+        )
         return jsonify(
             {
                 "referrals": results,
                 "total": total,
-                "period_start": period_start,
-                "period_end": period_end,
+                "week": week_str,
+                "week_start": week_start,
+                "week_end": week_end,
+                "active_threshold": REFERRAL_ACTIVE_THRESHOLD,
+                "active_definition": REFERRAL_ACTIVE_DEFINITION,
+                "active_count": full_active_count,
+                "active_history": active_history,
                 "limit": limit,
                 "offset": offset,
                 "has_more": has_more,
