@@ -37,7 +37,6 @@ const Row = styled.div`
     gap: 0.4rem;
     min-height: 52px;
 
-    /* Pseudo-element border extends full container width, passing under the float sidebar */
     &::after {
         content: '';
         position: absolute;
@@ -56,6 +55,17 @@ const Row = styled.div`
     &:hover {
         background: ${({ theme }) => theme.colors.panelAlt};
     }
+
+    @media (max-width: 600px) {
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        grid-template-rows: auto auto auto;
+        align-items: start;
+        gap: 0.25rem;
+        column-gap: 0.35rem;
+        padding: 0.5rem;
+        min-height: 0;
+    }
 `;
 
 const Rank = styled.span`
@@ -67,6 +77,10 @@ const Rank = styled.span`
     font-weight: 500;
     color: ${({ theme }) => theme.colors.subtleText};
     padding-top: 0.25rem;
+
+    @media (max-width: 600px) {
+        display: none;
+    }
 `;
 
 const VoteColumn = styled.div`
@@ -76,6 +90,12 @@ const VoteColumn = styled.div`
     align-items: center;
     min-width: 2.5rem;
     align-self: flex-start;
+
+    @media (max-width: 600px) {
+        grid-row: 1 / 4;
+        grid-column: 1;
+        min-width: 1.8rem;
+    }
 `;
 
 const Thumbnail = styled(Link)`
@@ -98,6 +118,8 @@ const Thumbnail = styled(Link)`
         flex: 0 0 50px;
         width: 50px;
         height: 50px;
+        grid-row: 1;
+        grid-column: 2;
     }
 `;
 
@@ -107,6 +129,31 @@ const ContentColumn = styled.div`
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
+
+    @media (max-width: 600px) {
+        grid-row: 1;
+        grid-column: 3;
+    }
+`;
+
+const MobileMetaWrap = styled.div`
+    display: none;
+
+    @media (max-width: 600px) {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        grid-row: 2 / 4;
+        grid-column: 2 / 4;
+    }
+`;
+
+const DesktopMeta = styled.div`
+    display: contents;
+
+    @media (max-width: 600px) {
+        display: none;
+    }
 `;
 
 const Title = styled(Link)`
@@ -128,6 +175,11 @@ const Title = styled(Link)`
     &:hover {
         text-decoration: underline;
     }
+
+    @media (max-width: 600px) {
+        font-size: 0.85rem;
+        -webkit-line-clamp: 3;
+    }
 `;
 
 const MetaLine = styled.div`
@@ -137,6 +189,19 @@ const MetaLine = styled.div`
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+
+    @media (max-width: 600px) {
+        white-space: normal;
+        overflow: visible;
+        font-size: 0.6rem;
+    }
+`;
+
+
+const SubmittedLabel = styled.span`
+    @media (max-width: 600px) {
+        display: none;
+    }
 `;
 
 const MetaLink = styled(Link)`
@@ -169,10 +234,16 @@ const TagBadge = styled.span`
 
 const ActionsLine = styled.div`
     display: flex;
+    flex-wrap: wrap;
     gap: 0.6rem;
     font-size: 0.65rem;
     color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.35;
+
+    @media (max-width: 600px) {
+        gap: 0.5rem;
+        font-size: 0.6rem;
+    }
 `;
 
 const ActionLink = styled(Link)`
@@ -207,6 +278,10 @@ const FeedToolbar = styled.div`
     padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
+
+    @media (max-width: 600px) {
+        padding: 0.35rem 0.5rem;
+    }
 `;
 
 const FeedNavGroup = styled.div`
@@ -307,6 +382,44 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
         displayAuthor = `${author.slice(0, 10)}...`;
     }
 
+    const meta = (
+        <MetaLine>
+            <SubmittedLabel>{isComment ? 'commented' : 'submitted'} </SubmittedLabel>{formatAge(ts)} by{' '}
+            <AuthorLink
+                to={`/u/${encodeURIComponent(username || author)}`}
+                style={authorColor ? { color: authorColor } : undefined}
+            >
+                {displayAuthor}
+            </AuthorLink>
+            {!isComment && topic && (
+                <>
+                    {' '}to{' '}
+                    <MetaLink to={`/t/${encodeURIComponent(topic)}`}>t/{topic}</MetaLink>
+                </>
+            )}
+        </MetaLine>
+    );
+
+    const actions = (
+        <ActionsLine>
+            <ActionLink to={linkTarget}>
+                {isComment ? 'context' : `${numComments} comment${numComments !== 1 ? 's' : ''}`}
+            </ActionLink>
+            <ActionButton type="button" onClick={() => onShare(postId)}>
+                share
+            </ActionButton>
+            <ActionButton type="button" onClick={() => onToggleSave(postId)}>
+                {saved ? 'unsave' : 'save'}
+            </ActionButton>
+            <ActionButton type="button" onClick={() => onHide(postId)}>
+                hide
+            </ActionButton>
+            <ActionLink to={linkTarget}>
+                report
+            </ActionLink>
+        </ActionsLine>
+    );
+
     return (
         <Row>
             <Rank>{rank}</Rank>
@@ -323,39 +436,9 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                     {hasTag && <TagBadge>{String(post.tag).trim()}</TagBadge>}
                     {title}
                 </Title>
-                <MetaLine>
-                    {isComment ? 'commented' : 'submitted'} {formatAge(ts)} by{' '}
-                    <AuthorLink
-                        to={`/u/${encodeURIComponent(username || author)}`}
-                        style={authorColor ? { color: authorColor } : undefined}
-                    >
-                        {displayAuthor}
-                    </AuthorLink>
-                    {!isComment && topic && (
-                        <>
-                            {' '}to{' '}
-                            <MetaLink to={`/t/${encodeURIComponent(topic)}`}>t/{topic}</MetaLink>
-                        </>
-                    )}
-                </MetaLine>
-                <ActionsLine>
-                    <ActionLink to={linkTarget}>
-                        {isComment ? 'context' : `${numComments} comment${numComments !== 1 ? 's' : ''}`}
-                    </ActionLink>
-                    <ActionButton type="button" onClick={() => onShare(postId)}>
-                        share
-                    </ActionButton>
-                    <ActionButton type="button" onClick={() => onToggleSave(postId)}>
-                        {saved ? 'unsave' : 'save'}
-                    </ActionButton>
-                    <ActionButton type="button" onClick={() => onHide(postId)}>
-                        hide
-                    </ActionButton>
-                    <ActionLink to={linkTarget}>
-                        report
-                    </ActionLink>
-                </ActionsLine>
+                <DesktopMeta>{meta}{actions}</DesktopMeta>
             </ContentColumn>
+            <MobileMetaWrap>{meta}{actions}</MobileMetaWrap>
         </Row>
     );
 }

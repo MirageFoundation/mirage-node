@@ -464,6 +464,15 @@ python3 -m deploy.migrations --config-dir "$ENV_DIR"
 # Reload env files after migrations
 load_env_files
 
+# Local testnet: override peer config so re-render doesn't reintroduce real peers
+# (init.sh does this too, but in a subprocess whose exports don't propagate back)
+if [ "${SKIP_PEERS:-0}" = "1" ]; then
+  export PERSISTENT_PEERS=""
+  export PEX_ENABLED="false"
+  export MAX_INBOUND_PEERS="0"
+  export MAX_OUTBOUND_PEERS="0"
+fi
+
 # Re-render node configs in case migrations updated env values.
 echo "==> Re-rendering node config from updated env..."
 mkdir -p "$NODE_HOME/config"

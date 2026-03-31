@@ -13,9 +13,9 @@ const HeaderRow = styled.div`
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    margin: ${({
+    margin-bottom: ${({
     theme
-}) => theme.layout.containerPadding};
+}) => theme.layout.formRowGap};
 `;
 
 // Using <a> tag so right-click "Open in new window" works natively
