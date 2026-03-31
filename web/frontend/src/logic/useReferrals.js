@@ -117,12 +117,17 @@ export function useReferrals({ state }) {
         } catch (_) { }
     };
 
+    const setWeekSafe = useCallback((nextWeek) => {
+        const cleaned = typeof nextWeek === 'string' ? nextWeek.trim() : '';
+        setWeek(cleaned || getCurrentISOWeek());
+    }, []);
+
     return {
         location,
         publicKey,
         username,
         week,
-        setWeek,
+        setWeek: setWeekSafe,
         data,
         referrals,
         hasMore,

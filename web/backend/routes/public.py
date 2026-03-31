@@ -8273,43 +8273,56 @@ def referrals_summary():
                 }
             )
 
-        earliest_referred = min(r[1] for r in all_referrals if r[1])
+        referred_ts = [r[1] for r in all_referrals if isinstance(r[1], (int, float)) and r[1] > 0]
+        if not referred_ts:
+            log_event(
+                rid,
+                "referrals.summary.missing_referred_at",
+                address=address,
+                week=week_str,
+            )
+            return jsonify({"error": "referral data missing referred_at"}), 500
+        earliest_referred = int(min(referred_ts))
 
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
 
             # ── Per-user counts for the selected week (page only) ──
-            cur.execute(
-                """
-                SELECT owner, COUNT(*) FROM posts
-                WHERE owner = ANY(%s)
-                  AND deleted = FALSE
-                  AND COALESCE(target, '') = ''
-                  AND created_at >= %s AND created_at <= %s
-                GROUP BY owner
-                """,
-                (page_addrs, week_start, week_end),
-            )
-            post_counts = {r[0]: r[1] for r in cur.fetchall()}
+            post_counts = {}
+            comment_counts = {}
+            usernames = {}
+            if page_addrs:
+                cur.execute(
+                    """
+                    SELECT owner, COUNT(*) FROM posts
+                    WHERE owner = ANY(%s)
+                      AND deleted = FALSE
+                      AND COALESCE(target, '') = ''
+                      AND created_at >= %s AND created_at <= %s
+                    GROUP BY owner
+                    """,
+                    (page_addrs, week_start, week_end),
+                )
+                post_counts = {r[0]: r[1] for r in cur.fetchall()}
 
-            cur.execute(
-                """
-                SELECT owner, COUNT(*) FROM posts
-                WHERE owner = ANY(%s)
-                  AND deleted = FALSE
-                  AND LENGTH(COALESCE(target, '')) > 0
-                  AND created_at >= %s AND created_at <= %s
-                GROUP BY owner
-                """,
-                (page_addrs, week_start, week_end),
-            )
-            comment_counts = {r[0]: r[1] for r in cur.fetchall()}
+                cur.execute(
+                    """
+                    SELECT owner, COUNT(*) FROM posts
+                    WHERE owner = ANY(%s)
+                      AND deleted = FALSE
+                      AND LENGTH(COALESCE(target, '')) > 0
+                      AND created_at >= %s AND created_at <= %s
+                    GROUP BY owner
+                    """,
+                    (page_addrs, week_start, week_end),
+                )
+                comment_counts = {r[0]: r[1] for r in cur.fetchall()}
 
-            cur.execute(
-                "SELECT owner, username FROM profiles WHERE owner = ANY(%s)",
-                (page_addrs,),
-            )
-            usernames = {r[0]: r[1] for r in cur.fetchall()}
+                cur.execute(
+                    "SELECT owner, username FROM profiles WHERE owner = ANY(%s)",
+                    (page_addrs,),
+                )
+                usernames = {r[0]: r[1] for r in cur.fetchall()}
 
             # ── Weekly active history (all referrals, all weeks) ──
             cur.execute(
@@ -8317,7 +8330,8 @@ def referrals_summary():
                 SELECT
                     TO_CHAR(date_trunc('week', to_timestamp(created_at) AT TIME ZONE 'UTC'), 'IYYY-"W"IW') AS wk,
                     owner,
-                    COUNT(*) AS cnt
+                    SUM(CASE WHEN COALESCE(target, '') = '' THEN 1 ELSE 0 END) AS post_count,
+                    SUM(CASE WHEN LENGTH(COALESCE(target, '')) > 0 THEN 1 ELSE 0 END) AS comment_count
                 FROM posts
                 WHERE owner = ANY(%s)
                   AND deleted = FALSE
@@ -8327,19 +8341,27 @@ def referrals_summary():
                 (all_addrs, earliest_referred),
             )
             weekly_user_counts: dict[str, dict[str, int]] = {}
-            for wk, owner, cnt in cur.fetchall():
-                weekly_user_counts.setdefault(wk, {})[owner] = int(cnt)
+            weekly_totals: dict[str, dict[str, int]] = {}
+            for wk, owner, post_cnt, comment_cnt in cur.fetchall():
+                posts = int(post_cnt or 0)
+                comments = int(comment_cnt or 0)
+                total_actions = posts + comments
+                weekly_user_counts.setdefault(wk, {})[owner] = total_actions
+                totals = weekly_totals.setdefault(
+                    wk,
+                    {"posts": 0, "comments": 0, "total_actions": 0},
+                )
+                totals["posts"] += posts
+                totals["comments"] += comments
+                totals["total_actions"] += total_actions
 
         # ── Build per-user results for the page ──
-        active_this_week = 0
         results = []
         for addr in page_addrs:
             posts = post_counts.get(addr, 0)
             comments = comment_counts.get(addr, 0)
             total_actions = posts + comments
             is_active = total_actions >= REFERRAL_ACTIVE_THRESHOLD
-            if is_active:
-                active_this_week += 1
             results.append(
                 {
                     "address": addr,
@@ -8369,6 +8391,7 @@ def referrals_summary():
             wk_label = cursor_monday.strftime("%G-W%V")
             user_counts = weekly_user_counts.get(wk_label, {})
             active_users = sum(1 for cnt in user_counts.values() if cnt >= REFERRAL_ACTIVE_THRESHOLD)
+            totals = weekly_totals.get(wk_label, {"posts": 0, "comments": 0, "total_actions": 0})
             wk_start = int(cursor_monday.timestamp())
             wk_end = int((cursor_monday + timedelta(days=6, hours=23, minutes=59, seconds=59)).timestamp())
             active_history.append(
@@ -8377,6 +8400,9 @@ def referrals_summary():
                     "week_start": wk_start,
                     "week_end": wk_end,
                     "active_count": active_users,
+                    "posts": totals["posts"],
+                    "comments": totals["comments"],
+                    "total_actions": totals["total_actions"],
                     "total_referrals": len(all_addrs),
                 }
             )
