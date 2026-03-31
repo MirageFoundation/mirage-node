@@ -478,7 +478,7 @@ export function useMain({
         } catch (_) { }
     }, [nodeConfig]);
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
     const showAndroidBanner = Boolean(nodeConfig) && isAndroid && !androidBannerDismissed && nodeConfig.android_banner_enabled;
     const showIPhoneBanner = Boolean(nodeConfig) && isIPhone && !iphoneBannerDismissed && nodeConfig.ios_banner_enabled;
 
