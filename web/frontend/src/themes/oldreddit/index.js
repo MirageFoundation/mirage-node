@@ -130,7 +130,7 @@ const oldredditManifest = {
     config: {
         showHeroCards: false,
         mapHomeSortMode: true,
-        profileTabs: ['profile', 'overview', 'submissions', 'comments', 'algo'],
+        profileTabs: ['profile', 'submissions', 'comments', 'algo'],
         profileDefaultTab: 'profile',
         profileUsesListFeed: true,
         profileHideFilterSelect: true,

@@ -2678,7 +2678,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onClick={confirmDonateAction}
                                         disabled={isSendPending(post?.user_id)}
                                     >
-                                        {formatSendStatus(post?.user_id) || 'Send'}
+                                        {formatSendStatus(post?.user_id) || 'Confirm'}
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                                 </ConfirmButtons>

@@ -94,7 +94,7 @@ export function useProfile({
     const [activeTab, setActiveTab] = useTabs(theme.caps.profileDefaultTab, VALID_TABS);
     const profileUsesListFeed = theme.caps.profileUsesListFeed;
     const FeedComponent = useMemo(() => getThemeFamily(theme.themeId).Feed, [theme.themeId]);
-    const isPostsTab = activeTab === 'posts' || activeTab === 'overview' || activeTab === 'submissions' || activeTab === 'comments';
+    const isPostsTab = activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => isOwnProfile ? username || '' : '');
     const [balance, setBalance] = useState(null);
     const [reserveFunds, setReserveFunds] = useState(null);
@@ -384,7 +384,7 @@ export function useProfile({
             recentLoadTimerRef.current = null;
         }
     }, [profileAddress]);
-    const effectivePostsFilter = profileUsesListFeed ? activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : 'all' : recentPostsFilter;
+    const effectivePostsFilter = activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : profileUsesListFeed ? 'all' : recentPostsFilter;
     useEffect(() => {
         setRecentPosts([]);
         setRecentPage(1);
