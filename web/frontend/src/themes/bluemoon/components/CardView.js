@@ -1806,7 +1806,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const hasMedia = !!(thumbSrc || thumbBlurSrc || isDirectImage || isPrimaryVideo);
     const shouldBlurMedia = !!(blurSensitiveMedia && post && post.tag && String(post.tag).trim() && hasMedia);
-    const displayThumbSrc = shouldBlurMedia && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
+    const displayThumbSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
 
     const shortenAddress = (address) => {
         if (!address) return "";
@@ -2001,7 +2001,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     loading="lazy"
                                     style={(() => {
                                         const s = {};
-                                        if (shouldBlurMedia && displayThumbSrc) s.filter = 'blur(15px)';
+                                        if (shouldBlurMedia && !mediaExpanded && displayThumbSrc) s.filter = 'blur(15px)';
                                         if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
                                         return Object.keys(s).length ? s : undefined;
                                     })()}
@@ -2049,7 +2049,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <MobileCardSquare $gradient={!thumbSrc ? generatePostGradient(post) : undefined}>
                             {(() => {
                                 // Use the already-computed proxied thumbnail (Photon primary, wsrv fallback)
-                                const displayMobileSrc = shouldBlurMedia && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
+                                const displayMobileSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
                                 if (displayMobileSrc) {
                                     return (
                                         <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
@@ -2059,7 +2059,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 loading="lazy"
                                                 style={(() => {
                                                     const s = {};
-                                                    if (shouldBlurMedia) s.filter = 'blur(15px)';
+                                                    if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
                                                     if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
                                                     return Object.keys(s).length ? s : undefined;
                                                 })()}
@@ -2386,7 +2386,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         </MediaModeContainer>
                     )}
                     {isMediaOnlyPost && mediaExpanded && (
-                        <MediaModeContainer $blur={shouldBlurMedia}>
+                        <MediaModeContainer $blur={false}>
                             <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
                         </MediaModeContainer>
                     )}

@@ -83,13 +83,9 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 - Current: Only two trivial Jest unit tests in `web/frontend/src/utils/__tests__/`. No real frontend coverage.
 - Recommendation: Add headless Playwright tests in `tests/` (alongside `test_backend.py` and `test_blockchain.py`). Should cover core user flows: wallet creation, posting, voting, username setup, subscription, agent management. Run against the local Docker testnet the same way backend tests do.
 
-# CLEANUP!!!
-- now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
-- Remove legacy `compact-db` binary and its usage in `deploy/entrypoint.sh`
-
 # Other Ideas:
 - Allow only 3 new profiles (set_username) per minute
-
+- rename `porn` category to `explicit`
 
 # We should explicitly add LINK as field (like media)
 - and something like youtube or redgifs link should just be media link?
@@ -100,3 +96,5 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 
 # Video Series ideas:
 - explaining the /network tab, e.g. show how difficulty spikes, how spam is handled and so on
+
+
