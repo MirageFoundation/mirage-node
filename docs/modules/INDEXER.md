@@ -690,14 +690,14 @@ def discover_post_thumbnail(self, content: str) -> str | None:
 
 ### Topic Content Classification
 
-Posts can be tagged with content classifications (`sensitive`, `gore`, `violence`, `death`, `porn`). The indexer aggregates these per topic:
+Posts can be tagged with content classifications (`sensitive`, `gore`, `violence`, `death`, `adult`). The indexer aggregates these per topic:
 
 ```sql
 topic_content_stats:
 ┌─────────────┬─────────────┬────────────────┬──────────────┬───────────────┐
-│ topic       │ total_posts │ sensitive_count│ porn_count   │ dominant_tag  │
+│ topic       │ total_posts │ sensitive_count│ adult_count  │ dominant_tag  │
 ├─────────────┼─────────────┼────────────────┼──────────────┼───────────────┤
-│ random      │ 1000        │ 50             │ 600          │ porn          │
+│ random      │ 1000        │ 50             │ 600          │ adult         │
 │ technology  │ 500         │ 5              │ 0            │               │
 └─────────────┴─────────────┴────────────────┴──────────────┴───────────────┘
 ```

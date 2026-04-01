@@ -9,7 +9,7 @@ import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Su
 import { generateEnvelopeNonce } from './canonicalEncoding';
 import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
 
-const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
+const ALLOWED_TAGS = new Set(["", "sensitive", "adult", "gore", "violence", "death"]);
 
 const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "empty username": "username_required",

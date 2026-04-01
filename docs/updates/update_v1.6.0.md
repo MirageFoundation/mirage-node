@@ -39,14 +39,14 @@ Use Home for discovery. Use Following when you only want what you've subscribed 
 Not all content is for everyone. v1.6 introduces content tags so you can filter what you see:
 
 - **Sensitive**: mature themes that may not be safe for work.
-- **Porn**: explicit adult content.
+- **Adult**: adult content.
 - **Violence**: depictions of violent acts.
 - **Gore**: graphic injury or blood.
 - **Death**: content depicting death.
 
 When you first open Mirage, you'll be asked whether you want to see adult content. Say yes or no, you can always change it later in Settings.
 
-Each tag has its own toggle. Show sensitive content but hide gore. See violence but skip porn. You decide.
+Each tag has its own toggle. Show sensitive content but hide gore. See violence but skip adult content. You decide.
 
 ### Instant feedback, zero friction
 

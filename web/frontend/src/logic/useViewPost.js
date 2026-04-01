@@ -22,7 +22,7 @@ export const pickCard = requireThemeColor;
 // Supports $size prop ('compact' or 'large') to match feed view mode
 // No margins - ModernPostFeed's gap handles spacing (matches CardView behavior)
 export const tagColors = {
-    porn: {
+    adult: {
         bg: 'rgba(236, 72, 153, 0.18)',
         border: 'rgba(236, 72, 153, 0.50)',
         text: '#ec4899'

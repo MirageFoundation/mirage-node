@@ -754,7 +754,7 @@ def test_edge_cases(backend: str):
         _pass("edge.self_follow handled")
 
     # 9.17 All 6 valid tags accepted
-    valid_tags = ["sensitive", "porn", "violence", "drugs", "politics", ""]
+    valid_tags = ["sensitive", "adult", "violence", "drugs", "politics", ""]
     for tag in valid_tags:
         label = tag if tag else "empty"
         try:
@@ -969,7 +969,7 @@ def test_frontend_bypass(backend: str):
         ("nsfw", "nsfw"),
         ("adult", "adult"),
         ("SENSITIVE", "uppercase_sensitive"),
-        ("Porn", "mixed_case_porn"),
+        ("Adult", "mixed_case_adult"),
         ("random_tag", "random_string"),
         ("tag with spaces", "spaces"),
         ("!@#$%", "special_chars"),

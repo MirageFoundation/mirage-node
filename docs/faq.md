@@ -224,7 +224,7 @@ For clearly illegal content, that is separate. Nodes support reporting, and veri
 content can be marked for deletion so nodes that comply with local law will remove it
 locally. That is about legal compliance, not enforcing one global speech policy.
 
-### What if I don’t want to see certain types of content, like porn, or gore?
+### What if I don’t want to see certain types of content, like adult content, or gore?
 
 Mirage supports content tags and filtering so you can decide what you see. Tags cover
 categories like adult content, violence, gore, and other sensitive types.

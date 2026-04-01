@@ -12,8 +12,8 @@ export const TAG_OPTIONS = [{
   value: 'sensitive',
   label: 'Sensitive (blur content)'
 }, {
-  value: 'porn',
-  label: 'Porn'
+  value: 'adult',
+  label: 'Adult'
 }, {
   value: 'violence',
   label: 'Violence'

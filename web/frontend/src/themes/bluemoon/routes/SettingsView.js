@@ -447,8 +447,8 @@ export default function SettingsView({
         setBlurSensitiveMedia,
         showTagSensitive,
         setShowTagSensitive,
-        showTagPorn,
-        setShowTagPorn,
+        showTagAdult,
+        setShowTagAdult,
         showTagViolence,
         setShowTagViolence,
         showTagGore,
@@ -575,17 +575,17 @@ export default function SettingsView({
                                         Sensitive
                                     </CheckboxLabel>
                                     <CheckboxLabel>
-                                        <CheckboxInput checked={showTagPorn} onChange={e => {
+                                        <CheckboxInput checked={showTagAdult} onChange={e => {
                                             const val = !!e.target.checked;
-                                            setShowTagPorn(val);
-                                            Storage.save('show_tag_porn', val);
+                                            setShowTagAdult(val);
+                                            Storage.save('show_tag_adult', val);
                                             window.dispatchEvent(new CustomEvent('settingsUpdated', {
                                                 detail: {
-                                                    showTagPorn: val
+                                                    showTagAdult: val
                                                 }
                                             }));
                                         }} />
-                                        Porn
+                                        Adult
                                     </CheckboxLabel>
                                     <CheckboxLabel>
                                         <CheckboxInput checked={showTagViolence} onChange={e => {

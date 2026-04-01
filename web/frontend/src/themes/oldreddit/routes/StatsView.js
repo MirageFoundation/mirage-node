@@ -751,8 +751,8 @@ export default function StatsView() {
                                                             <Mono>{formatNumber(mergedStats.tag_counts.sensitive || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
-                                                            <Mono>Porn</Mono>
-                                                            <Mono>{formatNumber(mergedStats.tag_counts.porn || 0)}</Mono>
+                                                            <Mono>Adult</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.adult || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Violence</Mono>

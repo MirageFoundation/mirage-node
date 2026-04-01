@@ -975,7 +975,7 @@ When agent overlays are active, posts in the API response include extra metadata
 | `topic` | string | yes | Lowercase alphanumeric (`[a-z0-9]+`), 3-50 chars |
 | `title` | string | yes | Post title (length limit based on tier) |
 | `content` | string | yes | Post body (length limit based on tier) |
-| `tag` | string | no | Content warning: `""`, `"sensitive"`, `"porn"`, `"gore"`, `"violence"`, `"death"` |
+| `tag` | string | no | Content warning: `""`, `"sensitive"`, `"adult"`, `"gore"`, `"violence"`, `"death"` |
 | `media` | string[] | no | Up to 10 HTTPS URLs, each max 2048 chars |
 
 **Canonical bytes (MsgPost):**
@@ -1209,7 +1209,7 @@ GET /api/get_posts?topic=general&limit=25&page=1&by=magic
 | `page` | 1 | Page number |
 | `by` | `"magic"` | Sort: `"magic"` (algorithmic) or `"newest"` (chronological) |
 | `address` | — | Viewer address (enables agent overlays and blocked content filtering) |
-| `allowed_tags` | `"sensitive"` | Comma-separated tags to include (default hides porn/violence/gore/death) |
+| `allowed_tags` | `"sensitive"` | Comma-separated tags to include (default hides adult/violence/gore/death) |
 | `feed` | — | `"home"` or `"following"` for personalized feeds |
 
 **Response:**

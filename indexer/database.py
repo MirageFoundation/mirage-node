@@ -17,7 +17,10 @@ class DatabaseManager:
     """Manages all database operations for the indexer."""
 
     # Allowed content tags for topic safety classification
-    _ALLOWED_TOPIC_TAGS = {"sensitive", "gore", "violence", "death", "porn"}
+    _ALLOWED_TOPIC_TAGS = {"sensitive", "gore", "violence", "death", "adult"}
+
+    # TODO: remove "porn" alias once all clients send "adult"
+    _TAG_ALIASES = {"porn": "adult"}
 
     def __init__(self, db_url: str):
         if not db_url or not isinstance(db_url, str):
@@ -489,6 +492,10 @@ class DatabaseManager:
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_topic_content_stats_topic_lower ON topic_content_stats(LOWER(topic))"
+                )
+                # v1.22.4: rename porn -> adult
+                cur.execute(
+                    "ALTER TABLE topic_content_stats ADD COLUMN IF NOT EXISTS adult_count INTEGER NOT NULL DEFAULT 0"
                 )
 
                 # NOTE: Data migrations have been moved to indexer/migrations/
@@ -1109,6 +1116,7 @@ class DatabaseManager:
     def _normalize_tag(cls, tag: str) -> str:
         """Return a normalized tag if allowed, else empty string."""
         t = str(tag or "").strip().lower()
+        t = cls._TAG_ALIASES.get(t, t)
         if t in cls._ALLOWED_TOPIC_TAGS:
             return t
         return ""
@@ -1120,7 +1128,7 @@ class DatabaseManager:
         gore: int,
         violence: int,
         death: int,
-        porn: int,
+        adult: int,
     ) -> Tuple[str, float]:
         """Compute dominant tag (>=50% of posts)."""
         if total <= 0:
@@ -1131,7 +1139,7 @@ class DatabaseManager:
             "gore": int(gore or 0),
             "violence": int(violence or 0),
             "death": int(death or 0),
-            "porn": int(porn or 0),
+            "adult": int(adult or 0),
         }
 
         dominant_tag = ""
@@ -1153,7 +1161,7 @@ class DatabaseManager:
         gore_inc = 1 if tag_norm == "gore" else 0
         violence_inc = 1 if tag_norm == "violence" else 0
         death_inc = 1 if tag_norm == "death" else 0
-        porn_inc = 1 if tag_norm == "porn" else 0
+        adult_inc = 1 if tag_norm == "adult" else 0
 
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1166,7 +1174,7 @@ class DatabaseManager:
                         gore_count,
                         violence_count,
                         death_count,
-                        porn_count
+                        adult_count
                     ) VALUES(%s, 1, %s, %s, %s, %s, %s)
                     ON CONFLICT(topic) DO UPDATE SET
                         total_posts = topic_content_stats.total_posts + 1,
@@ -1174,8 +1182,8 @@ class DatabaseManager:
                         gore_count = topic_content_stats.gore_count + EXCLUDED.gore_count,
                         violence_count = topic_content_stats.violence_count + EXCLUDED.violence_count,
                         death_count = topic_content_stats.death_count + EXCLUDED.death_count,
-                        porn_count = topic_content_stats.porn_count + EXCLUDED.porn_count
-                    RETURNING total_posts, sensitive_count, gore_count, violence_count, death_count, porn_count
+                        adult_count = topic_content_stats.adult_count + EXCLUDED.adult_count
+                    RETURNING total_posts, sensitive_count, gore_count, violence_count, death_count, adult_count
                     """,
                     (
                         topic_norm,
@@ -1183,15 +1191,15 @@ class DatabaseManager:
                         gore_inc,
                         violence_inc,
                         death_inc,
-                        porn_inc,
+                        adult_inc,
                     ),
                 )
                 row = cur.fetchone()
                 if not row:
                     return
-                total_posts, sensitive, gore, violence, death, porn = row
+                total_posts, sensitive, gore, violence, death, adult = row
                 dominant_tag, dominant_ratio = self._compute_dominant_tag(
-                    total_posts, sensitive, gore, violence, death, porn
+                    total_posts, sensitive, gore, violence, death, adult
                 )
                 cur.execute(
                     """
@@ -1218,7 +1226,7 @@ class DatabaseManager:
                         SUM(CASE WHEN LOWER(tag) = 'gore' THEN 1 ELSE 0 END) AS gore_count,
                         SUM(CASE WHEN LOWER(tag) = 'violence' THEN 1 ELSE 0 END) AS violence_count,
                         SUM(CASE WHEN LOWER(tag) = 'death' THEN 1 ELSE 0 END) AS death_count,
-                        SUM(CASE WHEN LOWER(tag) = 'porn' THEN 1 ELSE 0 END) AS porn_count
+                        SUM(CASE WHEN LOWER(tag) IN ('adult', 'porn') THEN 1 ELSE 0 END) AS adult_count
                     FROM posts
                     WHERE COALESCE(target, '') = ''
                       AND deleted = FALSE
@@ -1229,12 +1237,12 @@ class DatabaseManager:
                 row = cur.fetchone()
                 if not row:
                     return
-                total_posts, sensitive, gore, violence, death, porn = [int(x or 0) for x in row]
+                total_posts, sensitive, gore, violence, death, adult = [int(x or 0) for x in row]
                 if total_posts <= 0:
                     cur.execute("DELETE FROM topic_content_stats WHERE topic = %s", (topic_norm,))
                     return
                 dominant_tag, dominant_ratio = self._compute_dominant_tag(
-                    total_posts, sensitive, gore, violence, death, porn
+                    total_posts, sensitive, gore, violence, death, adult
                 )
                 cur.execute(
                     """
@@ -1245,7 +1253,7 @@ class DatabaseManager:
                         gore_count,
                         violence_count,
                         death_count,
-                        porn_count,
+                        adult_count,
                         dominant_tag,
                         dominant_ratio
                     ) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1255,7 +1263,7 @@ class DatabaseManager:
                         gore_count = EXCLUDED.gore_count,
                         violence_count = EXCLUDED.violence_count,
                         death_count = EXCLUDED.death_count,
-                        porn_count = EXCLUDED.porn_count,
+                        adult_count = EXCLUDED.adult_count,
                         dominant_tag = EXCLUDED.dominant_tag,
                         dominant_ratio = EXCLUDED.dominant_ratio
                     """,
@@ -1266,7 +1274,7 @@ class DatabaseManager:
                         gore,
                         violence,
                         death,
-                        porn,
+                        adult,
                         dominant_tag,
                         float(dominant_ratio),
                     ),

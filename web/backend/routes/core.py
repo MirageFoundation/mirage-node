@@ -3102,7 +3102,7 @@ def core_edit():
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
-        tag = str(data.get("tag", "")).strip()
+        tag = _normalize_tag(data.get("tag", ""))
 
         if _has_unsafe_chars(topic, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400
@@ -3349,7 +3349,8 @@ def core_annotate():
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
-        tag = str(data.get("tag", "")).strip()
+        raw_tag = str(data.get("tag", "")).strip()
+        tag = _normalize_tag(raw_tag) if raw_tag != ANNOTATE_SENTINEL else raw_tag
         appendix = str(data.get("appendix", "")).strip()
 
         # Media: list of strings or omitted
@@ -3509,7 +3510,16 @@ def core_annotate():
         return jsonify({"error": msg}), status
 
 
-ALLOWED_TAGS = {"", "sensitive", "porn", "gore", "violence", "death"}
+ALLOWED_TAGS = {"", "sensitive", "adult", "gore", "violence", "death"}
+
+# TODO: remove "porn" alias once all clients send "adult"
+_TAG_ALIASES = {"porn": "adult"}
+
+
+def _normalize_tag(tag: str) -> str:
+    """Return canonical tag name, applying aliases."""
+    t = (tag or "").strip().lower()
+    return _TAG_ALIASES.get(t, t)
 
 
 def _has_unsafe_chars(*values: str) -> bool:
@@ -3563,7 +3573,7 @@ def core_post():
         topic = str(data.get("topic", "")).strip()
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
-        tag = str(data.get("tag", "")).strip()
+        tag = _normalize_tag(data.get("tag", ""))
 
         if _has_unsafe_chars(topic, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400

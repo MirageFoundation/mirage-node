@@ -1535,7 +1535,7 @@ const MainView = ({
                             <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
                         </NsfwHeroTitle>
                         <NsfwHeroDescription>
-                            Mirage is uncensored and includes adult content like <strong>pornography</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
+                            Mirage is uncensored and may include <strong>adult content</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
                         </NsfwHeroDescription>
                         <NsfwHeroButtons>
                             <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>

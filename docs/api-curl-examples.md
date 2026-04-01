@@ -443,4 +443,4 @@ curl -X POST "${API_BASE}/mark_inbox_viewed" \
 - `timestamp` is milliseconds since epoch (for example `Date.now()` in JavaScript)
 - Amount values are in `umirage` (1 MIRAGE = 1,000,000 umirage)
 - Vote `direction`: 1 = upvote, -1 = downvote, 0 = remove vote
-- Tag must be one of: `""`, `"sensitive"`, `"porn"`, `"gore"`, `"violence"`, `"death"`
+- Tag must be one of: `""`, `"sensitive"`, `"adult"`, `"gore"`, `"violence"`, `"death"`

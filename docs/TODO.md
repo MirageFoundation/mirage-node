@@ -85,7 +85,7 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 
 # Other Ideas:
 - Allow only 3 new profiles (set_username) per minute
-- rename `porn` category to `explicit`
+- Remove `porn` -> `adult` tag alias once all clients (app + web) send `adult` natively
 
 # We should explicitly add LINK as field (like media)
 - and something like youtube or redgifs link should just be media link?

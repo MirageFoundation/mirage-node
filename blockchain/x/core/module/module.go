@@ -177,15 +177,30 @@ func topicMatchesPattern(topic string, pattern string) bool {
 var allowedTags = map[string]bool{
 	"":          true,
 	"sensitive": true,
-	"porn":      true,
+	"adult":     true,
 	"gore":      true,
 	"violence":  true,
 	"death":     true,
 }
 
+// tagAliases maps deprecated tag names to their canonical replacements.
+// TODO: remove "porn" alias once all clients send "adult".
+var tagAliases = map[string]string{
+	"porn": "adult",
+}
+
+// normalizeTag returns the canonical form of a tag (applying aliases).
+func normalizeTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if canonical, ok := tagAliases[tag]; ok {
+		return canonical
+	}
+	return tag
+}
+
 // validateTag validates the content tag field
 func validateTag(tag string) error {
-	tag = strings.TrimSpace(tag)
+	tag = normalizeTag(tag)
 	if len(tag) > 50 {
 		return fmt.Errorf("tag exceeds limit: %d > 50", len(tag))
 	}
@@ -1283,8 +1298,8 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		}
 	}
 
-	// Validate tag field
-	tag := strings.TrimSpace(req.GetTag())
+	// Validate and normalize tag field
+	tag := normalizeTag(req.GetTag())
 	if err := validateTag(tag); err != nil {
 		return nil, err
 	}
@@ -1463,8 +1478,8 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		}
 	}
 
-	// Validate tag field
-	tag := strings.TrimSpace(req.GetTag())
+	// Validate and normalize tag field
+	tag := normalizeTag(req.GetTag())
 	if err := validateTag(tag); err != nil {
 		return nil, err
 	}
@@ -1570,9 +1585,10 @@ func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*type
 		}
 	}
 
-	// Validate tag (skip if sentinel)
+	// Validate and normalize tag (skip if sentinel)
 	tag := strings.TrimSpace(req.GetTag())
 	if tag != sentinel {
+		tag = normalizeTag(tag)
 		if err := validateTag(tag); err != nil {
 			return nil, err
 		}

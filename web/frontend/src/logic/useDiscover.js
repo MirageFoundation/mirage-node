@@ -6,7 +6,7 @@ import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalid
 import { usePendingFollows } from "./useFollowState.js";
 import { useLocation } from "react-router-dom";
 export const tagColors = {
-  porn: {
+  adult: {
     bg: 'rgba(236, 72, 153, 0.18)',
     border: 'rgba(236, 72, 153, 0.50)',
     text: '#ec4899'

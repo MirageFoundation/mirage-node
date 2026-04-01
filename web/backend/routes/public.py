@@ -204,9 +204,20 @@ def _deleted_filter_bare() -> str:
     return "" if IGNORE_DELETIONS else "AND deleted = FALSE"
 
 
+def _normalize_api_tag(tag: str) -> str:
+    """Normalize a single tag value using alias map."""
+    t = (tag or "").strip().lower()
+    return _TAG_ALIASES.get(t, t)
+
+
+def _parse_allowed_tags(raw: str) -> set[str]:
+    """Parse and normalize the allowed_tags query param."""
+    return set(_normalize_api_tag(t) for t in (raw or "").split(",") if t.strip())
+
+
 def _is_tag_allowed(tag: str, allowed_tags: set[str]) -> bool:
     """Return True if tag is empty (safe) or in allowed_tags."""
-    t = (tag or "").strip().lower()
+    t = _normalize_api_tag(tag)
     return not t or t in allowed_tags
 
 
@@ -374,7 +385,10 @@ def _enrich_media_meta(cur, posts: list[dict]) -> None:
 
 
 # Allowed content tags used for topic safety classification
-_TOPIC_TAGS = ("sensitive", "gore", "violence", "death", "porn")
+_TOPIC_TAGS = ("sensitive", "gore", "violence", "death", "adult")
+
+# TODO: remove "porn" alias once all clients send "adult"
+_TAG_ALIASES = {"porn": "adult"}
 
 
 def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
@@ -391,7 +405,7 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
                 SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) = 'gore' THEN 1 ELSE 0 END) AS gore_count,
                 SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) = 'violence' THEN 1 ELSE 0 END) AS violence_count,
                 SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) = 'death' THEN 1 ELSE 0 END) AS death_count,
-                SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) = 'porn' THEN 1 ELSE 0 END) AS porn_count
+                SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) IN ('adult', 'porn') THEN 1 ELSE 0 END) AS adult_count
             FROM posts p
             WHERE COALESCE(p.target, '') = ''
               AND p.topic IS NOT NULL
@@ -410,7 +424,7 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
                 "gore": float(row[3] or 0),
                 "violence": float(row[4] or 0),
                 "death": float(row[5] or 0),
-                "porn": float(row[6] or 0),
+                "adult": float(row[6] or 0),
             }
             dominant_tag = ""
             dominant_ratio = 0.0
@@ -4016,7 +4030,7 @@ def get_topics():
     limit = min(max(1, limit), 200)
     min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
     try:
         # Get min/max topic size from chain params
         p = expect_params()
@@ -4145,7 +4159,7 @@ def search_topics():
     limit = min(max(1, limit), 50)
     offset = max(0, offset)
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
 
     q_raw = request.args.get("q", default="", type=str)
     q = re.sub(r"[^a-zA-Z0-9]", "", str(q_raw or "")).lower()
@@ -4265,7 +4279,7 @@ def search():
     viewer = request.args.get("address", default="", type=str).strip()
 
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
 
     # Detect search type from prefix
     if q_raw.startswith("@"):
@@ -4824,9 +4838,9 @@ def get_posts():
     address = request.args.get("address", default="", type=str)
 
     # Parse allowed_tags: comma-separated list of tags the user wants to see
-    # Default: only 'sensitive' is allowed; others (porn, violence, gore, death) are hidden
+    # Default: only 'sensitive' is allowed; others (adult, violence, gore, death) are hidden
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5243,7 +5257,7 @@ def get_user_posts():
     offset = (page - 1) * limit
 
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = set(t.strip().lower() for t in (allowed_tags_raw or "").split(",") if t.strip())
+    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
     if not allowed_tags:
         log_event(rid, "get_user_posts.allowed_tags.empty", owner=owner[:12] if owner else None)
     if post_type == "comments":
@@ -7955,7 +7969,7 @@ def get_stats():
                 "gore": tag_counts.get("gore", 0),
                 "violence": tag_counts.get("violence", 0),
                 "death": tag_counts.get("death", 0),
-                "porn": tag_counts.get("porn", 0),
+                "adult": tag_counts.get("adult", 0) + tag_counts.get("porn", 0),
             }
 
             stats["chain_active_24h"] = stats.get("chain_active_24h", 0)

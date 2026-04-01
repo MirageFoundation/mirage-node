@@ -220,7 +220,7 @@ const FLAG_LABELS = {
     gore: 'Gore',
     violence: 'Violence',
     death: 'Death',
-    porn: 'Porn'
+    adult: 'Adult'
 };
 
 export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled }) => {

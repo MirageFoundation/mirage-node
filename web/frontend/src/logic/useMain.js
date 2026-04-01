@@ -967,14 +967,14 @@ export function useMain({
             setShowNsfwHero(false);
             if (allowNsfw) {
                 // Enable all NSFW tags
-                Storage.save('show_tag_porn', true);
+                Storage.save('show_tag_adult', true);
                 Storage.save('show_tag_violence', true);
                 Storage.save('show_tag_gore', true);
                 Storage.save('show_tag_death', true);
                 // Dispatch settings update event so feed refreshes
                 window.dispatchEvent(new CustomEvent('settingsUpdated', {
                     detail: {
-                        showTagPorn: true,
+                        showTagAdult: true,
                         showTagViolence: true,
                         showTagGore: true,
                         showTagDeath: true
@@ -1001,7 +1001,7 @@ export function useMain({
     useEffect(() => {
         const handler = e => {
             const detail = e?.detail || {};
-            const tagKeys = ['showTagSensitive', 'showTagPorn', 'showTagViolence', 'showTagGore', 'showTagDeath'];
+            const tagKeys = ['showTagSensitive', 'showTagAdult', 'showTagViolence', 'showTagGore', 'showTagDeath'];
             const hasTagChange = tagKeys.some(key => Object.prototype.hasOwnProperty.call(detail, key));
             if (hasTagChange) {
                 // Force refresh the home feed to apply new tag filters
