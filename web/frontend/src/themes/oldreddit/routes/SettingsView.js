@@ -449,8 +449,6 @@ export default function SettingsView({
         themeId,
         themeMode,
         collapseThreshold,
-        sidebarTopicsLimit,
-        sidebarPeopleLimit,
         hideDownvotedPosts,
         setHideDownvotedPosts,
         blurSensitiveMedia,
@@ -500,8 +498,6 @@ export default function SettingsView({
         handleThemeModeChange,
         handleReferralPrecheckToggle,
         handleCollapseThresholdChange,
-        handleSidebarTopicsLimitChange,
-        handleSidebarPeopleLimitChange,
         getThemeExplanation,
         handleDeleteAccount
     } = useSettings({
