@@ -314,7 +314,6 @@ export default function ProfileView({
     const {
         navigate,
         location,
-        theme,
         address,
         usernameResolutionError,
         isResolvingUsername,
@@ -469,7 +468,7 @@ export default function ProfileView({
                                 <Label>Username:</Label>
                                 <ValueBoxWithButton>
                                     <InlineMono title={profileUsername}>{usernameDisplay}</InlineMono>
-                                    {canEditProfile && <Button onClick={() => navigate('/change_username')} size="sm" minWidth="copy" mobileFullWidth>Change</Button>}
+                                    {canEditProfile && <Button onClick={() => navigate('/change_username')} size="sm" minWidth="follow" mobileFullWidth>Change</Button>}
                                     {!isOwnProfile && address && <Button variant={(isFollowingProfile && followHover) || isUnfollowAction ? 'primaryDanger' : isFollowingProfile ? 'subtle' : 'primary'} size="sm" minWidth="follow" onMouseEnter={() => setFollowHover(true)} onMouseLeave={() => setFollowHover(false)} disabled={isFollowInProgress} loading={isFollowInProgress} onClick={handleFollowToggle} mobileFullWidth>
                                         {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
                                     </Button>}
@@ -720,7 +719,7 @@ export default function ProfileView({
                                         }}>
                                             {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
                                         </Mono>
-                                        {isOwnProfile && canHaveBiography && <Button size="sm" minWidth="copy" mobileFullWidth onClick={() => {
+                                        {isOwnProfile && canHaveBiography && <Button size="sm" minWidth="follow" mobileFullWidth onClick={() => {
                                             setBioDraft(biography);
                                             setBioEditing(true);
                                             setBioError('');

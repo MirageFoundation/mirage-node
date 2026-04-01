@@ -279,6 +279,7 @@ const ExpandedContent = styled.div`
     color: ${({ theme }) => theme.colors.text};
     overflow-wrap: anywhere;
     word-break: break-word;
+    max-width: 800px;
 
     img, video {
         max-width: 100%;
@@ -289,6 +290,7 @@ const ExpandedContent = styled.div`
     @media (max-width: 600px) {
         padding: 0.4rem 0.5rem;
         font-size: 0.75rem;
+        max-width: 100%;
     }
 `;
 
@@ -378,7 +380,7 @@ function truncateText(text, max) {
 function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive }) {
     const [expanded, setExpanded] = useState(false);
 
-    const mediaArr = useMemo(() => (post && Array.isArray(post.media) && post.media.length > 0) ? post.media : null, [post?.media]);
+    const mediaArr = useMemo(() => (post && Array.isArray(post.media) && post.media.length > 0) ? post.media : null, [post]);
     const expandedTextBody = useMemo(() => {
         const raw = String(post?.content || '').trim();
         if (!raw) return null;
@@ -460,14 +462,14 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
             <ActionButton type="button" onClick={() => onHide(postId)}>
                 hide
             </ActionButton>
+            <ActionLink to={linkTarget}>
+                report
+            </ActionLink>
             {hasExpandableContent && (
                 <ActionButton type="button" onClick={() => setExpanded(prev => !prev)}>
                     {expanded ? '[-]' : '[+]'}
                 </ActionButton>
             )}
-            <ActionLink to={linkTarget}>
-                report
-            </ActionLink>
         </ActionsLine>
     );
 

@@ -1882,15 +1882,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     // Check if post has actual media content to display in media mode
     const hasMediaModeContent = isMediaMode && firstLinkInContent && (isDirectImage || isPrimaryVideo);
 
-    // Desktop expand/collapse for media-only posts (no text content, just image/video)
-    const isMediaOnlyPost = (() => {
-        if (isMobile || hasMediaModeContent) return false;
-        if (!firstLinkInContent || (!isDirectImage && !isPrimaryVideo)) return false;
-        const rawContent = (post?.content || '').trim();
-        if (!rawContent) return true;
-        const withoutUrls = rawContent.replace(/https?:\/\/[^\s<>"']+/gi, '').trim();
-        return !withoutUrls;
-    })();
+
 
     const renderCommentCount = () => {
         const currentCount = Number.isFinite(Number(post.comments)) ? Math.round(Number(post.comments)) : 0;

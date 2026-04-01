@@ -412,6 +412,15 @@ export default function ProfileView({
         donateAmountRaw,
         setDonateAmountRaw,
         donateMessage,
+        confirmGiftSub,
+        giftSubMessage,
+        subFeePending,
+        subFeeStatus,
+        subFeeLabel,
+        agentFeeLabel,
+        handleGiftSub,
+        confirmGiftSubAction,
+        cancelGiftSub,
         formatPrefWeight,
         colorForWeight,
         hasValidAccount,
@@ -497,7 +506,7 @@ export default function ProfileView({
                                 <Label>Username:</Label>
                                 <ProfileFieldValue>
                                     <InlineMono title={profileUsername}>{usernameDisplay}</InlineMono>
-                                    {canEditProfile && <Button onClick={() => navigate('/change_username')} size="sm" minWidth="copy" mobileFullWidth>Change</Button>}
+                                    {canEditProfile && <Button onClick={() => navigate('/change_username')} size="sm" minWidth="follow" mobileFullWidth>Change</Button>}
                                     {!isOwnProfile && address && <Button variant={(isFollowingProfile && followHover) || isUnfollowAction ? 'primaryDanger' : isFollowingProfile ? 'subtle' : 'primary'} size="sm" minWidth="follow" onMouseEnter={() => setFollowHover(true)} onMouseLeave={() => setFollowHover(false)} disabled={isFollowInProgress} loading={isFollowInProgress} onClick={handleFollowToggle} mobileFullWidth>
                                         {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
                                     </Button>}
@@ -511,36 +520,102 @@ export default function ProfileView({
                                         navigator.clipboard.writeText(profileAddress);
                                         setAddressCopied(true);
                                         setTimeout(() => setAddressCopied(false), 1500);
-                                    }} size="sm" minWidth="copy" copied={addressCopied} mobileFullWidth>
+                                    }} size="sm" minWidth="follow" copied={addressCopied} mobileFullWidth>
                                         {addressCopied ? 'Copied!' : 'Copy'}
                                     </Button>}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             <ProfileFieldRow>
                                 <Label>Tier:</Label>
-                                <ProfileFieldValuePlain>
-                                    <Mono style={{
-                                        color: getTierColor(userLevel)
-                                    }}>
-                                        {getTierName(userLevel)}
-                                    </Mono>
-                                    {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
-                                        marginLeft: '0.5rem',
-                                        fontSize: '0.7rem',
-                                        color: '#888'
-                                    }}>
-                                        ({formatSubscriptionExpiry(subscriptionExpiry)})
-                                    </span>}
-                                </ProfileFieldValuePlain>
+                                <ProfileFieldValue>
+                                    <span style={{ display: 'flex', alignItems: 'center' }}>
+                                        <Mono style={{
+                                            color: getTierColor(userLevel)
+                                        }}>
+                                            {getTierName(userLevel)}
+                                        </Mono>
+                                        {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
+                                            marginLeft: '0.5rem',
+                                            fontSize: '0.7rem',
+                                            color: '#888'
+                                        }}>
+                                            ({formatSubscriptionExpiry(subscriptionExpiry)})
+                                        </span>}
+                                    </span>
+                                    {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="follow" mobileFullWidth onClick={handleGiftSub} disabled={subFeePending}>
+                                        {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
+                                    </Button>}
+                                </ProfileFieldValue>
                             </ProfileFieldRow>
+                            {confirmGiftSub && <ProfileFieldRow>
+                                <div aria-hidden="true" />
+                                <ProfileFieldValuePlain>
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.6rem',
+                                        width: '100%',
+                                        flexWrap: 'wrap',
+                                        background: 'rgba(251, 191, 36, 0.1)',
+                                        border: '1px solid #f59e0b',
+                                        padding: '0.5rem 0.6rem',
+                                        boxSizing: 'border-box'
+                                    }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                            <span style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                                                🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {profileUsername || profileAddress?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
+                                            </span>
+                                            {confirmGiftSub.loading && (
+                                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
+                                            )}
+                                            {confirmGiftSub.expiryLabel && (
+                                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{confirmGiftSub.expiryLabel}</span>
+                                            )}
+                                            {confirmGiftSub.error && (
+                                                <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>
+                                            )}
+                                        </div>
+                                        <div style={{
+                                            display: 'flex',
+                                            gap: '0.5rem',
+                                            marginLeft: 'auto',
+                                            flexShrink: 0
+                                        }}>
+                                            <Button variant="warning" size="sm" onClick={confirmGiftSubAction} disabled={subFeePending || confirmGiftSub.loading || !!confirmGiftSub.error}>
+                                                {subFeeStatus || 'Confirm'}
+                                            </Button>
+                                            <Button variant="ghost" size="sm" onClick={cancelGiftSub}>Cancel</Button>
+                                        </div>
+                                    </div>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>}
+                            {giftSubMessage && <ProfileFieldRow>
+                                <div aria-hidden="true" />
+                                <ProfileFieldValuePlain>
+                                    <div style={{
+                                        background: giftSubMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                        border: giftSubMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                                        padding: '0.6rem 0.85rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        color: giftSubMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                                        fontSize: '0.8rem',
+                                        boxSizing: 'border-box'
+                                    }}>
+                                        <span>{giftSubMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                        {giftSubMessage.message}
+                                    </div>
+                                </ProfileFieldValuePlain>
+                            </ProfileFieldRow>}
                             <ProfileFieldRow>
                                 <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
                                     Balance:
                                 </HoverableLabel>
                                 <ProfileFieldValue>
                                     <Mono>{balanceDisplay}</Mono>
-                                    {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="copy" mobileFullWidth onClick={handleDonate} disabled={donatePending}>
-                                        {donatePending ? donateStatus || 'Sending...' : 'Donate'}
+                                    {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="follow" mobileFullWidth onClick={handleDonate} disabled={donatePending}>
+                                        {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
                                     </Button>}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
@@ -562,7 +637,7 @@ export default function ProfileView({
                                             whiteSpace: 'nowrap',
                                             fontSize: '0.82rem'
                                         }}>
-                                            Donate to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
+                                            💰 Gift Mirage to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
                                         </span>
                                         <div style={{
                                             display: 'flex',
@@ -688,7 +763,7 @@ export default function ProfileView({
                                         }}>
                                             {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
                                         </Mono>
-                                        {isOwnProfile && canHaveBiography && <Button size="sm" minWidth="copy" mobileFullWidth onClick={() => {
+                                        {isOwnProfile && canHaveBiography && <Button size="sm" minWidth="follow" mobileFullWidth onClick={() => {
                                             setBioDraft(biography);
                                             setBioEditing(true);
                                             setBioError('');

@@ -282,7 +282,7 @@ function buildLayout(colors) {
         tabSizeTablet: '0.6rem',
 
         flatMode: true,
-        maxVideoWidth: 800,
+        maxVideoWidth: 600,
         inboxFullWidth: true,
         profilePostsFullWidth: true,
     };

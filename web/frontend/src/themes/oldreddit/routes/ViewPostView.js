@@ -539,8 +539,16 @@ const StyledContentArea = styled.div`
     overflow-wrap: anywhere;
     word-break: break-word;
     white-space: normal;
+    max-width: 800px;
+
+    img, video {
+        max-width: 100%;
+        max-height: 600px;
+    }
+
     @media (max-width: 1000px) {
         font-size: 0.72rem;
+        max-width: 100%;
     }
 `;
 const ColumnFlex = styled.div`
