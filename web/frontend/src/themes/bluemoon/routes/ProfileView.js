@@ -402,7 +402,16 @@ export default function ProfileView({
         formatDonateAmount,
         handleDonate,
         confirmDonateAction,
-        cancelDonate
+        cancelDonate,
+        confirmGiftSub,
+        giftSubMessage,
+        subFeePending,
+        subFeeStatus,
+        subFeeLabel,
+        agentFeeLabel,
+        handleGiftSub,
+        confirmGiftSubAction,
+        cancelGiftSub
     } = useProfile({
         state
     });
@@ -481,20 +490,25 @@ export default function ProfileView({
                             </Row>
                             <Row>
                                 <Label>Tier:</Label>
-                                <ValueBox>
-                                    <Mono style={{
-                                        color: getTierColor(userLevel)
-                                    }}>
-                                        {getTierName(userLevel)}
-                                    </Mono>
-                                    {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
-                                        marginLeft: '0.5rem',
-                                        fontSize: '0.7rem',
-                                        color: '#888'
-                                    }}>
-                                        ({formatSubscriptionExpiry(subscriptionExpiry)})
-                                    </span>}
-                                </ValueBox>
+                                <ValueBoxWithButton>
+                                    <span style={{ display: 'flex', alignItems: 'center' }}>
+                                        <Mono style={{
+                                            color: getTierColor(userLevel)
+                                        }}>
+                                            {getTierName(userLevel)}
+                                        </Mono>
+                                        {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
+                                            marginLeft: '0.5rem',
+                                            fontSize: '0.7rem',
+                                            color: '#888'
+                                        }}>
+                                            ({formatSubscriptionExpiry(subscriptionExpiry)})
+                                        </span>}
+                                    </span>
+                                    {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="copy" mobileFullWidth onClick={handleGiftSub} disabled={subFeePending}>
+                                        {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
+                                    </Button>}
+                                </ValueBoxWithButton>
                             </Row>
                             <Row>
                                 <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
@@ -503,7 +517,7 @@ export default function ProfileView({
                                 <ValueBoxWithButton>
                                     <Mono>{balanceDisplay}</Mono>
                                     {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="copy" mobileFullWidth onClick={handleDonate} disabled={donatePending}>
-                                        {donatePending ? donateStatus || 'Sending...' : 'Donate'}
+                                        {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
                                     </Button>}
                                 </ValueBoxWithButton>
                             </Row>
@@ -524,14 +538,14 @@ export default function ProfileView({
                                             whiteSpace: 'nowrap',
                                             fontSize: '0.82rem'
                                         }}>
-                                            Donate to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
+                                            💰 Gift Mirage to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
                                         </span>
                                         <div style={{
                                             display: 'flex',
                                             alignItems: 'center',
                                             gap: '0.35rem',
-                                            background: theme.colors.surface2,
-                                            border: `1px solid ${theme.colors.borderSubtle}`,
+                                            background: '#fff',
+                                            border: '1px solid #d1d5db',
                                             borderRadius: '8px',
                                             padding: '0.2rem 0.5rem'
                                         }}>
@@ -540,14 +554,14 @@ export default function ProfileView({
                                                 background: 'transparent',
                                                 border: 'none',
                                                 outline: 'none',
-                                                color: theme.colors.text,
+                                                color: '#1f2937',
                                                 fontSize: '0.8rem',
                                                 fontWeight: 700,
                                                 textAlign: 'right'
                                             }} />
                                             <span style={{
                                                 fontSize: '0.68rem',
-                                                opacity: 0.7
+                                                color: '#6b7280'
                                             }}>MIRAGE</span>
                                         </div>
                                         <div style={{
@@ -579,6 +593,64 @@ export default function ProfileView({
                                 }}>
                                     <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
                                     {donateMessage.message}
+                                </div>
+                            </Row>}
+                            {confirmGiftSub && <Row>
+                                <div />
+                                <ValueBox style={{
+                                    background: 'rgba(251, 191, 36, 0.1)',
+                                    borderColor: '#f59e0b'
+                                }}>
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.6rem',
+                                        width: '100%',
+                                        flexWrap: 'wrap'
+                                    }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                            <span style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                                                🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {profileUsername || profileAddress?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
+                                            </span>
+                                            {confirmGiftSub.loading && (
+                                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
+                                            )}
+                                            {confirmGiftSub.expiryLabel && (
+                                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{confirmGiftSub.expiryLabel}</span>
+                                            )}
+                                            {confirmGiftSub.error && (
+                                                <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>
+                                            )}
+                                        </div>
+                                        <div style={{
+                                            display: 'flex',
+                                            gap: '0.5rem',
+                                            marginLeft: 'auto',
+                                            flexShrink: 0
+                                        }}>
+                                            <Button variant="warning" size="sm" onClick={confirmGiftSubAction} disabled={subFeePending || confirmGiftSub.loading || !!confirmGiftSub.error}>
+                                                {subFeeStatus || 'Confirm'}
+                                            </Button>
+                                            <Button variant="ghost" size="sm" onClick={cancelGiftSub}>Cancel</Button>
+                                        </div>
+                                    </div>
+                                </ValueBox>
+                            </Row>}
+                            {giftSubMessage && <Row>
+                                <div />
+                                <div style={{
+                                    background: giftSubMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                    border: giftSubMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                                    borderRadius: '8px',
+                                    padding: '0.6rem 0.85rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    color: giftSubMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                                    fontSize: '0.8rem'
+                                }}>
+                                    <span>{giftSubMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                    {giftSubMessage.message}
                                 </div>
                             </Row>}
                             <Row>

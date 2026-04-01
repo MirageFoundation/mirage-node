@@ -153,7 +153,7 @@ function buildLayout(colors) {
 
         contentGridCols: '200px minmax(0, 1fr)',
         contentGridGap: '0.5rem',
-        contentMaxWidth: '1400px',
+        contentMaxWidth: '1600px',
         contentMargin: '0 auto',
         contentPadding: '0 0.5rem',
         contentPaddingTablet: '0 0.25rem',

@@ -12,6 +12,7 @@ import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../.
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
 import { requireThemeColor } from "../../../utils/themeColor";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../../../utils/media";
+import MarkdownRenderer from "./MarkdownRenderer";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import useBalance from "../../../logic/useBalance";
 import { usePendingSends } from "../../../logic/usePendingSends";
@@ -1847,6 +1848,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         );
     };
 
+    const expandedTextBody = useMemo(() => {
+        const raw = String(post?.content || '').trim();
+        if (!raw) return null;
+        if (mediaArr) return raw || null;
+        const idx = raw.indexOf('\n');
+        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+        const rest = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
+        if (/^https?:\/\//i.test(first)) return rest || null;
+        return raw || null;
+    }, [post?.content, mediaArr]);
+
     if (hideTeaser) return null;
 
     // Check if mobile (disable compact mode on mobile)
@@ -2346,50 +2358,57 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         </FeedReasonLine>
                     )}
                     {hasMediaModeContent ? (
-                        <div style={compactTitleStyle}>
+                        <div style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
                             {title}
+                            <span
+                                onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
+                                style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 'auto', padding: '0.2rem', opacity: 0.4, transition: 'opacity 0.15s, transform 0.2s', userSelect: 'none', transform: mediaExpanded ? 'rotate(180deg)' : 'none' }}
+                                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                                onMouseLeave={e => { e.currentTarget.style.opacity = '0.4'; }}
+                            >
+                                <svg viewBox="0 0 24 24" style={{ width: '18px', height: '18px', fill: 'none', stroke: 'currentColor', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </span>
                         </div>
                     ) : (
-                        <HideOnMobileTitle style={isMediaOnlyPost ? { ...compactTitleStyle, display: 'flex', alignItems: 'baseline', gap: '0' } : compactTitleStyle}>
+                        <HideOnMobileTitle style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
                             {title}
-                            {isMediaOnlyPost && (
-                                <>
-                                    <MetaSeparator style={{ margin: '0 0.35rem', alignSelf: 'center' }}>·</MetaSeparator>
-                                    <span
-                                        onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
-                                        style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', flexShrink: 0, opacity: 0.5, transition: 'opacity 0.15s', userSelect: 'none' }}
-                                        onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
-                                        onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; }}
-                                    >
-                                        <svg viewBox="0 0 24 24" style={{ width: '16px', height: '16px', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
-                                            {mediaExpanded ? (
-                                                <>
-                                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                                                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                                                    <line x1="1" y1="1" x2="23" y2="23" />
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                                    <circle cx="12" cy="12" r="3" />
-                                                </>
-                                            )}
-                                        </svg>
-                                    </span>
-                                </>
-                            )}
+                            <span
+                                onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
+                                style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 'auto', padding: '0.2rem', opacity: 0.4, transition: 'opacity 0.15s, transform 0.2s', userSelect: 'none', transform: mediaExpanded ? 'rotate(180deg)' : 'none' }}
+                                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                                onMouseLeave={e => { e.currentTarget.style.opacity = '0.4'; }}
+                            >
+                                <svg viewBox="0 0 24 24" style={{ width: '18px', height: '18px', fill: 'none', stroke: 'currentColor', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </span>
                         </HideOnMobileTitle>
                     )}
                     {hasMediaModeContent && (
-                        <MediaModeContainer $blur={shouldBlurMedia}>
+                        <MediaModeContainer $blur={shouldBlurMedia && !mediaExpanded}>
                             <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
                         </MediaModeContainer>
                     )}
-                    {isMediaOnlyPost && mediaExpanded && (
-                        <MediaModeContainer $blur={false}>
-                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
-                        </MediaModeContainer>
-                    )}
+                    {mediaExpanded && (() => {
+                        const showMedia = !hasMediaModeContent && firstLinkInContent && (isDirectImage || isPrimaryVideo);
+                        if (!showMedia && !expandedTextBody) return null;
+                        return (
+                            <>
+                                {showMedia && (
+                                    <MediaModeContainer $blur={false}>
+                                        <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
+                                    </MediaModeContainer>
+                                )}
+                                {expandedTextBody && (
+                                    <div style={{ padding: '0.4rem 0' }}>
+                                        <MarkdownRenderer text={expandedTextBody} />
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
                     {post && post.feed_bucket && post.feed_bucket !== 'guest' && hasMediaModeContent && (
                         <FeedReasonLine>
                             {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
