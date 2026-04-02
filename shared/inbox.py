@@ -1,12 +1,82 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 
 import psycopg
 
 from shared.config import get_config
 
 logger = logging.getLogger(__name__)
+
+NEW_USER_HIGHLIGHT_DAYS = int(os.environ.get("NEW_USER_HIGHLIGHT_DAYS", "7"))
+INBOX_PAYLOAD_CONTENT_MAX = 2000
+
+
+def is_new_user(profile_created_at: int) -> bool:
+    if NEW_USER_HIGHLIGHT_DAYS <= 0 or not profile_created_at:
+        return False
+    return (int(time.time()) - int(profile_created_at)) <= NEW_USER_HIGHLIGHT_DAYS * 86400
+
+
+def _truncate_for_payload(text: str, max_len: int = INBOX_PAYLOAD_CONTENT_MAX) -> str:
+    if not text or len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def parent_display_text(item_type: str, context_target: str, context_title: str, context_content: str) -> str:
+    """Compute parent preview text exactly as /api/get_inbox does."""
+    if item_type in ("follow", "donation", "subscription_gift"):
+        return ""
+    if item_type == "reply":
+        if not context_target:
+            return context_title or ""
+        return context_content or ""
+    if item_type == "award":
+        return context_title or ""
+    return context_title or context_content or ""
+
+
+def build_inbox_reply(
+    *,
+    reply_id: str,
+    reply_owner: str,
+    reply_username: str,
+    reply_timestamp: int,
+    reply_author_level: int,
+    reply_author_created_at: int,
+    reply_content: str,
+    parent_id: str,
+    parent_content: str,
+    parent_owner: str,
+    root_post_id: str,
+    award_type: str,
+    item_type: str,
+    amount: int | None,
+) -> dict:
+    """Build an inboxReply dict matching the exact shape returned by /api/get_inbox."""
+    ptext = parent_content
+    if len(ptext) > 200:
+        ptext = ptext[:197] + "..."
+
+    return {
+        "reply_id": reply_id,
+        "reply_owner": reply_owner,
+        "reply_username": reply_username,
+        "reply_author_level": reply_author_level,
+        "reply_author_is_new": is_new_user(reply_author_created_at),
+        "reply_content": _truncate_for_payload(reply_content),
+        "reply_timestamp": int(reply_timestamp),
+        "parent_id": parent_id,
+        "parent_content": ptext,
+        "parent_owner": parent_owner,
+        "root_post_id": root_post_id,
+        "award_type": award_type,
+        "type": item_type,
+        "amount": amount,
+    }
 
 
 def fetch_inbox_last_viewed_at(address: str, cur=None) -> int:

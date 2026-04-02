@@ -24,7 +24,7 @@ import psycopg
 import requests as http_requests
 
 from shared.config import get_config
-from shared.inbox import compute_unread_count, fetch_inbox_last_viewed_at
+from shared.inbox import build_inbox_reply, compute_unread_count, fetch_inbox_last_viewed_at, parent_display_text
 
 logger = logging.getLogger(__name__)
 
@@ -283,20 +283,30 @@ def _get_tokens_for_owner(owner: str) -> list[tuple[str, str]]:
         return []
 
 
-def _resolve_usernames_to_owners(usernames: list[str]) -> dict[str, str]:
+def _resolve_usernames_to_owners(usernames: list[str], cur=None) -> dict[str, str]:
     """Map usernames to owner addresses. Returns {username_lower: owner_lower}."""
     if not usernames:
         return {}
     try:
-        with _connect_indexer_ro() as conn:
-            with conn.cursor() as cur:
-                placeholders = ",".join(["%s"] * len(usernames))
-                cur.execute(
-                    f"SELECT LOWER(username), LOWER(owner) FROM profiles WHERE LOWER(username) IN ({placeholders}) AND deleted_at IS NULL",
-                    [u.lower() for u in usernames],
-                )
-                return {row[0]: row[1] for row in cur.fetchall()}
-    except Exception:
+        if cur is None:
+            with _connect_indexer_ro() as conn:
+                with conn.cursor() as cur_local:
+                    placeholders = ",".join(["%s"] * len(usernames))
+                    cur_local.execute(
+                        f"SELECT LOWER(username), LOWER(owner) FROM profiles WHERE LOWER(username) IN ({placeholders}) "
+                        "AND deleted_at IS NULL",
+                        [u.lower() for u in usernames],
+                    )
+                    return {row[0]: row[1] for row in cur_local.fetchall()}
+        placeholders = ",".join(["%s"] * len(usernames))
+        cur.execute(
+            f"SELECT LOWER(username), LOWER(owner) FROM profiles WHERE LOWER(username) IN ({placeholders}) "
+            "AND deleted_at IS NULL",
+            [u.lower() for u in usernames],
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+    except Exception as e:
+        logger.debug("[Push] Username resolve failed: %s", e)
         return {}
 
 
@@ -342,6 +352,89 @@ def _get_root_post_id(target_txhash: str) -> str | None:
                     return root_post_id
                 return None
     except Exception:
+        return None
+
+
+def _resolve_root_post_id(txhash: str, target: str, root_post_id: str) -> str | None:
+    txhash_lc = str(txhash or "").strip().lower()
+    if not txhash_lc:
+        return None
+    target_lc = str(target or "").strip().lower()
+    root_lc = str(root_post_id or "").strip().lower()
+    if not target_lc:
+        return txhash_lc
+    if root_lc:
+        return root_lc
+    return None
+
+
+def _fetch_profile_info(owner: str, cur=None) -> dict | None:
+    """Fetch (username, level, created_at) for an owner from the indexer DB."""
+    if not owner:
+        return None
+    try:
+        if cur is None:
+            with _connect_indexer_ro() as conn:
+                with conn.cursor() as cur_local:
+                    cur_local.execute(
+                        "SELECT COALESCE(username, ''), COALESCE(level, 0), COALESCE(created_at, 0) "
+                        "FROM profiles WHERE LOWER(owner) = LOWER(%s) AND deleted_at IS NULL LIMIT 1",
+                        (owner,),
+                    )
+                    row = cur_local.fetchone()
+        else:
+            cur.execute(
+                "SELECT COALESCE(username, ''), COALESCE(level, 0), COALESCE(created_at, 0) "
+                "FROM profiles WHERE LOWER(owner) = LOWER(%s) AND deleted_at IS NULL LIMIT 1",
+                (owner,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "username": str(row[0] or "").strip(),
+            "level": int(row[1]) if row[1] is not None else 0,
+            "created_at": int(row[2]) if row[2] is not None else 0,
+        }
+    except Exception as e:
+        logger.error("[Push] _fetch_profile_info failed for %s: %s", owner[:16], e)
+        return None
+
+
+def _fetch_post_context(txhash: str, cur=None) -> dict | None:
+    """Fetch post context (content, title, target, owner, root_post_id) from indexer DB."""
+    if not txhash:
+        return None
+    try:
+        if cur is None:
+            with _connect_indexer_ro() as conn:
+                with conn.cursor() as cur_local:
+                    cur_local.execute(
+                        "SELECT COALESCE(content, ''), COALESCE(title, ''), COALESCE(target, ''), "
+                        "owner, COALESCE(root_post_id, '') "
+                        "FROM posts WHERE LOWER(txhash) = LOWER(%s) AND deleted = FALSE LIMIT 1",
+                        (txhash,),
+                    )
+                    row = cur_local.fetchone()
+        else:
+            cur.execute(
+                "SELECT COALESCE(content, ''), COALESCE(title, ''), COALESCE(target, ''), "
+                "owner, COALESCE(root_post_id, '') "
+                "FROM posts WHERE LOWER(txhash) = LOWER(%s) AND deleted = FALSE LIMIT 1",
+                (txhash,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "content": str(row[0] or ""),
+            "title": str(row[1] or ""),
+            "target": str(row[2] or "").strip().lower(),
+            "owner": str(row[3] or "").strip().lower(),
+            "root_post_id": str(row[4] or "").strip().lower(),
+        }
+    except Exception as e:
+        logger.error("[Push] _fetch_post_context failed for %s: %s", txhash[:16], e)
         return None
 
 
@@ -399,8 +492,9 @@ def send_push_for_reply(
     target_txhash: str,
     content: str,
     tx_hash: str,
+    created_at: int = 0,
 ) -> None:
-    """Fire push for a reply/comment. Called after successful broadcast."""
+    """Fire push for a reply/comment. Called from push_listener after post is indexed."""
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping reply push for %s", tx_hash[:16])
         return
@@ -408,7 +502,7 @@ def send_push_for_reply(
     logger.info(
         "[Push] Firing reply push: poster=%s target=%s tx=%s", poster_addr[:16], target_txhash[:16], tx_hash[:16]
     )
-    _fire_and_forget(_do_reply_push, poster_addr, poster_username, target_txhash, content, tx_hash)
+    _fire_and_forget(_do_reply_push, poster_addr, poster_username, target_txhash, content, tx_hash, created_at)
     _maybe_flush_pending_summaries()
 
 
@@ -418,23 +512,56 @@ def _do_reply_push(
     target_txhash: str,
     content: str,
     tx_hash: str,
+    created_at: int = 0,
 ) -> None:
-    target_owner = _get_post_owner(target_txhash)
-    if not target_owner:
-        logger.warning("[Push] Missing reply target owner for %s", target_txhash[:16])
-        return
-    if target_owner == poster_addr.lower():
-        logger.debug("[Push] Self-reply, skipping push for %s", tx_hash[:16])
-        return
-    root_post_id = _get_root_post_id(target_txhash)
-    if not root_post_id:
-        logger.warning("[Push] Missing root_post_id for reply target %s", target_txhash[:16])
-        return
+    poster_lc = poster_addr.lower()
+    with _connect_indexer_ro() as conn:
+        with conn.cursor() as cur:
+            parent_ctx = _fetch_post_context(target_txhash, cur=cur)
+            if not parent_ctx:
+                logger.warning("[Push] Missing parent post context for %s", target_txhash[:16])
+                return
+            target_owner = parent_ctx["owner"]
+            if target_owner == poster_lc:
+                logger.debug("[Push] Self-reply, skipping push for %s", tx_hash[:16])
+                return
+            root_post_id = _resolve_root_post_id(target_txhash, parent_ctx["target"], parent_ctx["root_post_id"])
+            if not root_post_id:
+                logger.warning("[Push] Missing root_post_id for reply target %s", target_txhash[:16])
+                return
+            profile = _fetch_profile_info(poster_addr, cur=cur)
+            if not profile:
+                logger.warning("[Push] Missing profile for reply poster %s", poster_addr[:16])
+                return
+    logger.debug("[Push] Reply context resolved owner=%s root=%s", target_owner[:16], root_post_id[:16])
+    poster_username = poster_username or profile["username"]
+
+    p_display = parent_display_text("reply", parent_ctx["target"], parent_ctx["title"], parent_ctx["content"])
+
+    ts = created_at or int(time.time())
+
+    inbox_reply = build_inbox_reply(
+        reply_id=tx_hash.lower(),
+        reply_owner=poster_addr.lower(),
+        reply_username=poster_username,
+        reply_timestamp=ts,
+        reply_author_level=profile["level"],
+        reply_author_created_at=profile["created_at"],
+        reply_content=content,
+        parent_id=target_txhash.lower(),
+        parent_content=p_display,
+        parent_owner=parent_ctx["owner"],
+        root_post_id=root_post_id,
+        award_type="",
+        item_type="reply",
+        amount=None,
+    )
+    logger.debug("[Push] Built inboxReply for reply tx=%s", tx_hash[:16])
 
     display_name = f"@{poster_username}" if poster_username else poster_addr[:12]
     title = f"{display_name} replied"
     body = _truncate(content)
-    data = {"type": "reply", "rootPostId": root_post_id, "replyId": tx_hash}
+    data = {"type": "reply", "rootPostId": root_post_id, "replyId": tx_hash, "inboxReply": inbox_reply}
 
     _send_push_to_user(target_owner, title, body, data)
     _check_old_receipts()
@@ -446,12 +573,13 @@ def send_push_for_mentions(
     content: str,
     tx_hash: str,
     target_txhash: str,
+    created_at: int = 0,
 ) -> None:
-    """Fire pushes for @mentions in content. Called after successful broadcast."""
+    """Fire pushes for @mentions in content. Called from push_listener after post is indexed."""
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping mention push for %s", tx_hash[:16])
         return
-    _fire_and_forget(_do_mentions_push, poster_addr, poster_username, content, tx_hash, target_txhash)
+    _fire_and_forget(_do_mentions_push, poster_addr, poster_username, content, tx_hash, target_txhash, created_at)
     _maybe_flush_pending_summaries()
 
 
@@ -461,24 +589,63 @@ def _do_mentions_push(
     content: str,
     tx_hash: str,
     target_txhash: str,
+    created_at: int = 0,
 ) -> None:
     usernames = _extract_mentions(content)
     if not usernames:
         return
-
-    username_to_owner = _resolve_usernames_to_owners(usernames)
-    if not username_to_owner:
-        return
-
     root_post_id = tx_hash
     reply_target_owner = None
-    if target_txhash:
-        reply_target_owner = _get_post_owner(target_txhash)
-        root = _get_root_post_id(target_txhash)
-        if not root:
-            logger.warning("[Push] Missing root_post_id for mention target %s", target_txhash)
-            return
-        root_post_id = root
+    post_ctx = None
+    with _connect_indexer_ro() as conn:
+        with conn.cursor() as cur:
+            username_to_owner = _resolve_usernames_to_owners(usernames, cur=cur)
+            if not username_to_owner:
+                return
+            if target_txhash:
+                target_ctx = _fetch_post_context(target_txhash, cur=cur)
+                if not target_ctx:
+                    logger.warning("[Push] Missing target post context for %s", target_txhash)
+                    return
+                reply_target_owner = target_ctx["owner"]
+                root = _resolve_root_post_id(target_txhash, target_ctx["target"], target_ctx["root_post_id"])
+                if not root:
+                    logger.warning("[Push] Missing root_post_id for mention target %s", target_txhash)
+                    return
+                root_post_id = root
+            profile = _fetch_profile_info(poster_addr, cur=cur)
+            if not profile:
+                logger.warning("[Push] Missing profile for mention poster %s", poster_addr[:16])
+                return
+            post_ctx = _fetch_post_context(tx_hash, cur=cur)
+    poster_username = poster_username or profile["username"]
+    logger.debug("[Push] Mention context resolved root=%s", root_post_id[:16])
+    p_display = ""
+    parent_id = tx_hash.lower()
+    parent_owner = poster_addr.lower()
+    if post_ctx:
+        p_display = parent_display_text("mention", post_ctx["target"], post_ctx["title"], post_ctx["content"])
+        parent_owner = post_ctx["owner"]
+
+    ts = created_at or int(time.time())
+
+    inbox_reply = build_inbox_reply(
+        reply_id=tx_hash.lower(),
+        reply_owner=poster_addr.lower(),
+        reply_username=poster_username,
+        reply_timestamp=ts,
+        reply_author_level=profile["level"],
+        reply_author_created_at=profile["created_at"],
+        reply_content=content,
+        parent_id=parent_id,
+        parent_content=p_display,
+        parent_owner=parent_owner,
+        root_post_id=root_post_id,
+        award_type="",
+        item_type="mention",
+        amount=None,
+    )
+    logger.debug("[Push] Built inboxReply for mention tx=%s", tx_hash[:16])
 
     poster_lower = poster_addr.lower()
     display_name = f"@{poster_username}" if poster_username else poster_addr[:12]
@@ -500,7 +667,7 @@ def _do_mentions_push(
     for owner in owners:
         title = f"{display_name} mentioned you"
         body = _truncate(content)
-        data = {"type": "mention", "rootPostId": root_post_id, "replyId": tx_hash}
+        data = {"type": "mention", "rootPostId": root_post_id, "replyId": tx_hash, "inboxReply": inbox_reply}
         _send_push_to_user(owner, title, body, data)
 
     _check_old_receipts()
@@ -512,8 +679,9 @@ def send_push_for_award(
     post_owner: str,
     target_txhash: str,
     award_type: str,
+    created_at: int = 0,
 ) -> None:
-    """Fire push for an award. Called after successful broadcast."""
+    """Fire push for an award. Called from push_listener after award is indexed."""
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping award push for %s", target_txhash[:16])
         return
@@ -526,7 +694,7 @@ def send_push_for_award(
         post_owner[:16],
         target_txhash[:16],
     )
-    _fire_and_forget(_do_award_push, awarder_addr, awarder_username, post_owner, target_txhash, award_type)
+    _fire_and_forget(_do_award_push, awarder_addr, awarder_username, post_owner, target_txhash, award_type, created_at)
     _maybe_flush_pending_summaries()
 
 
@@ -536,11 +704,47 @@ def _do_award_push(
     post_owner: str,
     target_txhash: str,
     award_type: str,
+    created_at: int = 0,
 ) -> None:
+    with _connect_indexer_ro() as conn:
+        with conn.cursor() as cur:
+            profile = _fetch_profile_info(awarder_addr, cur=cur)
+            if not profile:
+                logger.warning("[Push] Missing profile for awarder %s", awarder_addr[:16])
+                return
+            post_ctx = _fetch_post_context(target_txhash, cur=cur)
+            if not post_ctx:
+                logger.warning("[Push] Missing post context for award target %s", target_txhash[:16])
+                return
+    awarder_username = awarder_username or profile["username"]
+
+    root_post_id = post_ctx["root_post_id"] or target_txhash.lower()
+    p_display = parent_display_text("award", post_ctx["target"], post_ctx["title"], post_ctx["content"])
+
+    ts = created_at or int(time.time())
+
+    inbox_reply = build_inbox_reply(
+        reply_id=target_txhash.lower(),
+        reply_owner=awarder_addr.lower(),
+        reply_username=awarder_username,
+        reply_timestamp=ts,
+        reply_author_level=profile["level"],
+        reply_author_created_at=profile["created_at"],
+        reply_content=post_ctx["content"],
+        parent_id=target_txhash.lower(),
+        parent_content=p_display,
+        parent_owner=post_ctx["owner"],
+        root_post_id=root_post_id,
+        award_type=award_type,
+        item_type="award",
+        amount=None,
+    )
+    logger.debug("[Push] Built inboxReply for award target=%s", target_txhash[:16])
+
     display_name = f"@{awarder_username}" if awarder_username else awarder_addr[:12]
     title = f"{display_name} gave you an award"
     body = f"Your post received a {award_type} award"
-    data = {"type": "award", "rootPostId": target_txhash, "replyId": ""}
+    data = {"type": "award", "rootPostId": root_post_id, "replyId": target_txhash.lower(), "inboxReply": inbox_reply}
 
     _send_push_to_user(post_owner, title, body, data)
     _check_old_receipts()
@@ -550,8 +754,10 @@ def send_push_for_follow(
     follower_addr: str,
     follower_username: str,
     target_owner: str,
+    event_key: str = "",
+    created_at: int = 0,
 ) -> None:
-    """Fire push for a follow. Called after successful broadcast."""
+    """Fire push for a follow. Called from push_listener after inbox_event is recorded."""
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping follow push for %s", follower_addr[:16])
         return
@@ -562,7 +768,7 @@ def send_push_for_follow(
         follower_addr[:16],
         target_owner[:16],
     )
-    _fire_and_forget(_do_follow_push, follower_addr, follower_username, target_owner)
+    _fire_and_forget(_do_follow_push, follower_addr, follower_username, target_owner, event_key, created_at)
     _maybe_flush_pending_summaries()
 
 
@@ -570,11 +776,40 @@ def _do_follow_push(
     follower_addr: str,
     follower_username: str,
     target_owner: str,
+    event_key: str,
+    created_at: int,
 ) -> None:
+    profile = _fetch_profile_info(follower_addr)
+    if not profile:
+        logger.warning("[Push] Missing profile for follower %s", follower_addr[:16])
+        return
+    follower_username = follower_username or profile["username"]
+
+    reply_id = event_key or follower_addr.lower()
+    ts = created_at or int(time.time())
+
+    inbox_reply = build_inbox_reply(
+        reply_id=reply_id,
+        reply_owner=follower_addr.lower(),
+        reply_username=follower_username,
+        reply_timestamp=ts,
+        reply_author_level=profile["level"],
+        reply_author_created_at=profile["created_at"],
+        reply_content="",
+        parent_id="",
+        parent_content="",
+        parent_owner=target_owner.lower(),
+        root_post_id="",
+        award_type="",
+        item_type="follow",
+        amount=None,
+    )
+    logger.debug("[Push] Built inboxReply for follow actor=%s", follower_addr[:16])
+
     display_name = f"@{follower_username}" if follower_username else follower_addr[:12]
     title = f"{display_name} followed you"
     body = "Tap to view their profile"
-    data = {"type": "follow", "user": follower_addr.lower()}
+    data = {"type": "follow", "user": follower_addr.lower(), "replyId": reply_id, "inboxReply": inbox_reply}
     _send_push_to_user(target_owner, title, body, data)
     _check_old_receipts()
 
@@ -603,8 +838,10 @@ def send_push_for_donation(
     sender_username: str,
     recipient_addr: str,
     amount: int,
+    event_key: str = "",
+    created_at: int = 0,
 ) -> None:
-    """Fire push for a donation. Called after successful broadcast."""
+    """Fire push for a donation. Called from push_listener after inbox_event is recorded."""
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping donation push for %s", sender_addr[:16])
         return
@@ -616,7 +853,7 @@ def send_push_for_donation(
         recipient_addr[:16],
         amount,
     )
-    _fire_and_forget(_do_donation_push, sender_addr, sender_username, recipient_addr, amount)
+    _fire_and_forget(_do_donation_push, sender_addr, sender_username, recipient_addr, amount, event_key, created_at)
     _maybe_flush_pending_summaries()
 
 
@@ -626,8 +863,10 @@ def send_push_for_subscription_gift(
     recipient_addr: str,
     level: int,
     was_subscriber: bool,
+    event_key: str = "",
+    created_at: int = 0,
 ) -> None:
-    """Fire push for a gifted subscription. Called after successful broadcast."""
+    """Fire push for a gifted subscription. Called from push_listener after inbox_event is recorded."""
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping subscription gift push for %s", gifter_addr[:16])
         return
@@ -640,7 +879,16 @@ def send_push_for_subscription_gift(
         level,
         was_subscriber,
     )
-    _fire_and_forget(_do_subscription_gift_push, gifter_addr, gifter_username, recipient_addr, level, was_subscriber)
+    _fire_and_forget(
+        _do_subscription_gift_push,
+        gifter_addr,
+        gifter_username,
+        recipient_addr,
+        level,
+        was_subscriber,
+        event_key,
+        created_at,
+    )
     _maybe_flush_pending_summaries()
 
 
@@ -650,7 +898,36 @@ def _do_subscription_gift_push(
     recipient_addr: str,
     level: int,
     was_subscriber: bool,
+    event_key: str,
+    created_at: int,
 ) -> None:
+    profile = _fetch_profile_info(gifter_addr)
+    if not profile:
+        logger.warning("[Push] Missing profile for gifter %s", gifter_addr[:16])
+        return
+    gifter_username = gifter_username or profile["username"]
+
+    reply_id = event_key or gifter_addr.lower()
+    ts = created_at or int(time.time())
+
+    inbox_reply = build_inbox_reply(
+        reply_id=reply_id,
+        reply_owner=gifter_addr.lower(),
+        reply_username=gifter_username,
+        reply_timestamp=ts,
+        reply_author_level=profile["level"],
+        reply_author_created_at=profile["created_at"],
+        reply_content="",
+        parent_id="",
+        parent_content="",
+        parent_owner=recipient_addr.lower(),
+        root_post_id="",
+        award_type="",
+        item_type="subscription_gift",
+        amount=int(level),
+    )
+    logger.debug("[Push] Built inboxReply for subscription_gift actor=%s level=%s", gifter_addr[:16], level)
+
     display_name = f"@{gifter_username}" if gifter_username else gifter_addr[:12]
     tier = "agent subscription" if int(level) == 10 else "subscription"
     if was_subscriber:
@@ -659,7 +936,13 @@ def _do_subscription_gift_push(
     else:
         title = f"{display_name} gifted you a {tier}"
         body = "Welcome to Mirage"
-    data = {"type": "subscription_gift", "user": gifter_addr.lower(), "level": int(level)}
+    data = {
+        "type": "subscription_gift",
+        "user": gifter_addr.lower(),
+        "level": int(level),
+        "replyId": reply_id,
+        "inboxReply": inbox_reply,
+    }
     _send_push_to_user(recipient_addr, title, body, data)
     _check_old_receipts()
 
@@ -669,13 +952,49 @@ def _do_donation_push(
     sender_username: str,
     recipient_addr: str,
     amount: int,
+    event_key: str,
+    created_at: int,
 ) -> None:
     amount_int = int(amount)
+
+    profile = _fetch_profile_info(sender_addr)
+    if not profile:
+        logger.warning("[Push] Missing profile for donation sender %s", sender_addr[:16])
+        return
+    sender_username = sender_username or profile["username"]
+
+    reply_id = event_key or sender_addr.lower()
+    ts = created_at or int(time.time())
+
+    inbox_reply = build_inbox_reply(
+        reply_id=reply_id,
+        reply_owner=sender_addr.lower(),
+        reply_username=sender_username,
+        reply_timestamp=ts,
+        reply_author_level=profile["level"],
+        reply_author_created_at=profile["created_at"],
+        reply_content="",
+        parent_id="",
+        parent_content="",
+        parent_owner=recipient_addr.lower(),
+        root_post_id="",
+        award_type="",
+        item_type="donation",
+        amount=amount_int,
+    )
+    logger.debug("[Push] Built inboxReply for donation actor=%s amount=%d", sender_addr[:16], amount_int)
+
     display_name = f"@{sender_username}" if sender_username else sender_addr[:12]
     amount_display = _format_mirage_amount(amount_int)
     title = f"{display_name} donated {amount_display} MIRAGE"
     body = "You received a donation"
-    data = {"type": "donation", "user": sender_addr.lower(), "amount": amount_int}
+    data = {
+        "type": "donation",
+        "user": sender_addr.lower(),
+        "amount": amount_int,
+        "replyId": reply_id,
+        "inboxReply": inbox_reply,
+    }
     _send_push_to_user(recipient_addr, title, body, data)
     _check_old_receipts()
 

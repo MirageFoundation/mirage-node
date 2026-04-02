@@ -13,8 +13,10 @@ from shared.inbox import donation_event_key, record_inbox_event
 from shared.push import (
     send_push_for_award,
     send_push_for_donation,
+    send_push_for_follow,
     send_push_for_mentions,
     send_push_for_reply,
+    send_push_for_subscription_gift,
     _extract_mentions,
 )
 from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
@@ -73,6 +75,7 @@ def _poll_once() -> int:
     total += _poll_posts()
     total += _poll_awards()
     total += _poll_send_tokens()
+    total += _poll_inbox_events()
     _maybe_cleanup_seen()
     logger().debug("push.listener.poll total=%d", total)
     return total
@@ -148,6 +151,22 @@ def _bootstrap_cursor(event_type: str) -> tuple[int, str]:
         if row:
             return int(row[0] or 0), str(row[1] or "")
         return 0, ""
+    if event_type == "inbox_events":
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT created_at, event_key
+                    FROM inbox_events
+                    WHERE event_type IN ('follow', 'subscription_gift')
+                    ORDER BY created_at DESC, event_key DESC
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+        if row:
+            return int(row[0] or 0), str(row[1] or "")
+        return 0, ""
     return 0, ""
 
 
@@ -202,15 +221,21 @@ def _poll_posts() -> int:
         poster_username = str(username or "").strip()
         content_text = str(content or "")
 
+        created_ts = int(created_at or 0)
+
         if target_hash:
             reply_key = reply_event_key(txhash_lc)
-            if mark_push_event_seen(reply_key, "reply", int(created_at or 0)):
-                send_push_for_reply(owner_lc, poster_username, target_hash, content_text, txhash_lc)
+            if mark_push_event_seen(reply_key, "reply", created_ts):
+                send_push_for_reply(
+                    owner_lc, poster_username, target_hash, content_text, txhash_lc, created_at=created_ts
+                )
 
         if _extract_mentions(content_text):
             mention_key = mention_event_key(txhash_lc)
-            if mark_push_event_seen(mention_key, "mention", int(created_at or 0)):
-                send_push_for_mentions(owner_lc, poster_username, content_text, txhash_lc, target_hash)
+            if mark_push_event_seen(mention_key, "mention", created_ts):
+                send_push_for_mentions(
+                    owner_lc, poster_username, content_text, txhash_lc, target_hash, created_at=created_ts
+                )
 
         processed += 1
         last_ts = int(created_at or last_ts)
@@ -257,10 +282,13 @@ def _poll_awards() -> int:
         post_owner_lc = str(post_owner or "").lower()
         if not owner_lc or not target_lc or not post_owner_lc:
             continue
+        created_ts = int(created_at or 0)
         award_key = award_event_key(owner_lc, target_lc)
-        if mark_push_event_seen(award_key, "award", int(created_at or 0)):
+        if mark_push_event_seen(award_key, "award", created_ts):
             awarder_username = str(username or "").strip()
-            send_push_for_award(owner_lc, awarder_username, post_owner_lc, target_lc, str(award_type or ""))
+            send_push_for_award(
+                owner_lc, awarder_username, post_owner_lc, target_lc, str(award_type or ""), created_at=created_ts
+            )
 
         processed += 1
         last_ts = int(created_at or last_ts)
@@ -456,7 +484,14 @@ def _poll_send_tokens() -> int:
             if inserted:
                 sender_username = _get_username_for_owner(sender, username_cache)
                 if mark_push_event_seen(event_key, "donation", created_ts):
-                    send_push_for_donation(sender, sender_username, recipient, amount)
+                    send_push_for_donation(
+                        sender,
+                        sender_username,
+                        recipient,
+                        amount,
+                        event_key=event_key,
+                        created_at=created_ts,
+                    )
                 from routes.public import _invalidate_inbox_cache
 
                 _invalidate_inbox_cache(recipient)
@@ -466,6 +501,104 @@ def _poll_send_tokens() -> int:
 
     _update_cursor("send_tokens", last_ts, last_id)
     logger().debug("push.listener.send_tokens processed=%d last_ts=%d", processed, last_ts)
+    return processed
+
+
+def _poll_inbox_events() -> int:
+    """Poll inbox_events for follow and subscription_gift events that need pushes."""
+    last_ts, last_id = _load_cursor("inbox_events")
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT event_key, recipient, actor, event_type, created_at, amount, tx_hash
+                FROM inbox_events
+                WHERE event_type IN ('follow', 'subscription_gift')
+                  AND (created_at > %s OR (created_at = %s AND event_key > %s))
+                ORDER BY created_at ASC, event_key ASC
+                LIMIT %s
+                """,
+                (last_ts, last_ts, last_id, PUSH_LISTENER_BATCH_SIZE),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return 0
+
+    processed = 0
+    username_cache: dict[str, str] = {}
+    for event_key, recipient, actor, event_type, created_at, amount, tx_hash in rows:
+        event_key_str = str(event_key or "").strip()
+        recipient_lc = str(recipient or "").strip().lower()
+        actor_lc = str(actor or "").strip().lower()
+        event_type_str = str(event_type or "").strip()
+        created_ts = int(created_at or 0)
+
+        if not event_key_str or not recipient_lc or not actor_lc:
+            processed += 1
+            last_ts = created_ts
+            last_id = event_key_str
+            continue
+
+        if actor_lc == recipient_lc:
+            processed += 1
+            last_ts = created_ts
+            last_id = event_key_str
+            continue
+
+        push_seen_key = f"inbox_event:{event_key_str}"
+        should_send = mark_push_event_seen(push_seen_key, event_type_str, created_ts)
+        if should_send:
+            actor_username = _get_username_for_owner(actor_lc, username_cache)
+            if event_type_str == "follow":
+                send_push_for_follow(
+                    actor_lc,
+                    actor_username,
+                    recipient_lc,
+                    event_key=event_key_str,
+                    created_at=created_ts,
+                )
+            elif event_type_str == "subscription_gift":
+                gift_level = int(amount) if amount is not None else 0
+                if gift_level <= 0:
+                    raise RuntimeError(f"subscription_gift missing level event_key={event_key_str}")
+                recipient_level = 0
+                with connect_db(timeout=3.0, busy_timeout_ms=5000) as iconn:
+                    icur = iconn.cursor()
+                    icur.execute(
+                        "SELECT COALESCE(level, 0) FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
+                        (recipient_lc,),
+                    )
+                    lrow = icur.fetchone()
+                    if lrow:
+                        recipient_level = int(lrow[0] or 0)
+                was_subscriber = recipient_level >= 1
+                logger().debug(
+                    "push.listener.subscription_gift level=%s was_subscriber=%s recipient=%s",
+                    gift_level,
+                    was_subscriber,
+                    recipient_lc[:16],
+                )
+                send_push_for_subscription_gift(
+                    actor_lc,
+                    actor_username,
+                    recipient_lc,
+                    level=gift_level,
+                    was_subscriber=was_subscriber,
+                    event_key=event_key_str,
+                    created_at=created_ts,
+                )
+
+        from routes.public import _invalidate_inbox_cache
+
+        _invalidate_inbox_cache(recipient_lc)
+
+        processed += 1
+        last_ts = created_ts
+        last_id = event_key_str
+
+    _update_cursor("inbox_events", last_ts, last_id)
+    logger().debug("push.listener.inbox_events processed=%d last_ts=%d", processed, last_ts)
     return processed
 
 
