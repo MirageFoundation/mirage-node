@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.22.0 (MsgSubscribe + Subscription Gifting)",
-    "summary": "Renames MsgUpgradeLevel to MsgSubscribe and adds subscription gifting. New 'target' field allows users to gift subscriptions to other addresses. Gift path charges the sender the period fee and extends the recipient's subscription by one period. Gifting to a higher-tier recipient is rejected. Recipient auto_renew is preserved. Only levels 1 (Subscriber) and 10 (Agent) are valid. No state migration required — wire-compatible rename with same field tags.",
+    "title": "Upgrade to v1.23.0 (Pruning Fix + Content Tag Normalization)",
+    "summary": "Fixes state-sync pruning bug where pruneSnapshotHeights[0]=0 prevented IAVL pruning from advancing past snapshotInterval-1. Adds content tag normalization (porn -> adult alias). Includes startup PebbleDB compaction for disk reclamation, reduced log retention (90 -> 30 days), and removal of obsolete GoLevelDB converter. No on-chain state migration required.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.22.0",
+                "name": "v1.23.0",
                 "height": "T+50",
                 "info": ""
             }

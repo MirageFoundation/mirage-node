@@ -1892,6 +1892,32 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.23.0: Pruning fix + content tag normalization ──
+	// - Fix state-sync pruning bug: fixStalePruneSnapshotHeights runs at app
+	//   startup to remove stale 0 entry from pruneSnapshotHeights (separate from
+	//   upgrade handler — runs before Load() every boot)
+	// - Content tag "porn" aliased to "adult" (backward-compatible normalization)
+	// - Startup PebbleDB compaction reclaims tombstone disk space
+	// - GoLevelDB-to-PebbleDB converter removed (obsolete)
+	// - analyze-db diagnostic tool added
+	// - LOG_RETENTION_DAYS reduced from 90 to 30
+	// - No on-chain state migration needed
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.23.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.23.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.23.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.23.0 complete")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)
