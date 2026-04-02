@@ -96,6 +96,7 @@ DATA_DIR="${HOME}/.mirage"
 NODE_HOME="$DATA_DIR/node"
 LOGS_DIR="$DATA_DIR/logs"
 BIN="$ROOT_DIR/blockchain/bin/miraged"
+COMPACT_BIN="$ROOT_DIR/blockchain/bin/compact-db"
 CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 
@@ -491,6 +492,16 @@ if [ -n "${DOMAIN:-}" ]; then
       echo "WARNING: HTTPS setup failed (non-fatal). Caddy continues with existing config." >&2
       echo "         To retry: python3 $ROOT_DIR/deploy/setup_letsencrypt.py $HTTPS_ARGS" >&2
     fi
+  fi
+fi
+
+# PebbleDB startup compaction (reclaim disk from pruning tombstones)
+if [ -x "$COMPACT_BIN" ] && [ -d "$NODE_HOME/data" ]; then
+  echo "==> Compacting PebbleDB databases (startup)..."
+  if "$COMPACT_BIN" "$NODE_HOME/data" application blockstore state evidence; then
+    echo "✓ PebbleDB compaction complete"
+  else
+    echo "WARNING: PebbleDB compaction failed (non-fatal)" >&2
   fi
 fi
 

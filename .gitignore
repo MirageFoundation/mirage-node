@@ -50,6 +50,7 @@ web/frontend/node_modules/
 # Blockchain data
 .mirage
 blockchain/bin/
+blockchain/miraged
 blockchain/miraged-v*
 
 # Databases
