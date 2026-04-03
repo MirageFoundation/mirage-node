@@ -7,6 +7,7 @@ import MarkdownRenderer from './components/MarkdownRenderer';
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from '../../utils/media';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
+import { normalizeTag } from '../../utils/ContentTags';
 import { OLDREDDIT_SHELL_INSET_X, OldRedditTab } from './Layout';
 
 /** Home/following: negate shell padding. Profile posts tabs: parent has no horizontal padding — do not bleed or borders stay inset.
@@ -487,7 +488,7 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                 ) : null}
                 <ContentColumn>
                     <Title to={linkTarget}>
-                        {hasTag && <TagBadge>{String(post.tag).trim()}</TagBadge>}
+                        {hasTag && <TagBadge>{normalizeTag(String(post.tag).trim())}</TagBadge>}
                         {title}
                     </Title>
                     <DesktopMeta>{meta}{actions}</DesktopMeta>

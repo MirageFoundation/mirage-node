@@ -18,6 +18,7 @@ import useBalance from "../../../logic/useBalance";
 import { usePendingSends } from "../../../logic/usePendingSends";
 import { usePendingSubscribes } from "../../../logic/usePendingSubscribes";
 import { formatMirageCompact } from "../../../utils/formatters";
+import { normalizeTag } from "../../../utils/ContentTags";
 
 import { Tooltip, tooltipStyles } from "./Tooltip";
 
@@ -2037,7 +2038,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
                         {renderAuthorMeta() || <span>@Anonymous</span>}
                         <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>{elapsed} ago</Tooltip>
-                        {post && post.tag ? <TagBadge $tag={post.tag}>{post.tag}</TagBadge> : null}
+                        {post && post.tag ? <TagBadge $tag={normalizeTag(post.tag)}>{normalizeTag(post.tag)}</TagBadge> : null}
                         {post?.awards?.length > 0 && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
                                 {post.awards.map(a => {
@@ -2099,7 +2100,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post && post.tag ? (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
-                                    <TagBadge $tag={post.tag}>{post.tag}</TagBadge>
+                                    <TagBadge $tag={normalizeTag(post.tag)}>{normalizeTag(post.tag)}</TagBadge>
                                 </>
                             ) : null}
                             {post?.awards?.length > 0 && (

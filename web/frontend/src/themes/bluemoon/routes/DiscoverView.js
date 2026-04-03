@@ -7,6 +7,7 @@ import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { useDiscover, tagColors } from "../../../logic/useDiscover";
+import { normalizeTag } from "../../../utils/ContentTags";
 const SearchInput = styled.input`
     width: 100%;
     padding: 0.4rem 0.6rem;
@@ -201,7 +202,7 @@ export default function DiscoverView({
                                         <ItemLeft>
                                             <Subtle>#</Subtle>
                                             <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
-                                            {t.dominant_tag && <TagBadge $tag={t.dominant_tag}>{t.dominant_tag}</TagBadge>}
+                                            {t.dominant_tag && <TagBadge $tag={normalizeTag(t.dominant_tag)}>{normalizeTag(t.dominant_tag)}</TagBadge>}
                                             <CountText>
                                                 ({t.post_count || 0} posts, {t.comment_count || 0} comments)
                                             </CountText>
@@ -230,7 +231,7 @@ export default function DiscoverView({
                                             <ItemLeft>
                                                 <Subtle>#</Subtle>
                                                 <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
-                                                {t.dominant_tag && <TagBadge $tag={t.dominant_tag}>{t.dominant_tag}</TagBadge>}
+                                                {t.dominant_tag && <TagBadge $tag={normalizeTag(t.dominant_tag)}>{normalizeTag(t.dominant_tag)}</TagBadge>}
                                                 <CountText>
                                                     ({t.post_count || 0} posts, {t.comment_count || 0} comments)
                                                 </CountText>

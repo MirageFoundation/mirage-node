@@ -1,5 +1,12 @@
 import Storage from './Storage';
 
+const TAG_ALIASES = { porn: 'adult' };
+
+export function normalizeTag(tag) {
+    const t = (tag || '').trim().toLowerCase();
+    return TAG_ALIASES[t] || t;
+}
+
 function isShowTagAdultEnabled() {
     try {
         if (typeof window === 'undefined' || !window.localStorage) return false;

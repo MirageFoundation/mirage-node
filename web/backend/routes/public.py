@@ -739,7 +739,7 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
             "topic": ae_topic,
             "title": ae_title,
             "content": ae_content,
-            "tag": ae_tag,
+            "tag": _normalize_api_tag(ae_tag) if ae_tag is not None else None,
             "media": ae_media,
             "appendix": ae_appendix,
         }
@@ -1083,6 +1083,7 @@ def _load_candidate_posts(
 
         pid = (txhash or "").lower()
         author = (owner or "").lower()
+        tag = _normalize_api_tag(tag or "")
         relayer_lower = (relayer or "").strip().lower()
         topic_raw = (topic or "").strip()
         topic_lower = topic_raw.lower()
@@ -1113,7 +1114,7 @@ def _load_candidate_posts(
                 "root_post_id": (root_post_id or pid).lower(),
                 "title": title or "",
                 "content": content or "",
-                "tag": tag or "",
+                "tag": tag,
                 "relayer": relayer_lower,
                 "edited": bool(edited_at),
                 "edited_at": int(edited_at or 0),
@@ -2462,6 +2463,7 @@ def _row_to_post(
 
     pid = (txhash or "").lower()
     author = (owner or "").lower()
+    tag = _normalize_api_tag(tag or "")
 
     relayer_lower = (relayer or "").strip().lower()
     viewer_lower = (viewer or "").strip().lower()
@@ -2498,7 +2500,7 @@ def _row_to_post(
         "root_post_id": (root_post_id or pid).lower(),
         "title": title or "",
         "content": content or "",
-        "tag": tag or "",
+        "tag": tag,
         "edited": bool(edited_at),
         "edited_at": int(edited_at or 0),
         "thumbnail": thumbnail or "",
@@ -4128,7 +4130,7 @@ def get_topics():
                 key = lower_to_key.get(t_lower)
                 if not key or key not in topics_dict:
                     continue
-                dominant_tag = (info.get("dominant_tag") or "") if info else ""
+                dominant_tag = _normalize_api_tag((info.get("dominant_tag") or "") if info else "")
                 dominant_ratio = float(info.get("dominant_ratio") or 0)
                 if dominant_tag and dominant_tag not in allowed_tags:
                     remove_keys.append(key)
@@ -4231,7 +4233,7 @@ def search_topics():
                 continue
             post_count = int(row[1] or 0)
             stat = stats.get(topic, {}) if stats else {}
-            dominant_tag = str(stat.get("dominant_tag") or "").lower()
+            dominant_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
             dominant_ratio = float(stat.get("dominant_ratio") or 0)
             if dominant_tag and dominant_tag not in allowed_tags:
                 continue
@@ -4458,7 +4460,7 @@ def search():
             for row in topic_rows:
                 topic, post_count, dominant_tag, dominant_ratio = row
                 stat = stats.get(topic, {}) if stats else {}
-                dom_tag = str(stat.get("dominant_tag") or "").lower()
+                dom_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
                 dom_ratio = float(stat.get("dominant_ratio") or 0)
                 if dom_tag and dom_tag not in allowed_tags:
                     continue
@@ -4525,7 +4527,7 @@ def search():
                 for row in topic_rows:
                     topic, post_count, dominant_tag, dominant_ratio = row
                     stat = stats.get(topic, {}) if stats else {}
-                    dom_tag = str(stat.get("dominant_tag") or "").lower()
+                dom_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
                     dom_ratio = float(stat.get("dominant_ratio") or 0)
                     if dom_tag and dom_tag not in allowed_tags:
                         continue
@@ -4809,7 +4811,7 @@ def _format_search_posts(
                 "topic": topic,
                 "title": title,
                 "content": content,
-                "tag": tag or "",
+                "tag": _normalize_api_tag(tag or ""),
                 "thumbnail": thumbnail or "",
                 "media": media_val,
                 "media_meta": [],
@@ -5337,7 +5339,7 @@ def get_user_posts():
                 f"SELECT LOWER(txhash), COALESCE(tag, '') FROM posts WHERE LOWER(txhash) IN ({ph})",
                 list(comment_root_ids),
             )
-            root_posts = [{"post_id": pid, "tag": tag or ""} for pid, tag in cur.fetchall()]
+            root_posts = [{"post_id": pid, "tag": _normalize_api_tag(tag or "")} for pid, tag in cur.fetchall()]
             if root_posts:
                 _apply_agent_edits(cur, root_posts, viewer)
                 root_tag_map = {p["post_id"]: p.get("tag", "") or "" for p in root_posts}
@@ -5577,7 +5579,7 @@ def get_user_posts():
                     "topic": topic,
                     "title": title,
                     "content": content,
-                    "tag": tag or "",
+                    "tag": _normalize_api_tag(tag or ""),
                     "target": target,
                     "edited": bool(edited_at),
                     "edited_at": int(edited_at or 0),
@@ -5767,7 +5769,7 @@ def _fetch_post(
     topic_val = row[3]
     title_val = row[4]
     content_val = row[5]
-    tag_val = (row[6] or "").strip()
+    tag_val = _normalize_api_tag((row[6] or "").strip())
     root_topic_val = (row[7] or "").strip()
     root_post_id_val = (row[8] or "").strip().lower()
     target_val = (row[9] or "").strip().lower()
@@ -5951,7 +5953,7 @@ def _fetch_comment_tree_batch(
         topic_val = row[3]
         title_val = row[4]
         content_val = row[5]
-        tag_val = (row[6] or "").strip()
+        tag_val = _normalize_api_tag((row[6] or "").strip())
         root_topic_val = (row[7] or "").strip()
         root_post_id_val = (row[8] or "").strip().lower()
         target_val = (row[9] or "").strip().lower()

@@ -18,6 +18,7 @@ import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, pickCard, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
+import { normalizeTag } from "../../../utils/ContentTags";
 // Card-based container matching front page style (width aligned with ModernPostFeed)
 // Supports $size prop ('compact' or 'large') to match feed view mode
 // No margins - ModernPostFeed's gap handles spacing (matches CardView behavior)
@@ -2491,7 +2492,7 @@ function ViewPostView({
                                             <MetaSeparator>·</MetaSeparator>
                                             <span>{formatElapsed(post.timestamp)} ago</span>
                                             {(() => {
-                                                const tagLabel = post.tag || mergedRoot?.tag || root?.tag || '';
+                                                const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
                                                 return tagLabel ? <>
                                                     <MetaSeparator>·</MetaSeparator>
                                                     <TagBadge $tag={tagLabel}>{tagLabel}</TagBadge>
@@ -2547,7 +2548,7 @@ function ViewPostView({
                                                 </> : null;
                                             })()}
                                             {(() => {
-                                                const tagLabel = post.tag || mergedRoot?.tag || root?.tag || '';
+                                                const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
                                                 return tagLabel ? <>
                                                     <MetaSeparator>·</MetaSeparator>
                                                     <TagBadge $tag={tagLabel}>{tagLabel}</TagBadge>

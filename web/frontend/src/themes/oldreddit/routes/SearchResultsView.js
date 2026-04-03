@@ -7,6 +7,7 @@ import CardView from "../components/CardView.js";
 import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { useSearchResults, tagColors } from "../../../logic/useSearchResults";
+import { normalizeTag } from "../../../utils/ContentTags";
 const SectionHeader = styled.div`
     font-size: ${({
   theme
@@ -288,7 +289,7 @@ export default function SearchResultsView({
                                             <ItemLeft>
                                                 <Subtle>#</Subtle>
                                                 <ItemLink to={`/t/${encodeURIComponent(t.topic)}`}>{t.topic}</ItemLink>
-                                                {t.dominant_tag && <TagBadge $tag={t.dominant_tag}>{t.dominant_tag}</TagBadge>}
+                                                {t.dominant_tag && <TagBadge $tag={normalizeTag(t.dominant_tag)}>{normalizeTag(t.dominant_tag)}</TagBadge>}
                                                 <CountText>({t.post_count || 0} posts)</CountText>
                                             </ItemLeft>
                                         </ItemRow>)}

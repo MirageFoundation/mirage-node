@@ -229,7 +229,11 @@ class MessageProcessor:
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
         target = str(msg_dict.get("target", "") or "").lower()
-        tag = str(msg_dict.get("tag", "") or "")
+        raw_tag = str(msg_dict.get("tag", "") or "")
+        tag_norm = raw_tag.strip().lower()
+        tag = DatabaseManager._TAG_ALIASES.get(tag_norm, tag_norm)
+        if tag != tag_norm:
+            logger.debug("Tag alias normalized on post: %s -> %s", tag_norm, tag)
         media = list(msg_dict.get("media", []) or [])
         logger.debug("MsgPost media count=%d tx=%s", len(media), (tx_hash or "")[:12])
 
@@ -756,7 +760,11 @@ class MessageProcessor:
         logger.info("MsgEdit topic=%s", topic)
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
-        tag = str(msg_dict.get("tag", "") or "")
+        raw_tag = str(msg_dict.get("tag", "") or "")
+        tag_norm = raw_tag.strip().lower()
+        tag = DatabaseManager._TAG_ALIASES.get(tag_norm, tag_norm)
+        if tag != tag_norm:
+            logger.debug("Tag alias normalized on edit: %s -> %s", tag_norm, tag)
 
         # Must reference an existing post/comment
         if not override or len(override) != 64:
@@ -921,6 +929,11 @@ class MessageProcessor:
             title = resolve_field(title_raw)
             content = resolve_field(content_raw)
             tag = resolve_field(tag_raw)
+            if tag is not None:
+                tag_norm = tag.strip().lower()
+                tag = DatabaseManager._TAG_ALIASES.get(tag_norm, tag_norm)
+                if tag != tag_norm:
+                    logger.debug("Tag alias normalized on annotate: %s -> %s", tag_norm, tag)
             appendix = resolve_field(appendix_raw)
 
             # Media: ["."] means no change; [] means clear; list means replace
