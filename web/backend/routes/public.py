@@ -4527,7 +4527,7 @@ def search():
                 for row in topic_rows:
                     topic, post_count, dominant_tag, dominant_ratio = row
                     stat = stats.get(topic, {}) if stats else {}
-                dom_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
+                    dom_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
                     dom_ratio = float(stat.get("dominant_ratio") or 0)
                     if dom_tag and dom_tag not in allowed_tags:
                         continue
