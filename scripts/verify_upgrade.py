@@ -5,13 +5,14 @@ Post-upgrade verification for v1.23.0.
 Checks:
   1. Required environment variables are set (DB URLs)
   2. Node retention config (snapshot keep recent, log retention)
-  3. Backend + indexer (RO) DB connections succeed
-  4. Database schema: key tables exist, indexer has "adult" tag (not "porn")
-  5. Indexer freshness: latest block is recent
-  6. Content tag normalization: "adult" tag present, "porn" absent
-  7. Chain params completeness via /api/get_chain_config
-  8. Backend API health: key GET endpoints return valid data
-  9. Core routes: subscribe exists, upgrade_level removed, POST routes reachable
+  3. Pruning logs: startup fix ran; no pruning errors; missing versions (if any) logged
+  4. Backend + indexer (RO) DB connections succeed
+  5. Database schema: key tables exist, indexer has "adult" tag (not "porn")
+  6. Indexer freshness: latest block is recent
+  7. Content tag normalization: "adult" tag present, "porn" absent
+  8. Chain params completeness via /api/get_chain_config
+  9. Backend API health: key GET endpoints return valid data
+  10. Core routes: subscribe exists, upgrade_level removed, POST routes reachable
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -178,6 +179,49 @@ def check_node_retention_config() -> None:
         ok(f"snapshot-keep-recent={val}")
     else:
         fail(f"snapshot-keep-recent={val} (expected <= 4)")
+
+
+def find_latest_log(log_dir: Path) -> Path:
+    logs = sorted(log_dir.glob("*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not logs:
+        raise RuntimeError(f"no log files found in {log_dir}")
+    return logs[0]
+
+
+def check_pruning_logs() -> None:
+    node_home_raw = os.environ.get("NODE_HOME", "").strip()
+    node_home = Path(node_home_raw).expanduser() if node_home_raw else Path.home() / ".mirage" / "node"
+    log_dir = node_home / "logs" / "node"
+    if not log_dir.exists():
+        fail(f"node log dir not found: {log_dir}")
+        return
+    try:
+        log_path = find_latest_log(log_dir)
+    except Exception as exc:
+        fail(str(exc))
+        return
+
+    ok(f"using node log: {log_path.name}")
+    content = log_path.read_text(errors="ignore")
+
+    if "fixing stale pruneSnapshotHeights" in content:
+        ok("startup pruning fix detected")
+    else:
+        fail("startup pruning fix log not found")
+
+    prune_error_count = content.count("Error while pruning")
+    if prune_error_count:
+        fail(f"pruning errors found in log ({prune_error_count})")
+    else:
+        ok("no pruning errors in latest log")
+
+    skipped_count = content.count("Pruning skipped missing version")
+    skipped_next_count = content.count("Pruning skipped missing next version")
+    skipped_total = skipped_count + skipped_next_count
+    if skipped_total:
+        ok(f"missing-version skips logged ({skipped_total})")
+    else:
+        warn("no missing-version skips found (may be fine on fresh nodes)")
 
 
 def check_log_retention() -> None:
@@ -454,7 +498,10 @@ def main() -> None:
     check_node_retention_config()
     check_log_retention()
 
-    section("3. Database Connectivity")
+    section("3. Pruning Logs")
+    check_pruning_logs()
+
+    section("4. Database Connectivity")
     backend_conn = None
     indexer_conn = None
     try:
@@ -473,23 +520,23 @@ def main() -> None:
         print("\nFATAL: Cannot proceed without database connections")
         sys.exit(1)
 
-    section("4. Database Schema")
+    section("5. Database Schema")
     check_indexer_schema(indexer_conn)
     check_backend_schema(backend_conn)
 
-    section("5. Indexer Health")
+    section("6. Indexer Health")
     check_indexer_freshness(indexer_conn)
 
-    section("6. Content Tag Normalization")
+    section("7. Content Tag Normalization")
     check_tag_normalization(indexer_conn)
 
-    section("7. Data Integrity")
+    section("8. Data Integrity")
     check_profile_data(indexer_conn)
 
-    section("8. Chain Params (via API)")
+    section("9. Chain Params (via API)")
     check_chain_config(backend_api)
 
-    section("9. Backend API Health")
+    section("10. Backend API Health")
     check_api_parameters(backend_api)
     check_subscribe_routes(backend_api)
     check_core_routes_reachable(backend_api)
