@@ -96,6 +96,7 @@ DATA_DIR="${HOME}/.mirage"
 NODE_HOME="$DATA_DIR/node"
 LOGS_DIR="$DATA_DIR/logs"
 BIN="$ROOT_DIR/blockchain/bin/miraged"
+COMPACT_BIN="$ROOT_DIR/blockchain/bin/compact-db"
 CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 
@@ -130,21 +131,6 @@ echo "Moniker:   $MONIKER"
 # Run initialization (idempotent - safe to run every startup)
 echo "==> Running initialization..."
 bash "$ROOT_DIR/deploy/init.sh"
-
-# NOTE: compact-db is legacy and should be removed.
-COMPACT_DB_BIN="$ROOT_DIR/blockchain/bin/compact-db"
-if [ ! -x "$COMPACT_DB_BIN" ]; then
-  echo "ERROR: compact-db binary missing at $COMPACT_DB_BIN" >&2
-  exit 1
-fi
-if [ "${APP_DB_BACKEND:-}" != "pebbledb" ] || [ "${COMET_DB_BACKEND:-}" != "pebbledb" ]; then
-  echo "ERROR: PebbleDB required for automatic compaction (APP_DB_BACKEND=${APP_DB_BACKEND:-}, COMET_DB_BACKEND=${COMET_DB_BACKEND:-})" >&2
-  exit 1
-fi
-
-echo "==> Compacting PebbleDB databases (startup)..."
-"$COMPACT_DB_BIN" "$NODE_HOME/data" application blockstore state evidence
-echo "✓ Compaction complete"
 
 # Ensure Caddyfile exists and is correct
 # If DOMAIN is set and Caddyfile already has HTTPS config for that domain, don't overwrite
@@ -506,6 +492,16 @@ if [ -n "${DOMAIN:-}" ]; then
       echo "WARNING: HTTPS setup failed (non-fatal). Caddy continues with existing config." >&2
       echo "         To retry: python3 $ROOT_DIR/deploy/setup_letsencrypt.py $HTTPS_ARGS" >&2
     fi
+  fi
+fi
+
+# PebbleDB startup compaction (reclaim disk from pruning tombstones)
+if [ -x "$COMPACT_BIN" ] && [ -d "$NODE_HOME/data" ]; then
+  echo "==> Compacting PebbleDB databases (startup)..."
+  if "$COMPACT_BIN" "$NODE_HOME/data" application blockstore state evidence; then
+    echo "✓ PebbleDB compaction complete"
+  else
+    echo "WARNING: PebbleDB compaction failed (non-fatal)" >&2
   fi
 fi
 

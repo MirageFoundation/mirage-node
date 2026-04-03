@@ -543,6 +543,10 @@ def init_backend_schema() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_created_at ON inbox_events(created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_inbox_events_type ON inbox_events(event_type)")
             cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_inbox_events_type_created_key "
+                "ON inbox_events(event_type, created_at, event_key)"
+            )
+            cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_inbox_events_recipient_created ON inbox_events(LOWER(recipient), created_at DESC)"
             )
             _assert_table_schema(

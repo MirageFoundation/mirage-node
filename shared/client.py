@@ -587,7 +587,7 @@ def post(
         title: Post title
         content: Post content
         target: Parent post hash (for comments) or empty for top-level
-        tag: Content tag (e.g., "sensitive", "porn", "gore")
+        tag: Content tag (e.g., "sensitive", "adult", "gore")
         skip_pow: If True, skip PoW (subscriber mode). If None, auto-detect.
 
     Returns:

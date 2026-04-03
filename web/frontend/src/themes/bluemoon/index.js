@@ -131,10 +131,10 @@ const bluemoonManifest = {
     config: {
         showHeroCards: true,
         mapHomeSortMode: false,
-        profileTabs: ['profile', 'posts', 'algo'],
+        profileTabs: ['profile', 'submissions', 'comments', 'algo'],
         profileDefaultTab: 'profile',
         profileUsesListFeed: false,
-        profileHideFilterSelect: false,
+        profileHideFilterSelect: true,
     },
 };
 

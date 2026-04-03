@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -417,11 +418,99 @@ func New(
 		return app.App.InitChainer(ctx, req)
 	})
 
+	// Fix Cosmos SDK pruning bug: state-synced nodes have a stale
+	// pruneSnapshotHeights[0]=0 that caps the prune limit at
+	// snapshotInterval-1, effectively disabling all IAVL pruning.
+	// Must run before Load() so LoadSnapshotHeights reads the corrected data.
+	if loadLatest {
+		fixStalePruneSnapshotHeights(db, logger)
+	}
+
 	if err := app.Load(loadLatest); err != nil {
 		panic(err)
 	}
 
 	return app
+}
+
+// fixStalePruneSnapshotHeights removes the seeded 0 height from the pruning
+// snapshot list. On state-sync starts, the first real snapshot height is far
+// above 0, so the contiguous-chain eviction never advances and pruning stays
+// capped at snapshotInterval-1 indefinitely.
+func fixStalePruneSnapshotHeights(db dbm.DB, logger log.Logger) {
+	key := []byte("s/prunesnapshotheights")
+	bz, err := db.Get(key)
+	if err != nil {
+		logger.Error("failed reading pruneSnapshotHeights", "err", err)
+		panic(err)
+	}
+	if len(bz) == 0 {
+		logger.Debug("pruneSnapshotHeights not set")
+		return
+	}
+	if len(bz)%8 != 0 {
+		err := fmt.Errorf("pruneSnapshotHeights malformed length: %d", len(bz))
+		logger.Error("invalid pruneSnapshotHeights", "err", err)
+		panic(err)
+	}
+
+	entries := make([]uint64, 0, len(bz)/8)
+	for i := 0; i < len(bz); i += 8 {
+		entries = append(entries, binary.BigEndian.Uint64(bz[i:i+8]))
+	}
+
+	if len(entries) == 1 {
+		logger.Debug("pruneSnapshotHeights single entry", "height", entries[0])
+		return
+	}
+
+	for i := 1; i < len(entries); i++ {
+		if entries[i] <= entries[i-1] {
+			err := fmt.Errorf("pruneSnapshotHeights non-increasing: prev=%d cur=%d", entries[i-1], entries[i])
+			logger.Error("invalid pruneSnapshotHeights", "err", err)
+			panic(err)
+		}
+	}
+
+	last := entries[len(entries)-1]
+	prev := entries[len(entries)-2]
+	interval := last - prev
+	if interval == 0 {
+		err := fmt.Errorf("pruneSnapshotHeights invalid interval: %d", interval)
+		logger.Error("invalid pruneSnapshotHeights", "err", err)
+		panic(err)
+	}
+
+	start := len(entries) - 1
+	for start > 0 && entries[start]-entries[start-1] == interval {
+		start--
+	}
+	if start == 0 {
+		logger.Debug("pruneSnapshotHeights contiguous", "first", entries[0], "entries", len(entries))
+		return
+	}
+	fixedEntries := entries[start:]
+
+	logger.Info("fixing stale pruneSnapshotHeights (state-sync pruning bug)",
+		"old_first", entries[0],
+		"new_first", fixedEntries[0],
+		"old_entries", len(entries),
+		"new_entries", len(fixedEntries),
+		"interval", interval,
+	)
+
+	fixed := make([]byte, 0, len(fixedEntries)*8)
+	for _, h := range fixedEntries {
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, h)
+		fixed = append(fixed, buf...)
+	}
+
+	if err := db.SetSync(key, fixed); err != nil {
+		logger.Error("failed to write pruneSnapshotHeights", "err", err)
+		panic(err)
+	}
+	logger.Debug("pruneSnapshotHeights updated")
 }
 
 // ProvideCustomGetSigners removed - now using cosmos.msg.v1.signer annotation in proto files

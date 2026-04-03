@@ -114,7 +114,7 @@ const CheckboxLabel = styled.label`
     column-gap: ${({
     theme
 }) => theme.layout.formRowGap};
-    align-items: flex-start;
+    align-items: center;
     color: ${({
     theme
 }) => theme.colors.subtleText};
@@ -126,6 +126,10 @@ const CheckboxLabel = styled.label`
     max-width: 100%;
     cursor: pointer;
     user-select: none;
+
+    input[type="checkbox"] {
+        margin-top: 0;
+    }
 
     &:hover input[type="checkbox"] {
         border-color: ${({
@@ -424,6 +428,7 @@ const SettingsTabbedContainer = styled(TabbedContainer)`
     margin-top: 0;
 `;
 
+
 const SettingsShellBody = styled(ContainerBody)`
     padding: 0.35rem 0 0.75rem;
     border: none;
@@ -444,16 +449,14 @@ export default function SettingsView({
         themeId,
         themeMode,
         collapseThreshold,
-        sidebarTopicsLimit,
-        sidebarPeopleLimit,
         hideDownvotedPosts,
         setHideDownvotedPosts,
         blurSensitiveMedia,
         setBlurSensitiveMedia,
         showTagSensitive,
         setShowTagSensitive,
-        showTagPorn,
-        setShowTagPorn,
+        showTagAdult,
+        setShowTagAdult,
         showTagViolence,
         setShowTagViolence,
         showTagGore,
@@ -495,8 +498,6 @@ export default function SettingsView({
         handleThemeModeChange,
         handleReferralPrecheckToggle,
         handleCollapseThresholdChange,
-        handleSidebarTopicsLimitChange,
-        handleSidebarPeopleLimitChange,
         getThemeExplanation,
         handleDeleteAccount
     } = useSettings({
@@ -577,17 +578,17 @@ export default function SettingsView({
                                         Sensitive
                                     </CheckboxLabel>
                                     <CheckboxLabel>
-                                        <CheckboxInput checked={showTagPorn} onChange={e => {
+                                        <CheckboxInput checked={showTagAdult} onChange={e => {
                                             const val = !!e.target.checked;
-                                            setShowTagPorn(val);
-                                            Storage.save('show_tag_porn', val);
+                                            setShowTagAdult(val);
+                                            Storage.save('show_tag_adult', val);
                                             window.dispatchEvent(new CustomEvent('settingsUpdated', {
                                                 detail: {
-                                                    showTagPorn: val
+                                                    showTagAdult: val
                                                 }
                                             }));
                                         }} />
-                                        Porn
+                                        Adult
                                     </CheckboxLabel>
                                     <CheckboxLabel>
                                         <CheckboxInput checked={showTagViolence} onChange={e => {
@@ -683,57 +684,6 @@ export default function SettingsView({
                             </ValueBox>
                         </Row>
 
-                        <Row>
-                            <Label>Sidebar topics:</Label>
-                            <ValueBox>
-                                <div style={{
-                                    display: 'flex',
-                                    gap: '0.5rem',
-                                    alignItems: 'center'
-                                }}>
-                                    <ThemeSelect value={String(sidebarTopicsLimit)} onChange={handleSidebarTopicsLimitChange} style={{
-                                        width: 'auto',
-                                        minWidth: '5rem'
-                                    }}>
-                                        <option value="5">5</option>
-                                        <option value="10">10</option>
-                                        <option value="15">15</option>
-                                        <option value="20">20</option>
-                                        <option value="50">50</option>
-                                        <option value="100">100</option>
-                                    </ThemeSelect>
-                                    <HelperText>
-                                        Topics shown in sidebar before "show more"
-                                    </HelperText>
-                                </div>
-                            </ValueBox>
-                        </Row>
-
-                        <Row>
-                            <Label>Sidebar people:</Label>
-                            <ValueBox>
-                                <div style={{
-                                    display: 'flex',
-                                    gap: '0.5rem',
-                                    alignItems: 'center'
-                                }}>
-                                    <ThemeSelect value={String(sidebarPeopleLimit)} onChange={handleSidebarPeopleLimitChange} style={{
-                                        width: 'auto',
-                                        minWidth: '5rem'
-                                    }}>
-                                        <option value="5">5</option>
-                                        <option value="10">10</option>
-                                        <option value="15">15</option>
-                                        <option value="20">20</option>
-                                        <option value="50">50</option>
-                                        <option value="100">100</option>
-                                    </ThemeSelect>
-                                    <HelperText>
-                                        People shown in sidebar before "show more"
-                                    </HelperText>
-                                </div>
-                            </ValueBox>
-                        </Row>
 
                         <Row>
                             <Label style={{

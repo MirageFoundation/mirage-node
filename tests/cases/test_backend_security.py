@@ -840,7 +840,7 @@ def test_validation(backend: str):
         ("invalid", "unknown_tag", "invalid tag"),
         ("SENSITIVE", "uppercase_tag", "invalid tag"),
         ("nsfw", "nsfw_instead_of_sensitive", "invalid tag"),
-        ("adult", "adult_instead_of_porn", "invalid tag"),
+        ("xxx", "xxx_invalid_tag", "invalid tag"),
         ("Porn", "mixed_case_tag", "invalid tag"),
     ]
 

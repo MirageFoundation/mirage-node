@@ -4,7 +4,7 @@ import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
 export const tagColors = {
-  porn: {
+  adult: {
     bg: 'rgba(236, 72, 153, 0.18)',
     border: 'rgba(236, 72, 153, 0.50)',
     text: '#ec4899'

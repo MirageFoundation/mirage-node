@@ -1,8 +1,10 @@
-import React, { memo, useCallback, useState, useEffect } from 'react';
+import React, { memo, useCallback, useMemo, useState, useEffect } from 'react';
 import styled, { css } from 'styled-components';
 import { Link } from 'react-router-dom';
 import VoteSection from './components/VoteSection';
-import { buildPhotonUrl, isLikelyImageUrl } from '../../utils/media';
+import InlineMedia from './components/InlineMedia';
+import MarkdownRenderer from './components/MarkdownRenderer';
+import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from '../../utils/media';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
 import { OLDREDDIT_SHELL_INSET_X, OldRedditTab } from './Layout';
@@ -268,6 +270,30 @@ const ActionButton = styled.button`
     }
 `;
 
+const ExpandedContent = styled.div`
+    padding: 0.5rem ${OLDREDDIT_SHELL_INSET_X};
+    padding-left: calc(${OLDREDDIT_SHELL_INSET_X} + 3.5rem + 70px + 0.8rem);
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panel};
+    font-size: 0.82rem;
+    color: ${({ theme }) => theme.colors.text};
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-width: 800px;
+
+    img, video {
+        max-width: 100%;
+        max-height: 600px;
+        border-radius: 4px;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.4rem 0.5rem;
+        font-size: 0.75rem;
+        max-width: 100%;
+    }
+`;
+
 const FeedToolbar = styled.div`
     display: flex;
     flex-wrap: wrap;
@@ -352,6 +378,20 @@ function truncateText(text, max) {
 }
 
 function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive }) {
+    const [expanded, setExpanded] = useState(false);
+
+    const mediaArr = useMemo(() => (post && Array.isArray(post.media) && post.media.length > 0) ? post.media : null, [post]);
+    const expandedTextBody = useMemo(() => {
+        const raw = String(post?.content || '').trim();
+        if (!raw) return null;
+        if (mediaArr) return raw || null;
+        const idx = raw.indexOf('\n');
+        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+        const rest = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
+        if (/^https?:\/\//i.test(first)) return rest || null;
+        return raw || null;
+    }, [post?.content, mediaArr]);
+
     if (!post || !post.post_id) return null;
     const isComment = !!(post.target && String(post.target).trim());
     if (!isComment && (typeof post.title !== 'string' || typeof post.topic !== 'string')) {
@@ -374,13 +414,21 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
     const thumbUrl = isComment ? null : getThumbUrl(post);
     const authorColor = getAuthorColor(post?.author_level, post?.author_is_new);
     const hasTag = !isComment && !!(post.tag && String(post.tag).trim());
-    const shouldBlur = blurSensitive && hasTag;
+    const shouldBlur = blurSensitive && hasTag && !expanded;
     let displayAuthor = '';
     if (typeof username === 'string' && username.trim().length > 0) {
         displayAuthor = username;
     } else if (typeof author === 'string' && author.trim().length > 0) {
         displayAuthor = `${author.slice(0, 10)}...`;
     }
+
+    const firstMediaUrl = mediaArr ? mediaArr[0] : (() => {
+        const raw = String(post?.content || '');
+        const m = raw.match(/https?:\/\/[^\s<>"']+/);
+        return m ? m[0] : null;
+    })();
+    const hasExpandableMedia = firstMediaUrl && (isLikelyImageUrl(firstMediaUrl) || isLikelyVideoUrl(firstMediaUrl));
+    const hasExpandableContent = hasExpandableMedia || !!expandedTextBody;
 
     const meta = (
         <MetaLine>
@@ -417,29 +465,46 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
             <ActionLink to={linkTarget}>
                 report
             </ActionLink>
+            {hasExpandableContent && (
+                <ActionButton type="button" onClick={() => setExpanded(prev => !prev)}>
+                    {expanded ? '[-]' : '[+]'}
+                </ActionButton>
+            )}
         </ActionsLine>
     );
 
     return (
-        <Row>
-            <Rank>{rank}</Rank>
-            <VoteColumn>
-                <VoteSection state={state} post={post} updatePost={updatePost} showToggle={false} />
-            </VoteColumn>
-            {thumbUrl ? (
-                <Thumbnail to={linkTarget}>
-                    <img src={thumbUrl} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
-                </Thumbnail>
-            ) : null}
-            <ContentColumn>
-                <Title to={linkTarget}>
-                    {hasTag && <TagBadge>{String(post.tag).trim()}</TagBadge>}
-                    {title}
-                </Title>
-                <DesktopMeta>{meta}{actions}</DesktopMeta>
-            </ContentColumn>
-            <MobileMetaWrap>{meta}{actions}</MobileMetaWrap>
-        </Row>
+        <>
+            <Row>
+                <Rank>{rank}</Rank>
+                <VoteColumn>
+                    <VoteSection state={state} post={post} updatePost={updatePost} showToggle={false} />
+                </VoteColumn>
+                {thumbUrl ? (
+                    <Thumbnail to={linkTarget}>
+                        <img src={thumbUrl} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
+                    </Thumbnail>
+                ) : null}
+                <ContentColumn>
+                    <Title to={linkTarget}>
+                        {hasTag && <TagBadge>{String(post.tag).trim()}</TagBadge>}
+                        {title}
+                    </Title>
+                    <DesktopMeta>{meta}{actions}</DesktopMeta>
+                </ContentColumn>
+                <MobileMetaWrap>{meta}{actions}</MobileMetaWrap>
+            </Row>
+            {expanded && (
+                <ExpandedContent>
+                    {hasExpandableMedia && (
+                        <div style={{ marginBottom: expandedTextBody ? '0.5rem' : 0 }}>
+                            <InlineMedia url={firstMediaUrl} variant="root_post" autoPlay mediaMeta={Array.isArray(post.media_meta) ? post.media_meta[0] || null : null} />
+                        </div>
+                    )}
+                    {expandedTextBody && <MarkdownRenderer text={expandedTextBody} />}
+                </ExpandedContent>
+            )}
+        </>
     );
 }
 

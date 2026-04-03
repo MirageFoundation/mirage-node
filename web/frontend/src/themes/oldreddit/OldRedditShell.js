@@ -11,6 +11,7 @@ const Container = styled.div`
     width: 100%;
     padding: 0 ${OLDREDDIT_SHELL_INSET_X};
     padding-bottom: 3rem;
+    background-color: ${({ theme }) => theme.colors.panel};
     @media (max-width: 600px) {
         padding-bottom: 52px;
     }

@@ -64,9 +64,8 @@ from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_
 from params import expect_params
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
-from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
+
 from shared.inbox import record_inbox_event, follow_event_key, donation_event_key, subscription_gift_event_key
-from shared.push import send_push_for_donation, send_push_for_follow, send_push_for_subscription_gift
 from pow import (
     argon2_digest,
     canon_base_post,
@@ -2370,9 +2369,6 @@ def core_follow_user():
                 tx_hash=tx_hash,
                 inserted=inserted,
             )
-            if inserted:
-                follower_username = _get_username_for_owner(user_addr)
-                send_push_for_follow(user_addr, follower_username, user)
             from routes.public import _invalidate_inbox_cache
 
             _invalidate_inbox_cache(user)
@@ -3102,7 +3098,7 @@ def core_edit():
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
-        tag = str(data.get("tag", "")).strip()
+        tag = _normalize_tag(data.get("tag", ""))
 
         if _has_unsafe_chars(topic, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400
@@ -3349,7 +3345,8 @@ def core_annotate():
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
-        tag = str(data.get("tag", "")).strip()
+        raw_tag = str(data.get("tag", "")).strip()
+        tag = _normalize_tag(raw_tag) if raw_tag != ANNOTATE_SENTINEL else raw_tag
         appendix = str(data.get("appendix", "")).strip()
 
         # Media: list of strings or omitted
@@ -3509,7 +3506,16 @@ def core_annotate():
         return jsonify({"error": msg}), status
 
 
-ALLOWED_TAGS = {"", "sensitive", "porn", "gore", "violence", "death"}
+ALLOWED_TAGS = {"", "sensitive", "adult", "gore", "violence", "death"}
+
+# TODO: remove "porn" alias once all clients send "adult"
+_TAG_ALIASES = {"porn": "adult"}
+
+
+def _normalize_tag(tag: str) -> str:
+    """Return canonical tag name, applying aliases."""
+    t = (tag or "").strip().lower()
+    return _TAG_ALIASES.get(t, t)
 
 
 def _has_unsafe_chars(*values: str) -> bool:
@@ -3563,7 +3569,7 @@ def core_post():
         topic = str(data.get("topic", "")).strip()
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
-        tag = str(data.get("tag", "")).strip()
+        tag = _normalize_tag(data.get("tag", ""))
 
         if _has_unsafe_chars(topic, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400
@@ -3828,23 +3834,6 @@ def core_post():
                 topic=topic,
                 content_length=len(content),
             )
-
-        try:
-            from shared.push import send_push_for_reply, send_push_for_mentions
-
-            if not poster_username:
-                poster_username = _get_username_for_owner(user_addr)
-
-            if is_comment and target:
-                reply_key = reply_event_key(tx_hash)
-                if mark_push_event_seen(reply_key, "reply", now_ts):
-                    send_push_for_reply(user_addr, poster_username, target, content, tx_hash)
-
-            mention_key = mention_event_key(tx_hash)
-            if mark_push_event_seen(mention_key, "mention", now_ts):
-                send_push_for_mentions(user_addr, poster_username, content, tx_hash, target or "")
-        except Exception as push_err:
-            log_event(rid, "post.push_err", error=str(push_err))
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
@@ -4263,9 +4252,6 @@ def core_send_tokens():
                 tx_hash=tx_hash,
                 inserted=inserted,
             )
-            if inserted:
-                sender_username = _get_username_for_owner(user_addr)
-                send_push_for_donation(user_addr, sender_username, target, int(amount))
             from routes.public import _invalidate_inbox_cache
 
             _invalidate_inbox_cache(target)
@@ -4436,6 +4422,7 @@ def core_subscribe():
                     actor=user_addr,
                     event_type="subscription_gift",
                     created_at=int(time.time()),
+                    amount=int(level),
                     tx_hash=tx_hash,
                 )
                 log_event(
@@ -4447,22 +4434,6 @@ def core_subscribe():
                     was_subscriber=was_subscriber,
                     inserted=inserted,
                 )
-                if inserted:
-                    send_push_for_subscription_gift(
-                        user_addr,
-                        gifter_username,
-                        target,
-                        int(level),
-                        was_subscriber,
-                    )
-                    log_event(
-                        rid,
-                        "subscribe.notify",
-                        recipient=target,
-                        actor=user_addr,
-                        level=int(level),
-                        was_subscriber=was_subscriber,
-                    )
                 from routes.public import _invalidate_inbox_cache
 
                 _invalidate_inbox_cache(target)
@@ -4733,16 +4704,6 @@ def core_award():
                 _inbox_cache.pop(recipient, None)
         except Exception:
             pass
-
-        try:
-            from shared.push import send_push_for_award
-
-            awarder_username = _get_username_for_owner(user_addr)
-            award_key = award_event_key(user_addr, target)
-            if mark_push_event_seen(award_key, "award", int(time.time())):
-                send_push_for_award(user_addr, awarder_username, post_owner, target, award_type)
-        except Exception as push_err:
-            log_event(rid, "award.push_err", error=str(push_err))
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:

@@ -11,8 +11,9 @@ import { useTabs } from "./useTabs.js";
 import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { useTxStatus } from "./useTxStatus.js";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
-import { formatMirage } from "../utils/formatters";
+import { formatMirage, formatMirageCompact } from "../utils/formatters";
 import { usePendingSends } from "./usePendingSends.js";
+import { usePendingSubscribes } from "./usePendingSubscribes.js";
 
 // (no footer actions here; sign out moved to header menu)
 
@@ -93,7 +94,7 @@ export function useProfile({
     const [activeTab, setActiveTab] = useTabs(theme.caps.profileDefaultTab, VALID_TABS);
     const profileUsesListFeed = theme.caps.profileUsesListFeed;
     const FeedComponent = useMemo(() => getThemeFamily(theme.themeId).Feed, [theme.themeId]);
-    const isPostsTab = activeTab === 'posts' || activeTab === 'overview' || activeTab === 'submissions' || activeTab === 'comments';
+    const isPostsTab = activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => isOwnProfile ? username || '' : '');
     const [balance, setBalance] = useState(null);
     const [reserveFunds, setReserveFunds] = useState(null);
@@ -142,6 +143,8 @@ export function useProfile({
     const [confirmDonate, setConfirmDonate] = useState(false);
     const [donateAmountRaw, setDonateAmountRaw] = useState("10000");
     const [donateMessage, setDonateMessage] = useState(null);
+    const [confirmGiftSub, setConfirmGiftSub] = useState(null);
+    const [giftSubMessage, setGiftSubMessage] = useState(null);
     const formatPrefWeight = w => {
         const num = Number(w);
         if (!Number.isFinite(num)) return '0';
@@ -154,6 +157,10 @@ export function useProfile({
         isPending: isSendPending,
         formatStatus: formatSendStatus
     } = usePendingSends();
+    const {
+        isPending: isSubscribePending,
+        formatStatus: formatSubscribeStatus
+    } = usePendingSubscribes();
 
     // Fetch preferences for Algo tab
     useEffect(() => {
@@ -377,7 +384,7 @@ export function useProfile({
             recentLoadTimerRef.current = null;
         }
     }, [profileAddress]);
-    const effectivePostsFilter = profileUsesListFeed ? activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : 'all' : recentPostsFilter;
+    const effectivePostsFilter = activeTab === 'submissions' ? 'submissions' : activeTab === 'comments' ? 'comments' : profileUsesListFeed ? 'all' : recentPostsFilter;
     useEffect(() => {
         setRecentPosts([]);
         setRecentPage(1);
@@ -683,16 +690,18 @@ export function useProfile({
         if (!profileAddress || !hasValidAccount) {
             setDonateMessage({
                 type: 'error',
-                message: 'Please log in to donate'
+                message: 'Please log in to gift MIRAGE'
             });
             setTimeout(() => setDonateMessage(null), 5000);
             return;
         }
-        console.debug('[ProfileView] donate.open', {
+        console.debug('[ProfileView] gift-mirage.open', {
             target: profileAddress
         });
         setDonateAmountRaw("10000");
         setDonateMessage(null);
+        setConfirmGiftSub(null);
+        setGiftSubMessage(null);
         setConfirmDonate(true);
     };
     const confirmDonateAction = async () => {
@@ -702,7 +711,7 @@ export function useProfile({
         if (!Number.isFinite(amount) || amount < 10000) {
             setDonateMessage({
                 type: 'error',
-                message: 'Minimum donation is 10,000 MIRAGE'
+                message: 'Minimum gift is 10,000 MIRAGE'
             });
             setTimeout(() => setDonateMessage(null), 5000);
             return;
@@ -740,6 +749,114 @@ export function useProfile({
     };
     const cancelDonate = () => {
         setConfirmDonate(false);
+    };
+
+    const subFeePending = isSubscribePending(profileAddress);
+    const subFeeStatus = formatSubscribeStatus(profileAddress);
+
+    const { subFeeLabel, agentFeeLabel } = useMemo(() => {
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            const tiers = cfg?.subscription_tiers || [];
+            const sf = Number(tiers[1]?.period_fee || 0);
+            const af = Number(tiers[2]?.period_fee || 0);
+            return {
+                subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
+                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
+            };
+        } catch (_) { }
+        return { subFeeLabel: null, agentFeeLabel: null };
+    }, []);
+
+    const handleGiftSub = () => {
+        if (!profileAddress || !hasValidAccount) return;
+        if (isSubscribePending(profileAddress)) return;
+        const level = (userLevel >= 10) ? 10 : 1;
+        console.debug('[ProfileView] gift-subscribe.confirm', { target: profileAddress, level });
+        setConfirmDonate(false);
+        setDonateMessage(null);
+        setGiftSubMessage(null);
+        setConfirmGiftSub({ level, target: profileAddress, loading: true, expiryLabel: null, error: null });
+        void (async () => {
+            let cfg = null;
+            try {
+                const raw = localStorage.getItem('chainConfig');
+                cfg = raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                console.debug('[ProfileView] gift-subscribe.config-error', e);
+            }
+            if (!cfg || !Number(cfg.subscription_period || 0)) {
+                try {
+                    const fetched = await Api.get('get_chain_config', undefined);
+                    if (fetched && typeof fetched === 'object') {
+                        try { tx.cacheChainConfig(fetched); } catch (_) { }
+                        cfg = fetched;
+                    }
+                } catch (e) {
+                    console.debug('[ProfileView] gift-subscribe.config-fetch-error', e);
+                }
+            }
+            const periodMinutes = Number(cfg?.subscription_period || 0);
+            if (!periodMinutes || periodMinutes <= 0) {
+                console.debug('[ProfileView] gift-subscribe.config-invalid', { periodMinutes });
+                setConfirmGiftSub((prev) => (prev && prev.target === profileAddress ? { ...prev, loading: false, error: 'Invalid subscription period' } : prev));
+                return;
+            }
+            try {
+                const pre = await Api.get('get_user_status', { address: profileAddress, _cb: Date.now() });
+                const currentExp = Number(pre?.subscription_expiry || 0);
+                const nowSec = Math.floor(Date.now() / 1000);
+                const isExtension = currentExp > nowSec;
+                const base = Math.max(nowSec, currentExp);
+                const expectedExp = base + periodMinutes * 60;
+                const dateStr = new Date(expectedExp * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                const label = isExtension ? `Extend until ${dateStr}` : `Until ${dateStr}`;
+                console.debug('[ProfileView] gift-subscribe.expected', { target: profileAddress, level, currentExp, expectedExp });
+                setConfirmGiftSub((prev) => (prev && prev.target === profileAddress ? { ...prev, loading: false, expiryLabel: label, error: null } : prev));
+            } catch (e) {
+                console.debug('[ProfileView] gift-subscribe.status-error', e);
+                setConfirmGiftSub((prev) => (prev && prev.target === profileAddress ? { ...prev, loading: false, error: 'Failed to load recipient status' } : prev));
+            }
+        })();
+    };
+
+    const confirmGiftSubAction = async () => {
+        if (!profileAddress) return;
+        if (isSubscribePending(profileAddress)) return;
+        if (confirmGiftSub?.loading || confirmGiftSub?.error) return;
+        const giftLevel = confirmGiftSub?.level || 1;
+        const target = confirmGiftSub?.target || profileAddress;
+        const expiryLabel = confirmGiftSub?.expiryLabel || null;
+        if (!expiryLabel) {
+            setConfirmGiftSub((prev) => (prev ? { ...prev, error: 'Missing expected expiry' } : prev));
+            return;
+        }
+        try {
+            console.debug('[ProfileView] gift-subscribe.submit', { target, level: giftLevel });
+            const result = await tx.subscribe(giftLevel, 0, target);
+            setConfirmGiftSub(null);
+            if (result.success) {
+                const isAgent = giftLevel === 10;
+                let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
+                msg += ` ${expiryLabel}`;
+                setGiftSubMessage({ type: 'success', message: msg });
+            } else {
+                const raw = String(result.error || 'Transaction failed');
+                const friendly = raw.replace(/^HTTP \d+:\s*/i, '').replace(/^Failed:\s*/i, '');
+                setGiftSubMessage({ type: 'error', message: friendly });
+            }
+            setTimeout(() => setGiftSubMessage(null), 8000);
+        } catch (error) {
+            setConfirmGiftSub(null);
+            setGiftSubMessage({ type: 'error', message: `${error.message || error}` });
+            setTimeout(() => setGiftSubMessage(null), 5000);
+        }
+    };
+
+    const cancelGiftSub = () => {
+        console.debug('[ProfileView] gift-subscribe.cancel', { target: profileAddress || null });
+        setConfirmGiftSub(null);
     };
 
     // Show loading/error states for username resolution
@@ -834,6 +951,15 @@ export function useProfile({
         formatDonateAmount,
         handleDonate,
         confirmDonateAction,
-        cancelDonate
+        cancelDonate,
+        confirmGiftSub,
+        giftSubMessage,
+        subFeePending,
+        subFeeStatus,
+        subFeeLabel,
+        agentFeeLabel,
+        handleGiftSub,
+        confirmGiftSubAction,
+        cancelGiftSub
     };
 }

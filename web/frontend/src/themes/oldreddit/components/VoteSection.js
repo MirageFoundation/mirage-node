@@ -96,13 +96,13 @@ const CollapseToggle = styled.span`
 
 const UpIcon = (props) => (
     <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" {...props}>
-        <path d="M8 3l5 8H3l5-8z" fill="currentColor" />
+        <path d="M8 4l5 8H3l5-8z" fill="currentColor" />
     </svg>
 );
 
 const DownIcon = (props) => (
     <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" {...props}>
-        <path d="M8 13l-5-8h10l-5 8z" fill="currentColor" />
+        <path d="M8 12l-5-8h10l-5 8z" fill="currentColor" />
     </svg>
 );
 

@@ -191,9 +191,16 @@ export function useSettings({
             return true;
         }
     });
-    const [showTagPorn, setShowTagPorn] = useState(() => {
+    const [showTagAdult, setShowTagAdult] = useState(() => {
         try {
-            return Storage.load('show_tag_porn', false) === true;
+            if (typeof window !== 'undefined' && window.localStorage) {
+                const adultRaw = window.localStorage.getItem('show_tag_adult');
+                if (adultRaw !== null) return JSON.parse(adultRaw) === true;
+                // TODO: remove show_tag_porn alias once app update is fully rolled out
+                const legacyRaw = window.localStorage.getItem('show_tag_porn');
+                if (legacyRaw !== null) return JSON.parse(legacyRaw) === true;
+            }
+            return false;
         } catch (_) {
             return false;
         }
@@ -523,8 +530,8 @@ export function useSettings({
         setBlurSensitiveMedia,
         showTagSensitive,
         setShowTagSensitive,
-        showTagPorn,
-        setShowTagPorn,
+        showTagAdult,
+        setShowTagAdult,
         showTagViolence,
         setShowTagViolence,
         showTagGore,

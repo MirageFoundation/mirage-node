@@ -14,37 +14,96 @@ from typing import Optional, Tuple
 import requests
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_subscribe, _docker_exec, _run_miraged, _miraged_cmd,
-    _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    FAUCET_AMOUNTS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _fetch_params,
+    _do_subscribe,
+    _docker_exec,
+    _run_miraged,
+    _miraged_cmd,
+    _keyring_backend,
+    _INSIDE_CONTAINER,
+    _check_local_docker,
     DEFAULT_BACKEND,
-    get_status, get_user_status, get_username_from_address, get_address_from_username,
-    sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_subscribe_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_annotate_raw, _canon_base_report_raw,
+    get_status,
+    get_user_status,
+    get_username_from_address,
+    get_address_from_username,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
+    _difficulty_factor,
+    _BASE_DIFFICULTY_FACTOR,
+    _canon_base_subscribe_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_award_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_annotate_raw,
+    _canon_base_report_raw,
     canon_signed_with_pow,
-    _generate_wallet, _faucet, _resolve_validator_key_addr,
-    _get_spendable_balance, _required_sub1_spend_budget_umirage,
+    _generate_wallet,
+    _faucet,
+    _resolve_validator_key_addr,
+    _get_spendable_balance,
+    _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_post, _do_post_with_nonce, _do_post_with_media,
-    _do_vote, _do_vote_with_nonce,
-    _do_edit, _do_annotate, _do_delete, _do_delete_user,
-    _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
-    _do_set_username_raw, _do_set_biography, _do_report,
-    _do_enable_agent, _do_set_agents, _do_set_auto_renewal,
-    _do_send_tokens, _do_award,
-    _wait_indexed, _wait_username, _wait_list_count,
-    _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,
-    _wait_followed_user, _wait_followed_topic,
-    _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
+    _do_post,
+    _do_post_with_nonce,
+    _do_post_with_media,
+    _do_vote,
+    _do_vote_with_nonce,
+    _do_edit,
+    _do_annotate,
+    _do_delete,
+    _do_delete_user,
+    _do_follow_user,
+    _do_follow_topic,
+    _do_block,
+    _do_block_topic,
+    _do_set_username_raw,
+    _do_set_biography,
+    _do_report,
+    _do_enable_agent,
+    _do_set_agents,
+    _do_set_auto_renewal,
+    _do_send_tokens,
+    _do_award,
+    _wait_indexed,
+    _wait_username,
+    _wait_list_count,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_tx_deliver,
+    _wait_followed_user,
+    _wait_followed_topic,
+    _wait_blocked_user,
+    _wait_blocked_topic,
+    _wait_blocked_topic_state,
     _wait_comment_indexed,
-    _rpc_latest_height, _wait_next_block,
+    _rpc_latest_height,
+    _wait_next_block,
 )
 
 
@@ -296,6 +355,7 @@ def test_post_lifecycle(backend: str):
 # Category 4: Comment Threading
 # =========================================================================
 
+
 def test_comments(backend: str):
 
     wallet = WALLETS["free"]
@@ -446,6 +506,7 @@ def test_comments(backend: str):
 # =========================================================================
 # Category 5: Social Graph
 # =========================================================================
+
 
 def test_media(backend: str):
 
@@ -635,6 +696,7 @@ def test_media(backend: str):
 # Category 15: Auto Renewal
 # =========================================================================
 
+
 def test_content_limits(backend: str):
     """Test content/title length limits per tier at the backend API level."""
 
@@ -699,6 +761,7 @@ def test_content_limits(backend: str):
 # =========================================================================
 # Category 24: Profile Fields Verification
 # =========================================================================
+
 
 def test_annotate(backend: str):
     """Test MsgAnnotate agent overlay edits."""
@@ -965,7 +1028,6 @@ def test_annotate(backend: str):
         _fail("annotate.comment_overlay_applied", f"content={comment_node.get('content') if comment_node else None}")
 
 
-
 def test_edit_target_immutability(backend: str):
     """Test that MsgEdit cannot change a post's target (parent)."""
 
@@ -998,3 +1060,42 @@ def test_edit_target_immutability(backend: str):
         _fail("edit_target.mismatch_rejected", f"expected rejection, got {resp}")
 
 
+def test_tag_normalization_porn_to_adult(backend: str) -> None:
+    """v1.23.0: posting with tag='porn' should store as 'adult' on-chain."""
+    free = WALLETS.get("free")
+    if not free:
+        _skip("tag_normalize.setup", "free wallet not available")
+        return
+
+    free_addr = str(free.address())
+    topic = "test"
+    title = f"Tag Normalize {_rand_str(6)}"
+    content = f"Body {_rand_str(10)}"
+
+    txh = _do_post(backend, free, topic, title, content, tag="porn")
+    if not txh:
+        _fail("tag_normalize.post_with_porn_tag")
+        return
+    _pass("tag_normalize.post_with_porn_tag", tx=txh)
+
+    if not _wait_indexed(backend, free_addr, txh):
+        _fail("tag_normalize.indexed")
+        return
+
+    code, data = _get(f"{backend}/api/get_user_posts", {"owner": free_addr, "limit": 10, "page": 1})
+    if code != 200:
+        _fail("tag_normalize.fetch_posts", f"status={code}")
+        return
+
+    posts = (data or {}).get("posts") or []
+    h = txh.lower()
+    matched = [p for p in posts if str(p.get("post_id", "")).lower() == h]
+    if not matched:
+        _fail("tag_normalize.find_post", "post not in results")
+        return
+
+    stored_tag = matched[0].get("tag", "")
+    if stored_tag == "adult":
+        _pass("tag_normalize.stored_as_adult")
+    else:
+        _fail("tag_normalize.stored_as_adult", f"expected 'adult', got '{stored_tag}'")

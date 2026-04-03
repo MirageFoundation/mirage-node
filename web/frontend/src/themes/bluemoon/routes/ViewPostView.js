@@ -535,14 +535,14 @@ const StyledContentArea = styled.div`
     theme
 }) => theme.colors.text};
     font-weight: normal;    
-    font-size: 0.9rem;
+    font-size: 0.82rem;
     padding-left: 0rem;
     padding-right: 0rem;
     overflow-wrap: anywhere;
     word-break: break-word;
     white-space: normal;
     @media (max-width: 1000px) {
-        font-size: 0.75rem;  /* slightly smaller comment text on mobile */
+        font-size: 0.72rem;
     }
 `;
 const ColumnFlex = styled.div`
@@ -1551,7 +1551,7 @@ function ViewPostView({
                         width: 'auto'
                     }}>
                         <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isSendPending(confirmDonate?.userId)}>
-                            {formatSendStatus(confirmDonate?.userId) || 'Send'}
+                            {formatSendStatus(confirmDonate?.userId) || 'Confirm'}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                     </ConfirmButtons>

@@ -12,6 +12,7 @@ import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../.
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
 import { requireThemeColor } from "../../../utils/themeColor";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../../../utils/media";
+import MarkdownRenderer from "./MarkdownRenderer";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import useBalance from "../../../logic/useBalance";
 import { usePendingSends } from "../../../logic/usePendingSends";
@@ -573,7 +574,7 @@ const ScoreDisplay = styled.span`
 `;
 
 const tagColors = {
-    porn: { bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.50)', text: '#ec4899' }, // pink
+    adult: { bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.50)', text: '#ec4899' }, // pink
     violence: { bg: 'rgba(185, 28, 28, 0.18)', border: 'rgba(185, 28, 28, 0.50)', text: '#b91c1c' }, // deep red
     sensitive: { bg: 'rgba(109, 40, 217, 0.18)', border: 'rgba(109, 40, 217, 0.50)', text: '#6d28d9' }, // purple
     // Default: light neutral pill that stays legible on both light and dark backgrounds.
@@ -1186,7 +1187,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setMenuOpen(false);
         if (!post || !post.user_id) return;
         if (!hasValidAccount) {
-            alert('Please log in to donate');
+            alert('Please log in to gift MIRAGE');
             return;
         }
         setConfirmDelete(false);
@@ -1213,7 +1214,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         if (isSendPending(post.user_id)) return;
         const amount = parseInt(String(donateAmountRaw || "").replace(/[^\d]/g, ""), 10);
         if (!Number.isFinite(amount) || amount < 10000) {
-            setDonateMessage({ type: 'error', message: 'Minimum donation is 10,000 MIRAGE' });
+            setDonateMessage({ type: 'error', message: 'Minimum gift is 10,000 MIRAGE' });
             setTimeout(() => setDonateMessage(null), 5000);
             return;
         }
@@ -1806,7 +1807,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const hasMedia = !!(thumbSrc || thumbBlurSrc || isDirectImage || isPrimaryVideo);
     const shouldBlurMedia = !!(blurSensitiveMedia && post && post.tag && String(post.tag).trim() && hasMedia);
-    const displayThumbSrc = shouldBlurMedia && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
+    const displayThumbSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
 
     const shortenAddress = (address) => {
         if (!address) return "";
@@ -1847,6 +1848,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         );
     };
 
+    const expandedTextBody = useMemo(() => {
+        const raw = String(post?.content || '').trim();
+        if (!raw) return null;
+        if (mediaArr) return raw || null;
+        const idx = raw.indexOf('\n');
+        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+        const rest = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
+        if (/^https?:\/\//i.test(first)) return rest || null;
+        return raw || null;
+    }, [post?.content, mediaArr]);
+
     if (hideTeaser) return null;
 
     // Check if mobile (disable compact mode on mobile)
@@ -1870,15 +1882,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     // Check if post has actual media content to display in media mode
     const hasMediaModeContent = isMediaMode && firstLinkInContent && (isDirectImage || isPrimaryVideo);
 
-    // Desktop expand/collapse for media-only posts (no text content, just image/video)
-    const isMediaOnlyPost = (() => {
-        if (isMobile || hasMediaModeContent) return false;
-        if (!firstLinkInContent || (!isDirectImage && !isPrimaryVideo)) return false;
-        const rawContent = (post?.content || '').trim();
-        if (!rawContent) return true;
-        const withoutUrls = rawContent.replace(/https?:\/\/[^\s<>"']+/gi, '').trim();
-        return !withoutUrls;
-    })();
+
 
     const renderCommentCount = () => {
         const currentCount = Number.isFinite(Number(post.comments)) ? Math.round(Number(post.comments)) : 0;
@@ -2001,7 +2005,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     loading="lazy"
                                     style={(() => {
                                         const s = {};
-                                        if (shouldBlurMedia && displayThumbSrc) s.filter = 'blur(15px)';
+                                        if (shouldBlurMedia && !mediaExpanded && displayThumbSrc) s.filter = 'blur(15px)';
                                         if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
                                         return Object.keys(s).length ? s : undefined;
                                     })()}
@@ -2049,7 +2053,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <MobileCardSquare $gradient={!thumbSrc ? generatePostGradient(post) : undefined}>
                             {(() => {
                                 // Use the already-computed proxied thumbnail (Photon primary, wsrv fallback)
-                                const displayMobileSrc = shouldBlurMedia && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
+                                const displayMobileSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
                                 if (displayMobileSrc) {
                                     return (
                                         <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
@@ -2059,7 +2063,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 loading="lazy"
                                                 style={(() => {
                                                     const s = {};
-                                                    if (shouldBlurMedia) s.filter = 'blur(15px)';
+                                                    if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
                                                     if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
                                                     return Object.keys(s).length ? s : undefined;
                                                 })()}
@@ -2346,50 +2350,57 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         </FeedReasonLine>
                     )}
                     {hasMediaModeContent ? (
-                        <div style={compactTitleStyle}>
+                        <div style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
                             {title}
+                            <span
+                                onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
+                                style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 'auto', padding: '0.2rem', opacity: 0.4, transition: 'opacity 0.15s, transform 0.2s', userSelect: 'none', transform: mediaExpanded ? 'rotate(180deg)' : 'none' }}
+                                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                                onMouseLeave={e => { e.currentTarget.style.opacity = '0.4'; }}
+                            >
+                                <svg viewBox="0 0 24 24" style={{ width: '18px', height: '18px', fill: 'none', stroke: 'currentColor', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </span>
                         </div>
                     ) : (
-                        <HideOnMobileTitle style={isMediaOnlyPost ? { ...compactTitleStyle, display: 'flex', alignItems: 'baseline', gap: '0' } : compactTitleStyle}>
+                        <HideOnMobileTitle style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
                             {title}
-                            {isMediaOnlyPost && (
-                                <>
-                                    <MetaSeparator style={{ margin: '0 0.35rem', alignSelf: 'center' }}>·</MetaSeparator>
-                                    <span
-                                        onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
-                                        style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', flexShrink: 0, opacity: 0.5, transition: 'opacity 0.15s', userSelect: 'none' }}
-                                        onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
-                                        onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; }}
-                                    >
-                                        <svg viewBox="0 0 24 24" style={{ width: '16px', height: '16px', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
-                                            {mediaExpanded ? (
-                                                <>
-                                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                                                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                                                    <line x1="1" y1="1" x2="23" y2="23" />
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                                    <circle cx="12" cy="12" r="3" />
-                                                </>
-                                            )}
-                                        </svg>
-                                    </span>
-                                </>
-                            )}
+                            <span
+                                onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
+                                style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 'auto', padding: '0.2rem', opacity: 0.4, transition: 'opacity 0.15s, transform 0.2s', userSelect: 'none', transform: mediaExpanded ? 'rotate(180deg)' : 'none' }}
+                                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                                onMouseLeave={e => { e.currentTarget.style.opacity = '0.4'; }}
+                            >
+                                <svg viewBox="0 0 24 24" style={{ width: '18px', height: '18px', fill: 'none', stroke: 'currentColor', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </span>
                         </HideOnMobileTitle>
                     )}
                     {hasMediaModeContent && (
-                        <MediaModeContainer $blur={shouldBlurMedia}>
+                        <MediaModeContainer $blur={shouldBlurMedia && !mediaExpanded}>
                             <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
                         </MediaModeContainer>
                     )}
-                    {isMediaOnlyPost && mediaExpanded && (
-                        <MediaModeContainer $blur={shouldBlurMedia}>
-                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
-                        </MediaModeContainer>
-                    )}
+                    {mediaExpanded && (() => {
+                        const showMedia = !hasMediaModeContent && firstLinkInContent && (isDirectImage || isPrimaryVideo);
+                        if (!showMedia && !expandedTextBody) return null;
+                        return (
+                            <>
+                                {showMedia && (
+                                    <MediaModeContainer $blur={false}>
+                                        <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
+                                    </MediaModeContainer>
+                                )}
+                                {expandedTextBody && (
+                                    <div style={{ padding: '0.4rem 0' }}>
+                                        <MarkdownRenderer text={expandedTextBody} />
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
                     {post && post.feed_bucket && post.feed_bucket !== 'guest' && hasMediaModeContent && (
                         <FeedReasonLine>
                             {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
@@ -2620,14 +2631,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                                 <span style={{ whiteSpace: 'nowrap' }}>
-                                    💰 Donate to {post?.username || post?.user_id?.substring(0, 12) + '...'}:
+                                    💰 Gift Mirage to {post?.username || post?.user_id?.substring(0, 12) + '...'}:
                                 </span>
                                 <div style={{
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.35rem',
-                                    background: theme.colors.surface2,
-                                    border: `1px solid ${theme.colors.borderSubtle}`,
+                                    background: '#fff',
+                                    border: '1px solid #d1d5db',
                                     borderRadius: '8px',
                                     padding: '0.2rem 0.5rem',
                                 }}>
@@ -2640,17 +2651,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         maxLength={11}
                                         disabled={isSendPending(post?.user_id)}
                                         style={{
-                                            width: '5.5rem',
+                                            width: '6.0rem',
                                             background: 'transparent',
                                             border: 'none',
                                             outline: 'none',
-                                            color: theme.colors.text,
+                                            color: '#1f2937',
                                             fontSize: '0.8rem',
                                             fontWeight: 700,
                                             textAlign: 'right',
                                         }}
                                     />
-                                    <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
+                                    <span style={{ fontSize: '0.68rem', color: '#6b7280' }}>MIRAGE</span>
                                 </div>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button
@@ -2659,7 +2670,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onClick={confirmDonateAction}
                                         disabled={isSendPending(post?.user_id)}
                                     >
-                                        {formatSendStatus(post?.user_id) || 'Send'}
+                                        {formatSendStatus(post?.user_id) || 'Confirm'}
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                                 </ConfirmButtons>

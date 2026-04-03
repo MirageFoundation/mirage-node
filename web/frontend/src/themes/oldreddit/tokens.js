@@ -111,15 +111,15 @@ function buildLayout(colors) {
         // Form rows
 
         fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
-        formRowColumns: 'minmax(120px, 200px) minmax(0, 1fr)',
+        formRowColumns: 'minmax(140px, 260px) minmax(0, 1fr)',
         formRowGap: '0.25rem',
         formRowMargin: '0.15rem 0',
-        formRowAlign: 'center',
+        formRowAlign: 'start',
 
         // Labels
         labelSize: '0.7rem',
         labelWeight: '700',
-        labelPaddingTop: '0.22rem',
+        labelPaddingTop: '0.35rem',
 
         // Value containers (settings rows, profile fields)
         containerBg: 'transparent',
@@ -282,7 +282,7 @@ function buildLayout(colors) {
         tabSizeTablet: '0.6rem',
 
         flatMode: true,
-        maxVideoWidth: 800,
+        maxVideoWidth: 600,
         inboxFullWidth: true,
         profilePostsFullWidth: true,
     };

@@ -20,7 +20,7 @@ Agents can edit any field on any post, same fields as a normal edit:
 
 - **Title**: fix, translate, or rewrite
 - **Body**: translate, clean up, add commentary
-- **Tag**: flag content as sensitive, porn, violence, etc.
+- **Tag**: flag content as sensitive, adult, violence, etc.
 - **Topic**: move misplaced posts to the correct topic
 - **Media**: add or remove media references
 

@@ -2,41 +2,20 @@
 
 /**
  * Minimal API client wrapper around fetch with JSON handling and timeouts.
- * IMPORTANT: We default to relative "/api" (Caddy proxy). We NEVER hardcode mirage.vote here.
- * If the local backend is unreachable or misrouted (e.g., HTML returned), we FALL BACK to
- * https://mirage.vote/api for that request only.
+ * Defaults to relative "/api" (Caddy proxy). Set REACT_APP_API_BASE in
+ * deploy/templates/env/frontend.env to point at a remote node instead.
  */
-
-/**
- * @returns {string}
- */
-function isLocalHost() {
-    try {
-        const h = (typeof window !== 'undefined' && window.location && window.location.hostname) ? window.location.hostname : '';
-        if (!h) return false;
-        if (h === 'localhost' || h === '127.0.0.1') return true;
-        // Private ranges and raw IPv4
-        if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(h)) return true;
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true;
-        return false;
-    } catch (_) {
-        return false;
-    }
-}
 
 /**
  * @returns {string}
  */
 function getBaseUrl() {
     try {
-        // Default to relative /api path (goes through Caddy proxy)
         let base = '/api';
-        // Respect explicit env override ONLY when not on localhost-like hosts
         const env = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_BASE) ? process.env.REACT_APP_API_BASE : '';
-        if (env && !isLocalHost()) {
-            base = String(env || '').trim() || '/api';
+        if (env) {
+            base = String(env).trim() || '/api';
         }
-        // ensure single /api suffix
         if (!/\/?api\/?$/.test(base)) {
             base = base.replace(/\/$/, '') + '/api';
         }

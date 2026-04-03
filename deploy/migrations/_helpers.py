@@ -164,7 +164,7 @@ def backup_file(path: Path, backup_dir: Path = None) -> Path:
         return None
 
     if backup_dir is None:
-        backup_dir = path.parent / "backups"
+        backup_dir = path.parent / ".backups"
     backup_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -178,7 +178,7 @@ def backup_env_files(config_dir: Path, logger=None) -> Path:
     Backup all env files in the config directory.
     Returns the backup directory.
     """
-    backup_dir = config_dir / "backups"
+    backup_dir = config_dir / ".backups"
     backup_dir.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
