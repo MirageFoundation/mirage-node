@@ -49,7 +49,7 @@ func TestFixStalePruneSnapshotHeights_SingleEntry(t *testing.T) {
 	require.Equal(t, []uint64{14400}, decodeHeights(bz))
 }
 
-func TestFixStalePruneSnapshotHeights_Contiguous(t *testing.T) {
+func TestFixStalePruneSnapshotHeights_TrimsToLast(t *testing.T) {
 	db := dbm.NewMemDB()
 	logger := log.NewNopLogger()
 
@@ -60,17 +60,13 @@ func TestFixStalePruneSnapshotHeights_Contiguous(t *testing.T) {
 
 	bz, err := db.Get([]byte("s/prunesnapshotheights"))
 	require.NoError(t, err)
-	require.Equal(t, heights, decodeHeights(bz))
+	require.Equal(t, []uint64{43200}, decodeHeights(bz))
 }
 
 func TestFixStalePruneSnapshotHeights_StaleZero(t *testing.T) {
 	db := dbm.NewMemDB()
 	logger := log.NewNopLogger()
 
-	// Simulates state-sync bug: [0, 450000, 464400, 478800]
-	// 0 is the stale seed, gap between 0 and 450000 breaks contiguity.
-	// interval = 478800 - 464400 = 14400
-	// Contiguous tail from 450000: 450000, 464400, 478800 (all 14400 apart)
 	heights := []uint64{0, 450000, 464400, 478800}
 	require.NoError(t, db.Set([]byte("s/prunesnapshotheights"), encodeHeights(heights)))
 
@@ -78,24 +74,21 @@ func TestFixStalePruneSnapshotHeights_StaleZero(t *testing.T) {
 
 	bz, err := db.Get([]byte("s/prunesnapshotheights"))
 	require.NoError(t, err)
-	fixed := decodeHeights(bz)
-	require.Equal(t, []uint64{450000, 464400, 478800}, fixed)
+	require.Equal(t, []uint64{478800}, decodeHeights(bz))
 }
 
-func TestFixStalePruneSnapshotHeights_MultipleGaps(t *testing.T) {
+func TestFixStalePruneSnapshotHeights_ManyContiguous(t *testing.T) {
 	db := dbm.NewMemDB()
 	logger := log.NewNopLogger()
 
-	// [0, 100, 450000, 464400, 478800] — two non-contiguous entries before tail
-	heights := []uint64{0, 100, 450000, 464400, 478800}
+	heights := []uint64{3513600, 3528000, 3542400, 3556800, 3571200, 3585600, 3600000}
 	require.NoError(t, db.Set([]byte("s/prunesnapshotheights"), encodeHeights(heights)))
 
 	fixStalePruneSnapshotHeights(db, logger)
 
 	bz, err := db.Get([]byte("s/prunesnapshotheights"))
 	require.NoError(t, err)
-	fixed := decodeHeights(bz)
-	require.Equal(t, []uint64{450000, 464400, 478800}, fixed)
+	require.Equal(t, []uint64{3600000}, decodeHeights(bz))
 }
 
 func TestFixStalePruneSnapshotHeights_MalformedLength(t *testing.T) {
