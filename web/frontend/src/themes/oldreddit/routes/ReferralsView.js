@@ -1,6 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed } from "../Layout";
 import { useReferrals, compareISOWeeks, shiftISOWeek, formatWeekRange } from "../../../logic/useReferrals";
@@ -165,11 +165,7 @@ const ChartLabel = styled.div`
 
 function ActiveChart({ history }) {
     if (!history || history.length < 2) {
-        return <ChartWrapper>
-            <ChartContainer>
-                <MutedNote>(chart available after more data is collected)</MutedNote>
-            </ChartContainer>
-        </ChartWrapper>;
+        return <MutedNote>(chart available after more data is collected)</MutedNote>;
     }
     const width = 500, height = 140;
     const padding = { top: 20, right: 12, bottom: 20, left: 32 };
@@ -202,9 +198,12 @@ function ActiveChart({ history }) {
 }
 
 function ReferralsView({ state }) {
+    const { address: urlAddress } = useParams();
     const {
         publicKey,
         username,
+        effectiveAddress,
+        isOwnReferrals,
         week,
         setWeek,
         data,
@@ -217,7 +216,7 @@ function ReferralsView({ state }) {
         shareUrl,
         handleLoadMore,
         handleCopy,
-    } = useReferrals({ state });
+    } = useReferrals({ state, targetAddress: urlAddress });
     const history = Array.isArray(data?.active_history) ? data.active_history : [];
     const selectedWeek = history.find(h => h.week === week);
     const weekRange = selectedWeek ? formatWeekRange(selectedWeek.week_start, selectedWeek.week_end) : '';
@@ -238,8 +237,10 @@ function ReferralsView({ state }) {
         if (nextWeek) setWeek(nextWeek);
     };
 
+    const pageTitle = isOwnReferrals ? 'Referrals | Mirage' : `Referrals for ${effectiveAddress.slice(0, 12)}… | Mirage`;
+
     return <ContentGrid>
-        <Helmet><title>Referrals | Mirage</title></Helmet>
+        <Helmet><title>{pageTitle}</title></Helmet>
         <div>
             <ModernPostFeed>
                 <MobileHeader />
@@ -268,14 +269,14 @@ function ReferralsView({ state }) {
                 </OldRedditContentBleed>
                 <ReferralsTabbedContainer>
                     <ContainerBody>
-                        {username && shareUrl && <ShareBox>
+                        {isOwnReferrals && username && shareUrl && <ShareBox>
                             <ShareUrl value={shareUrl} readOnly onClick={e => e.target.select()} />
                             <CopyBtn $copied={copied} onClick={handleCopy}>
                                 {copied ? "Copied!" : "Copy Link"}
                             </CopyBtn>
                         </ShareBox>}
 
-                        {!publicKey ? <EmptyState>Sign in to view your referrals.</EmptyState> : loading ? <EmptyState>Loading...</EmptyState> : error ? <EmptyState>{error}</EmptyState> : referrals.length === 0 && !data?.total ? <EmptyState>No referrals yet. Share your link above to get started.</EmptyState> : <>
+                        {!effectiveAddress ? <EmptyState>Sign in to view your referrals.</EmptyState> : loading ? <EmptyState>Loading...</EmptyState> : error ? <EmptyState>{error}</EmptyState> : referrals.length === 0 && !data?.total ? <EmptyState>{isOwnReferrals ? 'No referrals yet. Share your link above to get started.' : 'No referrals found for this address.'}</EmptyState> : <>
                             {data?.active_history && <ActiveChart history={data.active_history} />}
                             <SummaryRow>
                                 <SummaryCard>

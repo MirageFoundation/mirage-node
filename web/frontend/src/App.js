@@ -834,6 +834,7 @@ class App extends Component {
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
                                             <Route path="/referrals" element={<ReferralsView state={this.state} />} />
+                                            <Route path="/referrals/:address" element={<ReferralsView state={this.state} />} />
                                             <Route path="/bridge" element={<BridgeView state={this.state} />} />
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
