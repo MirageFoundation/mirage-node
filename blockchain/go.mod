@@ -5,6 +5,10 @@ go 1.24.0
 replace (
 	// force latest sonic version for Go 1.25 support
 	github.com/bytedance/sonic => github.com/bytedance/sonic v1.15.0
+	// fix: IAVL pruning fails on state-synced nodes with "version does not exist"
+	// because deleteVersionsTo iterates consecutive versions and bails on gaps.
+	// Patch skips missing versions instead of aborting the entire prune pass.
+	github.com/cosmos/iavl => ./patches/iavl
 	// fix upstream GHSA-h395-qcrw-5vmq vulnerability.
 	github.com/gin-gonic/gin => github.com/gin-gonic/gin v1.9.1
 	// replace broken goleveldb
