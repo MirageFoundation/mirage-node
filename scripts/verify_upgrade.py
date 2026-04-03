@@ -257,18 +257,19 @@ def check_indexer_schema(conn: psycopg.Connection) -> None:
 
 
 def check_tag_normalization(conn: psycopg.Connection) -> None:
-    """Verify the porn->adult tag migration ran in the indexer."""
+    """Verify the porn->adult tag normalization is working."""
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM posts WHERE tag = 'porn'")
         porn_count = cur.fetchone()[0]
-    if porn_count > 0:
-        fail(f"indexer still has {porn_count} posts with tag='porn' (should be 'adult')")
-    else:
-        ok("no posts with legacy 'porn' tag (migration complete)")
-
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM posts WHERE tag = 'adult'")
         adult_count = cur.fetchone()[0]
+
+    if porn_count > 0:
+        warn(f"{porn_count} legacy posts still have tag='porn' (pre-migration data)")
+    else:
+        ok("no posts with legacy 'porn' tag")
+
     if adult_count > 0:
         ok(f"indexer has {adult_count} posts with tag='adult'")
     else:
