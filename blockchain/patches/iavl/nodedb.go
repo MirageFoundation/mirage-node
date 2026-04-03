@@ -651,8 +651,6 @@ func (ndb *nodeDB) deleteVersionsTo(toVersion int64) error {
 		return err
 	}
 
-	// If the legacy version is greater than the toVersion, we don't need to delete anything.
-	// It will delete the legacy versions at once.
 	if legacyLatestVersion > toVersion {
 		return nil
 	}
@@ -680,20 +678,17 @@ func (ndb *nodeDB) deleteVersionsTo(toVersion int64) error {
 	}
 	ndb.mtx.Unlock()
 
-	// Delete the legacy versions
 	if legacyLatestVersion >= first {
 		if err := ndb.deleteLegacyVersions(legacyLatestVersion); err != nil {
 			ndb.logger.Error("Error deleting legacy versions", "err", err)
 		}
 		first = legacyLatestVersion + 1
-		// reset the legacy latest version forcibly to avoid multiple calls
 		ndb.resetLegacyLatestVersion(-1)
 	}
 
 	for version := first; version <= toVersion; version++ {
 		if err := ndb.deleteVersion(version); err != nil {
 			if errors.Is(err, ErrVersionDoesNotExist) {
-				ndb.logger.Error("Pruning skipped missing version", "version", version, "prune_to", toVersion)
 				ndb.resetFirstVersion(version + 1)
 				continue
 			}

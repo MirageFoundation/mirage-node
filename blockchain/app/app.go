@@ -433,10 +433,12 @@ func New(
 	return app
 }
 
-// fixStalePruneSnapshotHeights removes the seeded 0 height from the pruning
-// snapshot list. On state-sync starts, the first real snapshot height is far
-// above 0, so the contiguous-chain eviction never advances and pruning stays
-// capped at snapshotInterval-1 indefinitely.
+// fixStalePruneSnapshotHeights trims the pruning snapshot height list to just
+// the most recent entry. The Cosmos SDK's pruning manager uses
+// pruneSnapshotHeights[0]+snapshotInterval-1 as the prune ceiling. On
+// state-synced nodes, old entries accumulate (the SDK only evicts when a new
+// snapshot completes via HandleSnapshotHeight) and block all IAVL pruning.
+// Keeping only the latest entry matches the steady-state after SDK eviction.
 func fixStalePruneSnapshotHeights(db dbm.DB, logger log.Logger) {
 	key := []byte("s/prunesnapshotheights")
 	bz, err := db.Get(key)
@@ -459,8 +461,8 @@ func fixStalePruneSnapshotHeights(db dbm.DB, logger log.Logger) {
 		entries = append(entries, binary.BigEndian.Uint64(bz[i:i+8]))
 	}
 
-	if len(entries) == 1 {
-		logger.Debug("pruneSnapshotHeights single entry", "height", entries[0])
+	if len(entries) <= 1 {
+		logger.Debug("pruneSnapshotHeights already minimal", "entries", len(entries))
 		return
 	}
 
@@ -473,30 +475,12 @@ func fixStalePruneSnapshotHeights(db dbm.DB, logger log.Logger) {
 	}
 
 	last := entries[len(entries)-1]
-	prev := entries[len(entries)-2]
-	interval := last - prev
-	if interval == 0 {
-		err := fmt.Errorf("pruneSnapshotHeights invalid interval: %d", interval)
-		logger.Error("invalid pruneSnapshotHeights", "err", err)
-		panic(err)
-	}
+	fixedEntries := []uint64{last}
 
-	start := len(entries) - 1
-	for start > 0 && entries[start]-entries[start-1] == interval {
-		start--
-	}
-	if start == 0 {
-		logger.Debug("pruneSnapshotHeights contiguous", "first", entries[0], "entries", len(entries))
-		return
-	}
-	fixedEntries := entries[start:]
-
-	logger.Info("fixing stale pruneSnapshotHeights (state-sync pruning bug)",
+	logger.Info("trimming pruneSnapshotHeights to latest entry (unblock pruning)",
 		"old_first", entries[0],
-		"new_first", fixedEntries[0],
+		"old_last", last,
 		"old_entries", len(entries),
-		"new_entries", len(fixedEntries),
-		"interval", interval,
 	)
 
 	fixed := make([]byte, 0, len(fixedEntries)*8)
