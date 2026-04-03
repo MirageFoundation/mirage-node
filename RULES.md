@@ -219,6 +219,7 @@ const formatTopicStatus = useCallback((topic) => {
 
 - Do **not** run `git commit` unless I explicitly ask you to.
 - When I do ask you to "commit" (or similar), run a single command that both commits **and** pushes to the remote (e.g. `git commit ... && git push`).
+- **NEVER push directly to `prod`.** All production releases go through the `/prod-release` skill. If you find yourself on the `prod` branch, switch back to `dev` before committing. The only exception is if I explicitly confirm a direct push to prod.
 - When making a new version release (e.g. v1.6.3), also create/update the git tag:
   ```bash
   git tag -f v1.6.3 && git push origin v1.6.3 --force
