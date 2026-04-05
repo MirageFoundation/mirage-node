@@ -123,6 +123,7 @@ _RETRY_STATUS_CODES = {429, 502, 503, 504}
 _MAX_HTTP_RETRIES = 10
 _BASE_RETRY_SLEEP_SEC = 0.5
 
+
 try:
     from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
 except Exception:
@@ -336,9 +337,7 @@ def compute_pow(base: bytes, difficulty: int, pow_base_bits: int, pow_factor: fl
         if check_pow_target(digest, difficulty, pow_base_bits, pow_factor):
             total = time.perf_counter() - start
             rate = attempts / max(1e-6, total)
-            _log(
-                f"[pow] proof={proof} attempts={attempts} time={total:.2f}s rate={rate:.1f}/s"
-            )
+            _log(f"[pow] proof={proof} attempts={attempts} time={total:.2f}s rate={rate:.1f}/s")
             return proof
         proof += 1
 

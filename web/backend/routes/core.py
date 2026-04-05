@@ -3815,16 +3815,34 @@ def core_post():
 
         now_ts = int(time.time())
         quest_action = "comment" if target else "post"
-        comment_quest_kwargs = dict(
-            topic=topic,
-            target_topic=topic,
-            content_length=len(content),
-        )
+        comment_quest_kwargs = {
+            "content_length": len(content),
+        }
         if target:
             parent_info = _get_post_quest_info(target)
-            if parent_info:
+            if not parent_info:
+                log_event(rid, "quest.comment.parent_missing", owner=user_addr, target=target)
+            else:
+                parent_topic = (parent_info.get("topic") or "").strip().lower()
                 comment_quest_kwargs["root_post_id"] = parent_info["root_post_id"]
                 comment_quest_kwargs["target_owner"] = parent_info["owner"]
+                if parent_topic:
+                    comment_quest_kwargs["topic"] = parent_topic
+                    comment_quest_kwargs["target_topic"] = parent_topic
+                else:
+                    log_event(rid, "quest.comment.parent_topic_missing", owner=user_addr, target=target)
+                if topic and topic != parent_topic:
+                    log_event(
+                        rid,
+                        "quest.comment.topic_override",
+                        owner=user_addr,
+                        target=target,
+                        request_topic=topic,
+                        parent_topic=parent_topic,
+                    )
+        else:
+            comment_quest_kwargs["topic"] = topic
+            comment_quest_kwargs["target_topic"] = topic
         _track_quest_progress(user_addr, quest_action, now_ts, **comment_quest_kwargs)
         if not target and topic:
             _track_quest_progress(
