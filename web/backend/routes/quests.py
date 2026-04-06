@@ -528,13 +528,23 @@ def get_rewards_summary():
             if quest_def.get("action_type") == "balanced_vote":
                 target_up = quest_def.get("target_upvotes", 0) or 0
                 target_down = quest_def.get("target_downvotes", 0) or 0
-                quest_data["target"] = target_up + target_down
+                target_total = target_up + target_down
+                if target_total <= 0:
+                    raise ValueError(f"Quest {quest_id} requires non-zero balanced_vote targets")
+                quest_data["target"] = target_total
                 quest_data["upvotes"] = progress_meta.get("upvotes", 0)
                 quest_data["downvotes"] = progress_meta.get("downvotes", 0)
                 quest_data["target_upvotes"] = target_up
                 quest_data["target_downvotes"] = target_down
+                if completed_at is None and progress >= target_total:
+                    quest_data["progress"] = target_total - 1
             else:
-                quest_data["target"] = quest_def.get("target_count", 1)
+                target = quest_def.get("target_count", 1)
+                quest_data["target"] = target
+                unique_topics_min = quest_def.get("unique_topics_min")
+                if unique_topics_min and completed_at is None and progress >= target:
+                    if len(progress_meta.get("topics", [])) < unique_topics_min:
+                        quest_data["progress"] = target - 1
             daily_quests.append(quest_data)
 
         # ===== FLASH QUEST =====
@@ -574,14 +584,17 @@ def get_rewards_summary():
             template_id = flash_row[0]
             quest_def = flash_defs.get(template_id, {})
             if quest_def:
-                flash_quest_data = {
+                progress = flash_row[3]
+                progress_meta = flash_row[4] if isinstance(flash_row[4], dict) else {}
+                completed_at = flash_row[5]
+                action_type = quest_def.get("action_type", "")
+
+                quest_data = {
                     "id": template_id,
                     "title": quest_def.get("title", ""),
                     "description": quest_def.get("description", ""),
-                    "action_type": quest_def.get("action_type", ""),
-                    "progress": flash_row[3],
-                    "target": quest_def.get("target_count", 1),
-                    "completed": flash_row[5] is not None,
+                    "action_type": action_type,
+                    "completed": completed_at is not None,
                     "starts_at": flash_row[1],
                     "ends_at": flash_row[2],
                     "seconds_remaining": max(0, flash_row[2] - ts),
@@ -593,6 +606,30 @@ def get_rewards_summary():
                     "quality_threshold": quest_def.get("quality_threshold"),
                     "count_vote_changes": quest_def.get("count_vote_changes", True),
                 }
+
+                if action_type == "balanced_vote":
+                    target_up = quest_def.get("target_upvotes", 0) or 0
+                    target_down = quest_def.get("target_downvotes", 0) or 0
+                    target_total = target_up + target_down
+                    if target_total <= 0:
+                        raise ValueError(f"Flash quest {template_id} requires non-zero balanced_vote targets")
+                    if completed_at is None and progress >= target_total:
+                        progress = target_total - 1
+                    quest_data["target"] = target_total
+                    quest_data["upvotes"] = progress_meta.get("upvotes", 0)
+                    quest_data["downvotes"] = progress_meta.get("downvotes", 0)
+                    quest_data["target_upvotes"] = target_up
+                    quest_data["target_downvotes"] = target_down
+                else:
+                    target = quest_def.get("target_count", 1)
+                    unique_topics_min = quest_def.get("unique_topics_min")
+                    if unique_topics_min and completed_at is None and progress >= target:
+                        if len(progress_meta.get("topics", [])) < unique_topics_min:
+                            progress = target - 1
+                    quest_data["target"] = target
+
+                quest_data["progress"] = progress
+                flash_quest_data = quest_data
 
         # ===== PENDING REWARDS =====
         with connect_backend_db() as conn:

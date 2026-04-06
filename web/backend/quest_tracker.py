@@ -643,6 +643,12 @@ class QuestTracker:
         completed = False
 
         if quest.action_type == "balanced_vote":
+            target_up = quest.target_upvotes or 0
+            target_down = quest.target_downvotes or 0
+            target_total = target_up + target_down
+            if target_total <= 0:
+                raise ValueError(f"Flash quest {quest.id} requires non-zero balanced_vote targets")
+
             vote_direction = kwargs.get("vote_direction", 0)
             if vote_direction > 0:
                 meta["upvotes"] = meta.get("upvotes", 0) + 1
@@ -650,9 +656,10 @@ class QuestTracker:
                 meta["downvotes"] = meta.get("downvotes", 0) + 1
 
             new_progress = meta.get("upvotes", 0) + meta.get("downvotes", 0)
-            completed = meta.get("upvotes", 0) >= (quest.target_upvotes or 0) and meta.get("downvotes", 0) >= (
-                quest.target_downvotes or 0
-            )
+            completed = meta.get("upvotes", 0) >= target_up and meta.get("downvotes", 0) >= target_down
+
+            if not completed and new_progress >= target_total:
+                new_progress = target_total - 1
         else:
             new_progress = progress.progress + 1
             completed = new_progress >= quest.target_count
@@ -660,6 +667,8 @@ class QuestTracker:
             if quest.unique_topics_min:
                 if len(meta.get("topics", [])) < quest.unique_topics_min:
                     completed = False
+                    if new_progress >= quest.target_count:
+                        new_progress = quest.target_count - 1
 
         # Update progress
         self._update_flash_quest_progress(owner, starts_at, new_progress, meta, ts, ts if completed else None)
@@ -814,7 +823,12 @@ class QuestTracker:
         completed = False
 
         if quest.action_type == "balanced_vote":
-            # Track upvotes and downvotes separately
+            target_up = quest.target_upvotes or 0
+            target_down = quest.target_downvotes or 0
+            target_total = target_up + target_down
+            if target_total <= 0:
+                raise ValueError(f"Quest {quest.id} requires non-zero balanced_vote targets")
+
             vote_direction = kwargs.get("vote_direction", 0)
             if vote_direction > 0:
                 meta["upvotes"] = meta.get("upvotes", 0) + 1
@@ -823,18 +837,19 @@ class QuestTracker:
 
             new_progress = meta.get("upvotes", 0) + meta.get("downvotes", 0)
 
-            # Complete when both targets are met
-            completed = meta.get("upvotes", 0) >= (quest.target_upvotes or 0) and meta.get("downvotes", 0) >= (
-                quest.target_downvotes or 0
-            )
+            completed = meta.get("upvotes", 0) >= target_up and meta.get("downvotes", 0) >= target_down
+
+            if not completed and new_progress >= target_total:
+                new_progress = target_total - 1
         else:
             new_progress = progress.progress + 1
             completed = new_progress >= quest.target_count
 
-            # Check unique topics requirement
             if quest.unique_topics_min:
                 if len(meta.get("topics", [])) < quest.unique_topics_min:
                     completed = False
+                    if new_progress >= quest.target_count:
+                        new_progress = quest.target_count - 1
 
         # Update progress
         self._update_daily_quest_progress(owner, quest.id, day_utc, new_progress, meta, ts, ts if completed else None)
