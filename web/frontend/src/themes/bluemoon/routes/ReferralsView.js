@@ -189,7 +189,6 @@ function ReferralsView({ state }) {
     const { address: urlAddress } = useParams();
     const {
         location,
-        publicKey,
         username,
         effectiveAddress,
         isOwnReferrals,

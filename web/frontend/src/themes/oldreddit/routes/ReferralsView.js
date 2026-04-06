@@ -200,7 +200,6 @@ function ActiveChart({ history }) {
 function ReferralsView({ state }) {
     const { address: urlAddress } = useParams();
     const {
-        publicKey,
         username,
         effectiveAddress,
         isOwnReferrals,

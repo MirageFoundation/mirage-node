@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import Sidebar from "../components/Sidebar.js";
@@ -38,7 +39,11 @@ const Label = styled.div`
     theme
 }) => theme.layout.labelSize};
     white-space: nowrap;
+    padding-top: ${({
+    theme
+}) => theme.layout.labelPaddingTop};
     @media (max-width: 1000px) {
+        padding-top: 0;
         margin-bottom: 0.1rem;
     }
 `;
@@ -53,9 +58,13 @@ const HoverableLabel = styled.div`
     theme
 }) => theme.layout.labelSize};
     white-space: nowrap;
+    padding-top: ${({
+    theme
+}) => theme.layout.labelPaddingTop};
     ${tooltipStyles()}
     
     @media (max-width: 1000px) {
+        padding-top: 0;
         margin-bottom: 0.1rem;
     }
 `;
@@ -308,7 +317,15 @@ const LoadingRow = styled.div`
 export default function ProfileView({
     state
 }) {
-    const { caps } = useTheme();
+    const theme = useTheme();
+    const { caps } = theme;
+    useEffect(() => {
+        console.debug('[ProfileView] layout.tokens', {
+            formRowColumns: theme.layout.formRowColumns,
+            formRowAlign: theme.layout.formRowAlign,
+            labelPaddingTop: theme.layout.labelPaddingTop
+        });
+    }, [theme.layout.formRowColumns, theme.layout.formRowAlign, theme.layout.labelPaddingTop]);
     const profileHideFilterSelect = caps.profileHideFilterSelect;
     const profilePostsFullWidth = caps.profilePostsFullWidth;
     const {
