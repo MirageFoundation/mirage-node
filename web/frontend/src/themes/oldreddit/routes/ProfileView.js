@@ -493,7 +493,7 @@ export default function ProfileView({
                 <OldRedditTabsStrip>
                     <ProfileTabsRow role="tablist" aria-label="Profile sections">
                         {VALID_TABS.map(tab => <ProfileSortTab key={tab} role="tab" aria-selected={activeTab === tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
-                            {tab}
+                            {tab.charAt(0).toUpperCase() + tab.slice(1)}
                         </ProfileSortTab>)}
                     </ProfileTabsRow>
                 </OldRedditTabsStrip>

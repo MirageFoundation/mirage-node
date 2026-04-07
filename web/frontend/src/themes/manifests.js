@@ -12,9 +12,10 @@
  */
 
 import bluemoonManifest from './bluemoon/index';
+import onyxManifest from './onyx/index';
 import oldredditManifest from './oldreddit/index';
 
-export const THEME_MANIFESTS = [bluemoonManifest, oldredditManifest];
+export const THEME_MANIFESTS = [bluemoonManifest, onyxManifest, oldredditManifest];
 
 /** Map old persisted theme_id values → current manifest id (renames only). */
 export const LEGACY_THEME_IDS = Object.freeze({
