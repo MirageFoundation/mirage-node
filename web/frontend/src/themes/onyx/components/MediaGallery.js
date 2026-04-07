@@ -24,17 +24,16 @@ const ArrowBtn = styled.button`
     padding: 2px 6px;
     line-height: 1;
     border-radius: 4px;
-    transition: background 0.08s, color 0.08s, transform 0.06s;
+    transition: background 0.08s, color 0.08s;
 
     &:hover {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.1);
+        color: ${({ theme }) => theme.colors.text};
+        background: ${({ theme }) => theme.colors.accent};
     }
 
     &:active {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.2);
-        transform: scale(0.9);
+        color: ${({ theme }) => theme.colors.text};
+        background: ${({ theme }) => theme.colors.accentHover};
     }
 `;
 

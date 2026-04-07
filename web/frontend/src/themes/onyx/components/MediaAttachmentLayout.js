@@ -13,23 +13,17 @@ export const MediaIconButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease, opacity 0.15s ease;
     border: none;
     font-family: inherit;
     width: 32px;
     height: 32px;
     border-radius: 6px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    background: ${({ theme }) => theme.colors.accent};
+    color: ${({ theme }) => theme.colors.text};
 
     &:hover:not(:disabled) {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-        transform: translateY(-1px);
-    }
-
-    &:active:not(:disabled) {
-        transform: translateY(0);
+        background: ${({ theme }) => theme.colors.accentHover};
     }
 
     &:disabled {
@@ -47,7 +41,7 @@ export const MediaPreviewWrapper = styled.div`
     position: relative;
     height: 80px;
     max-width: 100%;
-    border-radius: 8px;
+    border-radius: 6px;
     overflow: hidden;
     border: 1px solid ${({ theme }) => theme.colors.border};
     background-color: ${({ theme }) => theme.colors.panelAlt};
@@ -67,7 +61,7 @@ export const MediaSpinner = styled.div`
     height: 26px;
     margin-top: -13px;
     margin-left: -13px;
-    border-radius: 999px;
+    border-radius: 50%;
     border: 2px solid ${({ theme }) => theme.colors.border};
     border-top-color: ${({ theme }) => theme.colors.subtleText};
     animation: media-spin 0.8s linear infinite;
@@ -84,21 +78,20 @@ export const MediaRemoveButton = styled.button`
     right: 4px;
     width: 20px;
     height: 20px;
-    border-radius: 999px;
+    border-radius: 50%;
     border: none;
-    background-color: #dc2626;
-    color: #ffffff;
+    background-color: ${({ theme }) => theme.colors.danger};
+    color: ${({ theme }) => theme.colors.bg};
     font-size: 0.75rem;
     font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
     padding: 0;
 
     &:hover:not(:disabled) {
-        background-color: #b91c1c;
+        filter: brightness(0.85);
     }
 
     &:disabled {

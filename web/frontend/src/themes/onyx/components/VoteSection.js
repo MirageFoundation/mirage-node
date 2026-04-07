@@ -51,11 +51,11 @@ const VoteButton = styled.button`
     border: 1px solid transparent;
     background: ${({ $active, $up, theme }) =>
         $active
-            ? ($up ? 'rgba(22, 163, 74, 0.16)' : 'rgba(220, 38, 38, 0.16)')
+            ? ($up ? theme.colors.voteUpBg : theme.colors.voteDownBg)
             : theme.colors.panelAlt};
     color: ${({ $active, $up, theme }) =>
         $active
-            ? ($up ? '#16a34a' : '#dc2626')
+            ? ($up ? theme.colors.voteUp : theme.colors.voteDown)
             : theme.colors.text};
     border: ${({ theme }) => theme.layout.voteButtonBorder};
     border-radius: ${({ theme }) => theme.layout.voteButtonRadius};
@@ -65,13 +65,13 @@ const VoteButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     padding: 0;
 
     &:hover {
-        background: ${({ $up }) => $up ? 'rgba(22, 163, 74, 0.12)' : 'rgba(220, 38, 38, 0.12)'};
-        color: ${({ $up }) => $up ? '#16a34a' : '#dc2626'};
-        border-color: rgba(0, 0, 0, 0.12);
+        background: ${({ $up, theme }) => $up ? theme.colors.voteUpBg : theme.colors.voteDownBg};
+        color: ${({ $up, theme }) => $up ? theme.colors.voteUp : theme.colors.voteDown};
+        border-color: ${({ theme }) => theme.colors.border};
         transform: ${({ theme }) => theme.layout.voteButtonHoverTransform};
     }
 

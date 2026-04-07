@@ -26,13 +26,7 @@ const NavContainer = styled.nav`
         padding-bottom: env(safe-area-inset-bottom, 0px);
         overflow: visible;
         
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        background: ${({ theme }) =>
-        theme.name !== 'light'
-            ? 'rgba(26, 26, 26, 0.95)'
-            : 'rgba(255, 255, 255, 0.95)'};
-        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
+        background: ${({ theme }) => theme.colors.panel};
     }
 `;
 
@@ -167,11 +161,11 @@ const CreateIconWrapper = styled.div`
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: ${({ theme }) => theme.colors.accent};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     margin-top: -16px;
     margin-bottom: 2px;
 `;
@@ -196,7 +190,7 @@ const Icon = styled.svg`
 const CreateIcon = styled.svg`
     width: 20px;
     height: 20px;
-    fill: #FFFFFF;
+    fill: ${({ theme }) => theme.colors.text};
 `;
 
 // Label text
@@ -223,10 +217,9 @@ const UnreadBadge = styled.span`
     min-width: 24px;
     height: 24px;
     padding: 0 6px;
-    background: #FF3B30;
-    border-radius: 12px;
-    background: ${({ theme }) => theme.colors.bg};
-    color: #fff;
+    background: ${({ theme }) => theme.colors.danger};
+    border-radius: 4px;
+    color: ${({ theme }) => theme.colors.bg};
     font-size: 11px;
     font-weight: 700;
     line-height: 20px;
@@ -269,11 +262,10 @@ const ProfileSheet = styled.div`
     width: 100%;
     max-width: min(430px, 100%);
     background-color: ${({ theme }) => theme.colors.panel};
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-bottom: none;
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
     padding: 0.6rem 0.9rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
     /* Sit visually above the fixed bottom nav bar */
     margin-bottom: 56px;
@@ -300,7 +292,7 @@ const ProfileSheet = styled.div`
 const ProfileSheetHandle = styled.div`
     width: 32px;
     height: 3px;
-    border-radius: 999px;
+    border-radius: 4px;
     background: ${({ theme }) => theme.colors.border};
     opacity: 0.7;
     margin: 0 auto 0.4rem;

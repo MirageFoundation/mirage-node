@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 import { Helmet } from "react-helmet-async";
 import Button from "../components/Button.js";
 import { Link, Navigate } from "react-router-dom";
@@ -19,10 +19,12 @@ import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
-import { useViewPost, pickCard, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
+import { useViewPost, pickCard, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
 import { normalizeTag } from "../../../utils/ContentTags";
+import { getTagPalette } from "../utils/tagPalette.js";
+import { resolveCardSize } from "../utils/cardSize.js";
 // Card-based container matching front page style (width aligned with ModernPostFeed)
-// Supports $size prop ('compact' or 'large') to match feed view mode
+// Supports $size prop ('compact' or 'media') to match feed view mode
 // No margins - ModernPostFeed's gap handles spacing (matches CardView behavior)
 const PostCard = styled.div`
     background: ${({
@@ -33,7 +35,7 @@ const PostCard = styled.div`
 }) => pickCard(theme, 'cardBorder')};
     border-radius: ${({
     $size
-}) => $size === 'compact' ? '12px' : '16px'};
+}) => $size === 'compact' ? '6px' : '6px'};
     display: flex;    
     min-height: auto;
     flex-direction: row;
@@ -42,10 +44,11 @@ const PostCard = styled.div`
     padding: ${({
     $size
 }) => $size === 'compact' ? '0.85rem' : '1.25rem'};
-    /* No margins - gap is handled by ModernPostFeed via --card-gap CSS variable */
     margin: 0;
     transition: background 0.3s ease;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    box-shadow: ${({
+    theme
+}) => theme.colors.cardShadow};
     ${({
     $isNew,
     theme
@@ -59,23 +62,16 @@ const PostCard = styled.div`
 
     position: relative;
 
-    @keyframes flashGlow {
-        0% { box-shadow: 0 0 50px rgba(255, 255, 255, 0.9), 0 4px 20px rgba(0, 0, 0, 0.1); }
-        100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
-    }
-
     @media (max-width: 1000px) {
         padding: ${({
     $size
 }) => $size === 'compact' ? '0.7rem' : '1rem'};
-        border-radius: ${({
-    $size
-}) => $size === 'compact' ? '10px' : '12px'};
+        border-radius: 6px;
     }
 
     @media (max-width: 768px) {
         padding: 0.35rem 0.75rem;
-        border-radius: 8px;
+        border-radius: 6px;
     }
 `;
 
@@ -93,11 +89,13 @@ const CommentCard = styled(PostCard)`
     $size
 }) => $isCollapsed ? $size === 'compact' ? '0.35rem 0.75rem' : '0.5rem 1rem' : $size === 'compact' ? '0.7rem' : '1rem'};
     
-    /* Persistent highlight for inbox-linked comments */
     &.inbox-highlight {
-        border: 2px solid #FACC15 !important;
-        background: rgba(250, 204, 21, 0.15) !important;
-        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.3), 0 4px 20px rgba(0, 0, 0, 0.15) !important;
+        border: 2px solid ${({
+    theme
+}) => theme.colors.warningBorder} !important;
+        background: ${({
+    theme
+}) => theme.colors.warningBg} !important;
     }
     
     @media (max-width: 1000px) {
@@ -114,7 +112,7 @@ const StyledThreadReminder = styled.div`
     border: 1px solid ${({
     theme
 }) => pickCard(theme, 'cardBorder')};
-    border-radius: 12px;
+    border-radius: 6px;
     padding: 0.75rem 1rem;
     margin: 0.35rem 0;
     color: ${({
@@ -150,7 +148,7 @@ const ContinueThreadLink = styled(Link)`
     border: 1px solid ${({
     theme
 }) => pickCard(theme, 'cardBorder')};
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.5rem 0.75rem;
     margin-left: ${({
     $level
@@ -163,7 +161,7 @@ const ContinueThreadLink = styled(Link)`
     font-size: 0.75rem;
     font-weight: 500;
     text-decoration: none;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease;
 
     &:hover {
         background: ${({
@@ -196,9 +194,8 @@ const TopicHeroCard = styled.div`
     border: 1px solid ${({
     theme
 }) => pickCard(theme, 'cardBorder')};
-    border-radius: 12px;
+    border-radius: 6px;
     padding: 0.3rem 1rem;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -435,19 +432,18 @@ const TagBadge = styled.span`
     display: inline-flex;
     align-items: center;
     padding: 0.1rem 0.45rem;
-    border-radius: 999px;
-    background: ${({
-    $tag
-}) => tagColors[$tag]?.bg || tagColors.default.bg};
-    color: ${({
-    $tag
-}) => tagColors[$tag]?.text || tagColors.default.text};
+    border-radius: 4px;
+    ${({ theme, $tag }) => {
+        const palette = getTagPalette(theme, $tag);
+        return css`
+            background: ${palette.bg};
+            color: ${palette.text};
+            border: 1px solid ${palette.border};
+        `;
+    }}
     font-size: 0.75rem;
     font-weight: 700;
     text-transform: lowercase;
-    border: 1px solid ${({
-    $tag
-}) => tagColors[$tag]?.border || tagColors.default.border};
 `;
 
 // Three-dots menu button
@@ -463,7 +459,7 @@ const MenuButton = styled.button`
     theme
 }) => theme.colors.subtleText};
     border-radius: 4px;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease;
 
     &:hover {
         background: ${({
@@ -491,8 +487,8 @@ const MenuDropdown = styled.div`
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     min-width: 180px;
     z-index: 99999;
     overflow: hidden;
@@ -526,7 +522,9 @@ const MenuItem = styled.button`
     }
 
     &[data-danger="true"] {
-        color: #ff6b6b;
+        color: ${({
+    theme
+}) => theme.colors.danger};
     }
 `;
 const StyledContentArea = styled.div`
@@ -573,7 +571,7 @@ const StyledReply = styled.div`
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
-    border-radius: 10px;
+    border-radius: 6px;
 `;
 
 // Mobile reply overlay - fullscreen focused reply experience (leaves room for bottom nav)
@@ -645,7 +643,7 @@ const MobileReplyPostPreview = styled.div`
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.6rem 0.75rem;
 `;
 const MobileReplyPostMeta = styled.div`
@@ -677,7 +675,7 @@ const ReplyCounter = styled.span`
     color: ${({
     $warn,
     theme
-}) => $warn ? '#ff6b6b' : theme.colors.subtleText};
+}) => $warn ? theme.colors.danger : theme.colors.subtleText};
     line-height: 1.2;
     margin-left: 0.2rem;
     margin-top: -0.25em;
@@ -691,12 +689,18 @@ const ReplyActionsRow = styled.div`
     flex-wrap: nowrap;
 `;
 const ReplyErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
-    border-radius: 8px;
+    background-color: ${({
+    theme
+}) => theme.colors.dangerBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.dangerBorder};
+    border-radius: 6px;
     padding: 0.5rem 0.75rem;
     margin-top: 0.25rem;
-    color: #dc2626;
+    color: ${({
+    theme
+}) => theme.colors.danger};
     font-size: 0.7rem;
     display: flex;
     align-items: center;
@@ -813,36 +817,54 @@ const ActionButton = styled.a`
     gap: 0.25rem;
 `;
 const BlockErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
-    border-radius: 3px;
+    background-color: ${({
+    theme
+}) => theme.colors.dangerBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.dangerBorder};
+    border-radius: 4px;
     padding: 0.75rem 1rem;
     margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #dc2626;
+    color: ${({
+    theme
+}) => theme.colors.danger};
     font-size: 0.9rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 `;
 const BlockSuccessMessage = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: 3px;
+    background-color: ${({
+    theme
+}) => theme.colors.successBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.successBorder};
+    border-radius: 4px;
     padding: 0.75rem 1rem;
     margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #22c55e;
+    color: ${({
+    theme
+}) => theme.colors.success};
     font-size: 0.9rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 `;
 const BlockConfirmMessage = styled.div`
-    background-color: rgba(251, 191, 36, 0.1);
-    border: 1px solid #f59e0b;
-    border-radius: 3px;
+    background-color: ${({
+    theme
+}) => theme.colors.warningBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.warningBorder};
+    border-radius: 4px;
     padding: 0.75rem 1rem;
     margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #f59e0b;
+    color: ${({
+    theme
+}) => theme.colors.warning};
     font-size: 0.9rem;
     display: flex;
     flex-direction: column;          /* message on top, buttons below */
@@ -1038,6 +1060,7 @@ function ViewPostView({
         state,
         updatePost
     });
+    resolveCardSize(cardSize);
     const commentsRequestRef = useRef(0);
     const commentsAutoOpenTimersRef = useRef(new Set());
     useEffect(() => {
@@ -1168,7 +1191,7 @@ function ViewPostView({
                         gap: '0.35rem'
                     }}>
                         <span style={{
-                            color: '#888'
+                            color: theme.colors.muted
                         }}>Loading post...</span>
                     </PostCard> : <PostCard $size={cardSize} style={{
                         display: 'flex',
@@ -1180,7 +1203,7 @@ function ViewPostView({
                         gap: '0.5rem'
                     }}>
                         <span style={{
-                            color: '#ff6b6b'
+                            color: theme.colors.danger
                         }}>{depthError || error}</span>
                     </PostCard>}
                 </ModernPostFeed>
@@ -1329,7 +1352,7 @@ function ViewPostView({
                 }}>
                     <span style={{
                         whiteSpace: 'nowrap'
-                    }}>🚫 Block this post?</span>
+                    }}>Block this post?</span>
                     <ConfirmButtons style={{
                         marginLeft: 'auto',
                         flexShrink: 0,
@@ -1353,7 +1376,7 @@ function ViewPostView({
                 }}>
                     <span style={{
                         whiteSpace: 'nowrap'
-                    }}>🚫 Block {post.username || 'this user'}?</span>
+                    }}>Block {post.username || 'this user'}?</span>
                     <ConfirmButtons style={{
                         marginLeft: 'auto',
                         flexShrink: 0,
@@ -1377,7 +1400,7 @@ function ViewPostView({
                 }}>
                     <span style={{
                         whiteSpace: 'nowrap'
-                    }}>🚫 Block #{confirmBlockTopic.topic}?</span>
+                    }}>Block #{confirmBlockTopic.topic}?</span>
                     <ConfirmButtons style={{
                         marginLeft: 'auto',
                         flexShrink: 0,
@@ -1402,7 +1425,7 @@ function ViewPostView({
                 }}>
                     <span style={{
                         whiteSpace: 'nowrap'
-                    }}>⚠ Mark {isComment ? 'comment' : 'post'} as deleted?</span>
+                    }}>Mark {isComment ? 'comment' : 'post'} as deleted?</span>
                     <ConfirmButtons style={{
                         marginLeft: 'auto',
                         flexShrink: 0,
@@ -1426,13 +1449,13 @@ function ViewPostView({
                 }}>
                     <span style={{
                         whiteSpace: 'nowrap'
-                    }}>🛡️ Suspend this user from quests:</span>
+                    }}>Suspend this user from quests:</span>
                     <select value={suspendDuration} onChange={e => setSuspendDuration(Number(e.target.value))} style={{
                         padding: '0.25rem 0.5rem',
                         borderRadius: '4px',
-                        border: '1px solid #d97706',
-                        background: '#fef3c7',
-                        color: '#92400e',
+                        border: `1px solid ${theme.colors.warningBorder}`,
+                        background: theme.colors.warningBg,
+                        color: theme.colors.warning,
                         fontWeight: 500
                     }}>
                         <option value={1}>1 day</option>
@@ -1464,7 +1487,7 @@ function ViewPostView({
                 }}>
                     <span style={{
                         whiteSpace: 'nowrap'
-                    }}>🛡️ Unsuspend this user from quests?</span>
+                    }}>Unsuspend this user from quests?</span>
                     <ConfirmButtons style={{
                         marginLeft: 'auto',
                         flexShrink: 0,
@@ -1480,24 +1503,23 @@ function ViewPostView({
         }
         if (suspendSuccess[post.post_id]) {
             return <div style={{
-                background: 'rgba(34, 197, 94, 0.1)',
-                border: '1px solid #22c55e',
-                borderRadius: '3px',
+                background: theme.colors.successBg,
+                border: `1px solid ${theme.colors.successBorder}`,
+                borderRadius: '4px',
                 padding: '0.75rem 1rem',
                 margin: '0.5rem 0',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                color: '#16a34a',
+                color: theme.colors.success,
                 fontSize: '0.8rem'
             }}>
-                <span>✓</span>
                 {suspendSuccess[post.post_id]}
             </div>;
         }
         if (confirmReportPost === post.post_id) {
             return <BlockConfirmMessage>
-                <span>🚨 Report this post? Provide a short reason.</span>
+                <span>Report this post? Provide a short reason.</span>
                 <ReportInput type="text" value={reportReason} onChange={e => setReportReason(e.target.value)} placeholder="Short reason (max 140 chars)" maxLength={140} />
                 <ConfirmButtons style={{
                     width: 'auto'
@@ -1520,7 +1542,7 @@ function ViewPostView({
                     <span style={{
                         whiteSpace: 'nowrap'
                     }}>
-                        💰 Donate to {post.username || post.user_id.substring(0, 12) + '...'}:
+                        Donate to {post.username || post.user_id.substring(0, 12) + '...'}:
                     </span>
                     <div style={{
                         display: 'flex',
@@ -1528,7 +1550,7 @@ function ViewPostView({
                         gap: '0.35rem',
                         background: theme.colors.surface2,
                         border: `1px solid ${theme.colors.borderSubtle}`,
-                        borderRadius: '8px',
+                        borderRadius: '6px',
                         padding: '0.2rem 0.5rem'
                     }}>
                         <input type="text" inputMode="numeric" value={formatDonateAmount(donateAmount)} onChange={e => handleDonateAmountChange(e.target.value)} placeholder="10,000" maxLength={11} disabled={isSendPending(confirmDonate?.userId)} style={{
@@ -1563,10 +1585,8 @@ function ViewPostView({
         if (donateMsg) {
             return <>
                 {donateMsg.type === 'error' ? <BlockErrorMessage>
-                    <span>⚠</span>
                     {donateMsg.message}
                 </BlockErrorMessage> : <BlockSuccessMessage>
-                    <span>✓</span>
                     {donateMsg.message}
                 </BlockSuccessMessage>}
             </>;
@@ -1588,7 +1608,7 @@ function ViewPostView({
                         <span style={{
                             whiteSpace: 'nowrap'
                         }}>
-                            🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post.username || post.user_id.substring(0, 12) + '...'}?{giftFeeLabel ? ` (${giftFeeLabel})` : ''}
+                            {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post.username || post.user_id.substring(0, 12) + '...'}?{giftFeeLabel ? ` (${giftFeeLabel})` : ''}
                         </span>
                         {confirmGiftSub.loading && <span style={{
                             fontSize: '0.75rem',
@@ -1600,7 +1620,7 @@ function ViewPostView({
                         }}>{confirmGiftSub.expiryLabel}</span>}
                         {confirmGiftSub.error && <span style={{
                             fontSize: '0.75rem',
-                            color: '#ef4444'
+                            color: theme.colors.danger
                         }}>{confirmGiftSub.error}</span>}
                     </div>
                     <ConfirmButtons style={{
@@ -1620,10 +1640,8 @@ function ViewPostView({
         if (giftMsg) {
             return <>
                 {giftMsg.type === 'error' ? <BlockErrorMessage>
-                    <span>⚠</span>
                     {giftMsg.message}
                 </BlockErrorMessage> : <BlockSuccessMessage>
-                    <span>✓</span>
                     {giftMsg.message}
                 </BlockSuccessMessage>}
             </>;
@@ -1666,7 +1684,7 @@ function ViewPostView({
                                 padding: '0.45rem 0.6rem',
                                 background: theme.colors.surface2,
                                 border: `1px solid ${theme.colors.borderSubtle}`,
-                                borderRadius: '8px',
+                                borderRadius: '6px',
                                 color: theme.colors.text,
                                 cursor: disabled ? isAwarding ? 'wait' : 'not-allowed' : 'pointer',
                                 opacity: disabled ? 0.4 : 1,
@@ -1692,7 +1710,7 @@ function ViewPostView({
                                     <span style={{
                                         fontSize: '0.68rem',
                                         opacity: 0.6,
-                                        color: !canAfford ? '#ef4444' : 'inherit'
+                                        color: !canAfford ? theme.colors.danger : 'inherit'
                                     }}>
                                         {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
                                     </span>
@@ -1711,7 +1729,7 @@ function ViewPostView({
         }
         const awardMsg = awardMessages[post.post_id];
         if (awardMsg) {
-            return awardMsg.type === 'error' ? <BlockErrorMessage><span>⚠</span>{awardMsg.message}</BlockErrorMessage> : <BlockSuccessMessage><span>✓</span>{awardMsg.message}</BlockSuccessMessage>;
+            return awardMsg.type === 'error' ? <BlockErrorMessage>{awardMsg.message}</BlockErrorMessage> : <BlockSuccessMessage>{awardMsg.message}</BlockSuccessMessage>;
         }
 
         // Show delete-specific messages for this post
@@ -1719,10 +1737,8 @@ function ViewPostView({
         if (deleteMsg) {
             return <>
                 {deleteMsg.type === 'error' ? <BlockErrorMessage>
-                    <span>⚠</span>
                     {deleteMsg.message}
                 </BlockErrorMessage> : <BlockSuccessMessage>
-                    <span>✓</span>
                     {deleteMsg.message}
                 </BlockSuccessMessage>}
             </>;
@@ -1733,10 +1749,8 @@ function ViewPostView({
         if (repMsg) {
             return <>
                 {repMsg.type === 'error' ? <BlockErrorMessage>
-                    <span>⚠</span>
                     {repMsg.message}
                 </BlockErrorMessage> : <BlockSuccessMessage>
-                    <span>✓</span>
                     {repMsg.message}
                 </BlockSuccessMessage>}
             </>;
@@ -1747,7 +1761,6 @@ function ViewPostView({
         if (shMsg) {
             return <>
                 <BlockSuccessMessage>
-                    <span>✓</span>
                     {shMsg.message}
                 </BlockSuccessMessage>
             </>;
@@ -1757,11 +1770,9 @@ function ViewPostView({
         if (post.level === 0 || post.post_id === root.post_id) {
             return <>
                 {blockError && <BlockErrorMessage>
-                    <span>⚠</span>
                     {blockError}
                 </BlockErrorMessage>}
                 {blockSuccess && <BlockSuccessMessage>
-                    <span>✓</span>
                     {blockSuccess}
                 </BlockSuccessMessage>}
             </>;
@@ -1863,15 +1874,15 @@ function ViewPostView({
                         <MenuItem onClick={() => {
                             setOpenMenuId(null);
                             handleDeletePost(post.post_id);
-                        }} data-danger="true">🛡️ Mark post deleted</MenuItem>
+                        }} data-danger="true">Mark post deleted</MenuItem>
                         {questsEnabled && userSuspendedStatus !== true && <MenuItem onClick={() => {
                             setOpenMenuId(null);
                             handleSuspendFromQuests(post.user_id, post.post_id);
-                        }} data-danger="true">🛡️ Suspend from quests</MenuItem>}
+                        }} data-danger="true">Suspend from quests</MenuItem>}
                         {questsEnabled && userSuspendedStatus === true && <MenuItem onClick={() => {
                             setOpenMenuId(null);
                             handleUnsuspendFromQuests(post.user_id, post.post_id);
-                        }}>🛡️ Unsuspend from quests</MenuItem>}
+                        }}>Unsuspend from quests</MenuItem>}
                     </>}
                 </>}
             </MenuDropdown>, document.body)}
@@ -2076,7 +2087,7 @@ function ViewPostView({
                             }}>
                                 <span style={{
                                     fontSize: '0.7rem',
-                                    color: '#888',
+                                    color: theme.colors.muted,
                                     marginBottom: '0.25rem'
                                 }}>
                                     Uploading {replyUploadProgress[post.post_id] !== undefined ? `${Math.round(replyUploadProgress[post.post_id])}%` : '...'}
@@ -2670,17 +2681,17 @@ function ViewPostView({
                                                 <Link to={`/u/${label}`} style={{
                                                     textDecoration: 'underline',
                                                     fontSize: '0.6rem',
-                                                    color: theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
+                                                    color: theme.colors.textSecondary
                                                 }}>@{label}</Link>
                                                 <span style={{
-                                                    color: theme.colors?.textMuted || '#888',
+                                                    color: theme.colors.textSecondary,
                                                     fontSize: '0.6rem'
                                                 }}>:</span>
                                             </div>
                                             <div style={{
                                                 padding: '0.4rem 0.65rem',
-                                                borderLeft: `3px solid ${theme.colors?.border || '#444'}`,
-                                                background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
+                                                borderLeft: `3px solid ${theme.colors.border}`,
+                                                background: theme.colors.accentSubtle,
                                                 borderRadius: '0 6px 6px 0',
                                                 fontSize: '0.85em'
                                             }}>
@@ -2763,7 +2774,7 @@ function ViewPostView({
                         padding: '2rem'
                     }}>
                         <span style={{
-                            color: '#ff6b6b'
+                            color: theme.colors.danger
                         }}>Unable to load post.</span>
                     </PostCard>
                 </ModernPostFeed>

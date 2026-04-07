@@ -11,10 +11,7 @@ const Overlay = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(255, 255, 255, 0.92)'
-        : 'rgba(20, 20, 20, 0.95)'};
-    backdrop-filter: blur(8px);
+    background: ${({ theme }) => theme.colors.overlay};
 `;
 
 const Card = styled.div`
@@ -23,7 +20,7 @@ const Card = styled.div`
     padding: 2rem 1.5rem;
     background-color: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 12px;
+    border-radius: 6px;
     text-align: center;
     margin: 0 1rem;
 `;
@@ -49,15 +46,15 @@ const Input = styled.input`
     font-size: 0.85rem;
     background-color: ${({ theme }) => theme.colors.panelAlt};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 4px;
     color: ${({ theme }) => theme.colors.text};
     box-sizing: border-box;
     margin-bottom: 0.75rem;
 
     &:focus {
         outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        border-color: ${({ theme }) => theme.colors.focusBorder};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 `;
 
@@ -69,13 +66,13 @@ const UnlockButton = styled.button`
     font-weight: 600;
     cursor: pointer;
     border: none;
-    border-radius: 8px;
-    background: #3b82f6;
-    color: #fff;
+    border-radius: 4px;
+    background: ${({ theme }) => theme.colors.accent};
+    color: ${({ theme }) => theme.colors.buttonText};
     transition: background 0.15s ease;
 
     &:hover:not(:disabled) {
-        background: #2563eb;
+        background: ${({ theme }) => theme.colors.accentHover};
     }
 
     &:disabled {
@@ -85,7 +82,7 @@ const UnlockButton = styled.button`
 `;
 
 const ErrorText = styled.div`
-    color: #f66;
+    color: ${({ theme }) => theme.colors.danger};
     font-size: 0.75rem;
     margin-top: 0.5rem;
 `;
@@ -104,7 +101,10 @@ const LinkText = styled.span`
 `;
 
 const LockIcon = styled.div`
-    font-size: 2rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-bottom: 0.75rem;
 `;
 
@@ -157,7 +157,7 @@ export default function UnlockPrompt({ mode, onUnlocked, onFallbackLogin }) {
         return (
             <Overlay>
                 <Card>
-                    <LockIcon>&#128274;</LockIcon>
+                    <LockIcon>LOCK</LockIcon>
                     <Title>Unlock Mirage</Title>
                     <Subtitle>Enter your password to decrypt your recovery phrase.</Subtitle>
                     <Input
@@ -186,7 +186,7 @@ export default function UnlockPrompt({ mode, onUnlocked, onFallbackLogin }) {
         return (
             <Overlay>
                 <Card>
-                    <LockIcon>&#128274;</LockIcon>
+                    <LockIcon>LOCK</LockIcon>
                     <Title>Unlock Mirage</Title>
                     <Subtitle>Authenticate with your passkey to unlock.</Subtitle>
                     <UnlockButton onClick={handlePasskeyUnlock} disabled={loading}>

@@ -184,11 +184,13 @@ const FilterSelect = styled.select`
     theme
 }) => theme.layout.inputSize};
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease;
     
     &:focus {
         outline: none;
-        border-color: #667eea;
+        border-color: ${({
+    theme
+}) => theme.colors.focusBorder};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -227,7 +229,7 @@ const PostItem = styled.a`
     box-shadow: ${({
     theme,
     isActive
-}) => isActive ? '0 0 12px rgba(102, 126, 234, 0.25)' : theme.layout.cardShadow};
+}) => isActive ? 'none' : theme.layout.cardShadow};
 
     &:hover {
         background-color: ${({
@@ -454,9 +456,9 @@ export default function ProfileView({
                             minHeight: '200px'
                         }}>
                             {isResolvingUsername ? <span style={{
-                                color: '#888'
+                                color: theme.colors.muted
                             }}>Looking up @{routeIdentity}...</span> : <span style={{
-                                color: '#ff6b6b'
+                                color: theme.colors.danger
                             }}>{usernameResolutionError}</span>}
                         </ContainerBody>
                     </TabbedContainer>
@@ -516,7 +518,7 @@ export default function ProfileView({
                                         {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
                                             marginLeft: '0.5rem',
                                             fontSize: '0.7rem',
-                                            color: '#888'
+                                            color: theme.colors.muted
                                         }}>
                                             ({formatSubscriptionExpiry(subscriptionExpiry)})
                                         </span>}
@@ -529,8 +531,8 @@ export default function ProfileView({
                             {confirmGiftSub && <Row>
                                 <div />
                                 <ValueBox style={{
-                                    background: 'rgba(251, 191, 36, 0.1)',
-                                    borderColor: '#f59e0b'
+                                    background: theme.colors.warningBg,
+                                    borderColor: theme.colors.warning
                                 }}>
                                     <div style={{
                                         display: 'flex',
@@ -541,7 +543,7 @@ export default function ProfileView({
                                     }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                             <span style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
-                                                🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {profileUsername || profileAddress?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
+                                                {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {profileUsername || profileAddress?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
                                             </span>
                                             {confirmGiftSub.loading && (
                                                 <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
@@ -550,7 +552,7 @@ export default function ProfileView({
                                                 <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{confirmGiftSub.expiryLabel}</span>
                                             )}
                                             {confirmGiftSub.error && (
-                                                <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>
+                                                <span style={{ fontSize: '0.75rem', color: theme.colors.danger }}>{confirmGiftSub.error}</span>
                                             )}
                                         </div>
                                         <div style={{
@@ -570,17 +572,17 @@ export default function ProfileView({
                             {giftSubMessage && <Row>
                                 <div />
                                 <div style={{
-                                    background: giftSubMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                    border: giftSubMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
-                                    borderRadius: '8px',
+                                    background: giftSubMessage.type === 'success' ? theme.colors.successBg : theme.colors.dangerBg,
+                                    border: giftSubMessage.type === 'success' ? `1px solid ${theme.colors.success}` : `1px solid ${theme.colors.danger}`,
+                                    borderRadius: '6px',
                                     padding: '0.6rem 0.85rem',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem',
-                                    color: giftSubMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                                    color: giftSubMessage.type === 'success' ? theme.colors.success : theme.colors.danger,
                                     fontSize: '0.8rem'
                                 }}>
-                                    <span>{giftSubMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                    <span>{giftSubMessage.type === 'success' ? 'OK' : '!'}</span>
                                     {giftSubMessage.message}
                                 </div>
                             </Row>}
@@ -598,8 +600,8 @@ export default function ProfileView({
                             {confirmDonate && <Row>
                                 <div />
                                 <ValueBox style={{
-                                    background: 'rgba(251, 191, 36, 0.1)',
-                                    borderColor: '#f59e0b'
+                                    background: theme.colors.warningBg,
+                                    borderColor: theme.colors.warning
                                 }}>
                                     <div style={{
                                         display: 'flex',
@@ -612,15 +614,15 @@ export default function ProfileView({
                                             whiteSpace: 'nowrap',
                                             fontSize: '0.82rem'
                                         }}>
-                                            💰 Gift Mirage to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
+                                            Gift Mirage to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
                                         </span>
                                         <div style={{
                                             display: 'flex',
                                             alignItems: 'center',
                                             gap: '0.35rem',
-                                            background: '#fff',
-                                            border: '1px solid #d1d5db',
-                                            borderRadius: '8px',
+                                            background: theme.colors.inputBackground,
+                                            border: `1px solid ${theme.colors.border}`,
+                                            borderRadius: '6px',
                                             padding: '0.2rem 0.5rem'
                                         }}>
                                             <input type="text" inputMode="numeric" value={formatDonateAmount(donateAmountRaw)} onChange={e => setDonateAmountRaw(e.target.value.replace(/[^\d]/g, ""))} placeholder="10,000" maxLength={11} disabled={donatePending} style={{
@@ -628,14 +630,14 @@ export default function ProfileView({
                                                 background: 'transparent',
                                                 border: 'none',
                                                 outline: 'none',
-                                                color: '#1f2937',
+                                                color: theme.colors.text,
                                                 fontSize: '0.8rem',
                                                 fontWeight: 700,
                                                 textAlign: 'right'
                                             }} />
                                             <span style={{
                                                 fontSize: '0.68rem',
-                                                color: '#6b7280'
+                                                color: theme.colors.muted
                                             }}>MIRAGE</span>
                                         </div>
                                         <div style={{
@@ -655,17 +657,17 @@ export default function ProfileView({
                             {donateMessage && <Row>
                                 <div />
                                 <div style={{
-                                    background: donateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                    border: donateMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
-                                    borderRadius: '8px',
+                                    background: donateMessage.type === 'success' ? theme.colors.successBg : theme.colors.dangerBg,
+                                    border: donateMessage.type === 'success' ? `1px solid ${theme.colors.success}` : `1px solid ${theme.colors.danger}`,
+                                    borderRadius: '6px',
                                     padding: '0.6rem 0.85rem',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem',
-                                    color: donateMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                                    color: donateMessage.type === 'success' ? theme.colors.success : theme.colors.danger,
                                     fontSize: '0.8rem'
                                 }}>
-                                    <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                    <span>{donateMessage.type === 'success' ? 'OK' : '!'}</span>
                                     {donateMessage.message}
                                 </div>
                             </Row>}
@@ -703,7 +705,7 @@ export default function ProfileView({
                                         }}>
                                             <span style={{
                                                 fontSize: '0.7rem',
-                                                color: bioDraft.length > BIO_MAX ? '#f87171' : '#888'
+                                                color: bioDraft.length > BIO_MAX ? theme.colors.danger : theme.colors.muted
                                             }}>
                                                 {bioDraft.length}/{BIO_MAX}
                                             </span>
@@ -725,13 +727,13 @@ export default function ProfileView({
                                         </div>
                                         {bioError && <span style={{
                                             fontSize: '0.75rem',
-                                            color: '#f87171'
+                                            color: theme.colors.danger
                                         }}>{bioError}</span>}
                                     </div> : <ValueBoxWithButton>
                                         <Mono style={{
                                             whiteSpace: 'pre-wrap',
                                             wordBreak: 'break-word',
-                                            color: biography ? undefined : '#888',
+                                            color: biography ? undefined : theme.colors.muted,
                                             fontSize: '0.8rem'
                                         }}>
                                             {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
@@ -757,7 +759,7 @@ export default function ProfileView({
                                 <SubtleMono>Loading posts...</SubtleMono>
                             </LoadingRow>}
                             {!isLoadingRecentPosts && recentPostsError && <Mono style={{
-                                color: '#f87171'
+                                color: theme.colors.danger
                             }}>{recentPostsError}</Mono>}
                             {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono>}
                             {recentPosts.length > 0 && <FeedComponent posts={recentPosts} state={state} showSortTabs={false} />}
@@ -786,7 +788,7 @@ export default function ProfileView({
                                 <SubtleMono>Loading posts...</SubtleMono>
                             </LoadingRow>}
                             {!isLoadingRecentPosts && recentPostsError && <Mono style={{
-                                color: '#f87171'
+                                color: theme.colors.danger
                             }}>{recentPostsError}</Mono>}
                             {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono>}
                             {!recentPostsError && recentPosts.length > 0 && <PostsList>
@@ -815,13 +817,13 @@ export default function ProfileView({
                                 padding: '0.25rem 0.5rem'
                             }}>
                                 {prefsLoading && <Mono style={{
-                                    color: '#888'
+                                    color: theme.colors.muted
                                 }}>Loading...</Mono>}
                                 {!prefsLoading && prefsError && <Mono style={{
-                                    color: '#f87171'
+                                    color: theme.colors.danger
                                 }}>{prefsError}</Mono>}
                                 {!prefsLoading && !prefsError && prefsTopics.length === 0 && <Mono style={{
-                                    color: '#888'
+                                    color: theme.colors.muted
                                 }}>No topic preference data yet.</Mono>}
                                 {!prefsError && prefsTopics.length > 0 && <div>
                                     {(() => {
@@ -837,7 +839,7 @@ export default function ProfileView({
                                                 }}>
                                                     <Mono onClick={() => setShowAllTopicPrefs(true)} style={{
                                                         cursor: 'pointer',
-                                                        color: '#888',
+                                                        color: theme.colors.muted,
                                                         fontStyle: 'italic',
                                                         fontSize: '0.6rem'
                                                     }}>
@@ -875,7 +877,7 @@ export default function ProfileView({
                                     }}>
                                         <Mono onClick={() => setShowAllTopicPrefs(false)} style={{
                                             cursor: 'pointer',
-                                            color: '#888',
+                                            color: theme.colors.muted,
                                             fontStyle: 'italic',
                                             fontSize: '0.6rem'
                                         }}>
@@ -890,13 +892,13 @@ export default function ProfileView({
                                 padding: '0.25rem 0.5rem'
                             }}>
                                 {prefsLoading && <Mono style={{
-                                    color: '#888'
+                                    color: theme.colors.muted
                                 }}>Loading...</Mono>}
                                 {!prefsLoading && prefsError && <Mono style={{
-                                    color: '#f87171'
+                                    color: theme.colors.danger
                                 }}>{prefsError}</Mono>}
                                 {!prefsLoading && !prefsError && prefsAuthors.length === 0 && <Mono style={{
-                                    color: '#888'
+                                    color: theme.colors.muted
                                 }}>No user preference data yet.</Mono>}
                                 {!prefsError && prefsAuthors.length > 0 && <div>
                                     {(() => {
@@ -912,7 +914,7 @@ export default function ProfileView({
                                                 }}>
                                                     <Mono onClick={() => setShowAllAuthorPrefs(true)} style={{
                                                         cursor: 'pointer',
-                                                        color: '#888',
+                                                        color: theme.colors.muted,
                                                         fontStyle: 'italic',
                                                         fontSize: '0.6rem'
                                                     }}>
@@ -949,7 +951,7 @@ export default function ProfileView({
                                     }}>
                                         <Mono onClick={() => setShowAllAuthorPrefs(false)} style={{
                                             cursor: 'pointer',
-                                            color: '#888',
+                                            color: theme.colors.muted,
                                             fontStyle: 'italic',
                                             fontSize: '0.6rem'
                                         }}>
@@ -964,13 +966,13 @@ export default function ProfileView({
                                 padding: '0.25rem 0.5rem'
                             }}>
                                 {similarUsersLoading && <Mono style={{
-                                    color: '#888'
+                                    color: theme.colors.muted
                                 }}>Computing similarity...</Mono>}
                                 {!similarUsersLoading && similarUsersError && <Mono style={{
-                                    color: '#f87171'
+                                    color: theme.colors.danger
                                 }}>{similarUsersError}</Mono>}
                                 {!similarUsersLoading && !similarUsersError && similarUsers.length === 0 && <Mono style={{
-                                    color: '#888'
+                                    color: theme.colors.muted
                                 }}>No similar users found yet.</Mono>}
                                 {!similarUsersError && similarUsers.length > 0 && <div>
                                     {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map(u => <a key={u.address} href={`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`} onClick={e => {
@@ -988,7 +990,7 @@ export default function ProfileView({
                                     }}>
                                         <Mono>{u.username || shortenAddress(u.address)}</Mono>
                                         <Mono style={{
-                                            color: u.similarity >= 0 ? '#22c55e' : '#ef4444'
+                                            color: u.similarity >= 0 ? theme.colors.success : theme.colors.danger
                                         }}>
                                             {u.similarity >= 0 ? '+' : ''}{Math.round(u.similarity * 100)}% ({u.shared_dimensions} shared)
                                         </Mono>
@@ -999,7 +1001,7 @@ export default function ProfileView({
                                     }}>
                                         <Mono onClick={() => setShowAllSimilarUsers(true)} style={{
                                             cursor: 'pointer',
-                                            color: '#888',
+                                            color: theme.colors.muted,
                                             fontStyle: 'italic',
                                             fontSize: '0.6rem'
                                         }}>
@@ -1012,7 +1014,7 @@ export default function ProfileView({
                                     }}>
                                         <Mono onClick={() => setShowAllSimilarUsers(false)} style={{
                                             cursor: 'pointer',
-                                            color: '#888',
+                                            color: theme.colors.muted,
                                             fontStyle: 'italic',
                                             fontSize: '0.6rem'
                                         }}>

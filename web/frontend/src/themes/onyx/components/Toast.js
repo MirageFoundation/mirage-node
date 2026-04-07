@@ -34,20 +34,16 @@ const ToastContainer = styled.div`
 `;
 
 const ToastItem = styled.div`
-    background: ${({ alert }) =>
-        alert
-            ? 'rgba(220, 38, 38, 0.95)'
-            : 'linear-gradient(135deg, rgba(88, 86, 214, 0.95) 0%, rgba(130, 87, 229, 0.95) 100%)'};
-    color: #fff;
-    border: 1px solid ${({ alert }) =>
-        alert
-            ? 'rgba(220, 38, 38, 0.6)'
-            : 'rgba(130, 87, 229, 0.5)'};
-    border-radius: 8px;
+    background: ${({ alert, theme }) =>
+        alert ? theme.colors.danger : theme.colors.panel};
+    color: ${({ alert, theme }) =>
+        alert ? theme.colors.bg : theme.colors.text};
+    border: 1px solid ${({ alert, theme }) =>
+        alert ? theme.colors.dangerBorder : theme.colors.border};
+    border-radius: 4px;
     padding: 0.5rem 0.9rem;
     font-size: 0.8rem;
     font-weight: 600;
-    box-shadow: 0 4px 16px rgba(88, 86, 214, 0.4);
     pointer-events: auto;
     animation: ${({ exiting }) => exiting ? slideOut : slideIn} 0.2s ease-out forwards;
     display: flex;
@@ -60,8 +56,8 @@ const Spinner = styled.div`
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #fff;
+    border: 2px solid ${({ theme }) => theme.colors.border};
+    border-top-color: ${({ theme }) => theme.colors.text};
     animation: toast-spin 0.8s linear infinite;
     flex-shrink: 0;
 
@@ -71,7 +67,6 @@ const Spinner = styled.div`
     }
 `;
 
-// Check if message is a progress update (should replace existing toast)
 function isProgressMessage(msg) {
     const lower = (msg || '').toLowerCase();
     return lower.includes('pow') ||
@@ -87,15 +82,12 @@ function Toast() {
     const timeoutRef = useRef(null);
 
     const showToast = useCallback((message, timeout = 0.5, alert = false) => {
-        // Clear any pending timeout
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
             timeoutRef.current = null;
         }
 
         const showSpinner = isProgressMessage(message);
-
-        // Update or create toast (only one at a time)
         setToast({ message, alert, showSpinner, exiting: false });
 
         if (timeout > 0) {
@@ -127,4 +119,3 @@ function Toast() {
 }
 
 export default Toast;
-

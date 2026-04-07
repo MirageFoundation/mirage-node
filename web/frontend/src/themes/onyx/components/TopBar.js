@@ -20,7 +20,7 @@ const BalanceDisplay = styled.div`
     padding: 0.55rem 0.85rem;
     background: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 18px;
+    border-radius: 4px;
     flex-shrink: 0;
 
     @media (max-width: 800px) {
@@ -50,15 +50,6 @@ const TabletLogo = styled(Link)`
     letter-spacing: 0.05em;
     white-space: nowrap;
     flex-shrink: 0;
-    ${({ theme }) => theme.name !== 'light' && `
-        animation: glowWander 8s ease-in-out infinite;
-    `}
-
-    @keyframes glowWander {
-        0% { text-shadow: 0 0 12px rgba(255, 255, 255, 0.4), 6px 2px 15px rgba(255, 255, 255, 0.25); }
-        50% { text-shadow: 0 0 10px rgba(255, 255, 255, 0.45), -6px -2px 15px rgba(255, 255, 255, 0.25); }
-        100% { text-shadow: 0 0 12px rgba(255, 255, 255, 0.4), 6px 2px 15px rgba(255, 255, 255, 0.25); }
-    }
 
     @media (max-width: 1000px) {
         display: block;
@@ -77,22 +68,18 @@ const TabletNav = styled.div`
 
 const TabletNavItem = styled(Link)`
     padding: 0.35rem 0.75rem;
-    border-radius: 16px;
+    border-radius: 4px;
     text-decoration: none;
     font-size: 0.8rem;
     font-weight: 500;
-    color: ${({ theme, $active }) => $active ? '#fff' : (theme.colors.text)};
-    background: ${({ theme, $active }) => $active
-        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-        : (theme.colors.panelAlt)};
-    border: 1px solid ${({ theme, $active }) => $active ? 'transparent' : (theme.colors.border)};
-    transition: all 0.15s ease;
+    color: ${({ theme, $active }) => $active ? theme.colors.text : theme.colors.subtleText};
+    background: ${({ theme, $active }) => $active ? theme.colors.accent : theme.colors.panelAlt};
+    border: 1px solid ${({ theme, $active }) => $active ? theme.colors.borderStrong : theme.colors.border};
+    transition: background-color 0.15s ease, border-color 0.15s ease;
 
     &:hover {
-        background: ${({ $active }) => $active
-        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-        : 'rgba(102, 126, 234, 0.15)'};
-        border-color: ${({ $active }) => $active ? 'transparent' : 'rgba(102, 126, 234, 0.3)'};
+        background: ${({ theme }) => theme.colors.accent};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
     }
 `;
 
@@ -111,15 +98,14 @@ const InboxLink = styled.a`
     border-radius: 50%;
     border: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panel};
-    color: ${({ $hasUnread, theme }) => $hasUnread ? '#FF3B30' : (theme.colors.text)};
+    color: ${({ $hasUnread, theme }) => $hasUnread ? theme.colors.danger : theme.colors.text};
     text-decoration: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease;
     position: relative;
     cursor: pointer;
 
     &:hover {
         background: ${({ theme }) => theme.colors.accent};
-        transform: scale(1.05);
     }
 
     @media (max-width: 600px) {
@@ -142,10 +128,10 @@ const UnreadBadge = styled.span`
     min-width: 24px;
     height: 24px;
     padding: 0 6px;
-    background: #FF3B30;
-    border-radius: 12px;
+    background: ${({ theme }) => theme.colors.danger};
+    border-radius: 4px;
     border: 2px solid ${({ theme }) => theme.colors.panel};
-    color: #fff;
+    color: ${({ theme }) => theme.colors.bg};
     font-size: 11px;
     font-weight: 700;
     line-height: 20px;
@@ -162,11 +148,11 @@ const Avatar = styled.button`
     width: 2.2rem;
     height: 2.2rem;
     border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
+    background: ${({ theme }) => theme.colors.accent};
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 600;
     font-size: 0.9rem;
-    border: none;
+    border: 1px solid ${({ theme }) => theme.colors.border};
     padding: 0;
     cursor: pointer;
     display: flex;
@@ -174,22 +160,18 @@ const Avatar = styled.button`
     justify-content: center;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    transition: transform 0.15s ease;
     font-family: inherit;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
     overflow: hidden;
     -webkit-appearance: none;
     appearance: none;
+    transition: background-color 0.15s ease;
 
     &:hover {
-        transform: scale(1.08);
+        background: ${({ theme }) => theme.colors.accentHover};
     }
     &:focus-visible {
-        outline: 2px solid rgba(255, 255, 255, 0.6);
+        outline: 1px solid ${({ theme }) => theme.colors.focusBorder};
         outline-offset: 2px;
-    }
-    &:active {
-        transform: scale(0.98);
     }
 `;
 
@@ -199,11 +181,10 @@ const Dropdown = styled.div`
     top: calc(100% + 0.5rem);
     background-color: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 12px;
+    border-radius: 6px;
     padding: 0.5rem 0;
     min-width: 12rem;
     z-index: 10000;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 `;
 
 const DropdownHeader = styled.div`

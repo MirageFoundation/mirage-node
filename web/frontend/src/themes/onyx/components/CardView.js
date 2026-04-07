@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, memo, useMemo } from "react";
 import ReactDOM from "react-dom";
-import styled, { useTheme } from "styled-components"
+import styled, { useTheme, css } from "styled-components"
 import { Link, useNavigate } from 'react-router-dom';
 import { getThemeFamily } from "../../../registry/theme";
 import InlineMedia from "./InlineMedia";
@@ -19,13 +19,15 @@ import { usePendingSends } from "../../../logic/usePendingSends";
 import { usePendingSubscribes } from "../../../logic/usePendingSubscribes";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { normalizeTag } from "../../../utils/ContentTags";
+import { getTagPalette } from "../utils/tagPalette";
+import { resolveCardSize } from "../utils/cardSize";
 
 import { Tooltip, tooltipStyles } from "./Tooltip";
 
 const StyledMainContainer = styled.div`
     background: ${({ theme }) => requireThemeColor(theme, 'card')};
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'cardBorder')};
-    border-radius: 12px;
+    border-radius: 6px;
     display: flex;    
     min-height: auto;
     flex-direction: row;
@@ -44,18 +46,9 @@ const StyledMainContainer = styled.div`
 
     position: relative;
 
-    ${(props) => props.isFlash ? `
-        animation: flashGlow 0.5s ease-out forwards;
-    ` : ``}
-
-    @keyframes flashGlow {
-        0% { background: rgba(255, 255, 200, 0.3); }
-        100% { background: ${(props) => props.theme.colors.card}; }
-    }
-
     @media (max-width: 1000px) {
         padding: 1rem;
-        border-radius: 10px;
+        border-radius: 6px;
     }
 
     @media (max-width: 600px) {
@@ -95,19 +88,13 @@ const StyledThumbBox = styled.div`
     width: 120px;
     min-width: 120px;
     height: 120px;
-    border-radius: 12px;
+    border-radius: 6px;
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    transition: transform 0.3s ease;
-
-    &:hover {
-        transform: scale(1.05);
-    }
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.borderSubtle};
 `
 
 const ThumbImage = styled.img`
@@ -125,12 +112,11 @@ const MobileCardWrapper = styled.div`
         display: block;
         width: 100%;
         margin: 0.5rem 0 0.5rem 0;
-        border-radius: 12px;
+        border-radius: 6px;
         overflow: hidden;
         border: 1px solid ${({ theme }) => requireThemeColor(theme, 'cardBorder')};
         background: ${({ theme }) => requireThemeColor(theme, 'cardAlt')};
         position: relative;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     }
 `
 
@@ -213,7 +199,7 @@ const MobileCardSquare = styled.div`
     width: 100%;
     /* 2:1 aspect ratio (half the height of the width) */
     padding-bottom: 50%;
-    background: ${({ $gradient }) => $gradient || '#fff'};
+    background: ${({ $gradient, theme }) => $gradient || theme.colors.panelAlt};
     overflow: hidden;
 `
 
@@ -239,33 +225,12 @@ const MobileCardText = styled.div`
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: rgba(0, 0, 0, 0.85);
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 800;
     text-align: center;
     padding: 1rem 1.5rem;
     box-sizing: border-box;
     overflow: hidden;
-    
-    /* Noise texture overlay for depth */
-    &::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-        opacity: 0.04;
-        pointer-events: none;
-        z-index: 1;
-    }
-    
-    /* Subtle inner glow */
-    &::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        box-shadow: inset 0 0 60px rgba(255, 255, 255, 0.15);
-        pointer-events: none;
-        z-index: 2;
-    }
 `
 
 // Decorative quote mark for text-only cards
@@ -277,7 +242,8 @@ const QuoteMark = styled.span`
     font-size: 3.5rem;
     font-weight: 400;
     line-height: 1;
-    color: rgba(0, 0, 0, 0.12);
+    color: ${({ theme }) => theme.colors.muted};
+    opacity: 0.3;
     pointer-events: none;
     z-index: 3;
     user-select: none;
@@ -291,7 +257,6 @@ const MobileTextContent = styled.span`
     font-weight: 700;
     line-height: 1.25;
     letter-spacing: -0.01em;
-    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.3);
     max-height: 100%;
     overflow: hidden;
     display: -webkit-box;
@@ -299,58 +264,6 @@ const MobileTextContent = styled.span`
     -webkit-box-orient: vertical;
 `
 
-// Generate a unique gradient based on post hash
-const generatePostGradient = (post) => {
-    // Get a hash-like value from post data
-    const base = String((post && (post.post_id || post.tx_hash)) || '')
-        || String((post && post.title) || '')
-        || String((post && post.timestamp) || '');
-
-    let hash = 0;
-    for (let i = 0; i < base.length; i++) {
-        hash = ((hash << 5) - hash) + base.charCodeAt(i);
-        hash |= 0;
-    }
-
-    // Curated gradient palettes - vibrant but readable with dark text
-    const gradients = [
-        // Warm sunset
-        'linear-gradient(135deg, #ffecd2 0%, #fcb69f 50%, #ff9a9e 100%)',
-        // Ocean breeze
-        'linear-gradient(135deg, #a8edea 0%, #fed6e3 50%, #ffecd2 100%)',
-        // Lavender dream
-        'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 50%, #f5f7fa 100%)',
-        // Citrus burst
-        'linear-gradient(135deg, #fff1eb 0%, #ace0f9 50%, #f5f7fa 100%)',
-        // Mint fresh
-        'linear-gradient(135deg, #d4fc79 0%, #96e6a1 50%, #84fab0 100%)',
-        // Peach glow
-        'linear-gradient(135deg, #ffeaa7 0%, #ffecd2 50%, #fcb69f 100%)',
-        // Arctic aurora
-        'linear-gradient(135deg, #c1dfc4 0%, #deecdd 50%, #f5f7fa 100%)',
-        // Coral reef
-        'linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #ffecd2 100%)',
-        // Morning sky
-        'linear-gradient(135deg, #89f7fe 0%, #66a6ff 50%, #a8edea 100%)',
-        // Rose gold
-        'linear-gradient(135deg, #f5f7fa 0%, #ffecd2 50%, #fcb69f 100%)',
-        // Electric lime
-        'linear-gradient(135deg, #d4fc79 0%, #96e6a1 50%, #c1dfc4 100%)',
-        // Soft violet
-        'linear-gradient(135deg, #f5f7fa 0%, #e0c3fc 50%, #8ec5fc 100%)',
-        // Honey dew
-        'linear-gradient(135deg, #ffeaa7 0%, #dfe6e9 50%, #b2bec3 100%)',
-        // Pastel sky
-        'linear-gradient(135deg, #a8edea 0%, #fed6e3 50%, #e0c3fc 100%)',
-        // Warm sand
-        'linear-gradient(135deg, #ffecd2 0%, #fcb69f 50%, #ffeaa7 100%)',
-        // Cool mint
-        'linear-gradient(135deg, #84fab0 0%, #8fd3f4 50%, #a8edea 100%)',
-    ];
-
-    const index = Math.abs(hash) % gradients.length;
-    return gradients[index];
-};
 
 // eslint-disable-next-line no-unused-vars
 const MobileCardTitleBar = styled.div`
@@ -359,23 +272,12 @@ const MobileCardTitleBar = styled.div`
     right: 0;
     bottom: 0;
     padding: 0.5rem 0.65rem;
-    color: #fff;
+    color: ${({ theme }) => theme.colors.text};
     font-weight: 700;
     font-size: clamp(0.60rem, 3.2vw, 1.0rem);
     line-height: 1.15;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.65);
     pointer-events: none;
     z-index: 2;
-    &::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        height: 200%;
-        background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.5) 50%, rgba(0,0,0,0) 100%);
-        z-index: -1;
-    }
 `
 
 const MobileCardTitleBelow = styled.div`
@@ -430,12 +332,12 @@ const StyledProfileLink = styled(Link)`
 
 // Success box styled like the delete confirmation but in green
 const ShareSuccessMessage = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: 3px;
+    background-color: ${({ theme }) => theme.colors.successBg};
+    border: 1px solid ${({ theme }) => theme.colors.successBorder};
+    border-radius: 4px;
     padding: 0.75rem 1rem;
     margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #22c55e;
+    color: ${({ theme }) => theme.colors.success};
     font-size: 0.9rem;
     display: flex;
     align-items: center;
@@ -445,12 +347,12 @@ const ShareSuccessMessage = styled.div`
 // legacy inline comment/topic link and admin/user buttons removed (unused)
 
 const BlockConfirmMessage = styled.div`
-    background-color: rgba(251, 191, 36, 0.1);
-    border: 1px solid #f59e0b;
-    border-radius: 3px;
+    background-color: ${({ theme }) => theme.colors.warningBg};
+    border: 1px solid ${({ theme }) => theme.colors.warningBorder};
+    border-radius: 4px;
     padding: 0.4rem 0.75rem;
     margin: 0.6rem 0 0.25rem 0;
-    color: #f59e0b;
+    color: ${({ theme }) => theme.colors.warning};
     font-size: 0.85rem;
     display: flex;
     align-items: center;
@@ -574,25 +476,22 @@ const ScoreDisplay = styled.span`
     }
 `;
 
-const tagColors = {
-    adult: { bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.50)', text: '#ec4899' }, // pink
-    violence: { bg: 'rgba(185, 28, 28, 0.18)', border: 'rgba(185, 28, 28, 0.50)', text: '#b91c1c' }, // deep red
-    sensitive: { bg: 'rgba(109, 40, 217, 0.18)', border: 'rgba(109, 40, 217, 0.50)', text: '#6d28d9' }, // purple
-    // Default: light neutral pill that stays legible on both light and dark backgrounds.
-    default: { bg: '#e5e7eb', border: '#cbd5e1', text: '#0f172a' },
-};
-
 const TagBadge = styled.span`
     display: inline-flex;
     align-items: center;
     padding: 0.1rem 0.4rem;
-    border-radius: 999px;
-    background: ${({ $tag }) => (tagColors[$tag]?.bg || tagColors.default.bg)};
-    color: ${({ $tag }) => (tagColors[$tag]?.text || tagColors.default.text)};
+    border-radius: 4px;
+    ${({ theme, $tag }) => {
+        const palette = getTagPalette(theme, $tag);
+        return css`
+            background: ${palette.bg};
+            color: ${palette.text};
+            border: 1px solid ${palette.border};
+        `;
+    }}
     font-size: 0.7rem;
     font-weight: 700;
     text-transform: lowercase;
-    border: 1px solid ${({ $tag }) => (tagColors[$tag]?.border || tagColors.default.border)};
 `;
 
 // Wrapper for feed reason with tooltip
@@ -628,7 +527,7 @@ const FeedDebugTooltip = styled.div`
     font-size: 0.7rem;
     line-height: 1.4;
     text-align: left;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, ${({ theme }) => theme.name === 'light' ? '0.15' : '0.3'});
+    box-shadow: 0 2px 8px rgba(0, 0, 0, ${({ theme }) => theme.name === 'light' ? '0.1' : '0.2'});
     white-space: normal;
     word-break: break-word;
 `;
@@ -690,7 +589,7 @@ const MenuButton = styled.button`
     justify-content: center;
     color: ${({ theme }) => theme.colors.subtleText};
     border-radius: 4px;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease;
 
     &:hover {
         background: ${({ theme }) => theme.colors.panelAlt};
@@ -712,8 +611,8 @@ const MenuDropdown = styled.div`
     position: fixed;
     background: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     min-width: 180px;
     z-index: 99999;
     overflow: hidden;
@@ -742,7 +641,7 @@ const MenuItem = styled.button`
     }
 
     &[data-danger="true"] {
-        color: #ff6b6b;
+        color: ${({ theme }) => theme.colors.danger};
     }
 `
 
@@ -758,14 +657,14 @@ const MediaModeContainer = styled.div`
     margin: 0.5rem 0;
     width: 100%;
     overflow: hidden;
-    border-radius: 8px;
+    border-radius: 6px;
     
     img, video {
         max-width: 100%;
         max-height: 2000px;
         width: auto;
         height: auto;
-        border-radius: 8px;
+        border-radius: 6px;
         display: block;
         ${({ $blur }) => $blur ? 'filter: blur(30px);' : ''}
     }
@@ -774,7 +673,7 @@ const MediaModeContainer = styled.div`
     & > div {
         max-height: 2000px;
         overflow: hidden;
-        border-radius: 8px;
+        border-radius: 6px;
         ${({ $blur }) => $blur ? 'filter: blur(30px);' : ''}
     }
 `
@@ -919,13 +818,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             return true;
         }
     });
-    const [cardSize, setCardSize] = useState(() => {
-        try {
-            return Storage.load('card_size', 'compact');
-        } catch (_) {
-            return 'compact';
-        }
-    });
+    const [cardSize, setCardSize] = useState(() => resolveCardSize(Storage.load('card_size', 'compact')));
     const menuRef = useRef(null);
     const menuButtonRef = useRef(null);
     const isMountedRef = useRef(true);
@@ -956,14 +849,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     setBlurSensitiveMedia(e.detail.blurSensitiveMedia === false ? false : true);
                 }
                 if (e && e.detail && typeof e.detail.cardSize !== 'undefined') {
-                    setCardSize(e.detail.cardSize);
+                    setCardSize(resolveCardSize(e.detail.cardSize));
                     return;
                 }
                 const val = Storage.load('blur_sensitive_media', true);
                 setBlurSensitiveMedia(val === false ? false : true);
                 const size = Storage.load('card_size', 'compact');
-                setCardSize(size);
-            } catch (_) { }
+                setCardSize(resolveCardSize(size));
+            } catch (err) {
+                console.debug('[Onyx][CardView] Failed to apply settings update', err);
+                throw err;
+            }
         };
         window.addEventListener('settingsUpdated', handleSettingsUpdated);
         return () => window.removeEventListener('settingsUpdated', handleSettingsUpdated);
@@ -1347,10 +1243,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const { displayBalance: userBalanceUmirage } = useBalance();
 
     const AWARD_TYPES = [
-        { name: 'quality_post', label: 'Quality Post Award', icon: '\uD83C\uDFC6' },
-        { name: 'original_content', label: 'Original Content Award', icon: '\uD83D\uDCA1' },
-        { name: 'based', label: 'Based AF Award', icon: '\uD83D\uDCAA' },
-        { name: 'receipts', label: 'Receipts Award', icon: '\uD83C\uDFF7\uFE0F' },
+        { name: 'quality_post', label: 'Quality Post Award', short: 'QP' },
+        { name: 'original_content', label: 'Original Content Award', short: 'OC' },
+        { name: 'based', label: 'Based AF Award', short: 'BA' },
+        { name: 'receipts', label: 'Receipts Award', short: 'RC' },
     ];
 
     const awardConfigs = useMemo(() => {
@@ -1965,7 +1861,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         ? { marginRight: '0.5rem', gap: '0.15rem' }
         : undefined;
     const compactThumbBoxStyle = isCompact
-        ? { width: '90px', minWidth: '90px', height: '90px', borderRadius: '8px' }
+        ? { width: '90px', minWidth: '90px', height: '90px', borderRadius: '6px' }
         : undefined;
     const compactMetaInfoRowStyle = isCompact
         ? { paddingBottom: '0.05rem', marginBottom: '0.05rem' }
@@ -2045,13 +1941,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     const def = AWARD_TYPES.find(t => t.name === a.type);
                                     if (!def) return null;
                                     const cnt = Number(a.count || 0);
-                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                    const countLabel = cnt > 1 ? `${cnt}x ` : '';
+                                    return <Tooltip key={a.type} data-tooltip={def.label}>{countLabel}{def.short}</Tooltip>;
                                 })}
                             </span>
                         )}
                     </MobileMetaLine>
                     {!hasMediaModeContent && <MobileCardWrapper>
-                        <MobileCardSquare $gradient={!thumbSrc ? generatePostGradient(post) : undefined}>
+                        <MobileCardSquare $gradient={undefined}>
                             {(() => {
                                 // Use the already-computed proxied thumbnail (Photon primary, wsrv fallback)
                                 const displayMobileSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
@@ -2111,7 +2008,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             const def = AWARD_TYPES.find(t => t.name === a.type);
                                             if (!def) return null;
                                             const cnt = Number(a.count || 0);
-                                            return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                            const countLabel = cnt > 1 ? `${cnt}x ` : '';
+                                            return <Tooltip key={a.type} data-tooltip={def.label}>{countLabel}{def.short}</Tooltip>;
                                         })}
                                     </span>
                                 </>
@@ -2167,7 +2065,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                                         : '(S + V + U) × R')}
                                                         </FeedDebugValue>
                                                     </FeedDebugRow>
-                                                    <FeedDebugRow style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
+                                                    <FeedDebugRow style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${theme.colors.border}` }}>
                                                         <FeedDebugLabel style={{ fontWeight: 'bold' }}>Score:</FeedDebugLabel>
                                                         <FeedDebugValue style={{ fontSize: '1.1em' }}>{post.feed_debug.score?.toFixed(4) || '0'}</FeedDebugValue>
                                                     </FeedDebugRow>
@@ -2318,12 +2216,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     )}
                                     {!isOwnPost && isAdmin && (
                                         <>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">Mark post deleted</MenuItem>
                                             {questsEnabled && userSuspendedStatus !== true && (
-                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">Suspend from quests</MenuItem>
                                             )}
                                             {questsEnabled && userSuspendedStatus === true && (
-                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleUnsuspendFromQuests(); }}>🛡️ Unsuspend from quests</MenuItem>
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleUnsuspendFromQuests(); }}>Unsuspend from quests</MenuItem>
                                             )}
                                         </>
                                     )}
@@ -2445,14 +2343,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     </MetaRow>
                     {shareCopied && (
                         <ShareSuccessMessage>
-                            <span>✓</span>
                             link copied to clipboard
                         </ShareSuccessMessage>
                     )}
                     {confirmBlockPost && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🚫 Block this post?</span>
+                                <span style={{ whiteSpace: 'nowrap' }}>Block this post?</span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button variant="warning" size="sm" onClick={confirmBlockPostAction}>
                                         Block
@@ -2465,7 +2362,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {confirmBlockUser && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🚫 Block {post?.username || 'this user'}?</span>
+                                <span style={{ whiteSpace: 'nowrap' }}>Block {post?.username || 'this user'}?</span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button variant="warning" size="sm" onClick={confirmBlockUserAction}>
                                         Block
@@ -2479,7 +2376,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <BlockConfirmMessage style={blockingTopic ? { opacity: 0.5, pointerEvents: 'none' } : undefined}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                                 <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'baseline' }}>
-                                    {blockingTopic ? '⏳' : '🚫'} Block #<span style={{ position: 'relative', display: 'inline-block' }}>
+                                    Block #<span style={{ position: 'relative', display: 'inline-block' }}>
                                         <span
                                             ref={blockTopicMeasureRef}
                                             aria-hidden="true"
@@ -2516,7 +2413,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             style={{
                                                 background: 'transparent',
                                                 border: 'none',
-                                                borderBottom: '1px solid var(--color-text-secondary, #888)',
+                                                borderBottom: `1px solid ${theme.colors.muted}`,
                                                 color: 'inherit',
                                                 font: 'inherit',
                                                 fontSize: 'inherit',
@@ -2540,31 +2437,29 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {blockTopicSuccess && (
                         <ShareSuccessMessage>
-                            <span>✓</span>
                             {blockTopicSuccess}
                         </ShareSuccessMessage>
                     )}
                     {blockTopicError && (
                         <div style={{
-                            background: 'rgba(239, 68, 68, 0.1)',
-                            border: '1px solid #ef4444',
-                            borderRadius: '3px',
+                            background: theme.colors.dangerBg,
+                            border: `1px solid ${theme.colors.dangerBorder}`,
+                            borderRadius: '4px',
                             padding: '0.75rem 1rem',
                             margin: '0.5rem 0.5rem 0.5rem 0',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            color: '#ef4444',
+                            color: theme.colors.danger,
                             fontSize: '0.8rem',
                         }}>
-                            <span>⚠</span>
                             {blockTopicError}
                         </div>
                     )}
                     {confirmDelete && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>⚠ Mark post as deleted?</span>
+                                <span style={{ whiteSpace: 'nowrap' }}>Mark post as deleted?</span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
                                         Delete
@@ -2577,11 +2472,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {confirmSuspendQuests && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Suspend this user from quests:</span>
+                                <span style={{ whiteSpace: 'nowrap' }}>Suspend this user from quests:</span>
                                 <select
                                     value={suspendDuration}
                                     onChange={(e) => setSuspendDuration(Number(e.target.value))}
-                                    style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #d97706', background: '#fef3c7', color: '#92400e', fontWeight: 500 }}
+                                    style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: `1px solid ${theme.colors.warningBorder}`, background: theme.colors.warningBg, color: theme.colors.warning, fontWeight: 500 }}
                                 >
                                     <option value={1}>1 day</option>
                                     <option value={3}>3 days</option>
@@ -2601,7 +2496,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {confirmUnsuspend && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Unsuspend this user from quests?</span>
+                                <span style={{ whiteSpace: 'nowrap' }}>Unsuspend this user from quests?</span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
                                         {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
@@ -2613,18 +2508,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {suspendSuccess && (
                         <div style={{
-                            background: 'rgba(34, 197, 94, 0.1)',
-                            border: '1px solid #22c55e',
-                            borderRadius: '3px',
+                            background: theme.colors.successBg,
+                            border: `1px solid ${theme.colors.successBorder}`,
+                            borderRadius: '4px',
                             padding: '0.75rem 1rem',
                             margin: '0.5rem 0.5rem 0.5rem 0',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            color: '#16a34a',
+                            color: theme.colors.success,
                             fontSize: '0.8rem',
                         }}>
-                            <span>✓</span>
                             {suspendSuccess}
                         </div>
                     )}
@@ -2632,15 +2526,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                                 <span style={{ whiteSpace: 'nowrap' }}>
-                                    💰 Gift Mirage to {post?.username || post?.user_id?.substring(0, 12) + '...'}:
+                                    Gift Mirage to {post?.username || post?.user_id?.substring(0, 12) + '...'}:
                                 </span>
                                 <div style={{
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.35rem',
-                                    background: '#fff',
-                                    border: '1px solid #d1d5db',
-                                    borderRadius: '8px',
+                                    background: theme.colors.inputBackground,
+                                    border: `1px solid ${theme.colors.borderSubtle}`,
+                                    borderRadius: '6px',
                                     padding: '0.2rem 0.5rem',
                                 }}>
                                     <input
@@ -2656,13 +2550,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             background: 'transparent',
                                             border: 'none',
                                             outline: 'none',
-                                            color: '#1f2937',
+                                            color: theme.colors.text,
                                             fontSize: '0.8rem',
                                             fontWeight: 700,
                                             textAlign: 'right',
                                         }}
                                     />
-                                    <span style={{ fontSize: '0.68rem', color: '#6b7280' }}>MIRAGE</span>
+                                    <span style={{ fontSize: '0.68rem', color: theme.colors.textSecondary }}>MIRAGE</span>
                                 </div>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
                                     <Button
@@ -2680,18 +2574,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {donateMessage && (
                         <div style={{
-                            background: donateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                            border: donateMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
-                            borderRadius: '3px',
+                            background: donateMessage.type === 'success' ? theme.colors.successBg : theme.colors.dangerBg,
+                            border: `1px solid ${donateMessage.type === 'success' ? theme.colors.successBorder : theme.colors.dangerBorder}`,
+                            borderRadius: '4px',
                             padding: '0.75rem 1rem',
                             margin: '0.5rem 0.5rem 0.5rem 0',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            color: donateMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                            color: donateMessage.type === 'success' ? theme.colors.success : theme.colors.danger,
                             fontSize: '0.8rem',
                         }}>
-                            <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
                             {donateMessage.message}
                         </div>
                     )}
@@ -2700,7 +2593,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                     <span style={{ whiteSpace: 'nowrap' }}>
-                                        🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post?.username || post?.user_id?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
+                                        {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post?.username || post?.user_id?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
                                     </span>
                                     {confirmGiftSub.loading && (
                                         <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
@@ -2709,7 +2602,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{confirmGiftSub.expiryLabel}</span>
                                     )}
                                     {confirmGiftSub.error && (
-                                        <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{confirmGiftSub.error}</span>
+                                        <span style={{ fontSize: '0.75rem', color: theme.colors.danger }}>{confirmGiftSub.error}</span>
                                     )}
                                 </div>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
@@ -2728,18 +2621,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {giftSubMessage && (
                         <div style={{
-                            background: giftSubMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                            border: giftSubMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
-                            borderRadius: '3px',
+                            background: giftSubMessage.type === 'success' ? theme.colors.successBg : theme.colors.dangerBg,
+                            border: `1px solid ${giftSubMessage.type === 'success' ? theme.colors.successBorder : theme.colors.dangerBorder}`,
+                            borderRadius: '4px',
                             padding: '0.75rem 1rem',
                             margin: '0.5rem 0.5rem 0.5rem 0',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            color: giftSubMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                            color: giftSubMessage.type === 'success' ? theme.colors.success : theme.colors.danger,
                             fontSize: '0.8rem',
                         }}>
-                            <span>{giftSubMessage.type === 'success' ? '✓' : '⚠'}</span>
                             {giftSubMessage.message}
                         </div>
                     )}
@@ -2770,7 +2662,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     padding: '0.45rem 0.6rem',
                                                     background: theme.colors.surface2,
                                                     border: `1px solid ${theme.colors.borderSubtle}`,
-                                                    borderRadius: '8px',
+                                                    borderRadius: '6px',
                                                     color: theme.colors.text,
                                                     cursor: disabled ? (isAwarding ? 'wait' : 'not-allowed') : 'pointer',
                                                     opacity: disabled ? 0.4 : 1,
@@ -2783,7 +2675,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
                                                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
                                                     <span style={{ fontWeight: 600 }}>{award.label}</span>
-                                                    <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? '#ef4444' : 'inherit' }}>
+                                                    <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? theme.colors.danger : 'inherit' }}>
                                                         {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
                                                     </span>
                                                 </span>
@@ -2797,18 +2689,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {awardMessage && (
                         <div style={{
-                            background: awardMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                            border: awardMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
-                            borderRadius: '3px',
+                            background: awardMessage.type === 'success' ? theme.colors.successBg : theme.colors.dangerBg,
+                            border: `1px solid ${awardMessage.type === 'success' ? theme.colors.successBorder : theme.colors.dangerBorder}`,
+                            borderRadius: '4px',
                             padding: '0.75rem 1rem',
                             margin: '0.5rem 0.5rem 0.5rem 0',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            color: awardMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                            color: awardMessage.type === 'success' ? theme.colors.success : theme.colors.danger,
                             fontSize: '0.8rem',
                         }}>
-                            <span>{awardMessage.type === 'success' ? '✓' : '⚠'}</span>
                             {awardMessage.message}
                         </div>
                     )}

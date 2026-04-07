@@ -13,14 +13,13 @@ const NotFoundCard = styled.div`
     border: 1px solid ${({
   theme
 }) => theme.colors.border};
-    border-radius: 12px;
+    border-radius: 6px;
     padding: 2rem;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
     align-items: center;
     text-align: center;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
     color: ${({
   theme
 }) => theme.colors.text};

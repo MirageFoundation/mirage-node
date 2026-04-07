@@ -3,36 +3,27 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import styled, { keyframes, css } from 'styled-components';
+import styled, { keyframes, css, useTheme } from 'styled-components';
 import { useRewards } from '../../../logic/useQuests';
 import Api from '../../../utils/api';
 import Storage from '../../../utils/Storage';
 import { requireThemeColor } from '../../../utils/themeColor';
 
-// Container styling matching invite codes card (blue/indigo theme)
 const QuestCardContainer = styled.div`
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
-        : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
-    border: 2px solid ${({ theme }) => theme.name === 'light'
-        ? 'rgba(59, 130, 246, 0.5)'
-        : 'rgba(59, 130, 246, 0.5)'};
-    border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ $size }) => $size === 'compact' ? '4px' : '6px'};
     padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
     gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-    box-shadow: ${({ theme }) => theme.name === 'light'
-        ? '0 4px 12px rgba(59, 130, 246, 0.15)'
-        : '0 4px 12px rgba(59, 130, 246, 0.25)'};
 
     @media (max-width: 1000px) {
-        border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
         padding: ${({ $size }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
     @media (max-width: 768px) {
-        border-radius: 6px;
+        border-radius: 4px;
         padding: 0.4rem 0.6rem;
     }
 `;
@@ -62,9 +53,7 @@ const QuestTitle = styled.div`
 const ResetTimer = styled.div`
     font-size: 0.6rem;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.05)'
-        : 'rgba(255, 255, 255, 0.08)'};
+    background: ${({ theme }) => theme.colors.surface};
     padding: 0.15rem 0.35rem;
     border-radius: 4px;
     font-variant-numeric: tabular-nums;
@@ -87,13 +76,9 @@ const QuestItem = styled.div`
     padding: 0.4rem 0.5rem;
     background: ${({ theme, $completed }) => {
         if ($completed) {
-            return theme.name === 'light'
-                ? 'rgba(34, 197, 94, 0.1)'
-                : 'rgba(34, 197, 94, 0.12)';
+            return theme.colors.successBg;
         }
-        return theme.name === 'light'
-            ? 'rgba(0, 0, 0, 0.03)'
-            : 'rgba(255, 255, 255, 0.04)';
+        return theme.colors.surface;
     }};
     border-radius: 6px;
     transition: background 0.2s ease;
@@ -101,22 +86,6 @@ const QuestItem = styled.div`
     @media (max-width: 768px) {
         padding: 0.35rem 0.4rem;
         gap: 0.4rem;
-    }
-`;
-
-const QuestIcon = styled.div`
-    font-size: 0.9rem;
-    width: 1.4rem;
-    height: 1.4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-
-    @media (max-width: 768px) {
-        font-size: 0.75rem;
-        width: 1.2rem;
-        height: 1.2rem;
     }
 `;
 
@@ -129,7 +98,7 @@ const QuestName = styled.div`
     font-size: 0.65rem;
     font-weight: 600;
     color: ${({ theme, $completed }) => $completed
-        ? '#22c55e'
+        ? theme.colors.success
         : requireThemeColor(theme, 'text')};
     white-space: nowrap;
     overflow: hidden;
@@ -158,7 +127,7 @@ const QuestDescription = styled.div`
 
 const QuestReward = styled.div`
     font-size: 0.5rem;
-    color: #f59e0b;
+    color: ${({ theme }) => theme.colors.warning};
     font-weight: 600;
 
     @media (max-width: 768px) {
@@ -184,15 +153,15 @@ const QuestRequirements = styled.ul`
 
 const LoyaltyBonusText = styled.div`
     font-size: 0.5rem;
-    color: #60a5fa;
+    color: ${({ theme }) => theme.colors.focusBorder};
     text-decoration: underline dotted;
     text-underline-offset: 2px;
     cursor: default;
-    transition: color 0.15s ease;
+    transition: opacity 0.15s ease;
     margin-top: 0.15rem;
 
     &:hover {
-        color: #93c5fd;
+        opacity: 0.7;
     }
 
     @media (max-width: 768px) {
@@ -216,9 +185,7 @@ const ProgressContainer = styled.div`
 const ProgressBar = styled.div`
     width: 100%;
     height: 4px;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.1)'
-        : 'rgba(255, 255, 255, 0.1)'};
+    background: ${({ theme }) => theme.colors.surface};
     border-radius: 2px;
     overflow: hidden;
 `;
@@ -226,7 +193,7 @@ const ProgressBar = styled.div`
 const ProgressFill = styled.div`
     height: 100%;
     width: ${props => Math.min(100, (props.$progress / props.$target) * 100)}%;
-    background: ${props => props.$completed ? '#22c55e' : '#60a5fa'};
+    background: ${({ theme, $completed }) => $completed ? theme.colors.success : theme.colors.focusBorder};
     border-radius: 2px;
     transition: width 0.3s ease;
 `;
@@ -251,7 +218,7 @@ const BalancedProgressRow = styled.span`
     align-items: center;
     gap: 2px;
     color: ${({ $met, theme }) => $met
-        ? '#22c55e'
+        ? theme.colors.success
         : requireThemeColor(theme, 'subtleText')};
     font-weight: ${({ $met }) => $met ? '600' : '400'};
 `;
@@ -259,15 +226,21 @@ const BalancedProgressRow = styled.span`
 const CheckMark = styled.div`
     width: 1.1rem;
     height: 1.1rem;
-    background: #22c55e;
+    background: ${({ theme }) => theme.colors.success};
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
-    font-size: 0.55rem;
-    font-weight: bold;
     flex-shrink: 0;
+
+    &::after {
+        content: '';
+        width: 0.3rem;
+        height: 0.18rem;
+        border-left: 1.5px solid ${({ theme }) => theme.colors.bg};
+        border-bottom: 1.5px solid ${({ theme }) => theme.colors.bg};
+        transform: rotate(-45deg) translateY(-1px);
+    }
 `;
 
 const ClaimSection = styled.div`
@@ -275,15 +248,7 @@ const ClaimSection = styled.div`
     justify-content: space-between;
     align-items: flex-start;
     padding-top: 0.4rem;
-    border-top: 1px solid ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.08)'
-        : 'rgba(255, 255, 255, 0.08)'};
-`;
-
-const pulseAnimation = keyframes`
-    0% { transform: scale(1); }
-    50% { transform: scale(1.02); }
-    100% { transform: scale(1); }
+    border-top: 1px solid ${({ theme }) => theme.colors.borderSubtle};
 `;
 
 const ClaimButton = styled.button`
@@ -293,32 +258,23 @@ const ClaimButton = styled.button`
     font-size: 0.6rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease;
 
     ${props => props.$hasRewards ? css`
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        color: white;
-        animation: ${pulseAnimation} 2s infinite;
+        background: ${({ theme }) => theme.colors.warning};
+        color: ${({ theme }) => theme.colors.bg};
 
         &:hover {
-            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-            transform: translateY(-1px);
-        }
-
-        &:active {
-            transform: translateY(0);
+            opacity: 0.85;
         }
     ` : css`
-        background: ${({ theme }) => theme.name === 'light'
-            ? 'rgba(0, 0, 0, 0.08)'
-            : 'rgba(255, 255, 255, 0.1)'};
+        background: ${({ theme }) => theme.colors.surface};
         color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
         cursor: not-allowed;
     `}
 
     &:disabled {
         cursor: not-allowed;
-        animation: none;
         opacity: 0.7;
     }
 
@@ -331,11 +287,11 @@ const ClaimButton = styled.button`
 const ClaimErrorMessage = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem 0.75rem;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: ${({ theme }) => theme.colors.dangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.dangerBorder};
     border-radius: 6px;
     font-size: 0.6rem;
-    color: #ef4444;
+    color: ${({ theme }) => theme.colors.danger};
     line-height: 1.4;
 
     @media (max-width: 768px) {
@@ -344,21 +300,9 @@ const ClaimErrorMessage = styled.div`
     }
 `;
 
-// Celebration animation
-const confettiAnimation = keyframes`
-    0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-    100% { transform: translateY(400px) rotate(720deg); opacity: 0; }
-`;
-
 const celebrationFadeIn = keyframes`
-    0% { opacity: 0; transform: scale(0.8); }
-    100% { opacity: 1; transform: scale(1); }
-`;
-
-const countUpAnimation = keyframes`
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
+    0% { opacity: 0; }
+    100% { opacity: 1; }
 `;
 
 const CelebrationOverlay = styled.div`
@@ -380,60 +324,43 @@ const CelebrationContent = styled.div`
     padding: 2rem;
 `;
 
-const CelebrationEmoji = styled.div`
-    font-size: 4rem;
-    margin-bottom: 1rem;
-    animation: ${countUpAnimation} 0.5s ease infinite;
-`;
-
 const CelebrationTitle = styled.div`
     font-size: 1.5rem;
     font-weight: 700;
-    color: #f59e0b;
+    color: ${({ theme }) => theme.colors.warning};
     margin-bottom: 0.5rem;
 `;
 
 const CelebrationAmount = styled.div`
     font-size: 2.5rem;
     font-weight: 800;
-    color: white;
+    color: ${({ theme }) => theme.colors.text};
     margin-bottom: 1rem;
 `;
 
 const CelebrationClose = styled.button`
     padding: 0.75rem 2rem;
-    background: #22c55e;
-    color: white;
+    background: ${({ theme }) => theme.colors.success};
+    color: ${({ theme }) => theme.colors.bg};
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.2s ease;
+    transition: opacity 0.2s ease;
 
     &:hover {
-        background: #16a34a;
+        opacity: 0.85;
     }
 `;
 
-const ConfettiPiece = styled.div`
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    background: ${props => props.$color};
-    top: -10px;
-    left: ${props => props.$left}%;
-    animation: ${confettiAnimation} ${props => props.$duration}s linear forwards;
-    animation-delay: ${props => props.$delay}s;
-`;
-
 const SuspendedBanner = styled.div`
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: ${({ theme }) => theme.colors.dangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.dangerBorder};
     border-radius: 6px;
     padding: 0.4rem 0.6rem;
     text-align: center;
-    color: #ef4444;
+    color: ${({ theme }) => theme.colors.danger};
     font-size: 0.6rem;
 `;
 
@@ -459,24 +386,6 @@ function formatTime(seconds) {
         return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
     return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-/**
- * Get icon for quest action type
- */
-function getQuestIcon(actionType) {
-    const icons = {
-        'post': '📝',
-        'comment': '💬',
-        'vote': '👍',
-        'balanced_vote': '⚖️',
-        'upvotes_received': '⭐',
-        'comment_upvotes_received': '🌟',
-        'unique_topic_post': '🗺️',
-        'invite_recruit': '👥',
-        'claim_only': '🎁',
-    };
-    return icons[actionType] || '🎯';
 }
 
 /**
@@ -524,30 +433,25 @@ function getQuestRequirements(quest) {
     if (quest.quality_threshold) {
         reqs.push(`Needs ${quest.quality_threshold}+ upvotes`);
     }
-    // For vote quests, show if vote changes don't count
     if (quest.action_type === 'vote' && quest.count_vote_changes === false) {
         reqs.push('New votes only (changes don\'t count)');
     }
     return reqs;
 }
 
-const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
-
 // Debug panel styled components
 const DebugPanel = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(239, 68, 68, 0.1)'
-        : 'rgba(239, 68, 68, 0.15)'};
-    border: 1px dashed rgba(239, 68, 68, 0.5);
+    background: ${({ theme }) => theme.colors.dangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.dangerBorder};
     border-radius: 6px;
     font-size: 0.55rem;
 `;
 
 const DebugTitle = styled.div`
     font-weight: 700;
-    color: #ef4444;
+    color: ${({ theme }) => theme.colors.danger};
     margin-bottom: 0.4rem;
     display: flex;
     align-items: center;
@@ -572,28 +476,27 @@ const DebugValue = styled.span`
 `;
 
 const DebugButton = styled.button`
-    background: ${({ $variant }) =>
-        $variant === 'danger' ? 'rgba(239, 68, 68, 0.2)' :
-            $variant === 'success' ? 'rgba(34, 197, 94, 0.2)' :
-                'rgba(59, 130, 246, 0.2)'};
-    border: 1px solid ${({ $variant }) =>
-        $variant === 'danger' ? 'rgba(239, 68, 68, 0.5)' :
-            $variant === 'success' ? 'rgba(34, 197, 94, 0.5)' :
-                'rgba(59, 130, 246, 0.5)'};
-    color: ${({ $variant }) =>
-        $variant === 'danger' ? '#ef4444' :
-            $variant === 'success' ? '#22c55e' :
-                '#3b82f6'};
+    background: ${({ $variant, theme }) =>
+        $variant === 'danger' ? theme.colors.dangerBg :
+            $variant === 'success' ? theme.colors.successBg :
+                theme.colors.accentSubtle};
+    border: 1px solid ${({ $variant, theme }) =>
+        $variant === 'danger' ? theme.colors.dangerBorder :
+            $variant === 'success' ? theme.colors.successBorder :
+                theme.colors.focusBorder};
+    color: ${({ $variant, theme }) =>
+        $variant === 'danger' ? theme.colors.danger :
+            $variant === 'success' ? theme.colors.success :
+                theme.colors.focusBorder};
     font-size: 0.5rem;
     font-weight: 600;
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: opacity 0.15s ease;
 
     &:hover:not(:disabled) {
         opacity: 0.8;
-        transform: scale(1.02);
     }
 
     &:disabled {
@@ -613,15 +516,15 @@ const DebugInput = styled.input`
     width: 50px;
     padding: 0.15rem 0.25rem;
     font-size: 0.5rem;
-    border: 1px solid rgba(59, 130, 246, 0.5);
+    border: 1px solid ${({ theme }) => theme.colors.focusBorder};
     border-radius: 4px;
-    background: ${({ theme }) => theme.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
+    background: ${({ theme }) => theme.colors.inputBackground};
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
     text-align: center;
 
     &:focus {
         outline: none;
-        border-color: #3b82f6;
+        border-color: ${({ theme }) => theme.colors.focusBorder};
     }
 `;
 
@@ -631,9 +534,7 @@ const DebugQuestRow = styled.div`
     align-items: center;
     padding: 0.2rem 0.3rem;
     margin: 0.15rem 0;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0,0,0,0.03)'
-        : 'rgba(255,255,255,0.03)'};
+    background: ${({ theme }) => theme.colors.surface};
     border-radius: 4px;
 `;
 
@@ -646,21 +547,20 @@ const CollapseButton = styled.button`
     font-weight: 600;
     cursor: pointer;
     padding: 4px 8px;
-    border-radius: 12px;
-    transition: all 0.2s ease;
+    border-radius: 4px;
+    transition: color 0.2s ease, background 0.2s ease;
     display: flex;
     align-items: center;
     gap: 4px;
 
     &:hover {
         color: ${({ theme }) => requireThemeColor(theme, 'text')};
-        background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.05)'
-        : 'rgba(255, 255, 255, 0.05)'};
+        background: ${({ theme }) => theme.colors.surface};
     }
 `;
 
 export default function QuestHeroCard({ collapsed = false, onToggleCollapse, size = 'large' }) {
+    const theme = useTheme();
     const {
         dailyQuests,
         flashQuest,
@@ -758,11 +658,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         const result = await claimRewards();
 
         if (result.success) {
-            // Find the MIRAGE reward amount
             const mirageReward = result.rewards?.find(r => r.type === 'mirage');
             const amount = mirageReward?.amount || 0;
 
-            // Find invite code rewards
             const inviteCodeReward = result.rewards?.find(r => r.type === 'invite_code');
             const inviteCodesCount = inviteCodeReward?.count || 0;
 
@@ -770,18 +668,14 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             setClaimedInviteCodes(inviteCodesCount);
             setShowCelebration(true);
 
-            // Refresh data
             refreshAll();
 
-            // If invite codes were claimed, notify other components to refresh
             if (inviteCodesCount > 0) {
                 window.dispatchEvent(new CustomEvent('inviteCodesUpdated'));
             }
         } else {
-            // Show user-friendly message from backend if available, otherwise show error code
             const errorMessage = result.message || result.error || 'Failed to claim rewards. Please try again later.';
             setClaimError(errorMessage);
-            // Clear error after 10 seconds
             setTimeout(() => setClaimError(null), 10000);
         }
     }, [claimRewards, refreshAll]);
@@ -790,7 +684,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         setShowCelebration(false);
     }, []);
 
-    // If quests system is disabled, don't render anything
     if (questsDisabled) {
         return null;
     }
@@ -801,10 +694,10 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
+                        Daily Quests
                         {collapsed && (
                             <span style={{ fontWeight: 'normal' }}>
-                                {' '}— Loading...
+                                {' '}&mdash; Loading...
                             </span>
                         )}
                     </QuestTitle>
@@ -827,7 +720,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚫</span> Quests Suspended
+                        Quests Suspended
                     </QuestTitle>
                     {onToggleCollapse && (
                         <CollapseButton onClick={onToggleCollapse}>
@@ -863,10 +756,10 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
+                        Daily Quests
                         {collapsed && (
                             <span style={{ fontWeight: 'normal' }}>
-                                {' '}— None available
+                                {' '}&mdash; None available
                             </span>
                         )}
                     </QuestTitle>
@@ -879,7 +772,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 {!collapsed && (
                     <EmptyState>
                         {questsError
-                            ? `⚠️ ${typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.'}`
+                            ? `${typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.'}`
                             : 'No quests available yet. Check back soon!'}
                     </EmptyState>
                 )}
@@ -897,10 +790,10 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size} role="region" aria-label="Daily Quests">
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
+                        Daily Quests
                         {collapsed && (
                             <span style={{ fontWeight: 'normal' }}>
-                                {' '}— {dailyQuests.filter(q => !q.completed).length} available
+                                {' '}&mdash; {dailyQuests.filter(q => !q.completed).length} available
                             </span>
                         )}
                         {!collapsed && (
@@ -942,7 +835,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             }
                             return (
                                 <QuestItem key={quest.id} $completed={quest.completed}>
-                                    <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
                                     <QuestDetails>
                                         <QuestName $completed={quest.completed}>
                                             {quest.title}
@@ -960,7 +852,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                         )}
                                     </QuestDetails>
                                     {quest.completed ? (
-                                        <CheckMark aria-label="Completed">✓</CheckMark>
+                                        <CheckMark aria-label="Completed" />
                                     ) : (
                                         <>
                                             <ProgressContainer>
@@ -996,12 +888,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
                         {/* Flash quest if active */}
                         {flashQuest && flashQuest.seconds_remaining > 0 && (
-                            <QuestItem $completed={flashQuest.completed} style={{ borderLeft: '2px solid #f59e0b' }}>
-                                <QuestIcon>⚡</QuestIcon>
+                            <QuestItem $completed={flashQuest.completed} style={{ borderLeft: `2px solid ${theme.colors.warning}` }}>
                                 <QuestDetails>
                                     <QuestName $completed={flashQuest.completed}>
                                         {flashQuest.title}
-                                        <span style={{ color: '#f59e0b', fontSize: '0.5rem', marginLeft: '0.3rem' }}>
+                                        <span style={{ color: theme.colors.warning, fontSize: '0.5rem', marginLeft: '0.3rem' }}>
                                             FLASH
                                         </span>
                                         <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
@@ -1020,7 +911,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                     )}
                                 </QuestDetails>
                                 {flashQuest.completed ? (
-                                    <CheckMark aria-label="Completed">✓</CheckMark>
+                                    <CheckMark aria-label="Completed" />
                                 ) : (
                                     <ProgressContainer>
                                         <ProgressBar>
@@ -1065,7 +956,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 )}
                 {claimError && !collapsed && (
                     <ClaimErrorMessage>
-                        ⚠️ {claimError}
+                        {claimError}
                     </ClaimErrorMessage>
                 )}
 
@@ -1073,11 +964,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 {!collapsed && debugEnabled && (
                     <div style={{ marginTop: '0.5rem' }}>
                         <DebugButton onClick={() => setShowDebug(!showDebug)}>
-                            {showDebug ? '🔧 Hide Debug' : '🔧 Debug'}
+                            {showDebug ? 'Hide Debug' : 'Debug'}
                         </DebugButton>
                         {showDebug && (
                             <DebugPanel>
-                                <DebugTitle>🔧 Quest Debug Panel</DebugTitle>
+                                <DebugTitle>Quest Debug Panel</DebugTitle>
                                 {debugLoading ? (
                                     <div>Loading...</div>
                                 ) : debugInfo ? (
@@ -1090,14 +981,14 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             <DebugLabel>Unused Invite Codes:</DebugLabel>
                                             <DebugValue>{debugInfo.unused_invite_codes}</DebugValue>
                                         </DebugRow>
-                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                        <div style={{ marginTop: '0.4rem', borderTop: `1px solid ${theme.colors.dangerBorder}`, paddingTop: '0.4rem' }}>
                                             <DebugLabel>invite_recruit:</DebugLabel>
                                             <DebugRow>
                                                 <span>
                                                     Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} |
                                                     Chance: {debugInfo.invite_recruit?.chance}
                                                 </span>
-                                                <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? theme.colors.success : theme.colors.muted }}>
                                                     {debugInfo.invite_recruit?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
                                                 </DebugValue>
                                             </DebugRow>
@@ -1108,21 +999,21 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 <span>
                                                     Earned: {debugInfo.invite_earner?.completed || 0} |
                                                     Next milestone: {debugInfo.invite_earner?.next_milestone}
-                                                    {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''} |
+                                                    {debugInfo.invite_earner?.milestone_reached ? ' (reached)' : ''} |
                                                     Chance: {debugInfo.invite_earner?.chance}
                                                 </span>
-                                                <DebugValue style={{ color: debugInfo.invite_earner?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                <DebugValue style={{ color: debugInfo.invite_earner?.assigned ? theme.colors.success : theme.colors.muted }}>
                                                     {debugInfo.invite_earner?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
                                                 </DebugValue>
                                             </DebugRow>
                                         </div>
-                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                        <div style={{ marginTop: '0.4rem', borderTop: `1px solid ${theme.colors.dangerBorder}`, paddingTop: '0.4rem' }}>
                                             <DebugLabel>Today's Quests:</DebugLabel>
                                             {debugInfo.today_quests?.map(q => (
                                                 <DebugQuestRow key={q.quest_id}>
                                                     <span>
                                                         {q.quest_id} ({q.progress})
-                                                        {q.completed && ' ✓'}
+                                                        {q.completed && ' (done)'}
                                                     </span>
                                                     {!q.completed && (
                                                         <DebugButton
@@ -1135,7 +1026,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 </DebugQuestRow>
                                             ))}
                                         </div>
-                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                        <div style={{ marginTop: '0.4rem', borderTop: `1px solid ${theme.colors.dangerBorder}`, paddingTop: '0.4rem' }}>
                                             <DebugLabel>Set completed count:</DebugLabel>
                                             <DebugRow>
                                                 <DebugInput
@@ -1170,18 +1061,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             {/* Celebration overlay */}
             {showCelebration && (
                 <CelebrationOverlay onClick={closeCelebration}>
-                    {/* Confetti pieces */}
-                    {Array.from({ length: 30 }).map((_, i) => (
-                        <ConfettiPiece
-                            key={i}
-                            $color={CONFETTI_COLORS[i % CONFETTI_COLORS.length]}
-                            $left={Math.random() * 100}
-                            $duration={2 + Math.random() * 2}
-                            $delay={Math.random() * 0.5}
-                        />
-                    ))}
                     <CelebrationContent onClick={e => e.stopPropagation()}>
-                        <CelebrationEmoji>🎉</CelebrationEmoji>
                         <CelebrationTitle>Rewards Claimed!</CelebrationTitle>
                         {claimedAmount > 0 && (
                             <CelebrationAmount>
@@ -1194,7 +1074,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             </CelebrationAmount>
                         )}
                         <CelebrationClose onClick={closeCelebration}>
-                            Awesome!
+                            Done
                         </CelebrationClose>
                     </CelebrationContent>
                 </CelebrationOverlay>

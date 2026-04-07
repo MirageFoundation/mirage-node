@@ -89,11 +89,13 @@ const ThemeSelect = styled.select`
 }) => theme.layout.inputSize};
     width: 100%;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease;
     
     &:focus {
         outline: none;
-        border-color: #667eea;
+        border-color: ${({
+    theme
+}) => theme.colors.focusBorder};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -147,8 +149,12 @@ const HelperText = styled.span`
 }) => theme.layout.smallSize};
 `;
 const SecurityBanner = styled.div`
-    background-color: rgba(245, 158, 11, 0.1);
-    border: 1px solid #f59e0b;
+    background-color: ${({
+    theme
+}) => theme.colors.warningBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.warningBorder};
     border-radius: ${({
     theme
 }) => theme.layout.bannerRadius};
@@ -239,7 +245,9 @@ const PasswordInput = styled.input`
 
     &:focus {
         outline: none;
-        border-color: #667eea;
+        border-color: ${({
+    theme
+}) => theme.colors.focusBorder};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -258,13 +266,19 @@ const SmallButton = styled.button`
     border-radius: ${({
     theme
 }) => theme.layout.buttonRadius};
-    background: #3b82f6;
-    color: #fff;
+    background: ${({
+    theme
+}) => theme.colors.accent};
+    color: ${({
+    theme
+}) => theme.colors.bg};
     transition: background 0.15s ease;
     white-space: nowrap;
 
     &:hover:not(:disabled) {
-        background: #2563eb;
+        background: ${({
+    theme
+}) => theme.colors.accentHover};
     }
 
     &:disabled {
@@ -273,10 +287,14 @@ const SmallButton = styled.button`
     }
 `;
 const DangerButton = styled(SmallButton)`
-    background: #dc2626;
+    background: ${({
+    theme
+}) => theme.colors.danger};
 
     &:hover:not(:disabled) {
-        background: #b91c1c;
+        background: ${({
+    theme
+}) => theme.colors.danger};
     }
 `;
 const DangerInput = styled.input`
@@ -304,7 +322,9 @@ const DangerInput = styled.input`
 
     &:focus {
         outline: none;
-        border-color: #ef4444;
+        border-color: ${({
+    theme
+}) => theme.colors.danger};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -317,7 +337,9 @@ const DangerRow = styled.div`
     flex-wrap: wrap;
 `;
 const DangerNotice = styled.div`
-    color: #fca5a5;
+    color: ${({
+    theme
+}) => theme.colors.danger};
     font-size: ${({
     theme
 }) => theme.layout.smallSize};
@@ -327,13 +349,19 @@ const DangerNotice = styled.div`
 }) => theme.layout.sectionMarginBottom};
 `;
 const SecurityError = styled.div`
-    color: #f66;
+    color: ${({
+    theme
+}) => theme.colors.danger};
     font-size: 0.72rem;
     margin-top: 0.35rem;
 `;
 const SecuritySuccess = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
+    background-color: ${({
+    theme
+}) => theme.colors.successBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.successBorder};
     border-radius: ${({
     theme
 }) => theme.layout.bannerRadius};
@@ -343,7 +371,9 @@ const SecuritySuccess = styled.div`
     margin-top: ${({
     theme
 }) => theme.layout.sectionMarginBottom};
-    color: #22c55e;
+    color: ${({
+    theme
+}) => theme.colors.success};
     font-size: ${({
     theme
 }) => theme.layout.bannerSize};
@@ -381,7 +411,7 @@ const SeedWord = styled.div`
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
-    border-radius: 3px;
+    border-radius: 4px;
     padding: 0.3rem 0.2rem;
     text-align: left;
     font-size: 0.75rem;
@@ -417,10 +447,28 @@ const SeedWord = styled.div`
     }
 `;
 const SeedWarning = styled.div`
-    color: #f59e0b;
+    color: ${({
+    theme
+}) => theme.colors.warning};
     font-size: 0.7rem;
     line-height: 1.35;
     margin-bottom: 0.5rem;
+`;
+const GhostButton = styled(SmallButton)`
+    background: transparent;
+    border: 1px solid ${({
+    theme
+}) => theme.colors.border};
+    color: ${({
+    theme
+}) => theme.colors.muted};
+
+    &:hover:not(:disabled) {
+        background: transparent;
+        border-color: ${({
+    theme
+}) => theme.colors.borderStrong};
+    }
 `;
 const Divider = styled.hr`
     border: none;
@@ -547,7 +595,7 @@ export default function SettingsView({
                                     Lets people sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
                                 </ExplanationText>
                                 {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
-                                {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
+                                {referralPrecheckSuccess && <SecuritySuccess>{referralPrecheckSuccess}</SecuritySuccess>}
                             </ValueBox>
                         </Row>}
 
@@ -773,7 +821,7 @@ export default function SettingsView({
                                             <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
                                         </span>
                                     </RadioLabel>
-                                    {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    {secSuccess && seedMode === 'insecure' && <SecuritySuccess>{secSuccess}</SecuritySuccess>}
 
                                     <RadioLabel>
                                         <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
@@ -818,7 +866,7 @@ export default function SettingsView({
                                         </InlinePasswordRow>
                                         {secError && <SecurityError>{secError}</SecurityError>}
                                     </div>}
-                                    {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    {secSuccess && seedMode === 'password' && <SecuritySuccess>{secSuccess}</SecuritySuccess>}
 
                                     <RadioLabel>
                                         <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
@@ -827,7 +875,7 @@ export default function SettingsView({
                                             <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
                                         </span>
                                     </RadioLabel>
-                                    {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    {secSuccess && seedMode === 'memory' && <SecuritySuccess>{secSuccess}</SecuritySuccess>}
 
                                     <RadioLabel $disabled={!prfSupported}>
                                         <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
@@ -838,7 +886,7 @@ export default function SettingsView({
                                             </RadioDescription>
                                         </span>
                                     </RadioLabel>
-                                    {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    {secSuccess && seedMode === 'passkey' && <SecuritySuccess>{secSuccess}</SecuritySuccess>}
                                 </RadioGroup>
 
                                 {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
@@ -886,16 +934,12 @@ export default function SettingsView({
                                         }}>
                                             {seedCopied ? 'Copied!' : 'Copy'}
                                         </SmallButton>
-                                        <SmallButton onClick={() => {
+                                        <GhostButton onClick={() => {
                                             setSeedRevealed(false);
                                             setSeedCopied(false);
-                                        }} style={{
-                                            background: 'transparent',
-                                            border: '1px solid #555',
-                                            color: '#ccc'
                                         }}>
                                             Hide
-                                        </SmallButton>
+                                        </GhostButton>
                                     </div>
                                 </>}
                             </ValueBox>
@@ -927,7 +971,7 @@ export default function SettingsView({
                                     </DangerButton>
                                 </DangerRow>
                                 {deleteError && <SecurityError>{deleteError}</SecurityError>}
-                                {deleteSuccess && <SecuritySuccess><span>✓</span>{deleteSuccess}</SecuritySuccess>}
+                                {deleteSuccess && <SecuritySuccess>{deleteSuccess}</SecuritySuccess>}
                             </ValueBox>
                         </Row>
 

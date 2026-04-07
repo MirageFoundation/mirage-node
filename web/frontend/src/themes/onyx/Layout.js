@@ -126,7 +126,7 @@ export const AnimatedCard = styled.div`
     opacity: 0;
     transform: translateY(10px);
     animation: slideInUp 0.3s ease-out forwards;
-    border-radius: 12px;
+    border-radius: 6px;
     position: relative;
 
     &:hover {
@@ -141,40 +141,17 @@ export const AnimatedCard = styled.div`
     }
 
     @keyframes slideUpHide {
-        from {
-            opacity: 1;
-        }
         to {
             opacity: 0;
         }
     }
-
-    @keyframes flashHighlight {
-        0% {
-            box-shadow: inset 0 0 0 3px rgba(251, 191, 36, 0.6);
-        }
-        100% {
-            box-shadow: inset 0 0 0 3px transparent;
-        }
-    }
-
-    ${({ $flash, $hiding }) => ($flash && !$hiding) && `
-        opacity: 1;
-        transform: translateY(0);
-        animation: slideInUp 0.3s ease-out forwards, flashHighlight 1s ease-out forwards;
-    `}
 
     ${({ $hiding }) => $hiding && `
         animation: slideUpHide 0.25s ease-out forwards !important;
         overflow: hidden;
     `}
 
-    @media (max-width: 1000px) {
-        border-radius: 10px;
-    }
-
     @media (max-width: 600px) {
-        border-radius: 4px;
         animation: ${({ $hiding }) => $hiding ? 'slideUpHide 0.25s ease-out forwards' : 'none'};
         opacity: 1;
         transform: none;
@@ -256,7 +233,7 @@ export const SearchInput = styled.input`
     color: ${({ theme }) => theme.colors.text};
     font-size: ${({ theme }) => theme.layout.searchInputSize};
     outline: none;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
     &::placeholder {
         color: ${({ theme }) => theme.colors.subtleText};

@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Button from "../components/Button.js";
 import AuthPageShell from "../components/AuthPageShell.js";
 import Sidebar from "../components/Sidebar.js";
@@ -26,7 +26,7 @@ const StyledInfo = styled.div`
     border: 1px solid ${({
   theme
 }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 6px;
     text-align: center;
     
     @media (max-width: 1000px) {
@@ -139,6 +139,7 @@ function CreateAccountView({
     state,
     setCredentials
   });
+  const theme = useTheme();
   if (!nodeConfig) {
     return <ContentGrid>
                 <Helmet>
@@ -207,7 +208,7 @@ function CreateAccountView({
                                 <div>
                                     {fromRecovery ? <>
                                             <IntroP style={{
-                    color: '#f66'
+                    color: theme.colors.danger
                   }}>
                                                 No account was found on the blockchain for this recovery phrase, but you can create a new account using it now.
                                             </IntroP>
@@ -230,11 +231,11 @@ function CreateAccountView({
                                             <StyledInputBox value="Code applied" readOnly disabled style={{
                   opacity: 0.7,
                   cursor: 'default',
-                  color: '#7ecf7e',
+                  color: theme.colors.success,
                   pointerEvents: 'none'
                 }} tabIndex={-1} />
                                             {referrerAvailable > 0 && <div style={{
-                  color: '#f5a623',
+                  color: theme.colors.warning,
                   fontSize: '0.7rem',
                   marginTop: '0.25rem'
                 }}>
@@ -250,13 +251,13 @@ function CreateAccountView({
                                         </> : referrerStatus === "invalid" && refFromUrl ? <div style={{
                 marginTop: '1.5rem',
                 padding: '1rem 1.25rem',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color, #444)',
-                background: 'var(--panel-alt, #2A2E33)',
+                borderRadius: '6px',
+                border: `1px solid ${theme.colors.border}`,
+                background: theme.colors.panelAlt,
                 textAlign: 'center'
               }}>
                                             <div style={{
-                  color: '#f66',
+                  color: theme.colors.danger,
                   fontSize: '0.85rem',
                   fontWeight: 600
                 }}>
@@ -305,7 +306,7 @@ function CreateAccountView({
                                             </Button>
                                         </ButtonWrapper>
                                         {submitError && <div style={{
-                  color: '#f66',
+                  color: theme.colors.danger,
                   marginTop: '0.5rem',
                   fontSize: '0.8rem'
                 }}>{submitError}</div>}

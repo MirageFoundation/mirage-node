@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Button from "../components/Button.js";
 import seedVault from "../../../utils/SeedVault";
 import AuthPageShell from "../components/AuthPageShell.js";
@@ -60,7 +60,7 @@ const IntroP = styled.p`
     margin-bottom: 0.7rem;
 `;
 const ErrorMessage = styled.div`
-    color: #f66;
+    color: ${({ theme }) => theme.colors.danger};
     margin-top: 0.5rem;
     font-size: 0.8rem;
     max-width: 400px;
@@ -84,6 +84,7 @@ function LoginView({
     state,
     setCredentials
   });
+  const theme = useTheme();
   return <ContentGrid>
             <Helmet>
                 <title>Sign In | Mirage</title>
@@ -123,11 +124,11 @@ function LoginView({
                             {seedVault.isLocked() && <div style={{
               marginTop: '1rem',
               fontSize: '0.6rem',
-              color: '#999'
+              color: theme.colors.muted
             }}>
                                     Encrypted vault detected.{' '}
                                     <span style={{
-                color: '#4a9eff',
+                color: theme.colors.accent,
                 cursor: 'pointer',
                 fontSize: '0.6rem'
               }} onMouseEnter={e => e.target.style.textDecoration = 'underline'} onMouseLeave={e => e.target.style.textDecoration = 'none'} onClick={() => window.dispatchEvent(new CustomEvent('showVaultUnlock'))}>
@@ -138,11 +139,11 @@ function LoginView({
                             <div style={{
               marginTop: '0.25rem',
               fontSize: '0.6rem',
-              color: '#999'
+              color: theme.colors.muted
             }}>
                                 Don't have an account?{' '}
                                 <a href="/signup" style={{
-                color: '#4a9eff',
+                color: theme.colors.accent,
                 cursor: 'pointer',
                 fontSize: '0.6rem',
                 textDecoration: 'none'

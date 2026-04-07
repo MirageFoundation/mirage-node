@@ -29,7 +29,7 @@ const CurrentTierBanner = styled.div`
     gap: 1.25rem;
     box-shadow: ${({
     theme
-}) => theme.caps.flatMode ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.2)'};
+}) => theme.layout.cardShadow};
     
     @media (min-width: 600px) {
         grid-template-columns: auto 1fr;
@@ -77,26 +77,9 @@ const TierNameDisplay = styled.div`
 }) => theme.layout.sectionSize};
     font-weight: 800;
     line-height: 1.5;
-    background: ${({
-    theme,
-    $color
-}) => theme.caps.flatMode ? 'transparent' : `linear-gradient(135deg, ${$color}, ${$color}88)`};
-    -webkit-background-clip: ${({
-    theme
-}) => theme.caps.flatMode ? 'unset' : 'text'};
-    -webkit-text-fill-color: ${({
-    theme
-}) => theme.caps.flatMode ? 'unset' : 'transparent'};
-    background-clip: ${({
-    theme
-}) => theme.caps.flatMode ? 'unset' : 'text'};
     color: ${({
     $color
 }) => $color};
-    filter: ${({
-    theme,
-    $color
-}) => theme.caps.flatMode ? 'none' : `drop-shadow(0 2px 10px ${$color}33)`};
     letter-spacing: -0.03em;
 `;
 const InfoSection = styled.div`
@@ -133,23 +116,16 @@ const StatusBadge = styled.div`
     font-weight: 600;
     width: fit-content;
     white-space: nowrap;
-    background: ${props => props.$active ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)'};
-    color: ${props => props.$active ? '#22C55E' : '#EF4444'};
-    border: 1px solid ${props => props.$active ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'};
+    background: ${props => props.$active ? props.theme.colors.successBg : props.theme.colors.dangerBg};
+    color: ${props => props.$active ? props.theme.colors.success : props.theme.colors.danger};
+    border: 1px solid ${props => props.$active ? props.theme.colors.successBorder : props.theme.colors.dangerBorder};
     cursor: ${props => props.$clickable && !props.$disabled ? 'pointer' : 'default'};
     opacity: ${props => props.$disabled ? 0.5 : 1};
     pointer-events: ${props => props.$disabled ? 'none' : 'auto'};
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease;
     
     &:hover {
-        ${props => props.$clickable && !props.$disabled ? `
-            background: ${props.$active ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)'};
-            transform: translateY(-1px);
-        ` : ''}
-    }
-    
-    &:active {
-        ${props => props.$clickable && !props.$disabled ? 'transform: translateY(0);' : ''}
+        ${props => props.$clickable && !props.$disabled ? 'opacity: 0.85;' : ''}
     }
 `;
 const StatusIndicator = styled.span`
@@ -175,7 +151,9 @@ const TimeHighlight = styled.span`
 `;
 const HorizontalDivider = styled.div`
     height: 1px;
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: ${({
+    theme
+}) => theme.colors.border};
     width: 100%;
 `;
 const SectionSeparator = styled.div`
@@ -279,11 +257,10 @@ const TierCard = styled.div`
     }) => theme.layout.cardPadding};
     display: flex;
     flex-direction: column;
-    transition: border-color 0.2s, transform 0.1s;
+    transition: border-color 0.2s;
     
     &:hover {
         border-color: ${props => props.$color};
-        transform: translateY(-2px);
     }
 `;
 const TierHeader = styled.div`
@@ -297,7 +274,7 @@ const TierName = styled.div`
     theme
 }) => theme.layout.sectionSize};
     font-weight: bold;
-    color: ${props => props.$color || '#FFFFFF'};
+    color: ${props => props.$color || props.theme.colors.text};
 `;
 const TierPrice = styled.div`
     font-size: ${({
@@ -339,10 +316,14 @@ const TierFeatures = styled.ul`
         gap: 0.3rem;
         
         &::before {
-            content: '✓';
-            color: ${props => props.$color || '#22C55E'};
-            font-weight: bold;
-            line-height: 1.4;
+            content: '';
+            width: 0.35rem;
+            height: 0.2rem;
+            margin-top: 0.25rem;
+            color: ${props => props.$color || props.theme.colors.success};
+            border-left: 2px solid currentColor;
+            border-bottom: 2px solid currentColor;
+            transform: rotate(-45deg);
         }
     }
 `;
@@ -359,7 +340,7 @@ const TierDetailsPanel = styled.div`
     background: ${({
     theme
 }) => theme.layout.containerBg};
-    border: 2px solid ${props => props.$color || 'rgba(255, 255, 255, 0.1)'};
+    border: 2px solid ${props => props.$color || props.theme.colors.border};
     animation: slideDown 0.3s ease-out;
 
     @keyframes slideDown {
@@ -393,7 +374,7 @@ const TierDetailsTitle = styled.h3`
     theme
 }) => theme.layout.sectionSize};
     font-weight: 700;
-    color: ${props => props.$color || '#fff'};
+    color: ${props => props.$color || props.theme.colors.text};
 `;
 const TierDetailsContent = styled.div`
     display: grid;
@@ -415,7 +396,7 @@ const TierDetailItem = styled.div`
 
     &::before {
         content: '•';
-        color: ${props => props.$color || 'rgba(255, 255, 255, 0.4)'};
+        color: ${props => props.$color || props.theme.colors.muted};
         font-weight: bold;
         flex-shrink: 0;
         margin-top: 0.2rem;
@@ -441,7 +422,9 @@ const ErrorMessageBox = styled.div`
     background: ${({
     theme
 }) => theme.layout.containerBg};
-    border: 1px solid #dc2626;
+    border: 1px solid ${({
+    theme
+}) => theme.colors.danger};
     border-radius: ${({
     theme
 }) => theme.layout.inputRadius};
@@ -451,7 +434,9 @@ const ErrorMessageBox = styled.div`
     margin-bottom: ${({
     theme
 }) => theme.layout.sectionMarginBottom};
-    color: #dc2626;
+    color: ${({
+    theme
+}) => theme.colors.danger};
     font-size: ${({
     theme
 }) => theme.layout.inputSize};
@@ -506,7 +491,7 @@ export default function SubscriptionView({
                         </TabsRow>
                         <ContainerBody>
                             <Mono style={{
-                                color: '#888'
+                                color: theme.colors.muted
                             }}>Loading subscription info...</Mono>
                         </ContainerBody>
                     </TabbedContainer>
@@ -530,7 +515,7 @@ export default function SubscriptionView({
                         </TabsRow>
                         <ContainerBody>
                             <Mono style={{
-                                color: '#888'
+                                color: theme.colors.muted
                             }}>Failed to load tier configuration from blockchain.</Mono>
                         </ContainerBody>
                     </TabbedContainer>
@@ -695,11 +680,8 @@ Not directly spendable and will get burned if not used.`}>
 
                                             <Button variant={isActive ? 'ghost' : 'primary'} size="sm" onClick={() => handleUpgrade(tier)} disabled={isActive || isUpgrading || isSubscribePending(address) || (!affordable && tier.level > 0)} style={{
                                                 marginTop: 'auto',
-                                                ...(isActive ? {} : theme.caps.flatMode ? {
-                                                    background: theme.colors.panelAlt,
-                                                    borderColor: color
-                                                } : {
-                                                    background: `linear-gradient(135deg, ${color}, ${color}CC)`,
+                                                ...(isActive ? {} : {
+                                                    background: color,
                                                     borderColor: color
                                                 })
                                             }}>

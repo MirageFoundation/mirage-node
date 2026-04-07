@@ -31,23 +31,17 @@ const PickerButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease, opacity 0.15s ease;
     border: none;
     font-family: inherit;
     width: 32px;
     height: 32px;
     border-radius: 6px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    background: ${({ theme }) => theme.colors.accent};
+    color: ${({ theme }) => theme.colors.text};
 
     &:hover:not(:disabled) {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-        transform: translateY(-1px);
-    }
-
-    &:active:not(:disabled) {
-        transform: translateY(0);
+        background: ${({ theme }) => theme.colors.accentHover};
     }
 
     &:disabled {
@@ -66,8 +60,8 @@ const Popover = styled.div`
     z-index: 10100;
     background: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     width: 340px;
     height: 420px;
     display: flex;
@@ -103,7 +97,7 @@ const SearchInput = styled.input`
     outline: none;
 
     &:focus {
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.focusBorder};
     }
 
     &::placeholder {
@@ -127,20 +121,15 @@ const GifItem = styled.button`
     height: 100px;
     border: none;
     background: ${({ theme }) => theme.colors.panelAlt};
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
     padding: 0;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease;
     overflow: hidden;
     flex-shrink: 0;
 
     &:hover {
-        transform: scale(1.03);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    }
-
-    &:active {
-        transform: scale(0.98);
+        border-color: ${({ theme }) => theme.colors.borderStrong};
     }
 
     img {
@@ -158,20 +147,19 @@ const CloseButton = styled.button`
     height: 24px;
     border-radius: 50%;
     border: none;
-    background: #dc2626;
-    color: #ffffff;
+    background: ${({ theme }) => theme.colors.danger};
+    color: ${({ theme }) => theme.colors.bg};
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 1rem;
     line-height: 1;
-    transition: all 0.15s ease;
+    transition: opacity 0.15s ease;
     z-index: 1;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 
     &:hover {
-        background: #b91c1c;
+        filter: brightness(0.85);
     }
 `;
 

@@ -12,17 +12,14 @@ import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopi
 import { ContentGrid, ModernPostFeed, StyledError } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
+import { resolveCardSize } from "../utils/cardSize";
 
 // Invite-only hero for logged-out users on the front page
 const InviteOnlyHero = styled.div`
     margin-top: 1rem;
-    background: ${({
-    theme
-}) => theme.name === 'light' ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)' : 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)'};
-    border: 1px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.3)' : 'rgba(102, 126, 234, 0.35)'};
-    border-radius: 16px;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     padding: 2rem 2.5rem;
     display: flex;
     flex-direction: column;
@@ -31,32 +28,18 @@ const InviteOnlyHero = styled.div`
     gap: 1rem;
 
     @media (max-width: 1000px) {
-        border-radius: 12px;
         padding: 1.5rem 1.25rem;
     }
 
     @media (max-width: 768px) {
-        border-radius: 10px;
         padding: 1.25rem 1rem;
         gap: 0.75rem;
-    }
-`;
-const InviteOnlyHeroEmoji = styled.span`
-    font-size: 2.5rem;
-    line-height: 1;
-    display: block;
-    margin-bottom: 0.25rem;
-
-    @media (max-width: 768px) {
-        font-size: 2rem;
     }
 `;
 const InviteOnlyHeroTitle = styled.h1`
     font-size: 1.5rem;
     font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
     line-height: 1.2;
 
@@ -71,7 +54,7 @@ const InviteOnlyHeroTitle = styled.h1`
 const InviteOnlyHeroSubtitle = styled.div`
     font-size: 0.95rem;
     font-weight: 600;
-    color: #667eea;
+    color: ${({ theme }) => theme.colors.focusBorder};
     margin-top: -0.25rem;
 
     @media (max-width: 1000px) {
@@ -84,9 +67,7 @@ const InviteOnlyHeroSubtitle = styled.div`
 `;
 const InviteOnlyHeroDescription = styled.p`
     font-size: 0.85rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     line-height: 1.6;
     margin: 0;
     max-width: 500px;
@@ -121,12 +102,8 @@ const WelcomeStatsGrid = styled.div`
     gap: 0.75rem;
     margin: 0.5rem 0;
     padding: 0.75rem 0;
-    border-top: 1px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.2)' : 'rgba(102, 126, 234, 0.25)'};
-    border-bottom: 1px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(102, 126, 234, 0.2)' : 'rgba(102, 126, 234, 0.25)'};
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     width: 100%;
 
     @media (max-width: 768px) {
@@ -145,9 +122,7 @@ const WelcomeStatItem = styled.div`
 const WelcomeStatValue = styled.div`
     font-size: 1.25rem;
     font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     font-variant-numeric: tabular-nums;
 
     @media (max-width: 1000px) {
@@ -161,9 +136,7 @@ const WelcomeStatValue = styled.div`
 const WelcomeStatLabel = styled.div`
     font-size: 0.65rem;
     font-weight: 500;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     text-transform: uppercase;
     letter-spacing: 0.03em;
 
@@ -176,42 +149,22 @@ const WelcomeStatLabel = styled.div`
     }
 `;
 
-// Mobile header branding for home/following feeds
-
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
 const InviteOnlyBanner = styled.div`
-    background: ${({
-    theme
-}) => theme.name === 'light' ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)' : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
-    border: 2px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(59, 130, 246, 0.5)' : 'rgba(96, 165, 250, 0.6)'};
-    border-radius: ${({
-    $size
-}) => $size === 'compact' ? '8px' : '10px'};
-    padding: ${({
-    $size
-}) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ $size }) => $size === 'compact' ? '4px' : '6px'};
+    padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
-    gap: ${({
-    $size
-}) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-    box-shadow: ${({
-    theme
-}) => theme.name === 'light' ? '0 0 12px rgba(59, 130, 246, 0.2)' : '0 0 15px rgba(96, 165, 250, 0.25)'};
+    gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
 
     @media (max-width: 1000px) {
-        border-radius: ${({
-    $size
-}) => $size === 'compact' ? '6px' : '8px'};
-        padding: ${({
-    $size
-}) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
+        padding: ${({ $size }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
     @media (max-width: 768px) {
-        border-radius: 6px;
+        border-radius: 4px;
         padding: 0.4rem 0.6rem;
     }
 `;
@@ -248,27 +201,25 @@ const InviteBannerButton = styled.button`
     font-size: 0.7rem;
     font-weight: 600;
     font-family: inherit;
-    color: #FFFFFF;
-    background: linear-gradient(135deg, #FF8C00 0%, #FF5722 100%);
+    color: ${({ theme }) => theme.colors.bg};
+    background: ${({ theme }) => theme.colors.warning};
     border: none;
     border-radius: 6px;
     cursor: pointer;
     white-space: nowrap;
-    transition: transform 0.15s ease;
-    box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
+    transition: opacity 0.15s ease;
     flex-shrink: 0;
 
     &:hover {
-        transform: translateY(-1px);
+        opacity: 0.85;
     }
 
     &:active {
-        transform: translateY(0);
+        opacity: 0.75;
     }
 
     &:disabled {
-        background: linear-gradient(135deg, #666 0%, #555 100%);
-        box-shadow: none;
+        background: ${({ theme }) => theme.colors.muted};
         cursor: not-allowed;
         opacity: 0.7;
     }
@@ -286,7 +237,8 @@ const InviteBannerButton = styled.button`
 `;
 const InviteBannerCount = styled.span`
     font-size: 0.6rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: inherit;
+    opacity: 0.8;
     font-weight: 500;
 
     @media (max-width: 1000px) {
@@ -298,26 +250,20 @@ const InviteBannerCount = styled.span`
 const CollapseButton = styled.button`
     background: transparent;
     border: none;
-    color: ${({
-    theme
-}) => requireThemeColor(theme, 'subtleText')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.65rem;
     font-weight: 600;
     cursor: pointer;
     padding: 4px 8px;
-    border-radius: 12px;
-    transition: all 0.2s ease;
+    border-radius: 4px;
+    transition: color 0.2s ease, background 0.2s ease;
     display: flex;
     align-items: center;
     gap: 4px;
 
     &:hover {
-        color: ${({
-    theme
-}) => requireThemeColor(theme, 'text')};
-        background: ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)'};
+        color: ${({ theme }) => requireThemeColor(theme, 'text')};
+        background: ${({ theme }) => theme.colors.surface};
     }
 `;
 
@@ -336,13 +282,9 @@ const InviteModalOverlay = styled.div`
     padding: 1rem;
 `;
 const InviteModalContent = styled.div`
-    background: ${({
-    theme
-}) => theme.colors.panel};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 16px;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     padding: 1.5rem;
     max-width: 420px;
     width: 100%;
@@ -350,7 +292,6 @@ const InviteModalContent = styled.div`
 
     @media (max-width: 768px) {
         padding: 1.25rem;
-        border-radius: 12px;
     }
 `;
 const InviteModalHeader = styled.div`
@@ -362,9 +303,7 @@ const InviteModalHeader = styled.div`
 const InviteModalTitle = styled.h2`
     font-size: 1.1rem;
     font-weight: 600;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
     display: flex;
     align-items: center;
@@ -373,23 +312,19 @@ const InviteModalTitle = styled.h2`
 const InviteModalClose = styled.button`
     background: none;
     border: none;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     cursor: pointer;
     font-size: 1.5rem;
     line-height: 1;
     padding: 0;
     &:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 const InviteCodeDisplay = styled.div`
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
-    border: 2px dashed rgba(102, 126, 234, 0.4);
-    border-radius: 12px;
+    background: ${({ theme }) => theme.colors.surface};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     padding: 1.25rem;
     text-align: center;
     margin-bottom: 1rem;
@@ -398,9 +333,7 @@ const InviteCodeText = styled.div`
     font-size: 1.75rem;
     font-weight: 700;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     letter-spacing: 0.1em;
     margin-bottom: 0.5rem;
 
@@ -410,9 +343,7 @@ const InviteCodeText = styled.div`
 `;
 const InviteCodeSubtext = styled.div`
     font-size: 0.75rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 const InviteShareButtons = styled.div`
     display: grid;
@@ -433,52 +364,35 @@ const InviteShareButton = styled.button`
     font-size: 0.75rem;
     font-weight: 500;
     font-family: inherit;
-    color: ${({
-    theme
-}) => theme.colors.text};
-    background: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 8px;
+    color: ${({ theme }) => theme.colors.text};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
 
     &:hover {
-        background: ${({
-    theme
-}) => theme.colors.accent};
-        border-color: ${({
-    theme
-}) => theme.colors.text};
+        background: ${({ theme }) => theme.colors.accent};
+        border-color: ${({ theme }) => theme.colors.text};
     }
 `;
 const InviteCopyButton = styled(InviteShareButton)`
     grid-column: 1 / -1;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: ${({ theme }) => theme.colors.accent};
     border: none;
-    color: #FFFFFF;
+    color: ${({ theme }) => theme.colors.bg};
     font-weight: 600;
 
     &:hover {
-        background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+        opacity: 0.85;
         border: none;
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        transform: translateY(-1px);
-    }
-
-    &:active {
-        transform: translateY(0);
     }
 `;
 const InviteNativeShareButton = styled(InviteCopyButton)`
-    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    background: ${({ theme }) => theme.colors.success};
 
     &:hover {
-        background: linear-gradient(135deg, #0d9668 0%, #047857 100%);
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        opacity: 0.85;
     }
 `;
 const InviteDesktopShareButtons = styled.div`
@@ -494,76 +408,57 @@ const InviteDesktopShareButtons = styled.div`
 const InviteRemainingText = styled.div`
     text-align: center;
     font-size: 0.7rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 const InviteNoCodesText = styled.div`
     text-align: center;
     padding: 1rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.85rem;
 `;
 
 // Home feed info card for logged-in users
 const HomeFeedInfoCard = styled.div`
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.2);
-    border-radius: ${({
-    $size
-}) => $size === 'compact' ? '8px' : '10px'};
-    padding: ${({
-    $size
-}) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: ${({ $size }) => $size === 'compact' ? '4px' : '6px'};
+    padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
-    gap: ${({
-    $size
-}) => $size === 'compact' ? '0.25rem' : '0.35rem'};
+    gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
 
     @media (max-width: 1000px) {
-        border-radius: ${({
-    $size
-}) => $size === 'compact' ? '6px' : '8px'};
-        padding: ${({
-    $size
-}) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
+        padding: ${({ $size }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
     @media (max-width: 768px) {
-        border-radius: 6px;
+        border-radius: 4px;
         padding: 0.4rem 0.6rem;
     }
 `;
 
 // NSFW welcome hero - shown once to logged-in users on home feed
 const NsfwWelcomeHero = styled.div`
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 127, 0.08) 100%);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 12px;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.dangerBorder};
+    border-radius: 6px;
     padding: 1.25rem 1.5rem;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
 
     @media (max-width: 1000px) {
-        border-radius: 10px;
         padding: 1rem 1.25rem;
     }
 
     @media (max-width: 768px) {
-        border-radius: 8px;
         padding: 0.85rem 1rem;
     }
 `;
 const NsfwHeroTitle = styled.div`
     font-size: 1rem;
     font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -573,14 +468,8 @@ const NsfwHeroTitle = styled.div`
         font-size: 0.9rem;
     }
 `;
-const NsfwHeroEmoji = styled.span`
-    font-size: 1.1rem;
-    line-height: 1;
-`;
 const NsfwHeroDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     line-height: 1.6;
 
@@ -589,9 +478,7 @@ const NsfwHeroDescription = styled.div`
     }
 
     strong {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
         font-weight: 600;
     }
 `;
@@ -607,11 +494,11 @@ const NsfwHeroButtons = styled.div`
 `;
 const NsfwHeroButton = styled.button`
     padding: 0.5rem 1.25rem;
-    border-radius: 8px;
+    border-radius: 6px;
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease;
     border: none;
 
     @media (max-width: 768px) {
@@ -621,37 +508,29 @@ const NsfwHeroButton = styled.button`
         min-width: 80px;
     }
 
-    ${({
-    $variant
-}) => $variant === 'yes' ? `
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        color: #fff;
+    ${({ $variant, theme }) => $variant === 'yes' ? `
+        background: ${theme.colors.danger};
+        color: ${theme.colors.bg};
         &:hover {
-            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-            transform: translateY(-1px);
+            opacity: 0.85;
         }
     ` : `
-        background: rgba(100, 116, 139, 0.2);
-        color: #94a3b8;
-        border: 1px solid rgba(100, 116, 139, 0.3);
+        background: ${theme.colors.surface};
+        color: ${theme.colors.subtleText};
+        border: 1px solid ${theme.colors.border};
         &:hover {
-            background: rgba(100, 116, 139, 0.3);
-            color: #cbd5e1;
+            opacity: 0.85;
         }
     `}
 `;
 const NsfwHeroNote = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.mutedText};
+    color: ${({ theme }) => theme.colors.mutedText};
     font-size: 0.7rem;
     font-style: italic;
     margin-top: 0.25rem;
 
     a {
-        color: ${({
-    theme
-}) => theme.colors.link};
+        color: ${({ theme }) => theme.colors.link};
         text-decoration: none;
         &:hover {
             text-decoration: underline;
@@ -661,30 +540,26 @@ const NsfwHeroNote = styled.div`
 
 // Android app banner - shown once to Android mobile users until dismissed
 const AndroidAppHero = styled.div`
-    background: linear-gradient(135deg, rgba(52, 168, 83, 0.08) 0%, rgba(66, 133, 244, 0.08) 100%);
-    border: 1px solid rgba(66, 133, 244, 0.3);
-    border-radius: 12px;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     padding: 1.25rem 1.5rem;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
 
     @media (max-width: 1000px) {
-        border-radius: 10px;
         padding: 1rem 1.25rem;
     }
 
     @media (max-width: 768px) {
-        border-radius: 8px;
         padding: 0.85rem 1rem;
     }
 `;
 const AndroidHeroTitle = styled.div`
     font-size: 1rem;
     font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -694,14 +569,8 @@ const AndroidHeroTitle = styled.div`
         font-size: 0.9rem;
     }
 `;
-const AndroidHeroEmoji = styled.span`
-    font-size: 1.1rem;
-    line-height: 1;
-`;
 const AndroidHeroDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     line-height: 1.6;
 
@@ -721,20 +590,19 @@ const AndroidHeroButtons = styled.div`
 `;
 const AndroidHeroButton = styled.a`
     padding: 0.5rem 1.25rem;
-    border-radius: 8px;
+    border-radius: 6px;
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease;
     border: none;
     text-decoration: none;
     text-align: center;
-    background: linear-gradient(135deg, #34a853 0%, #2d9249 100%);
-    color: #fff;
+    background: ${({ theme }) => theme.colors.success};
+    color: ${({ theme }) => theme.colors.bg};
 
     &:hover {
-        background: linear-gradient(135deg, #2d9249 0%, #267a3d 100%);
-        transform: translateY(-1px);
+        opacity: 0.85;
     }
 
     @media (max-width: 768px) {
@@ -746,18 +614,17 @@ const AndroidHeroButton = styled.a`
 `;
 const AndroidHeroDismiss = styled.button`
     padding: 0.5rem 1.25rem;
-    border-radius: 8px;
+    border-radius: 6px;
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
-    background: rgba(100, 116, 139, 0.2);
-    color: #94a3b8;
-    border: 1px solid rgba(100, 116, 139, 0.3);
+    transition: opacity 0.2s ease;
+    background: ${({ theme }) => theme.colors.surface};
+    color: ${({ theme }) => theme.colors.subtleText};
+    border: 1px solid ${({ theme }) => theme.colors.border};
 
     &:hover {
-        background: rgba(100, 116, 139, 0.3);
-        color: #cbd5e1;
+        opacity: 0.85;
     }
 
     @media (max-width: 768px) {
@@ -768,40 +635,37 @@ const AndroidHeroDismiss = styled.button`
     }
 `;
 const IPhoneAppHero = styled.div`
-    background: linear-gradient(135deg, rgba(0, 122, 255, 0.08) 0%, rgba(88, 86, 214, 0.08) 100%);
-    border: 1px solid rgba(0, 122, 255, 0.3);
-    border-radius: 12px;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     padding: 1.25rem 1.5rem;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
 
     @media (max-width: 1000px) {
-        border-radius: 10px;
         padding: 1rem 1.25rem;
     }
 
     @media (max-width: 768px) {
-        border-radius: 8px;
         padding: 0.85rem 1rem;
     }
 `;
 const IPhoneHeroButton = styled.a`
     padding: 0.5rem 1.25rem;
-    border-radius: 8px;
+    border-radius: 6px;
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease;
     border: none;
     text-decoration: none;
     text-align: center;
-    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
-    color: #fff;
+    background: ${({ theme }) => theme.colors.focusBorder};
+    color: ${({ theme }) => theme.colors.bg};
 
     &:hover {
-        background: linear-gradient(135deg, #0066D6 0%, #4B49B8 100%);
-        transform: translateY(-1px);
+        opacity: 0.85;
     }
 
     @media (max-width: 768px) {
@@ -814,9 +678,7 @@ const IPhoneHeroButton = styled.a`
 const HomeFeedInfoTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -839,20 +701,8 @@ const HomeFeedModeInline = styled.div`
     gap: 0.45rem;
     font-size: 0.7rem;
 `;
-const HomeFeedInfoEmoji = styled.span`
-    font-size: 0.85rem;
-    line-height: 1;
-    display: inline-block;
-    transform: translateY(-1px);
-
-    @media (max-width: 1000px) {
-        font-size: 0.75rem;
-    }
-`;
 const HomeFeedInfoDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.65rem;
     line-height: 1.5;
 
@@ -861,9 +711,7 @@ const HomeFeedInfoDescription = styled.div`
     }
 
     strong {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
         font-weight: 600;
     }
 `;
@@ -871,19 +719,10 @@ const HomeFeedModeSelect = styled.select`
     font-size: 0.65rem;
     padding: 0.15rem 0.35rem;
     border-radius: 6px;
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    background: ${({
-    theme
-}) => theme.colors.inputBackground};
-    color: ${({
-    theme
-}) => theme.colors.text};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.inputBackground};
+    color: ${({ theme }) => theme.colors.text};
     outline: none;
-    box-shadow: ${({
-    theme
-}) => theme.name === 'light' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'};
 `;
 
 // Post header card shown on single post view
@@ -891,15 +730,9 @@ const PostHeaderCard = styled.div`
     margin-top: 0.5rem;
     margin-left: 1rem;
     margin-right: 1rem;
-    background-color: ${({
-    theme
-}) => requireThemeColor(theme, 'card')};
-    border: 1px solid ${({
-    theme
-}) => requireThemeColor(theme, 'cardBorder')};
-    color: ${({
-    theme
-}) => theme.colors.text};
+    background-color: ${({ theme }) => requireThemeColor(theme, 'card')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'cardBorder')};
+    color: ${({ theme }) => theme.colors.text};
     border-radius: 6px;
     padding: 0.2rem 0.6rem 0.4rem 0.6rem;
     display: flex;
@@ -912,32 +745,22 @@ const PostHeaderCard = styled.div`
     }
 `;
 const PostHeaderText = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.6rem;
     line-height: 1.5;
 `;
 const TopicLinkInHeader = styled(Link)`
-    color: ${({
-    theme
-}) => theme.colors.link};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: 700;
     &:hover {
-        color: ${({
-    theme
-}) => theme.colors.linkHover};
+        color: ${({ theme }) => theme.colors.linkHover};
         text-decoration: underline;
-        text-decoration-color: ${({
-    theme
-}) => theme.colors.link};
+        text-decoration-color: ${({ theme }) => theme.colors.link};
     }
 `;
 const PostHeaderTitle = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     font-size: 0.9rem;
     font-weight: bold;
 `;
@@ -946,18 +769,14 @@ const HeaderInlineLink = styled.a`
     border: none;
     padding: 0;
     margin: 0;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-weight: 700;
     font-size: 0.6rem;
     font-family: inherit;
     cursor: pointer;
     text-decoration: none;
     &:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
         text-decoration: none;
     }
 `;
@@ -970,9 +789,7 @@ const LoadingMoreIndicator = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem 1rem;
     text-align: center;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
     font-style: italic;
 `;
@@ -983,16 +800,12 @@ const LoadMoreButton = styled.button`
     margin-top: 0.25rem;
     border: none;
     background: transparent;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.85rem;
     cursor: pointer;
     text-align: center;
     &:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -1003,44 +816,26 @@ const LoadMoreButton = styled.button`
  * This ensures same width as CardView cards.
  */
 const LoadingCard = styled.div`
-    margin: ${({
-    $size
-}) => $size === 'compact' ? '0.5rem 0 0 0' : '1rem 0 0 0'};
-    padding: ${({
-    $size
-}) => $size === 'compact' ? '1rem 0.6rem' : '2rem 1rem'};
-    background-color: ${({
-    theme
-}) => theme.colors.cardAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.cardBorder};
-    border-radius: ${({
-    $size
-}) => $size === 'compact' ? '8px' : '12px'};
+    margin: ${({ $size }) => $size === 'compact' ? '0.5rem 0 0 0' : '1rem 0 0 0'};
+    padding: ${({ $size }) => $size === 'compact' ? '1rem 0.6rem' : '2rem 1rem'};
+    background-color: ${({ theme }) => theme.colors.cardAlt};
+    border: 1px solid ${({ theme }) => theme.colors.cardBorder};
+    border-radius: ${({ $size }) => $size === 'compact' ? '4px' : '6px'};
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: ${({
-    $size
-}) => $size === 'compact' ? '0.5rem' : '0.75rem'};
+    gap: ${({ $size }) => $size === 'compact' ? '0.5rem' : '0.75rem'};
 
     @media (max-width: 1000px) {
-        padding: ${({
-    $size
-}) => $size === 'compact' ? '0.75rem 0.5rem' : '1.5rem 0.75rem'};
+        padding: ${({ $size }) => $size === 'compact' ? '0.75rem 0.5rem' : '1.5rem 0.75rem'};
     }
 `;
 const LoadingSpinner = styled.div`
     width: 24px;
     height: 24px;
-    border: 3px solid ${({
-    theme
-}) => theme.colors.border};
-    border-top: 3px solid ${({
-    theme
-}) => theme.colors.subtleText};
+    border: 3px solid ${({ theme }) => theme.colors.border};
+    border-top: 3px solid ${({ theme }) => theme.colors.subtleText};
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     
@@ -1050,9 +845,7 @@ const LoadingSpinner = styled.div`
     }
 `;
 const LoadingText = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.85rem;
     font-weight: 500;
 `;
@@ -1060,40 +853,32 @@ const LoadingText = styled.div`
 // TopicsBar removed (unused)
 
 const InlineLink = styled(Link)`
-    color: ${({
-    theme
-}) => theme.colors.link};
+    color: ${({ theme }) => theme.colors.link};
     text-decoration: none;
     font-weight: 700;
     &:hover {
-        color: ${({
-    theme
-}) => theme.colors.linkHover};
+        color: ${({ theme }) => theme.colors.linkHover};
         text-decoration: underline;
-        text-decoration-color: ${({
-    theme
-}) => theme.colors.link};
+        text-decoration-color: ${({ theme }) => theme.colors.link};
     }
 `;
 
 // Topic header card (for topic pages) - unified with HomeFeedInfoCard
 const TopicHeroCard = styled.div`
     margin-top: 1rem;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.2);
-    border-radius: 10px;
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
     padding: 0.6rem 0.9rem;
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
 
     @media (max-width: 1000px) {
-        border-radius: 8px;
         padding: 0.5rem 0.75rem;
     }
 
     @media (max-width: 768px) {
-        border-radius: 6px;
         padding: 0.4rem 0.6rem;
         margin-top: 0.5rem;
     }
@@ -1101,9 +886,7 @@ const TopicHeroCard = styled.div`
 const TopicHeroTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -1121,9 +904,7 @@ const TopicHeroHeader = styled.div`
     flex-wrap: wrap;
 `;
 const TopicHeroDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.65rem;
     line-height: 1.5;
 
@@ -1133,9 +914,7 @@ const TopicHeroDescription = styled.div`
     }
 
     strong {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
         font-weight: 600;
     }
 `;
@@ -1149,13 +928,9 @@ const TopicHeroDescription = styled.div`
 const EmptyHomeCard = styled.div`
     margin: 1rem 0 0 0;
     padding: 1.5rem 1.25rem;
-    background-color: ${({
-    theme
-}) => theme.colors.cardAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.cardBorder};
-    border-radius: 12px;
+    background-color: ${({ theme }) => theme.colors.cardAlt};
+    border: 1px solid ${({ theme }) => theme.colors.cardBorder};
+    border-radius: 6px;
     text-align: center;
 
     @media (max-width: 1000px) {
@@ -1166,16 +941,12 @@ const EmptyHomeTitle = styled.div`
     font-size: 1rem;
     font-weight: 600;
     margin-bottom: 0.5rem;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
 `;
 const EmptyHomeBody = styled.div`
     font-size: 0.8rem;
     line-height: 1.5;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 const EmptyHomeMessage = () => <EmptyHomeCard role="region" aria-label="Empty home feed">
     <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
@@ -1213,7 +984,6 @@ const MainView = ({
         hidingPostsSet,
         flashingPostsSet,
         isLoadingMore,
-        isMobile,
         isTopicBlockedLocal,
         location,
         viewerAddress,
@@ -1259,6 +1029,7 @@ const MainView = ({
         setTopic,
         routeTopic
     });
+    resolveCardSize(cardSize);
     if (error) {
         return <StyledError>{error}</StyledError>;
     }
@@ -1428,9 +1199,8 @@ const MainView = ({
                                     <option value="magic">Magic</option>
                                     <option value="newest">Newest</option>
                                 </HomeFeedModeSelect>
-                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                    <option value="large">Large</option>
-                                    {!isMobile && <option value="compact">Compact</option>}
+                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(resolveCardSize(e.target.value))}>
+                                    <option value="compact">Compact</option>
                                     <option value="media">Media</option>
                                 </HomeFeedModeSelect>
                                 <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" minWidth="5.5rem" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
@@ -1467,7 +1237,7 @@ const MainView = ({
                     {isLoggedIn && showHero && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
                         <HomeFeedHeaderRow>
                             <HomeFeedInfoTitle>
-                                <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Invite Codes
+                                Invite Codes
                                 {inviteBannerCollapsed && <span style={{
                                     fontWeight: 'normal'
                                 }}>
@@ -1497,7 +1267,7 @@ const MainView = ({
                     {/* Android app banner - shown once for Android users until dismissed */}
                     {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
                         <AndroidHeroTitle>
-                            <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
+                            Mirage is available on Android
                         </AndroidHeroTitle>
                         <AndroidHeroDescription>
                             Get the native Android app for a faster, smoother experience with push notifications and offline support.
@@ -1514,7 +1284,7 @@ const MainView = ({
 
                     {showHero && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
                         <AndroidHeroTitle>
-                            <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
+                            Mirage is available on iPhone
                         </AndroidHeroTitle>
                         <AndroidHeroDescription>
                             Get the native iOS app for a faster, smoother experience with push notifications and offline support.
@@ -1532,7 +1302,7 @@ const MainView = ({
                     {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
                     {isLoggedIn && showHero && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero role="region" aria-label="Content preferences">
                         <NsfwHeroTitle>
-                            <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
+                            Allow Adult Content?
                         </NsfwHeroTitle>
                         <NsfwHeroDescription>
                             Mirage is uncensored and may include <strong>adult content</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
@@ -1557,7 +1327,7 @@ const MainView = ({
                     {isLoggedIn && urlTopic === 'home' && !showNsfwHero && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
                         <HomeFeedHeaderRow>
                             <HomeFeedInfoTitle>
-                                <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
+                                Your Home Feed
                             </HomeFeedInfoTitle>
                             <HomeFeedModeInline>
                                 <HomeFeedModeSelect value={homeSortMode} onChange={e => {
@@ -1568,9 +1338,8 @@ const MainView = ({
                                     <option value="magic">Magic</option>
                                     <option value="newest">Newest</option>
                                 </HomeFeedModeSelect>
-                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                    <option value="large">Large</option>
-                                    {!isMobile && <option value="compact">Compact</option>}
+                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(resolveCardSize(e.target.value))}>
+                                    <option value="compact">Compact</option>
                                     <option value="media">Media</option>
                                 </HomeFeedModeSelect>
                             </HomeFeedModeInline>
@@ -1584,7 +1353,7 @@ const MainView = ({
                     {isLoggedIn && urlTopic === 'following' && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
                         <HomeFeedHeaderRow>
                             <HomeFeedInfoTitle>
-                                <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
+                                Your Following Feed
                             </HomeFeedInfoTitle>
                             <HomeFeedModeInline>
                                 <HomeFeedModeSelect value={homeSortMode} onChange={e => {
@@ -1595,9 +1364,8 @@ const MainView = ({
                                     <option value="magic">Magic</option>
                                     <option value="newest">Newest</option>
                                 </HomeFeedModeSelect>
-                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                    <option value="large">Large</option>
-                                    {!isMobile && <option value="compact">Compact</option>}
+                                <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(resolveCardSize(e.target.value))}>
+                                    <option value="compact">Compact</option>
                                     <option value="media">Media</option>
                                 </HomeFeedModeSelect>
                             </HomeFeedModeInline>
@@ -1623,7 +1391,6 @@ const MainView = ({
 
                     {/* Invite-only hero - shown to logged-out users on all feeds */}
                     {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
-                        <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
                         <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
                             fontSize: '0.5em',
                             marginLeft: '0.3em',
@@ -1701,7 +1468,7 @@ const MainView = ({
                 <InviteModalContent onClick={e => e.stopPropagation()}>
                     <InviteModalHeader>
                         <InviteModalTitle>
-                            <span role="img" aria-label="sparkles">✨</span> Share Your Invite Code
+                            Share Your Invite Code
                         </InviteModalTitle>
                         <InviteModalClose onClick={() => setInviteModalOpen(false)}>&times;</InviteModalClose>
                     </InviteModalHeader>
@@ -1714,24 +1481,24 @@ const MainView = ({
 
                         <InviteShareButtons>
                             <InviteCopyButton onClick={handleCopyInviteCode}>
-                                {inviteCodeCopied ? '✓ Copied!' : 'Copy Invite Link'}
+                                {inviteCodeCopied ? 'Copied!' : 'Copy Invite Link'}
                             </InviteCopyButton>
                             {canNativeShare && <InviteNativeShareButton onClick={handleNativeShare}>
-                                <span role="img" aria-label="share">📤</span> Share via...
+                                Share via...
                             </InviteNativeShareButton>}
                         </InviteShareButtons>
                         <InviteDesktopShareButtons>
                             <InviteShareButton as="a" href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText())}&url=${encodeURIComponent(getShareUrl())}`} target="_blank" rel="noopener noreferrer">
-                                <span role="img" aria-label="X">𝕏</span> Twitter/X
+                                Twitter/X
                             </InviteShareButton>
                             <InviteShareButton as="a" href={`https://t.me/share/url?url=${encodeURIComponent(getShareUrl())}&text=${encodeURIComponent(getShareText())}`} target="_blank" rel="noopener noreferrer">
-                                <span role="img" aria-label="telegram">📨</span> Telegram
+                                Telegram
                             </InviteShareButton>
                             <InviteShareButton as="a" href={`https://wa.me/?text=${encodeURIComponent(getShareText() + ' ' + getShareUrl())}`} target="_blank" rel="noopener noreferrer">
-                                <span role="img" aria-label="whatsapp">💬</span> WhatsApp
+                                WhatsApp
                             </InviteShareButton>
                             <InviteShareButton as="a" href={`mailto:?subject=${encodeURIComponent('Join me on Mirage!')}&body=${encodeURIComponent(getShareText() + '\n\n' + getShareUrl())}`}>
-                                <span role="img" aria-label="email">📧</span> Email
+                                Email
                             </InviteShareButton>
                         </InviteDesktopShareButtons>
 

@@ -35,40 +35,8 @@ const MobileBrandText = styled.a`
     flex-shrink: 0;
     line-height: 1;
     cursor: pointer;
-    transform: ${({ $hidden }) => $hidden ? 'translateX(-100px)' : 'translateX(0)'};
     opacity: ${({ $hidden }) => $hidden ? 0 : 1};
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
-    ${({ theme }) => theme.name !== 'light' && `
-        animation: glowWander 8s ease-in-out infinite;
-    `}
-
-    @keyframes glowWander {
-        0% {
-            text-shadow: 
-                0 0 12px rgba(255, 255, 255, 0.4),
-                6px 2px 15px rgba(255, 255, 255, 0.25);
-        }
-        25% {
-            text-shadow: 
-                0 0 14px rgba(255, 255, 255, 0.35),
-                -4px 4px 12px rgba(255, 255, 255, 0.2);
-        }
-        50% {
-            text-shadow: 
-                0 0 10px rgba(255, 255, 255, 0.45),
-                -6px -2px 15px rgba(255, 255, 255, 0.25);
-        }
-        75% {
-            text-shadow: 
-                0 0 13px rgba(255, 255, 255, 0.38),
-                4px -4px 12px rgba(255, 255, 255, 0.2);
-        }
-        100% {
-            text-shadow: 
-                0 0 12px rgba(255, 255, 255, 0.4),
-                6px 2px 15px rgba(255, 255, 255, 0.25);
-        }
-    }
+    transition: opacity 0.15s ease;
 `;
 
 const MobileRightSection = styled.div`
@@ -129,7 +97,7 @@ const MobileSearchInputWrapper = styled.div`
     align-items: center;
     background: ${({ theme, $expanded }) => $expanded ? (theme.colors.panelAlt) : 'transparent'};
     border: ${({ $expanded, theme }) => $expanded ? `1px solid ${theme.colors.border}` : '1px solid transparent'};
-    border-radius: 20px;
+    border-radius: 4px;
     overflow: hidden;
     width: ${({ $expanded }) => $expanded ? '100%' : '1.6rem'};
     pointer-events: ${({ $expanded }) => $expanded ? 'auto' : 'none'};
@@ -197,11 +165,10 @@ const MobileBalanceDisplay = styled.div`
     padding: 0.3rem 0.55rem;
     background: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 14px;
+    border-radius: 4px;
     flex-shrink: 0;
-    transform: ${({ $hidden }) => $hidden ? 'scale(0.8)' : 'scale(1)'};
     opacity: ${({ $hidden }) => $hidden ? 0 : 1};
-    transition: transform 0.2s ease, opacity 0.15s ease;
+    transition: opacity 0.15s ease;
 `;
 
 const MobileBalanceAmount = styled.span`

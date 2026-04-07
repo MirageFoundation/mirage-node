@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
@@ -139,6 +139,7 @@ const Mono = styled.span`
 export default function FollowsView({
   state
 }) {
+  const theme = useTheme();
   const {
     navigate,
     location,
@@ -173,10 +174,10 @@ export default function FollowsView({
                             <SectionTitle $first>Topics</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Loading...</Mono>}
                                 {!listsLoading && !listsError && followedTopics.length === 0 && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Not following any topics.</Mono>}
                                 {!listsLoading && !listsError && followedTopics.length > 0 && <PostsList>
                                         {followedTopics.map(topic => {
@@ -206,13 +207,13 @@ export default function FollowsView({
                             <SectionTitle>Users</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Loading...</Mono>}
                                 {!listsLoading && listsError && <Mono style={{
-                color: '#f87171'
+                color: theme.colors.danger
               }}>{listsError}</Mono>}
                                 {!listsLoading && !listsError && followedUsers.length === 0 && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Not following any users.</Mono>}
                                 {!listsLoading && !listsError && followedUsers.length > 0 && <PostsList>
                                         {followedUsers.map(userAddr => {

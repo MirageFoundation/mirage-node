@@ -131,6 +131,7 @@ const onyxManifest = {
     config: {
         showHeroCards: true,
         mapHomeSortMode: false,
+        flatMode: true,
         profileTabs: ['profile', 'submissions', 'comments', 'algo'],
         profileDefaultTab: 'profile',
         profileUsesListFeed: false,

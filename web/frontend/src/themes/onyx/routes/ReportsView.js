@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Button from "../components/Button.js";
 import Sidebar from "../components/Sidebar.js";
@@ -111,6 +111,7 @@ const Username = styled.span`
 export default function ReportsView({
   state
 }) {
+  const theme = useTheme();
   const {
     location,
     reports,
@@ -162,7 +163,7 @@ export default function ReportsView({
                     <TabbedContainer>
                         <ContainerTab>Reports</ContainerTab>
                         <ContainerBody><div style={{
-              color: '#f66'
+              color: theme.colors.danger
             }}>{error}</div></ContainerBody>
                     </TabbedContainer>
                 </ModernPostFeed>

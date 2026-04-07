@@ -1,6 +1,6 @@
 import React from "react";
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
@@ -112,12 +112,12 @@ const LoadingSpinner = styled.div`
     }
 `;
 const ErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
-    border-radius: 8px;
+    background-color: ${({ theme }) => theme.colors.dangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.danger};
+    border-radius: 6px;
     padding: 0.6rem 0.85rem;
     margin-top: 0.5rem;
-    color: #dc2626;
+    color: ${({ theme }) => theme.colors.danger};
     font-size: 0.8rem;
 `;
 const StatList = styled.div`
@@ -133,9 +133,7 @@ const StatItem = styled.div`
 `;
 const TrendIndicator = styled.span`
     margin-left: 0.5rem;
-    color: ${({
-  trend
-}) => trend === 'up' ? '#22c55e' : trend === 'down' ? '#dc2626' : '#888'};
+    color: ${({ trend, theme }) => trend === 'up' ? theme.colors.success : trend === 'down' ? theme.colors.danger : theme.colors.muted};
 `;
 const SectionNote = styled.div`
     color: ${({
@@ -166,9 +164,7 @@ const Th = styled.th`
 `;
 const Td = styled.td`
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid ${({
-  theme
-}) => theme.colors.border}22;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.borderSubtle};
     vertical-align: middle;
 `;
 const UserCell = styled.div`
@@ -220,20 +216,15 @@ const Badge = styled.span`
     border-radius: 4px;
     font-size: 0.65rem;
     font-weight: 600;
-    background: ${({
-  $variant,
-  theme
-}) => {
-  if ($variant === 'subscriber') return '#F59E0B20';
-  if ($variant === 'agent') return '#EF444420';
+    background: ${({ $variant, theme }) => {
+  if ($variant === 'subscriber') return theme.colors.warningBg;
+  if ($variant === 'agent') return theme.colors.dangerBg;
   return theme.colors.panelAlt;
 }};
-    color: ${({
-  $variant
-}) => {
-  if ($variant === 'subscriber') return '#F59E0B';
-  if ($variant === 'agent') return '#EF4444';
-  return '#888';
+    color: ${({ $variant, theme }) => {
+  if ($variant === 'subscriber') return theme.colors.warning;
+  if ($variant === 'agent') return theme.colors.danger;
+  return theme.colors.muted;
 }};
     margin-left: 0.25rem;
 `;
@@ -250,7 +241,7 @@ const SummaryItem = styled.div`
     border: 1px solid ${({
   theme
 }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.75rem;
     text-align: center;
 `;
@@ -278,9 +269,7 @@ const TierHeader = styled.div`
     gap: 0.5rem;
     margin-bottom: 0.5rem;
     padding-bottom: 0.25rem;
-    border-bottom: 2px solid ${({
-  $color
-}) => $color || '#333'};
+    border-bottom: 2px solid ${({ $color, theme }) => $color || theme.colors.border};
 `;
 const TierBadge = styled.span`
     display: inline-block;
@@ -326,6 +315,7 @@ export default function StatsView() {
     getDAUTrend,
     truncateAddress
   } = useStats();
+  const theme = useTheme();
   const renderUserCell = (user, showAddress = true) => {
     if (!user) return <Td>-</Td>;
     const address = user.address;
@@ -816,7 +806,7 @@ export default function StatsView() {
                                                         {signupsData.top_referrers.map((ref, idx) => <tr key={idx}>
                                                                 <Td style={{
                           width: '40px',
-                          color: '#888'
+                          color: theme.colors.muted
                         }}>{idx + 1}</Td>
                                                                 {renderUserCell(ref)}
                                                                 <Td style={{
@@ -868,7 +858,7 @@ export default function StatsView() {
                                                         </tr>) : <tr>
                                                         <Td colSpan={4} style={{
                         textAlign: 'center',
-                        color: '#888'
+                        color: theme.colors.muted
                       }}>
                                                             No signups via invite codes yet.
                                                         </Td>
@@ -955,7 +945,7 @@ export default function StatsView() {
                                                 {accountsData.accounts && accountsData.accounts.length > 0 ? accountsData.accounts.map((account, idx) => <tr key={idx}>
                                                             <Td style={{
                         width: '40px',
-                        color: '#888'
+                        color: theme.colors.muted
                       }}>{idx + 1}</Td>
                                                             <Td>
                                                                 <UserLink to={`/u/${account.username || account.address}`}>
@@ -966,7 +956,7 @@ export default function StatsView() {
                                                                 {account.username ? <UserLink to={`/u/${account.username}`}>
                                                                         {account.username}
                                                                     </UserLink> : <span style={{
-                          color: '#666'
+                          color: theme.colors.muted
                         }}>-</span>}
                                                             </Td>
                                                             <Td style={{
@@ -979,7 +969,7 @@ export default function StatsView() {
                                                         </tr>) : <tr>
                                                         <Td colSpan={4} style={{
                         textAlign: 'center',
-                        color: '#888'
+                        color: theme.colors.muted
                       }}>
                                                             No accounts found.
                                                         </Td>
@@ -996,7 +986,7 @@ export default function StatsView() {
                                     </SectionTitle>
                                     <SummaryBox>
                                         <SummaryItem>
-                                            <SummaryValue $color={rewardsData.summary?.quest_payouts_enabled ? '#22c55e' : '#ef4444'}>
+                                            <SummaryValue $color={rewardsData.summary?.quest_payouts_enabled ? theme.colors.success : theme.colors.danger}>
                                                 {rewardsData.summary?.quest_payouts_enabled ? 'Active' : 'Disabled'}
                                             </SummaryValue>
                                             <SummaryLabel>Payouts</SummaryLabel>
@@ -1020,11 +1010,11 @@ export default function StatsView() {
                                             <SummaryLabel>MIRAGE Earned</SummaryLabel>
                                         </SummaryItem>
                                         <SummaryItem>
-                                            <SummaryValue $color="#22c55e">{formatMirage(rewardsData.summary?.claimed_amount || 0)}</SummaryValue>
+                                            <SummaryValue $color={theme.colors.success}>{formatMirage(rewardsData.summary?.claimed_amount || 0)}</SummaryValue>
                                             <SummaryLabel>MIRAGE Claimed</SummaryLabel>
                                         </SummaryItem>
                                         <SummaryItem>
-                                            <SummaryValue $color="#f59e0b">{formatMirage(rewardsData.summary?.pending_amount || 0)}</SummaryValue>
+                                            <SummaryValue $color={theme.colors.warning}>{formatMirage(rewardsData.summary?.pending_amount || 0)}</SummaryValue>
                                             <SummaryLabel>MIRAGE Pending</SummaryLabel>
                                         </SummaryItem>
                                         <SummaryItem>
@@ -1063,12 +1053,12 @@ export default function StatsView() {
                         [user.address]: !prev[user.address]
                       }))} style={{
                         cursor: 'pointer',
-                        background: expandedUsers[user.address] ? 'rgba(102, 126, 234, 0.1)' : 'transparent'
+                        background: expandedUsers[user.address] ? theme.colors.accentSubtle : 'transparent'
                       }}>
                                                                 <Td style={{
                           width: '30px',
                           textAlign: 'center',
-                          color: '#888'
+                          color: theme.colors.muted
                         }}>
                                                                     {expandedUsers[user.address] ? '▼' : '▶'}
                                                                 </Td>
@@ -1096,13 +1086,13 @@ export default function StatsView() {
                           textAlign: 'right'
                         }}>
                                                                     <Mono style={{
-                            color: '#888'
+                            color: theme.colors.muted
                           }}>{formatMirage(user.earnings_per_day)}</Mono>
                                                                 </Td>
                                                             </tr>
                                                             {expandedUsers[user.address] && <tr>
                                                                     <Td colSpan={4} style={{
-                          background: 'rgba(102, 126, 234, 0.05)',
+                          background: theme.colors.accentSubtle,
                           padding: '1rem'
                         }}>
                                                                         <div style={{
@@ -1113,29 +1103,29 @@ export default function StatsView() {
                                                                             <div>
                                                                                 <div style={{
                                 fontSize: '0.7rem',
-                                color: '#888',
+                                color: theme.colors.muted,
                                 marginBottom: '0.25rem'
                               }}>Claimed</div>
                                                                                 <Mono style={{
-                                color: '#22c55e',
+                                color: theme.colors.success,
                                 fontWeight: 'bold'
                               }}>{formatMirage(user.claimed_amount)} MIRAGE</Mono>
                                                                             </div>
                                                                             <div>
                                                                                 <div style={{
                                 fontSize: '0.7rem',
-                                color: '#888',
+                                color: theme.colors.muted,
                                 marginBottom: '0.25rem'
                               }}>Pending</div>
                                                                                 <Mono style={{
-                                color: '#f59e0b',
+                                color: theme.colors.warning,
                                 fontWeight: 'bold'
                               }}>{formatMirage(user.pending_amount)} MIRAGE</Mono>
                                                                             </div>
                                                                             <div>
                                                                                 <div style={{
                                 fontSize: '0.7rem',
-                                color: '#888',
+                                color: theme.colors.muted,
                                 marginBottom: '0.25rem'
                               }}>Reward Count</div>
                                                                                 <Mono>{user.reward_count} ({user.claimed_count} claimed, {user.pending_count} pending)</Mono>
@@ -1143,7 +1133,7 @@ export default function StatsView() {
                                                                             <div>
                                                                                 <div style={{
                                 fontSize: '0.7rem',
-                                color: '#888',
+                                color: theme.colors.muted,
                                 marginBottom: '0.25rem'
                               }}>First Reward</div>
                                                                                 <Mono>{user.first_reward_at ? formatDateShort(user.first_reward_at) : 'N/A'}</Mono>
@@ -1151,7 +1141,7 @@ export default function StatsView() {
                                                                             <div>
                                                                                 <div style={{
                                 fontSize: '0.7rem',
-                                color: '#888',
+                                color: theme.colors.muted,
                                 marginBottom: '0.25rem'
                               }}>Last Reward</div>
                                                                                 <Mono>{user.last_reward_at ? formatDateShort(user.last_reward_at) : 'N/A'}</Mono>
@@ -1159,7 +1149,7 @@ export default function StatsView() {
                                                                             <div>
                                                                                 <div style={{
                                 fontSize: '0.7rem',
-                                color: '#888',
+                                color: theme.colors.muted,
                                 marginBottom: '0.25rem'
                               }}>Account Created</div>
                                                                                 <Mono>{user.account_created_at ? formatDateShort(user.account_created_at) : 'N/A'}</Mono>
@@ -1170,7 +1160,7 @@ export default function StatsView() {
                                                         </React.Fragment>) : <tr>
                                                         <Td colSpan={4} style={{
                         textAlign: 'center',
-                        color: '#888'
+                        color: theme.colors.muted
                       }}>
                                                             No reward data found.
                                                         </Td>
@@ -1195,16 +1185,16 @@ export default function StatsView() {
                   alignItems: 'center',
                   gap: '0.75rem',
                   padding: '0.5rem 0.75rem',
-                  background: reward.claimed ? 'rgba(34, 197, 94, 0.05)' : 'rgba(245, 158, 11, 0.05)',
+                  background: reward.claimed ? theme.colors.successBg : theme.colors.warningBg,
                   borderRadius: '6px',
-                  borderLeft: `3px solid ${reward.claimed ? '#22c55e' : '#f59e0b'}`
+                  borderLeft: `3px solid ${reward.claimed ? theme.colors.success : theme.colors.warning}`
                 }}>
                                                     <div style={{
                     flex: '0 0 auto',
                     minWidth: '80px'
                   }}>
                                                         <Mono style={{
-                      color: reward.claimed ? '#22c55e' : '#f59e0b',
+                      color: reward.claimed ? theme.colors.success : theme.colors.warning,
                       fontWeight: 'bold',
                       fontSize: '0.85rem'
                     }}>
@@ -1222,7 +1212,7 @@ export default function StatsView() {
                                                         </UserLink>
                                                         <div style={{
                       fontSize: '0.7rem',
-                      color: '#888',
+                      color: theme.colors.muted,
                       marginTop: '0.15rem'
                     }}>
                                                             {reward.reason}
@@ -1231,12 +1221,12 @@ export default function StatsView() {
                                                     <div style={{
                     flex: '0 0 auto',
                     fontSize: '0.7rem',
-                    color: '#666',
+                    color: theme.colors.muted,
                     textAlign: 'right'
                   }}>
                                                         {formatDateShort(reward.created_at)}
                                                         {reward.claimed && <div style={{
-                      color: '#22c55e',
+                      color: theme.colors.success,
                       fontSize: '0.6rem'
                     }}>claimed</div>}
                                                     </div>
@@ -1245,9 +1235,9 @@ export default function StatsView() {
                                             {payoutsHasMore && <button onClick={() => fetchRewardHistory(payouts.length, true)} disabled={payoutsLoading} style={{
                   padding: '0.75rem',
                   background: 'transparent',
-                  border: '1px dashed #444',
+                  border: `1px dashed ${theme.colors.border}`,
                   borderRadius: '6px',
-                  color: '#888',
+                  color: theme.colors.muted,
                   cursor: payoutsLoading ? 'wait' : 'pointer',
                   fontSize: '0.8rem'
                 }}>

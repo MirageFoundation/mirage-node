@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
@@ -139,6 +139,7 @@ const Mono = styled.span`
 export default function BlocksView({
   state
 }) {
+  const theme = useTheme();
   const {
     navigate,
     location,
@@ -177,10 +178,10 @@ export default function BlocksView({
                             <SectionTitle $first>Blocked Topics</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Loading...</Mono>}
                                 {!listsLoading && !listsError && blockedTopics.length === 0 && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>No blocked topics.</Mono>}
                                 {!listsLoading && !listsError && blockedTopics.length > 0 && <PostsList>
                                         {blockedTopics.map(topic => {
@@ -210,10 +211,10 @@ export default function BlocksView({
                             <SectionTitle>Blocked Users</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Loading...</Mono>}
                                 {!listsLoading && !listsError && blockedUsers.length === 0 && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>No blocked users.</Mono>}
                                 {!listsLoading && !listsError && blockedUsers.length > 0 && <PostsList>
                                         {blockedUsers.map(userAddr => {
@@ -246,10 +247,10 @@ export default function BlocksView({
                             <SectionTitle>Blocked Posts</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>Loading...</Mono>}
                                 {!listsLoading && !listsError && blockedPosts.length === 0 && <Mono style={{
-                color: '#888'
+                color: theme.colors.muted
               }}>No blocked posts.</Mono>}
                                 {!listsLoading && !listsError && blockedPosts.length > 0 && <PostsList>
                                         {blockedPosts.map(postId => {

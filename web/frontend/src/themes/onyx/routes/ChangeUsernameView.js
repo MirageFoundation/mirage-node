@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Button from "../components/Button.js";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
@@ -120,8 +120,8 @@ const ButtonWrapper = styled.div`
     margin-top: 0.5rem;
 `;
 const WarningBox = styled.div`
-    background-color: rgba(245, 158, 11, 0.1);
-    border: 1px solid #f59e0b;
+    background-color: ${({ theme }) => theme.colors.warningBg};
+    border: 1px solid ${({ theme }) => theme.colors.warningBorder};
     padding: ${({
   theme
 }) => theme.layout.bannerPadding};
@@ -140,12 +140,12 @@ const WarningBox = styled.div`
     word-wrap: break-word;
     
     a {
-        color: #f59e0b;
+        color: ${({ theme }) => theme.colors.warning};
         text-decoration: underline;
         font-weight: 600;
         
         &:hover {
-            color: #fbbf24;
+            color: ${({ theme }) => theme.colors.warning};
         }
     }
 `;
@@ -161,7 +161,7 @@ const SuccessBox = styled.div`
 const SuccessTitle = styled.div`
     font-size: 1.5rem;
     font-weight: bold;
-    color: #4ade80;
+    color: ${({ theme }) => theme.colors.success};
     margin-bottom: 0.75rem;
 `;
 const SuccessText = styled.div`
@@ -197,6 +197,7 @@ function ChangeUsernameView({
   } = useChangeUsername({
     state
   });
+  const theme = useTheme();
   return <>
             <Helmet>
                 <title>Change Username | Mirage</title>
@@ -245,7 +246,7 @@ function ChangeUsernameView({
                                             </ButtonWrapper>
 
                                             {submitError && <div style={{
-                    color: '#f66',
+                    color: theme.colors.danger,
                     marginTop: '0.75rem',
                     fontSize: '0.8rem'
                   }}>{submitError}</div>}

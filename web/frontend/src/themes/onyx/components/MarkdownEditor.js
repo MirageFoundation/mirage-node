@@ -262,7 +262,7 @@ const IconLink = styled.span`
 	line-height: 1;
 	display: inline-block;
 	&::before {
-		content: "🔗";
+		content: "link";
 		font-size: var(--icon-font-size, 0.65rem);
 		display: block;
 	}
@@ -348,7 +348,7 @@ const IconTable = styled.span`
 
 const Area = styled.textarea`
 	border: 1px solid ${({ theme }) => theme.colors.border};
-	border-radius: 8px;
+	border-radius: 4px;
 	margin: 0;
 	background-color: ${({ theme }) => theme.colors.panelAlt};
 	color: ${({ theme }) => theme.colors.text};
@@ -362,14 +362,14 @@ const Area = styled.textarea`
 	box-sizing: border-box;
 	width: 100%;
 	max-width: 100%;
-	transition: all 0.2s ease;
+	transition: border-color 0.2s ease;
 	&:hover {
 		border-color: ${({ theme }) => theme.colors.subtleText};
 	}
 	&:focus {
 		outline: none;
-		border-color: #667eea;
-		box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+		border-color: ${({ theme }) => theme.colors.focusBorder};
+		box-shadow: ${({ theme }) => theme.layout.focusRing};
 	}
 	&:disabled {
 		opacity: 0.5;
@@ -388,7 +388,7 @@ const HelperRow = styled.div`
 
 const SmallText = styled.span`
 	font-size: 0.4rem;
-	color: #888;
+	color: ${({ theme }) => theme.colors.muted};
 	margin-top: -0.25rem;
 `;
 

@@ -114,23 +114,17 @@ const PickerButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease, opacity 0.15s ease;
     border: none;
     font-family: inherit;
     width: 32px;
     height: 32px;
     border-radius: 6px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    background: ${({ theme }) => theme.colors.accent};
+    color: ${({ theme }) => theme.colors.text};
 
     &:hover:not(:disabled) {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-        transform: translateY(-1px);
-    }
-
-    &:active:not(:disabled) {
-        transform: translateY(0);
+        background: ${({ theme }) => theme.colors.accentHover};
     }
 
     &:disabled {
@@ -149,8 +143,8 @@ const Popover = styled.div`
     z-index: 10100;
     background: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     width: 340px;
     height: 400px;
     display: flex;
@@ -183,19 +177,19 @@ const PackTab = styled.button`
     border-radius: 6px;
     border: none;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease;
     background: ${({ $active, theme }) =>
         $active
-            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-            : (theme.colors.panelAlt)};
-    color: ${({ $active }) => ($active ? '#fff' : '#aaa')};
+            ? theme.colors.accent
+            : theme.colors.panelAlt};
+    color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.textSecondary)};
 
     &:hover {
-        background: ${({ $active }) =>
+        background: ${({ $active, theme }) =>
             $active
-                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                : 'rgba(102, 126, 234, 0.2)'};
-        color: #fff;
+                ? theme.colors.accent
+                : theme.colors.accentSubtle};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -219,10 +213,10 @@ const StickerItem = styled.button`
     height: 56px;
     border: none;
     background: ${({ theme }) => theme.colors.panelAlt};
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
     padding: 4px;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease, background 0.15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -230,12 +224,8 @@ const StickerItem = styled.button`
     flex-shrink: 0;
 
     &:hover {
-        background: rgba(102, 126, 234, 0.25);
-        transform: scale(1.08);
-    }
-
-    &:active {
-        transform: scale(0.95);
+        background: ${({ theme }) => theme.colors.accentSubtle};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
     }
 
     img {
@@ -255,20 +245,19 @@ const CloseButton = styled.button`
     height: 24px;
     border-radius: 50%;
     border: none;
-    background: #dc2626;
-    color: #ffffff;
+    background: ${({ theme }) => theme.colors.danger};
+    color: ${({ theme }) => theme.colors.bg};
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 1rem;
     line-height: 1;
-    transition: all 0.15s ease;
+    transition: opacity 0.15s ease;
     z-index: 1;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 
     &:hover {
-        background: #b91c1c;
+        filter: brightness(0.85);
     }
 `;
 

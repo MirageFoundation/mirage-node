@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link, useParams } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
@@ -93,8 +93,8 @@ const Badge = styled.span`
     border-radius: ${({ theme }) => theme.layout.buttonRadius};
     font-size: ${({ theme }) => theme.layout.tinySize};
     font-weight: 600;
-    background: ${({ $real }) => $real ? '#2e7d3233' : '#78909c22'};
-    color: ${({ $real }) => $real ? '#66bb6a' : '#90a4ae'};
+    background: ${({ $real, theme }) => $real ? theme.colors.successBg : theme.colors.surface2};
+    color: ${({ $real, theme }) => $real ? theme.colors.success : theme.colors.muted};
 `;
 const EmptyState = styled.div`
     text-align: center;
@@ -152,6 +152,7 @@ const ChartLabel = styled.div`
 `;
 
 function ActiveChart({ history }) {
+    const theme = useTheme();
     if (!history || history.length < 2) {
         return <MutedNote>(chart available after more data is collected)</MutedNote>;
     }
@@ -170,12 +171,12 @@ function ActiveChart({ history }) {
     return <ChartWrapper>
         <ChartContainer>
             <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-                <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-                <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-                <text x={padding.left - 4} y={padding.top + 4} textAnchor="end" fill="#888" fontSize="9">{maxVal}</text>
-                <text x={padding.left - 4} y={height - padding.bottom + 4} textAnchor="end" fill="#888" fontSize="9">0</text>
-                <polygon points={areaPoints} fill="#667eea22" />
-                <polyline points={points} fill="none" stroke="#667eea" strokeWidth="2" />
+                <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke={theme.colors.border} strokeWidth="1" />
+                <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke={theme.colors.border} strokeWidth="1" />
+                <text x={padding.left - 4} y={padding.top + 4} textAnchor="end" fill={theme.colors.muted} fontSize="9">{maxVal}</text>
+                <text x={padding.left - 4} y={height - padding.bottom + 4} textAnchor="end" fill={theme.colors.muted} fontSize="9">0</text>
+                <polygon points={areaPoints} fill={theme.colors.accentSubtle} />
+                <polyline points={points} fill="none" stroke={theme.colors.accent} strokeWidth="2" />
             </ChartSvg>
         </ChartContainer>
         <ChartLabel>

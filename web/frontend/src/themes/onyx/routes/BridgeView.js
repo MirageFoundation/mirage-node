@@ -62,8 +62,10 @@ const StepNumber = styled.span`
 }) => theme.layout.containerRadius};
     background: ${({
     theme
-}) => theme.caps.flatMode ? theme.colors.panelAlt : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
-    color: #fff;
+}) => theme.colors.accent};
+    color: ${({
+    theme
+}) => theme.colors.text};
     font-size: ${({
     theme
 }) => theme.layout.tinySize};
@@ -88,7 +90,7 @@ const NetworkCard = styled.button`
     theme,
     $selected,
     $color
-}) => theme.caps.flatMode ? $selected ? theme.colors.panelAlt : theme.colors.panel : $selected ? `linear-gradient(135deg, ${$color}22 0%, ${$color}11 100%)` : theme.colors.panel};
+}) => $selected ? `${$color}22` : theme.colors.panel};
     border: 2px solid ${({
     $selected,
     $color,
@@ -101,7 +103,7 @@ const NetworkCard = styled.button`
     theme
 }) => theme.layout.cardPadding};
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease;
     text-align: left;
     position: relative;
     overflow: hidden;
@@ -116,27 +118,13 @@ const NetworkCard = styled.button`
         border-color: ${({
     $color
 }) => $color};
-        transform: ${({
-    theme
-}) => theme.caps.flatMode ? 'none' : 'translateY(-2px)'};
-        box-shadow: ${({
-    theme,
-    $color
-}) => theme.caps.flatMode ? 'none' : `0 4px 12px ${$color}33`};
     }
     
     &:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
-    
-    ${({
-    $selected,
-    $color,
-    theme
-}) => $selected && css`
-        box-shadow: ${theme.caps.flatMode ? 'none' : `0 0 0 1px ${$color}44, 0 4px 12px ${$color}22`};
-    `}
+
 `;
 const NetworkCardContent = styled.div`
     flex: 1;
@@ -215,7 +203,9 @@ const SelectedIndicator = styled.div`
     font-size: ${({
     theme
 }) => theme.layout.tinySize};
-    color: #fff;
+    color: ${({
+    theme
+}) => theme.colors.text};
     animation: ${fadeIn} 0.2s ease-out;
 `;
 const InputSection = styled.div`
@@ -247,7 +237,7 @@ const AmountInput = styled.input`
     border: 1px solid ${({
     theme,
     $error
-}) => $error ? '#f56565' : theme.colors.border};
+}) => $error ? theme.colors.danger : theme.colors.border};
     border-radius: ${({
     theme
 }) => theme.layout.inputRadius};
@@ -263,7 +253,7 @@ const AmountInput = styled.input`
     font-weight: 600;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     outline: none;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
     
     &::placeholder {
         color: ${({
@@ -276,7 +266,7 @@ const AmountInput = styled.input`
         border-color: ${({
     theme,
     $error
-}) => $error ? '#f56565' : theme.colors.link};
+}) => $error ? theme.colors.danger : theme.colors.link};
         box-shadow: ${({
     theme,
     $error
@@ -319,8 +309,10 @@ const MaxButton = styled.button`
 }) => theme.layout.inputRadius};
     background: ${({
     theme
-}) => theme.caps.flatMode ? theme.colors.link : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
-    color: #fff;
+}) => theme.colors.accent};
+    color: ${({
+    theme
+}) => theme.colors.text};
     font-size: ${({
     theme
 }) => theme.layout.tinySize};
@@ -328,16 +320,7 @@ const MaxButton = styled.button`
     text-transform: uppercase;
     letter-spacing: 0.05em;
     cursor: pointer;
-    transition: all 0.2s ease;
-    
-    &:hover {
-        transform: ${({
-    theme
-}) => theme.caps.flatMode ? 'none' : 'scale(1.05)'};
-        box-shadow: ${({
-    theme
-}) => theme.caps.flatMode ? 'none' : '0 2px 8px rgba(102, 126, 234, 0.4)'};
-    }
+    transition: background-color 0.2s ease;
 `;
 const AddressInput = styled.input`
     width: 100%;
@@ -347,7 +330,7 @@ const AddressInput = styled.input`
     border: 1px solid ${({
     theme,
     $error
-}) => $error ? '#f56565' : theme.colors.border};
+}) => $error ? theme.colors.danger : theme.colors.border};
     border-radius: ${({
     theme
 }) => theme.layout.inputRadius};
@@ -362,7 +345,7 @@ const AddressInput = styled.input`
 }) => theme.layout.inputSize};
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     outline: none;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
     
     &::placeholder {
         color: ${({
@@ -375,7 +358,7 @@ const AddressInput = styled.input`
         border-color: ${({
     theme,
     $error
-}) => $error ? '#f56565' : theme.colors.link};
+}) => $error ? theme.colors.danger : theme.colors.link};
         box-shadow: ${({
     theme,
     $error
@@ -383,7 +366,9 @@ const AddressInput = styled.input`
     }
 `;
 const ErrorText = styled.div`
-    color: #f56565;
+    color: ${({
+    theme
+}) => theme.colors.danger};
     font-size: ${({
     theme
 }) => theme.layout.smallSize};
@@ -395,9 +380,7 @@ const ErrorText = styled.div`
 const PreviewCard = styled.div`
     background: ${({
     theme
-}) => theme.caps.flatMode ? theme.colors.panelAlt : `linear-gradient(135deg, 
-        ${theme.colors.panelAlt} 0%, 
-        ${theme.colors.panel} 100%)`};
+}) => theme.colors.panelAlt};
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
@@ -475,9 +458,10 @@ const PreviewValue = styled.span`
     white-space: nowrap;
     
     ${({
-    $highlight
+    $highlight,
+    theme
 }) => $highlight && css`
-        color: #48bb78;
+        color: ${theme.colors.success};
         font-weight: 700;
     `}
 `;
@@ -503,15 +487,21 @@ const WarningBanner = styled.div`
     margin-bottom: ${({
     theme
 }) => theme.layout.sectionMarginBottom};
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: ${({
+    theme
+}) => theme.colors.warningBg};
+    border: 1px solid ${({
+    theme
+}) => theme.colors.warningBorder};
     border-radius: ${({
     theme
 }) => theme.layout.containerRadius};
     font-size: ${({
     theme
 }) => theme.layout.inputSize};
-    color: #f59e0b;
+    color: ${({
+    theme
+}) => theme.colors.warning};
     line-height: 1.5;
 `;
 const WarningIcon = styled.span`
@@ -570,12 +560,14 @@ const StatusBanner = styled.div`
 }) => theme.layout.sectionMarginBottom};
     background: ${({
     $success,
-    $error
-}) => $success ? 'rgba(72, 187, 120, 0.1)' : $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
+    $error,
+    theme
+}) => $success ? theme.colors.successBg : $error ? theme.colors.dangerBg : theme.colors.accentSubtle};
     border: 1px solid ${({
     $success,
-    $error
-}) => $success ? 'rgba(72, 187, 120, 0.3)' : $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
+    $error,
+    theme
+}) => $success ? theme.colors.successBorder : $error ? theme.colors.dangerBorder : theme.colors.focusBorder};
     border-radius: ${({
     theme
 }) => theme.layout.containerRadius};
@@ -584,8 +576,9 @@ const StatusBanner = styled.div`
 }) => theme.layout.monoSize};
     color: ${({
     $success,
-    $error
-}) => $success ? '#48bb78' : $error ? '#ef4444' : '#667eea'};
+    $error,
+    theme
+}) => $success ? theme.colors.success : $error ? theme.colors.danger : theme.colors.accent};
     font-weight: 500;
     animation: ${fadeIn} 0.3s ease-out;
 `;
@@ -637,15 +630,11 @@ const StepDot = styled.span`
     $state,
     theme
 }) => {
-        if ($state === 'complete') return '#48bb78';
-        if ($state === 'active') return '#667eea';
-        if ($state === 'error') return '#ef4444';
+        if ($state === 'complete') return theme.colors.success;
+        if ($state === 'active') return theme.colors.accent;
+        if ($state === 'error') return theme.colors.danger;
         return theme.colors.border;
     }};
-    box-shadow: ${({
-        $state,
-        theme
-    }) => theme.caps.flatMode || $state !== 'active' ? 'none' : '0 0 0 3px rgba(102, 126, 234, 0.2)'};
 `;
 const StepText = styled.div`
     display: flex;
@@ -890,7 +879,7 @@ const BalanceComparisonValue = styled.span`
     theme,
     $highlight,
     $dim
-}) => $highlight ? '#48bb78' : $dim ? theme.colors.subtleText : theme.colors.text};
+}) => $highlight ? theme.colors.success : $dim ? theme.colors.subtleText : theme.colors.text};
 `;
 
 // Derived address display
@@ -1016,28 +1005,29 @@ const SolanaWalletButton = styled.button`
     padding: ${({
     theme
 }) => theme.layout.bannerPadding};
-    border: 2px solid #14F195;
+    border: 2px solid ${({
+    theme
+}) => theme.colors.success};
     border-radius: ${({
     theme
 }) => theme.layout.containerRadius};
     background: ${({
     theme
-}) => theme.caps.flatMode ? theme.colors.panelAlt : 'rgba(20, 241, 149, 0.1)'};
-    color: #14F195;
+}) => theme.colors.successBg};
+    color: ${({
+    theme
+}) => theme.colors.success};
     font-size: ${({
     theme
 }) => theme.layout.sectionSize};
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
     
     &:hover:not(:disabled) {
         background: ${({
     theme
-}) => theme.caps.flatMode ? theme.colors.panelAlt : 'rgba(20, 241, 149, 0.2)'};
-        transform: ${({
-    theme
-}) => theme.caps.flatMode ? 'none' : 'translateY(-1px)'};
+}) => theme.colors.successBg};
     }
     
     &:disabled {
@@ -1054,7 +1044,9 @@ const ConnectedWalletBox = styled.div`
     background: ${({
     theme
 }) => theme.colors.panelAlt};
-    border: 1px solid #14F195;
+    border: 1px solid ${({
+    theme
+}) => theme.colors.success};
     border-radius: ${({
     theme
 }) => theme.layout.containerRadius};
@@ -1090,7 +1082,9 @@ const DisconnectButton = styled.button`
     padding: 0.25rem 0.5rem;
     
     &:hover {
-        color: #f56565;
+        color: ${({
+    theme
+}) => theme.colors.danger};
     }
 `;
 
@@ -1215,13 +1209,13 @@ function SolanaBridgeInFlow({
                 {bridgeStatus === 'error' && bridgeError && <StatusBanner $error style={{
                     marginTop: '0.75rem'
                 }}>
-                    ✗ {bridgeError}
+                    Error: {bridgeError}
                 </StatusBanner>}
 
                 {bridgeStatus === 'complete' && <StatusBanner $success style={{
                     marginTop: '0.75rem'
                 }}>
-                    ✓ Bridge complete! {bridgeAmount ? `${bridgeAmount} ` : ''}MIRAGE minted to your address.
+                    Bridge complete! {bridgeAmount ? `${bridgeAmount} ` : ''}MIRAGE minted to your address.
                 </StatusBanner>}
             </StepsCard>
 
@@ -1270,7 +1264,7 @@ function SolanaBridgeInFlow({
                 paddingBottom: '2rem'
             }}>
                 <Button variant="primary" fullWidth disabled={mintStatus.state !== 'minted' && mintStatus.state !== 'error' && mintStatus.state !== 'timeout' && bridgeStatus !== 'error'} onClick={handleNewBridge} style={{
-                    background: 'linear-gradient(135deg, #14F195 0%, #0ea66e 100%)'
+                    background: theme.colors.success
                 }}>
                     {mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout' || bridgeStatus === 'error' ? 'Start New Bridge' : 'Bridging...'}
                 </Button>
@@ -1291,13 +1285,13 @@ function SolanaBridgeInFlow({
                 gap: '0.5rem',
                 padding: '0.5rem 0.75rem',
                 marginBottom: '0.75rem',
-                background: 'rgba(20, 241, 149, 0.1)',
-                borderRadius: '0.5rem',
-                border: '1px solid rgba(20, 241, 149, 0.3)',
+                background: theme.colors.successBg,
+                borderRadius: '6px',
+                border: `1px solid ${theme.colors.successBorder}`,
                 fontSize: '0.8rem'
             }}>
                 <span style={{
-                    color: '#14F195',
+                    color: theme.colors.success,
                     fontWeight: 600
                 }}>
                     {solanaCluster.toUpperCase()}
@@ -1315,7 +1309,7 @@ function SolanaBridgeInFlow({
                 </SolanaWalletButton>
                 {bridgeError && bridgeStatus === 'idle' && <ErrorText style={{
                     marginTop: '0.5rem'
-                }}>⚠ {bridgeError}</ErrorText>}
+                }}>{bridgeError}</ErrorText>}
             </> : <ConnectedWalletBox>
                 <WalletRow>
                     <div style={{
@@ -1352,9 +1346,9 @@ function SolanaBridgeInFlow({
                         alignItems: 'center',
                         gap: '0.4rem',
                         padding: '0.35rem 0.6rem',
-                        background: 'rgba(20, 241, 149, 0.1)',
+                        background: theme.colors.successBg,
                         borderRadius: '6px',
-                        border: '1px solid rgba(20, 241, 149, 0.3)'
+                        border: `1px solid ${theme.colors.successBorder}`
                     }}>
                         <span style={{
                             fontSize: '0.9rem',
@@ -1374,9 +1368,9 @@ function SolanaBridgeInFlow({
                         alignItems: 'center',
                         gap: '0.4rem',
                         padding: '0.35rem 0.6rem',
-                        background: 'rgba(20, 241, 149, 0.1)',
+                        background: theme.colors.successBg,
                         borderRadius: '6px',
-                        border: '1px solid rgba(20, 241, 149, 0.3)'
+                        border: `1px solid ${theme.colors.successBorder}`
                     }}>
                         <span style={{
                             fontSize: '0.9rem',
@@ -1398,10 +1392,10 @@ function SolanaBridgeInFlow({
                 {solanaWallet.mirageBalance === 0 && solanaCluster !== 'mainnet' && <div style={{
                     marginTop: '0.5rem',
                     padding: '0.5rem',
-                    background: 'rgba(245, 158, 11, 0.1)',
+                    background: theme.colors.warningBg,
                     borderRadius: '0.25rem',
                     fontSize: '0.75rem',
-                    color: '#f59e0b'
+                    color: theme.colors.warning
                 }}>
                     No MIRAGE tokens found. Make sure Phantom is set to {solanaCluster}.
                 </div>}
@@ -1444,7 +1438,7 @@ function SolanaBridgeInFlow({
                     </MaxButton>}
                     <AmountSuffix>MIRAGE</AmountSuffix>
                 </InputWrapper>
-                {amountError && <ErrorText>⚠ {amountError}</ErrorText>}
+                {amountError && <ErrorText>{amountError}</ErrorText>}
             </InputSection>
 
             {/* Step 4: Destination */}
@@ -1478,7 +1472,7 @@ function SolanaBridgeInFlow({
             {amount && parseFloat(amount.replace(/,/g, '')) > 0 && <PreviewCard>
                 <PreviewHeader>
                     <PreviewTitle>Summary</PreviewTitle>
-                    <PreviewNetwork $color="#14F195">
+                    <PreviewNetwork $color={theme.colors.success}>
                         <img src="/images/bridges/solana.svg" alt="" style={{
                             width: '1.25rem',
                             height: '1.25rem'
@@ -1507,7 +1501,7 @@ function SolanaBridgeInFlow({
                 paddingBottom: '1rem'
             }}>
                 <Button variant="primary" fullWidth disabled={!canBridge} onClick={handleBridge} style={{
-                    background: 'linear-gradient(135deg, #14F195 0%, #0ea66e 100%)'
+                    background: theme.colors.success
                 }}>
                     {!amount || parseFloat(amount) <= 0 ? 'Enter Amount' : `Bridge ${amount} MIRAGE`}
                 </Button>
@@ -1547,7 +1541,7 @@ function BridgeInPanel({
         return <BridgeContainer>
             <BridgeLayout>
                 <InfoBanner>
-                    <InfoIcon>ℹ️</InfoIcon>
+                    <InfoIcon>i</InfoIcon>
                     <span>Sign in to bridge MIRAGE tokens from other networks.</span>
                 </InfoBanner>
             </BridgeLayout>
@@ -1573,9 +1567,7 @@ function BridgeInPanel({
                             </NetworkMeta>
                         </NetworkCardContent>
                         <NetworkIcon src={network.icon} alt={network.name} />
-                        {selectedSource?.id === network.id && <SelectedIndicator $color={network.color}>
-                            ✓
-                        </SelectedIndicator>}
+                        {selectedSource?.id === network.id && <SelectedIndicator $color={network.color} />}
                     </NetworkCard>)}
                 </NetworkGrid>
             </>}
@@ -1585,7 +1577,7 @@ function BridgeInPanel({
 
             {/* Info when no source selected */}
             {!selectedSource && <InfoBanner>
-                <InfoIcon>ℹ️</InfoIcon>
+                <InfoIcon>i</InfoIcon>
                 <span>
                     Select a source chain above to see instructions for bridging MIRAGE tokens to your Mirage wallet.
                 </span>
@@ -1671,7 +1663,7 @@ export default function BridgeView({
                     </TabsRow>
                     <ContainerBody>
                         {activeTab === 'out' && (!address ? <InfoBanner>
-                            <InfoIcon>ℹ️</InfoIcon>
+                            <InfoIcon>i</InfoIcon>
                             <span>Sign in to bridge MIRAGE tokens to other networks.</span>
                         </InfoBanner> : submitStage !== 'idle' ?
                             // Progress Screen - shown when bridge is in progress
@@ -1752,17 +1744,17 @@ export default function BridgeView({
                                     {submitStage === 'error' && submitError && <StatusBanner $error style={{
                                         marginTop: '0.75rem'
                                     }}>
-                                        ✗ {submitError}
+                                        Error: {submitError}
                                     </StatusBanner>}
                                     {isSolanaBridge && mintStatus.state === 'minted' && <StatusBanner $success style={{
                                         marginTop: '0.75rem'
                                     }}>
-                                        ✓ Bridge complete! {bridgeOutAmount && bridgeFee !== null ? `${(parseFloat(bridgeOutAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
+                                        Bridge complete! {bridgeOutAmount && bridgeFee !== null ? `${(parseFloat(bridgeOutAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
                                     </StatusBanner>}
                                     {!isSolanaBridge && submitStage === 'confirmed' && <StatusBanner $success style={{
                                         marginTop: '0.75rem'
                                     }}>
-                                        ✓ Bridge complete! {bridgeOutAmount && bridgeFee !== null ? `${(parseFloat(bridgeOutAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {bridgeOutNetwork?.name || selectedNetwork?.name || 'destination'}.
+                                        Bridge complete! {bridgeOutAmount && bridgeFee !== null ? `${(parseFloat(bridgeOutAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {bridgeOutNetwork?.name || selectedNetwork?.name || 'destination'}.
                                     </StatusBanner>}
                                 </StepsCard>
 
@@ -1813,7 +1805,7 @@ export default function BridgeView({
                                     <Button variant="primary" fullWidth disabled={
                                         // For Solana: wait for mint to complete (or error/timeout)
                                         isSolanaBridge ? mintStatus.state !== 'minted' && mintStatus.state !== 'error' && mintStatus.state !== 'timeout' : submitStage !== 'confirmed' && submitStage !== 'error'} onClick={handleNewBridge} style={bridgeOutNetwork || selectedNetwork ? {
-                                            background: `linear-gradient(135deg, ${(bridgeOutNetwork || selectedNetwork).color} 0%, ${(bridgeOutNetwork || selectedNetwork).color}CC 100%)`
+                                            background: (bridgeOutNetwork || selectedNetwork).color
                                         } : {}}>
                                         {(isSolanaBridge ? mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout' : submitStage === 'confirmed' || submitStage === 'error') ? 'Start New Bridge' : 'Bridging...'}
                                     </Button>
@@ -1836,9 +1828,7 @@ export default function BridgeView({
                                                 </NetworkMeta>
                                             </NetworkCardContent>
                                             <NetworkIcon src={network.icon} alt={network.name} />
-                                            {selectedNetwork?.id === network.id && <SelectedIndicator $color={network.color}>
-                                                ✓
-                                            </SelectedIndicator>}
+                                            {selectedNetwork?.id === network.id && <SelectedIndicator $color={network.color} />}
                                         </NetworkCard>)}
                                     </NetworkGrid>
 
@@ -1865,7 +1855,7 @@ export default function BridgeView({
                                             </MaxButton>
                                             <AmountSuffix>MIRAGE</AmountSuffix>
                                         </InputWrapper>
-                                        {errors.amount && <ErrorText>⚠ {errors.amount}</ErrorText>}
+                                        {errors.amount && <ErrorText>{errors.amount}</ErrorText>}
                                     </InputSection>
 
                                     {/* Step 3: Destination Address */}
@@ -1881,7 +1871,7 @@ export default function BridgeView({
                                         {selectedNetwork?.canDerive ? <>
                                             {!useDifferentAddress ? <>
                                                 <AddressExplanation>
-                                                    <ExplanationIcon>💡</ExplanationIcon>
+                                                    <ExplanationIcon>Note:</ExplanationIcon>
                                                     <span>
                                                         Your Mirage wallet key works on {selectedNetwork.name}.
                                                         Tokens will arrive at your {selectedNetwork.name} address below.
@@ -1899,7 +1889,7 @@ export default function BridgeView({
                                                     {selectedNetwork.name} Address
                                                 </InputLabel>
                                                 <AddressInput type="text" placeholder={`${selectedNetwork.addressPrefix}1...`} value={destinationAddress} onChange={handleAddressChange} $error={!!errors.address} disabled={inputsDisabled} />
-                                                {errors.address && <ErrorText>⚠ {errors.address}</ErrorText>}
+                                                {errors.address && <ErrorText>{errors.address}</ErrorText>}
                                                 <DifferentAddressToggle type="button" onClick={() => {
                                                     setUseDifferentAddress(false);
                                                     setDestinationAddress('');
@@ -1917,7 +1907,7 @@ export default function BridgeView({
                                                     {selectedNetwork ? `${selectedNetwork.name} Address` : 'Recipient Address'}
                                                 </InputLabel>
                                                 <AddressInput type="text" placeholder={selectedNetwork?.id === 'solana' ? 'Enter your Solana wallet address' : 'Select a network first'} value={destinationAddress} onChange={handleAddressChange} $error={!!errors.address} disabled={!selectedNetwork || inputsDisabled} />
-                                                {errors.address && <ErrorText>⚠ {errors.address}</ErrorText>}
+                                                {errors.address && <ErrorText>{errors.address}</ErrorText>}
                                             </>)}
                                     </InputSection>
 
@@ -1954,7 +1944,7 @@ export default function BridgeView({
 
                                     {/* Warning */}
                                     <WarningBanner>
-                                        <WarningIcon>⚠️</WarningIcon>
+                                        <WarningIcon>!</WarningIcon>
                                         <span>
                                             Cross-chain transfers are irreversible. Double-check the destination
                                             address before proceeding.
@@ -1964,7 +1954,7 @@ export default function BridgeView({
                                     {/* Submit */}
                                     <SubmitSection>
                                         <Button variant="primary" fullWidth disabled={!canSubmit} onClick={handleSubmit} style={selectedNetwork ? {
-                                            background: `linear-gradient(135deg, ${selectedNetwork.color} 0%, ${selectedNetwork.color}CC 100%)`
+                                            background: selectedNetwork.color
                                         } : {}}>
                                             {!selectedNetwork ? 'Select Network' : !amount || parseFloat(amount) <= 0 ? 'Enter Amount' : !hasValidDestination ? 'Enter Address' : `Bridge to ${selectedNetwork.name}`}
                                         </Button>

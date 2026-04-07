@@ -28,7 +28,7 @@ const AgentCard = styled.div`
     background-color: ${({
   theme
 }) => theme.colors.panelAlt};
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.75rem 1rem;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 
@@ -110,12 +110,12 @@ const EmptyMessage = styled.div`
     padding: 1rem 0;
 `;
 const ErrorMessage = styled.div`
-    color: #f87171;
+    color: ${({ theme }) => theme.colors.danger};
     font-size: 0.75rem;
     padding: 0.5rem 0.75rem;
     margin-bottom: 0.5rem;
-    background: rgba(248, 113, 113, 0.1);
-    border: 1px solid rgba(248, 113, 113, 0.25);
+    background: ${({ theme }) => theme.colors.dangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.dangerBorder};
     border-radius: 6px;
 `;
 const OrderControls = styled.div`
@@ -141,7 +141,7 @@ const OrderButton = styled.button`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
     &:hover:not(:disabled) {
         background: ${({

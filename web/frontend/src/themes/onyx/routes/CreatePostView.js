@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Sidebar from "../components/Sidebar.js";
@@ -94,7 +94,7 @@ const StyledInputBox = styled.input`
     width: 100%;
     max-width: 100%;
     pointer-events: auto !important;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
     outline: none;
 
     &:hover {
@@ -103,7 +103,9 @@ const StyledInputBox = styled.input`
 }) => theme.colors.subtleText};
     }
     &:focus {
-        border-color: #667eea;
+        border-color: ${({
+    theme
+}) => theme.colors.focusBorder};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -142,7 +144,7 @@ const StyledSelect = styled.select`
     width: 100%;
     max-width: 100%;
     pointer-events: auto !important;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
     outline: none;
 
     &:hover {
@@ -151,7 +153,9 @@ const StyledSelect = styled.select`
 }) => theme.colors.subtleText};
     }
     &:focus {
-        border-color: #667eea;
+        border-color: ${({
+    theme
+}) => theme.colors.focusBorder};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -172,22 +176,22 @@ const ContentActionsRow = styled.div`
 `;
 const ContentCounter = styled.span`
     font-size: 0.45rem;
-    color: ${props => props.$warn ? '#ff6b6b' : '#888'};
+    color: ${({ $warn, theme }) => $warn ? theme.colors.danger : theme.colors.muted};
     margin-left: 0.15rem;
     margin-top: -0.05rem;
 `;
 const GlobalDropOverlay = styled.div`
     position: absolute;
     inset: 0;
-    border: 2px dashed #667eea;
-    border-radius: 12px;
-    background-color: rgba(102, 126, 234, 0.15);
+    border: 2px dashed ${({ theme }) => theme.colors.focusBorder};
+    border-radius: 6px;
+    background-color: ${({ theme }) => theme.colors.accentSubtle};
     display: flex;
     align-items: center;
     justify-content: center;
     pointer-events: none;
     z-index: 5;
-    color: #667eea;
+    color: ${({ theme }) => theme.colors.accent};
     font-size: 0.9rem;
     font-weight: 600;
 `;
@@ -214,12 +218,12 @@ const Mono = styled.span`
     overflow-wrap: anywhere;
 `;
 const ErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
+    background-color: ${({ theme }) => theme.colors.dangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.danger};
     border-radius: 6px;
     padding: 0.5rem 0.75rem;
     margin-top: 0.5rem;
-    color: #dc2626;
+    color: ${({ theme }) => theme.colors.danger};
     font-size: 0.8rem;
     display: flex;
     align-items: center;
@@ -230,7 +234,7 @@ const CharCounter = styled.span`
     color: ${({
     $warn,
     theme
-}) => $warn ? '#ff6b6b' : '#888'};
+}) => $warn ? theme.colors.danger : theme.colors.muted};
     margin-left: 0.15rem;
     margin-top: 0.15rem;    
 `;
@@ -244,7 +248,7 @@ const TagToggle = styled.label`
 }) => theme.colors.text};
 
     input {
-        accent-color: #667eea;
+        accent-color: ${({ theme }) => theme.colors.accent};
         width: 1rem;
         height: 1rem;
     }
@@ -301,6 +305,7 @@ function CreatePostView({
         setPosts,
         updatePost
     });
+    const theme = useTheme();
     return <ContentGrid>
         <Helmet>
             <title>{isEditMode ? 'Edit Post' : 'Create Post'} | Mirage</title>
@@ -460,7 +465,7 @@ function CreatePostView({
                                     </MediaIconButton>
                                     {attachedMedia.length > 0 && <span style={{
                                         fontSize: '0.65rem',
-                                        color: '#888'
+                                        color: theme.colors.muted
                                     }}>
                                         {attachedMedia.length}/{MAX_MEDIA}
                                     </span>}
@@ -499,7 +504,7 @@ function CreatePostView({
                                         }}>
                                             <span style={{
                                                 fontSize: '0.7rem',
-                                                color: '#888',
+                                                color: theme.colors.muted,
                                                 marginBottom: '0.25rem'
                                             }}>
                                                 Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '...'}

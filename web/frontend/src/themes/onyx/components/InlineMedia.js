@@ -400,7 +400,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
             const match = u.pathname.match(/^\/?([^/]+)/);
             videoUid = match ? match[1] : null;
             if (!videoUid) {
-                return <div style={{ padding: '1rem', background: '#222', borderRadius: '4px', color: '#fff' }}>Invalid video URL</div>;
+                return <div style={{ padding: '1rem', background: theme.colors.panelAlt, borderRadius: '4px', color: theme.colors.text }}>Invalid video URL</div>;
             }
 
             return (
@@ -425,7 +425,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                         <div style={{
                             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'rgba(0,0,0,0.7)', color: '#fff', zIndex: 10,
+                            background: theme.colors.overlay, color: theme.colors.text, zIndex: 10,
                             fontSize: '0.9rem', pointerEvents: 'none'
                         }}>
                             Video is still processing...
@@ -440,7 +440,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                         autoPlay={autoPlay}
                         muted={autoPlay}
                         loop={autoPlay}
-                        style={{ width: '100%', height: '100%', backgroundColor: '#000', display: 'block' }}
+                        style={{ width: '100%', height: '100%', backgroundColor: theme.colors.bg, display: 'block' }}
                         onLoadedMetadata={(e) => {
                             if (!mountedRef.current) return;
                             setNaturalWidth(e.currentTarget.videoWidth);

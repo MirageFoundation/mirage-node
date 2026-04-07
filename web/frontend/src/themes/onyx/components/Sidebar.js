@@ -10,11 +10,10 @@ const SidebarContainer = styled.div`
     width: 210px;
     background: ${({ theme }) => theme.colors.sidebarBg };
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.75rem;
     height: fit-content;
     margin: 1.75rem 0rem 0 -0.25rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 
     @media (max-width: 1000px) {
         display: none;
@@ -36,37 +35,6 @@ const Logo = styled(Link)`
     letter-spacing: 0.05em;
     text-decoration: none;
     display: block;
-    ${({ theme }) => theme.name !== 'light' && `
-        animation: glowWander 8s ease-in-out infinite;
-    `}
-
-    @keyframes glowWander {
-        0% {
-            text-shadow: 
-                0 0 12px rgba(255, 255, 255, 0.4),
-                6px 2px 15px rgba(255, 255, 255, 0.25);
-        }
-        25% {
-            text-shadow: 
-                0 0 14px rgba(255, 255, 255, 0.35),
-                -4px 4px 12px rgba(255, 255, 255, 0.2);
-        }
-        50% {
-            text-shadow: 
-                0 0 10px rgba(255, 255, 255, 0.45),
-                -6px -2px 15px rgba(255, 255, 255, 0.25);
-        }
-        75% {
-            text-shadow: 
-                0 0 13px rgba(255, 255, 255, 0.38),
-                4px -4px 12px rgba(255, 255, 255, 0.2);
-        }
-        100% {
-            text-shadow: 
-                0 0 12px rgba(255, 255, 255, 0.4),
-                6px 2px 15px rgba(255, 255, 255, 0.25);
-        }
-    }
 
     &:hover {
         color: ${({ theme }) => theme.colors.text};
@@ -85,7 +53,7 @@ const NavItem = styled(Link)`
     color: ${({ theme }) => theme.colors.text};
     font-weight: 500;
     font-size: 0.75rem;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease;
     margin-bottom: 0.04rem;
 
     &:hover {
@@ -123,7 +91,7 @@ const TopicItem = styled(Link)`
     text-decoration: none;
     color: ${({ theme }) => theme.colors.text};
     font-size: 0.7rem;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease;
     margin-bottom: 0.02rem;
     white-space: nowrap;
     overflow: hidden;
@@ -141,7 +109,7 @@ const UserItem = styled(Link)`
     border-radius: 3px;
     text-decoration: none;
     color: ${({ theme }) => theme.colors.text};
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease;
     margin-bottom: 0.04rem;
     font-size: 0.7rem;
     overflow: hidden;
@@ -165,7 +133,7 @@ const ToggleButton = styled.button`
     margin-left: 0.3rem;
     padding: 0.2rem 0.5rem;
     border: none;
-    border-radius: 10px;
+    border-radius: 4px;
     background: ${({ theme }) => theme.colors.panelAlt};
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.6rem;
@@ -176,7 +144,7 @@ const ToggleButton = styled.button`
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease;
     
     &:hover {
         background: ${({ theme }) => theme.colors.accent};

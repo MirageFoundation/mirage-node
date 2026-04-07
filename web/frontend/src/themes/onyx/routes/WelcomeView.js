@@ -106,8 +106,7 @@ const WarningBox = styled.div`
         font-size: 0.85rem;
         
         &:before {
-            content: "⚠️ ";
-            margin-right: 0.2rem;
+            content: "";
         }
     }
 `;

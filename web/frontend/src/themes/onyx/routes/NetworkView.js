@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
@@ -132,7 +132,7 @@ const PeerLink = styled.a`
     font-size: 0.85rem;
     font-weight: 500;
     transition: color 0.2s ease;
-    &:hover { color: #667eea; }
+    &:hover { color: ${({ theme }) => theme.colors.accent}; }
 `;
 const PeerIp = styled.span`
     color: ${({
@@ -180,7 +180,7 @@ const AccountName = styled.a`
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    &:hover { color: #667eea; }
+    &:hover { color: ${({ theme }) => theme.colors.accent}; }
 `;
 const AccountBalance = styled.span`
     color: ${({
@@ -235,26 +235,28 @@ const LegendDot = styled.span`
 
 // Shared SVG grid (left axis, bottom axis, right axis)
 function ChartGrid() {
+  const theme = useTheme();
   const {
     width,
     height,
     padding
   } = CHART;
   return <>
-            <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-            <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-            <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+            <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke={theme.colors.border} strokeWidth="1" />
+            <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke={theme.colors.border} strokeWidth="1" />
+            <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={height - padding.bottom} stroke={theme.colors.border} strokeWidth="1" />
         </>;
 }
 function DifficultyChart({
   history
 }) {
+  const theme = useTheme();
   if (!history || history.length < 2) {
     return <ChartWrapper>
                 <ChartContainer>
                     <Mono style={{
           fontSize: '0.75rem',
-          color: '#888'
+          color: theme.colors.muted
         }}>
                         (chart available after more data is collected)
                     </Mono>
@@ -298,29 +300,29 @@ function DifficultyChart({
   const hoursAgo = Math.round((Date.now() / 1000 - minTs) / 3600);
   return <ChartWrapper>
             <ChartLegend>
-                <LegendItem><LegendDot color="#667eea" /> Difficulty</LegendItem>
-                <LegendItem><LegendDot color="#48bb78" /> Msgs/Window</LegendItem>
+                <LegendItem><LegendDot color={theme.colors.accent} /> Difficulty</LegendItem>
+                <LegendItem><LegendDot color={theme.colors.success} /> Msgs/Window</LegendItem>
             </ChartLegend>
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
                     <ChartGrid />
 
                     {/* Left Y-axis labels (Difficulty - blue) */}
-                    <text x={padding.left - 4} y={padding.top - 4} fill="#667eea" fontSize="8" textAnchor="end">{maxDiff}</text>
-                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#667eea" fontSize="8" textAnchor="end">{minDiff}</text>
+                    <text x={padding.left - 4} y={padding.top - 4} fill={theme.colors.accent} fontSize="8" textAnchor="end">{maxDiff}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill={theme.colors.accent} fontSize="8" textAnchor="end">{minDiff}</text>
 
                     {/* Right Y-axis labels (Msgs - green, just inside right axis) */}
-                    <text x={width - padding.right - 2} y={padding.top - 4} fill="#48bb78" fontSize="8" textAnchor="end">{maxMsg}</text>
-                    <text x={width - padding.right - 2} y={height - padding.bottom + 8} fill="#48bb78" fontSize="8" textAnchor="end">0</text>
+                    <text x={width - padding.right - 2} y={padding.top - 4} fill={theme.colors.success} fontSize="8" textAnchor="end">{maxMsg}</text>
+                    <text x={width - padding.right - 2} y={height - padding.bottom + 8} fill={theme.colors.success} fontSize="8" textAnchor="end">0</text>
 
                     {/* Message count area fill (green, behind) */}
-                    <polygon fill="rgba(72, 187, 120, 0.15)" points={`${padding.left},${height - padding.bottom} ${msgPoints} ${width - padding.right},${height - padding.bottom}`} />
+                    <polygon fill={theme.colors.successBg} points={`${padding.left},${height - padding.bottom} ${msgPoints} ${width - padding.right},${height - padding.bottom}`} />
 
                     {/* Message count line (green) */}
-                    <polyline fill="none" stroke="#48bb78" strokeWidth="1.5" points={msgPoints} />
+                    <polyline fill="none" stroke={theme.colors.success} strokeWidth="1.5" points={msgPoints} />
 
                     {/* Difficulty line (blue, on top) */}
-                    <polyline fill="none" stroke="#667eea" strokeWidth="2" points={diffPoints} />
+                    <polyline fill="none" stroke={theme.colors.accent} strokeWidth="2" points={diffPoints} />
                 </ChartSvg>
             </ChartContainer>
             <ChartLabel>
@@ -332,12 +334,13 @@ function DifficultyChart({
 function BurnMintChart({
   history
 }) {
+  const theme = useTheme();
   if (!history || history.length < 2) {
     return <ChartWrapper>
                 <ChartContainer>
                     <Mono style={{
           fontSize: '0.75rem',
-          color: '#888'
+          color: theme.colors.muted
         }}>
                         (chart available after more data is collected)
                     </Mono>
@@ -384,18 +387,18 @@ function BurnMintChart({
   const end = `${width - padding.right},${height - padding.bottom}`;
   return <ChartWrapper>
             <ChartLegend>
-                <LegendItem><LegendDot color="#48bb78" /> Minted ({fmtMirage(totalMinted)})</LegendItem>
-                <LegendItem><LegendDot color="#f56565" /> Burned ({fmtMirage(totalBurned)})</LegendItem>
+                <LegendItem><LegendDot color={theme.colors.success} /> Minted ({fmtMirage(totalMinted)})</LegendItem>
+                <LegendItem><LegendDot color={theme.colors.danger} /> Burned ({fmtMirage(totalBurned)})</LegendItem>
             </ChartLegend>
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
                     <ChartGrid />
-                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
-                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">0</text>
-                    <polygon fill="rgba(72, 187, 120, 0.15)" points={`${base} ${mintedPts} ${end}`} />
-                    <polygon fill="rgba(245, 101, 101, 0.15)" points={`${base} ${burnedPts} ${end}`} />
-                    <polyline fill="none" stroke="#48bb78" strokeWidth="1.5" points={mintedPts} />
-                    <polyline fill="none" stroke="#f56565" strokeWidth="1.5" points={burnedPts} />
+                    <text x={padding.left - 4} y={padding.top - 4} fill={theme.colors.muted} fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill={theme.colors.muted} fontSize="8" textAnchor="end">0</text>
+                    <polygon fill={theme.colors.successBg} points={`${base} ${mintedPts} ${end}`} />
+                    <polygon fill={theme.colors.dangerBg} points={`${base} ${burnedPts} ${end}`} />
+                    <polyline fill="none" stroke={theme.colors.success} strokeWidth="1.5" points={mintedPts} />
+                    <polyline fill="none" stroke={theme.colors.danger} strokeWidth="1.5" points={burnedPts} />
                 </ChartSvg>
             </ChartContainer>
             <ChartLabel>
@@ -407,12 +410,13 @@ function BurnMintChart({
 function SupplyChart({
   history
 }) {
+  const theme = useTheme();
   if (!history || history.length < 2) {
     return <ChartWrapper>
                 <ChartContainer>
                     <Mono style={{
           fontSize: '0.75rem',
-          color: '#888'
+          color: theme.colors.muted
         }}>
                         (chart available after more data is collected)
                     </Mono>
@@ -442,8 +446,8 @@ function SupplyChart({
     return `${x},${y}`;
   }).join(' ');
   const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
-  const color = delta >= 0 ? '#48bb78' : '#f56565';
-  const fill = delta >= 0 ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 101, 101, 0.15)';
+  const color = delta >= 0 ? theme.colors.success : theme.colors.danger;
+  const fill = delta >= 0 ? theme.colors.successBg : theme.colors.dangerBg;
 
   // Y-axis labels: pick a unit where top != bottom label
   const fmtAxis = v => {
@@ -476,8 +480,8 @@ function SupplyChart({
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
                     <ChartGrid />
-                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(maxS)}</text>
-                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(minS)}</text>
+                    <text x={padding.left - 4} y={padding.top - 4} fill={theme.colors.muted} fontSize="8" textAnchor="end">{fmtAxis(maxS)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill={theme.colors.muted} fontSize="8" textAnchor="end">{fmtAxis(minS)}</text>
                     <polygon fill={fill} points={`${base} ${pts} ${end}`} />
                     <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
                 </ChartSvg>
@@ -491,14 +495,14 @@ function SupplyChart({
 function NodeBalanceChart({
   history
 }) {
-  // Filter to entries that have node_balance recorded
+  const theme = useTheme();
   const data = (history || []).filter(h => h.node_balance != null);
   if (data.length < 2) {
     return <ChartWrapper>
                 <ChartContainer>
                     <Mono style={{
           fontSize: '0.75rem',
-          color: '#888'
+          color: theme.colors.muted
         }}>
                         (collecting node balance data...)
                     </Mono>
@@ -525,8 +529,8 @@ function NodeBalanceChart({
     return `${x},${y}`;
   }).join(' ');
   const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
-  const color = delta >= 0 ? '#48bb78' : '#f56565';
-  const fill = delta >= 0 ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 101, 101, 0.15)';
+  const color = delta >= 0 ? theme.colors.success : theme.colors.danger;
+  const fill = delta >= 0 ? theme.colors.successBg : theme.colors.dangerBg;
   const fmtAxis = v => {
     if (Math.abs(v) >= 1e9) return (v / 1e9).toFixed(2) + 'B';
     if (Math.abs(v) >= 1e6) {
@@ -547,8 +551,8 @@ function NodeBalanceChart({
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
                     <ChartGrid />
-                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(maxB)}</text>
-                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(minB)}</text>
+                    <text x={padding.left - 4} y={padding.top - 4} fill={theme.colors.muted} fontSize="8" textAnchor="end">{fmtAxis(maxB)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill={theme.colors.muted} fontSize="8" textAnchor="end">{fmtAxis(minB)}</text>
                     <polygon fill={fill} points={`${base} ${pts} ${end}`} />
                     <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
                 </ChartSvg>
@@ -562,14 +566,14 @@ function NodeBalanceChart({
 function NodeMintBurnChart({
   history
 }) {
-  // Filter to entries that have node_balance recorded
+  const theme = useTheme();
   const raw = (history || []).filter(h => h.node_balance != null);
   if (raw.length < 2) {
     return <ChartWrapper>
                 <ChartContainer>
                     <Mono style={{
           fontSize: '0.75rem',
-          color: '#888'
+          color: theme.colors.muted
         }}>
                         (collecting node balance data...)
                     </Mono>
@@ -616,18 +620,18 @@ function NodeMintBurnChart({
   const end = `${width - padding.right},${height - padding.bottom}`;
   return <ChartWrapper>
             <ChartLegend>
-                <LegendItem><LegendDot color="#48bb78" /> Earned ({fmtMirage(totalEarned)})</LegendItem>
-                <LegendItem><LegendDot color="#f56565" /> Spent ({fmtMirage(totalSpent)})</LegendItem>
+                <LegendItem><LegendDot color={theme.colors.success} /> Earned ({fmtMirage(totalEarned)})</LegendItem>
+                <LegendItem><LegendDot color={theme.colors.danger} /> Spent ({fmtMirage(totalSpent)})</LegendItem>
             </ChartLegend>
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
                     <ChartGrid />
-                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
-                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">0</text>
-                    <polygon fill="rgba(72, 187, 120, 0.15)" points={`${base} ${earnedPts} ${end}`} />
-                    <polygon fill="rgba(245, 101, 101, 0.15)" points={`${base} ${spentPts} ${end}`} />
-                    <polyline fill="none" stroke="#48bb78" strokeWidth="1.5" points={earnedPts} />
-                    <polyline fill="none" stroke="#f56565" strokeWidth="1.5" points={spentPts} />
+                    <text x={padding.left - 4} y={padding.top - 4} fill={theme.colors.muted} fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill={theme.colors.muted} fontSize="8" textAnchor="end">0</text>
+                    <polygon fill={theme.colors.successBg} points={`${base} ${earnedPts} ${end}`} />
+                    <polygon fill={theme.colors.dangerBg} points={`${base} ${spentPts} ${end}`} />
+                    <polyline fill="none" stroke={theme.colors.success} strokeWidth="1.5" points={earnedPts} />
+                    <polyline fill="none" stroke={theme.colors.danger} strokeWidth="1.5" points={spentPts} />
                 </ChartSvg>
             </ChartContainer>
             <ChartLabel>

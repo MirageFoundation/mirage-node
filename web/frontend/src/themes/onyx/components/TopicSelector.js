@@ -17,12 +17,12 @@ const SelectorButton = styled.button`
     width: 100%;
     padding: 0.5rem 0.75rem;
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 4px;
     background-color: ${({ theme }) => theme.colors.panelAlt};
     color: ${({ theme }) => theme.colors.text};
     font-size: 0.85rem;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: border-color 0.2s ease;
     text-align: left;
 
     &:hover:not(:disabled) {
@@ -31,8 +31,8 @@ const SelectorButton = styled.button`
     
     &:focus {
         outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        border-color: ${({ theme }) => theme.colors.focusBorder};
+        box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 
     &:disabled {
@@ -78,13 +78,13 @@ const SearchInputWrapper = styled.div`
 const SearchInput = styled.input`
     width: 100%;
     padding: 0.5rem 0.75rem;
-    border: 1px solid #667eea;
-    border-radius: 8px;
+    border: 1px solid ${({ theme }) => theme.colors.focusBorder};
+    border-radius: 4px;
     background-color: ${({ theme }) => theme.colors.panelAlt};
     color: ${({ theme }) => theme.colors.text};
     font-size: 0.85rem;
     outline: none;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    box-shadow: ${({ theme }) => theme.layout.focusRing};
 
     &::placeholder {
         color: ${({ theme }) => theme.colors.subtleText};
@@ -98,8 +98,11 @@ const Dropdown = styled.div`
     right: 0;
     background-color: ${({ theme }) => theme.colors.panel};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    box-shadow: ${({ theme }) =>
+        theme.name === 'dark'
+            ? '0 4px 16px rgba(0, 0, 0, 0.5)'
+            : '0 4px 16px rgba(0, 0, 0, 0.15)'};
     z-index: 1000;
     max-height: 280px;
     display: flex;
@@ -130,7 +133,6 @@ const TopicItem = styled.div`
     gap: 0.2rem;
     padding: 0.5rem 0.75rem;
     cursor: pointer;
-    transition: background-color 0.15s ease;
     background-color: ${({ $highlighted, theme }) =>
         $highlighted ? (theme.colors.accent) : 'transparent'};
 
@@ -164,9 +166,9 @@ const TopicMetaGroup = styled.div`
 
 const FlagBadge = styled.span`
     padding: 2px 6px;
-    border-radius: 6px;
-    background-color: rgba(255, 99, 71, 0.12);
-    color: #ff7b6b;
+    border-radius: 4px;
+    background-color: ${({ theme }) => theme.colors.dangerBg};
+    color: ${({ theme }) => theme.colors.danger};
     font-size: 0.68rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -175,17 +177,17 @@ const FlagBadge = styled.span`
 
 const CreateNewItem = styled(TopicItem)`
     border-top: 1px solid ${({ theme }) => theme.colors.border};
-    background-color: ${({ $highlighted }) =>
-        $highlighted ? 'rgba(102, 126, 234, 0.15)' : 'rgba(102, 126, 234, 0.05)'};
+    background-color: ${({ $highlighted, theme }) =>
+        $highlighted ? theme.colors.accentHover : theme.colors.accentSubtle};
     
     &:hover {
-        background-color: rgba(102, 126, 234, 0.2);
+        background-color: ${({ theme }) => theme.colors.accentHover};
     }
 `;
 
 const CreateNewLabel = styled.span`
     font-size: 0.8rem;
-    color: #667eea;
+    color: ${({ theme }) => theme.colors.link};
     font-weight: 500;
 `;
 

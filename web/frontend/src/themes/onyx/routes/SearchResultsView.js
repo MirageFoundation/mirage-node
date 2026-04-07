@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 import { Link, Navigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
@@ -8,8 +8,9 @@ import Button from "../components/Button.js";
 import CardView from "../components/CardView.js";
 import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
-import { useSearchResults, tagColors } from "../../../logic/useSearchResults";
+import { useSearchResults } from "../../../logic/useSearchResults";
 import { normalizeTag } from "../../../utils/ContentTags";
+import { getTagPalette } from "../utils/tagPalette.js";
 const SectionHeader = styled.div`
     font-size: ${({
   theme
@@ -160,7 +161,7 @@ const LoadingMessage = styled.div`
 }) => theme.layout.containerPadding};
 `;
 const ErrorMessage = styled.div`
-    color: #f87171;
+    color: ${({ theme }) => theme.colors.danger};
     font-size: ${({
   theme
 }) => theme.layout.monoSize};
@@ -178,20 +179,19 @@ const TagBadge = styled.span`
     border-radius: ${({
   theme
 }) => theme.layout.containerRadius};
-    background: ${({
-  $tag
-}) => tagColors[$tag]?.bg || tagColors.default.bg};
-    color: ${({
-  $tag
-}) => tagColors[$tag]?.text || tagColors.default.text};
+    ${({ theme, $tag }) => {
+        const palette = getTagPalette(theme, $tag);
+        return css`
+            background: ${palette.bg};
+            color: ${palette.text};
+            border: 1px solid ${palette.border};
+        `;
+    }}
     font-size: ${({
   theme
 }) => theme.layout.tinySize};
     font-weight: 700;
     text-transform: lowercase;
-    border: 1px solid ${({
-  $tag
-}) => tagColors[$tag]?.border || tagColors.default.border};
 `;
 const LoadMoreButton = styled.div`
     display: flex;

@@ -115,7 +115,7 @@ const MarkReadButton = styled.button`
 }) => theme.layout.cardBorder};
     border-radius: 0;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, text-decoration 0.15s ease;
     white-space: nowrap;
 
     &:hover {
@@ -124,7 +124,7 @@ const MarkReadButton = styled.button`
 }) => theme.layout.containerBg};
         border-color: ${({
     theme
-}) => theme.caps.flatMode ? 'transparent' : 'rgba(102, 126, 234, 0.5)'};
+}) => theme.caps.flatMode ? 'transparent' : theme.colors.focusBorder};
         text-decoration: ${({
     theme
 }) => theme.caps.flatMode ? 'underline' : 'none'};
@@ -292,7 +292,7 @@ export default function InboxView({
     }
     if (error) {
         return renderShell(<div style={{
-            color: '#f66'
+            color: theme.colors.danger
         }}>{error}</div>, 'Inbox');
     }
     return renderShell(<>

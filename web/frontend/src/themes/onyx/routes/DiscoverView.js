@@ -1,13 +1,14 @@
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
-import { useDiscover, tagColors } from "../../../logic/useDiscover";
+import { useDiscover } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
+import { getTagPalette } from "../utils/tagPalette.js";
 const SearchInput = styled.input`
     width: 100%;
     padding: 0.4rem 0.6rem;
@@ -140,19 +141,18 @@ const TagBadge = styled.span`
     display: inline-flex;
     align-items: center;
     padding: 0.05rem 0.35rem;
-    border-radius: 999px;
-    background: ${({
-    $tag
-}) => tagColors[$tag]?.bg || tagColors.default.bg};
-    color: ${({
-    $tag
-}) => tagColors[$tag]?.text || tagColors.default.text};
+    border-radius: 4px;
+    ${({ theme, $tag }) => {
+        const palette = getTagPalette(theme, $tag);
+        return css`
+            background: ${palette.bg};
+            color: ${palette.text};
+            border: 1px solid ${palette.border};
+        `;
+    }}
     font-size: 0.55rem;
     font-weight: 700;
     text-transform: lowercase;
-    border: 1px solid ${({
-    $tag
-}) => tagColors[$tag]?.border || tagColors.default.border};
     margin-left: 0.3rem;
 `;
 export default function DiscoverView({
