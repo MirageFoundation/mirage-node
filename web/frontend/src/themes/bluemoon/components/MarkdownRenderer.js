@@ -48,6 +48,12 @@ const Container = styled.div`
 		border: none;
 		border-top: 1px solid ${({ theme }) => theme.colors.border};
 	}
+	& a {
+		color: ${({ theme }) => theme.colors.link};
+		&:hover {
+			color: ${({ theme }) => theme.colors.linkHover};
+		}
+	}
 `;
 
 const SpoilerSpan = styled.span`
@@ -67,7 +73,7 @@ const SpoilerSpan = styled.span`
 `;
 
 const MentionLink = styled.a`
-	color: ${({ theme }) => theme.colors.link };
+	color: ${({ theme }) => theme.colors.link};
 	font-weight: 600;
 	text-decoration: none;
 	cursor: pointer;
@@ -77,7 +83,7 @@ const MentionLink = styled.a`
 `;
 
 const HashtagLink = styled.a`
-	color: ${({ theme }) => theme.colors.link };
+	color: ${({ theme }) => theme.colors.link};
 	font-weight: 600;
 	text-decoration: none;
 	cursor: pointer;

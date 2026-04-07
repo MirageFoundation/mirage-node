@@ -8,6 +8,8 @@ import { fetchFollowedTopics } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { usePendingFollows } from "./useFollowState.js";
 
+const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
+
 // Session storage key helpers for feed state preservation (keyed by topic)
 export const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
 
@@ -382,7 +384,7 @@ export function useMain({
     const downvoteTimeoutsRef = useRef(new Set());
     const latestFeedRequestRef = useRef(0);
 
-    // Android app banner: show once for Android users until dismissed
+    // Android app banner: cooldown after dismissal
     const isAndroid = (() => {
         try {
             return /android/i.test(navigator.userAgent);
@@ -390,21 +392,24 @@ export function useMain({
             return false;
         }
     })();
-    const [androidBannerDismissed, setAndroidBannerDismissed] = useState(() => {
+    const [androidBannerDismissedAt, setAndroidBannerDismissedAt] = useState(() => {
         try {
-            return Storage.load('android_app_banner_dismissed', false);
+            const stored = Storage.load('android_app_banner_dismissed_at_ms', 0);
+            const parsed = Number(stored);
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
         } catch (_) {
-            return false;
+            return 0;
         }
     });
     const dismissAndroidBanner = () => {
+        const now = Date.now();
         try {
-            Storage.save('android_app_banner_dismissed', true);
+            Storage.save('android_app_banner_dismissed_at_ms', now);
         } catch (_) { }
-        setAndroidBannerDismissed(true);
+        setAndroidBannerDismissedAt(now);
     };
 
-    // iPhone app banner: show once for iPhone users until dismissed
+    // iPhone app banner: cooldown after dismissal
     const isIPhone = (() => {
         try {
             return /iPhone/i.test(navigator.userAgent) && !isAndroid;
@@ -412,18 +417,21 @@ export function useMain({
             return false;
         }
     })();
-    const [iphoneBannerDismissed, setIphoneBannerDismissed] = useState(() => {
+    const [iphoneBannerDismissedAt, setIphoneBannerDismissedAt] = useState(() => {
         try {
-            return Storage.load('iphone_app_banner_dismissed', false);
+            const stored = Storage.load('iphone_app_banner_dismissed_at_ms', 0);
+            const parsed = Number(stored);
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
         } catch (_) {
-            return false;
+            return 0;
         }
     });
     const dismissIPhoneBanner = () => {
+        const now = Date.now();
         try {
-            Storage.save('iphone_app_banner_dismissed', true);
+            Storage.save('iphone_app_banner_dismissed_at_ms', now);
         } catch (_) { }
-        setIphoneBannerDismissed(true);
+        setIphoneBannerDismissedAt(now);
     };
 
     // NSFW welcome hero: show once for logged-in users until they choose yes/no
@@ -479,8 +487,25 @@ export function useMain({
     }, [nodeConfig]);
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled);
-    const showAndroidBanner = Boolean(nodeConfig) && isAndroid && !androidBannerDismissed && nodeConfig.android_banner_enabled;
-    const showIPhoneBanner = Boolean(nodeConfig) && isIPhone && !iphoneBannerDismissed && nodeConfig.ios_banner_enabled;
+    const nowMs = Date.now();
+    const androidBannerCooldownActive = androidBannerDismissedAt > 0 && (nowMs - androidBannerDismissedAt) < APP_BANNER_COOLDOWN_MS;
+    const iphoneBannerCooldownActive = iphoneBannerDismissedAt > 0 && (nowMs - iphoneBannerDismissedAt) < APP_BANNER_COOLDOWN_MS;
+    const showAndroidBanner = Boolean(nodeConfig) && isAndroid && !androidBannerCooldownActive && nodeConfig.android_banner_enabled;
+    const showIPhoneBanner = Boolean(nodeConfig) && isIPhone && !iphoneBannerCooldownActive && nodeConfig.ios_banner_enabled;
+    useEffect(() => {
+        const androidNextEligibleAt = androidBannerDismissedAt ? androidBannerDismissedAt + APP_BANNER_COOLDOWN_MS : 0;
+        const iphoneNextEligibleAt = iphoneBannerDismissedAt ? iphoneBannerDismissedAt + APP_BANNER_COOLDOWN_MS : 0;
+        console.debug('[MainView] app banner cooldown', {
+            android: {
+                dismissedAtMs: androidBannerDismissedAt,
+                nextEligibleAtMs: androidNextEligibleAt
+            },
+            iphone: {
+                dismissedAtMs: iphoneBannerDismissedAt,
+                nextEligibleAtMs: iphoneNextEligibleAt
+            }
+        });
+    }, [androidBannerDismissedAt, iphoneBannerDismissedAt]);
 
     // Invite code state
     const [inviteCodes, setInviteCodes] = useState([]);
