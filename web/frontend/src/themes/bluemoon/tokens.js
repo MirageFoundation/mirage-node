@@ -71,6 +71,17 @@ const bluemoonLightColors = {
     overlay: 'rgba(0, 0, 0, 0.7)',
     cardShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
     cardShadowHover: '0 6px 20px rgba(0, 0, 0, 0.15)',
+
+    surface: '#F7F7F8',
+    surface2: '#EFEFF1',
+    surface3: '#E5E7EB',
+    borderSubtle: '#E5E7EB',
+    borderStrong: '#9CA3AF',
+    textSecondary: '#4B5563',
+    inputBackground: '#FFFFFF',
+    accentSubtle: '#F3F4F6',
+    cardHoverBorder: '#9CA3AF',
+
     inboxReplyUnreadBg: 'rgba(59, 130, 246, 0.08)',
     inboxReplyReadBg: 'rgba(0, 0, 0, 0.03)',
     inboxReplyUnreadBorder: 'rgba(59, 130, 246, 0.2)',
