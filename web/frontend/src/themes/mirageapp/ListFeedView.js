@@ -1,12 +1,14 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styled, { css, keyframes, useTheme } from "styled-components";
-import { Link } from "react-router-dom";
-import { HiChevronDown } from "react-icons/hi2";
+import { Link, useNavigate } from "react-router-dom";
+import { HiChevronDown, HiOutlineArrowsPointingOut, HiOutlineArrowsPointingIn } from "react-icons/hi2";
 
 import CardView from "./components/CardView";
+import InlineMedia from "./components/InlineMedia";
+import MarkdownRenderer from "./components/MarkdownRenderer";
 import { getThemeFamily } from "../../registry/theme";
-import { buildPhotonUrl, isLikelyImageUrl } from "../../utils/media";
 import { getAuthorColor } from "../../utils/tierColors";
+import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
 import Storage from "../../utils/Storage";
 
 /**
@@ -59,10 +61,19 @@ const FeedList = styled.div`
     background: ${({ theme }) => theme.colors.bg};
 `;
 
+/* Row slot owns the between-card divider so it sits OUTSIDE the card
+ * (the card's hover bg no longer bleeds into the divider line, and the
+ * divider clearly reads as "below the card" rather than as its border).
+ * The last slot omits the divider so the feed doesn't end with a hairline. */
 const RowSlot = styled.div`
     position: relative;
     opacity: 1;
     animation: ${slideIn} 0.25s ease-out;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+    &:last-child {
+        border-bottom: none;
+    }
 
     ${({ $hiding }) =>
         $hiding &&
@@ -166,10 +177,11 @@ const Menu = styled.div`
     position: absolute;
     top: calc(100% + 6px);
     left: 0;
-    min-width: 200px;
-    /* No horizontal padding so MenuItem's active/hover background extends
-       edge-to-edge inside the popover. Header still gets inline padding. */
-    padding: 6px 0;
+    /* Shrinks to the widest item. MenuItem uses white-space: nowrap
+       so every option stays on one line. */
+    min-width: max-content;
+    width: max-content;
+    padding: 0;
     background: ${({ theme }) => theme.colors.menuBg};
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 10px;
@@ -177,15 +189,19 @@ const Menu = styled.div`
     z-index: 40;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
     overflow: hidden;
 `;
 
+/* Header uses the SAME vertical padding as MenuItem so header + options
+ * share a single rhythm, but slightly heavier weight (500) than the options (400). */
 const MenuHeader = styled.div`
-    padding: 4px 12px 6px;
-    font-size: 0.66rem;
-    font-weight: 400;
+    padding: 10px 14px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1;
     color: ${({ theme }) => theme.colors.menuHeaderText};
+    white-space: nowrap;
 `;
 
 const MenuItem = styled.button`
@@ -194,7 +210,8 @@ const MenuItem = styled.button`
     justify-content: space-between;
     gap: 0.75rem;
     width: 100%;
-    padding: 8px 12px;
+    padding: 10px 14px;
+    white-space: nowrap;
     background: ${({ theme, $active }) =>
         $active ? theme.colors.menuSelectedBg : 'transparent'};
     border: none;
@@ -207,12 +224,17 @@ const MenuItem = styled.button`
     text-align: left;
     cursor: pointer;
     line-height: 1;
+    transition: background 0.12s ease, color 0.12s ease;
 
+    /* Hover:
+     *  - Dark: bg stays transparent, text + icons lift to pure white.
+     *  - Light: bg lifts to rgb(246,248,249), text stays normal.
+     * Handled via the menuItemHoverBg / menuItemHoverText tokens. */
     &:hover {
         background: ${({ theme, $active }) =>
-        $active ? theme.colors.menuSelectedBg : theme.colors.feedCtrlHoverBg};
+        $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
         color: ${({ theme, $active }) =>
-        $active ? theme.colors.sidebarItemActiveText : theme.colors.sidebarItemText};
+        $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText};
     }
 
     & > svg {
@@ -241,17 +263,35 @@ const IconCompact = (props) => (
 );
 
 // ─── Compact row ───────────────────────────────────────────────────────────
+//
+// Compact layout (thumbnail + stacked text):
+//
+//   ┌──────┐  #topic · @user · time
+//   │ thumb│  Title (smaller than card-mode title)
+//   │ 72px │  [▲ cnt ▼]  N comments  Share  [⇱ expand]
+//   └──────┘
+//
+// When "expand" is clicked, the row reveals full-size InlineMedia + the
+// post body below the footer (without navigating away). Click again to
+// collapse. Typography matches CardView.
 
 const CompactRoot = styled.article`
     display: grid;
-    grid-template-columns: auto 56px minmax(0, 1fr);
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0.75rem 0.5rem 0.5rem;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    gap: 0.2rem 0.75rem;
+    padding: 0.75rem 1rem 0.65rem;
+    margin: 4px 0;
     background: ${({ theme }) => theme.colors.bg};
+    border: 1px solid transparent;
+    border-radius: 8px;
     position: relative;
-    contain: layout style;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
 
     ${({ $flash }) =>
         $flash &&
@@ -264,33 +304,25 @@ const CompactRoot = styled.article`
         100% { background: transparent; }
     }
 
-    &:hover {
-        background: ${({ theme }) => theme.colors.panelAlt};
-    }
-
     @media (max-width: 600px) {
-        grid-template-columns: auto 46px minmax(0, 1fr);
-        padding: 0.45rem 0.5rem;
-        gap: 0.45rem;
+        grid-template-columns: 60px minmax(0, 1fr);
+        gap: 0.15rem 0.6rem;
+        padding: 0.65rem 0.85rem 0.55rem;
+        border-radius: 6px;
     }
 `;
 
-const CompactVote = styled.div`
+/* Thumbnail / placeholder column — spans the 3 text rows on the left. */
+const CompactThumbLink = styled(Link)`
+    grid-row: 1 / span 3;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    align-self: center;
-`;
-
-const CompactThumb = styled(Link)`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 56px;
-    height: 56px;
-    background: ${({ theme }) => theme.colors.panelAlt};
+    width: 72px;
+    height: 72px;
     border-radius: 8px;
     overflow: hidden;
+    background: ${({ theme }) => theme.colors.actionIconBg};
     text-decoration: none;
     flex-shrink: 0;
 
@@ -301,82 +333,198 @@ const CompactThumb = styled(Link)`
     }
 
     @media (max-width: 600px) {
-        width: 46px;
-        height: 46px;
+        width: 60px;
+        height: 60px;
         border-radius: 6px;
     }
 `;
 
 const CompactThumbPlaceholder = styled.div`
+    grid-row: 1 / span 3;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 56px;
-    height: 56px;
-    background: ${({ theme }) => theme.colors.panelAlt};
+    width: 72px;
+    height: 72px;
     border-radius: 8px;
+    background: ${({ theme }) => theme.colors.actionIconBg};
     color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.75rem;
+    font-size: 1rem;
     font-weight: 700;
     flex-shrink: 0;
 
     @media (max-width: 600px) {
-        width: 46px;
-        height: 46px;
+        width: 60px;
+        height: 60px;
         border-radius: 6px;
+        font-size: 0.9rem;
     }
 `;
 
-const CompactContent = styled.div`
+/* Header row mirrors CardView's HeaderMeta exactly so the two view modes
+ * share a single metadata style. Font sizes + weights are copied 1:1. */
+const CompactHeader = styled.div`
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.3rem;
+    min-width: 0;
+    font-size: 0.62rem;
+    font-weight: 400;
+    color: ${({ theme }) => theme.colors.subtleText};
+    line-height: 1.2;
+`;
+
+const CompactTopicLink = styled(Link)`
+    font-weight: 500;
+    font-size: 0.62rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    text-decoration: none;
+    &:hover { color: ${({ theme }) => theme.colors.text}; text-decoration: none; }
+`;
+
+const CompactUserLink = styled(Link)`
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.subtleText};
+    font-weight: 500;
+    font-size: 0.62rem;
+    text-decoration: none;
+    &:hover { color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text}; }
+`;
+
+const CompactHeaderDot = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1;
+`;
+
+const CompactTime = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.62rem;
+    font-weight: 400;
+`;
+
+/* Title is smaller than CardView's title so the compact row stays short
+ * and the thumbnail/title/footer fit the 72px thumbnail height. */
+const CompactTitle = styled(Link)`
+    display: block;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.82rem;
+    font-weight: 700;
+    line-height: 1.3;
+    text-decoration: none;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+
+    &:hover { color: ${({ theme }) => theme.colors.text}; text-decoration: none; }
+    &:visited { color: ${({ theme }) => theme.colors.text}; }
+
+    @media (max-width: 1000px) {
+        font-size: 0.74rem;
+    }
+`;
+
+/* Footer row: vote pill + plain-text comment / share buttons + expand chip. */
+const CompactFooter = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.1rem;
+`;
+
+/* Plain-text action button used for the "N comments" and "Share" labels.
+ * Sits on a rounded rect hover tile (actionIconHoverBg) to match the card
+ * action-row, but stays transparent at rest so the row reads as text. */
+const CompactTextAction = styled.button`
+    appearance: none;
+    background: transparent;
+    border: none;
+    padding: 6px 10px;
+    margin: 0;
+    border-radius: 9999px;
+    font: inherit;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.12s ease, background 0.12s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.actionIconHoverBg};
+        color: ${({ theme }) => theme.colors.sidebarItemActiveText};
+    }
+`;
+
+/* Expand / collapse chip — same filled surface as the vote pill so the
+ * two controls visually balance the footer row. */
+const CompactExpandChip = styled.button`
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 9999px;
+    border: none;
+    background: ${({ theme }) => theme.colors.actionIconBg};
+    color: ${({ theme }) => theme.colors.text};
+    cursor: pointer;
+    transition: background 0.12s ease;
+
+    &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+`;
+
+const CompactSpacer = styled.div`
+    flex: 1 1 auto;
     min-width: 0;
 `;
 
-const CompactTitle = styled(Link)`
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: ${({ theme }) => theme.colors.text};
-    text-decoration: none;
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-
-    &:hover { color: ${({ theme }) => theme.colors.link}; }
-
-    @media (max-width: 600px) {
-        font-size: 0.78rem;
-        -webkit-line-clamp: 2;
-    }
-`;
-
-const CompactMeta = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
+const CompactShareNote = styled.span`
     font-size: 0.62rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-    line-height: 1.3;
-    white-space: nowrap;
+    font-weight: 500;
+    color: #22c55e;
+    margin-left: 0.25rem;
+`;
+
+/* Expanded content block rendered below the footer when the user clicks
+ * the expand chip. Spans the full grid width so media can use all of it. */
+const CompactExpandedBlock = styled.div`
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+`;
+
+const CompactExpandedMedia = styled.div`
+    max-width: 100%;
     overflow: hidden;
-    text-overflow: ellipsis;
+    border-radius: 10px;
 `;
 
-const CompactMetaLink = styled(Link)`
-    color: ${({ theme }) => theme.colors.subtleText};
-    text-decoration: none;
-    font-weight: 600;
+const CompactExpandedBody = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.85rem;
+    line-height: 1.5;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 
-    &:hover { color: ${({ theme }) => theme.colors.text}; }
-`;
+    p { margin: 0 0 0.5rem; }
+    p:last-child { margin-bottom: 0; }
 
-const CompactMetaSep = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
-    opacity: 0.6;
+    a { color: ${({ theme }) => theme.colors.link}; }
+
+    @media (max-width: 1000px) {
+        font-size: 0.75rem;
+    }
 `;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -394,22 +542,6 @@ function formatAge(tsSec) {
     });
 }
 
-function getThumbUrl(post) {
-    const thumb = post?.thumbnail;
-    if (typeof thumb === 'string' && thumb.trim() && isLikelyImageUrl(thumb)) {
-        try { return buildPhotonUrl(thumb, { w: 112, h: 112 }); }
-        catch (_) { /* noop */ }
-    }
-    if (Array.isArray(post?.media) && post.media.length > 0) {
-        const first = post.media[0];
-        if (typeof first === 'string' && isLikelyImageUrl(first)) {
-            try { return buildPhotonUrl(first, { w: 112, h: 112 }); }
-            catch (_) { /* noop */ }
-        }
-    }
-    return null;
-}
-
 function loadViewMode() {
     try {
         const raw = Storage.load(VIEW_MODE_KEY, VIEW_MODE_DEFAULT);
@@ -419,22 +551,119 @@ function loadViewMode() {
     }
 }
 
+/* Resolve the post's primary media URL + post body. Mirrors the helper in
+ * CardView so compact expansion shows the same asset the card would. */
+function extractFirstUrl(content) {
+    if (!content) return null;
+    const m = String(content).match(/https?:\/\/[^\s<>"']+/);
+    return m ? m[0] : null;
+}
+
+function resolveCompactContent(post) {
+    const mediaList = Array.isArray(post?.media) && post.media.length > 0 ? post.media : null;
+    const rawBody = String(post?.content || '');
+
+    if (mediaList) {
+        return { mediaUrl: mediaList[0], body: rawBody.trim() };
+    }
+
+    const firstUrl = extractFirstUrl(rawBody);
+    if (firstUrl && (isLikelyImageUrl(firstUrl) || isLikelyVideoUrl(firstUrl))) {
+        const body = rawBody.replace(firstUrl, '').trim();
+        return { mediaUrl: firstUrl, body };
+    }
+
+    return { mediaUrl: null, body: rawBody.trim() };
+}
+
+/* Small photon-scaled thumbnail for the compact left column. Returns null
+ * if we couldn't derive an image URL (the component falls back to the
+ * first-letter placeholder). */
+function getCompactThumb(post) {
+    const thumb = post?.thumbnail;
+    if (typeof thumb === 'string' && thumb.trim() && isLikelyImageUrl(thumb)) {
+        try { return buildPhotonUrl(thumb, { w: 144, h: 144 }); }
+        catch (_) { /* noop */ }
+    }
+    if (Array.isArray(post?.media) && post.media.length > 0) {
+        const first = post.media[0];
+        if (typeof first === 'string' && isLikelyImageUrl(first)) {
+            try { return buildPhotonUrl(first, { w: 144, h: 144 }); }
+            catch (_) { /* noop */ }
+        }
+    }
+    const rawBody = String(post?.content || '');
+    const firstUrl = extractFirstUrl(rawBody);
+    if (firstUrl && isLikelyImageUrl(firstUrl)) {
+        try { return buildPhotonUrl(firstUrl, { w: 144, h: 144 }); }
+        catch (_) { /* noop */ }
+    }
+    return null;
+}
+
 // ─── Compact row component ─────────────────────────────────────────────────
+
+// A click on a link/button/popover inside the compact row must NOT bubble
+// up to the card-level navigate handler. Mirrors CardView.isInteractiveTarget.
+function isCompactInteractive(target) {
+    if (!(target instanceof Element)) return false;
+    return !!target.closest('a, button, [data-no-card-click]');
+}
 
 function CompactRow({ post, state, updatePost }) {
     const theme = useTheme();
+    const navigate = useNavigate();
     const VoteSection = useMemo(
         () => getThemeFamily(theme.themeId).VoteSection,
         [theme.themeId]
     );
+
+    const [shareCopied, setShareCopied] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    const postId = post && post.post_id ? String(post.post_id) : '';
+    const linkTarget = postId ? `/p/${postId}` : '#';
+
+    const handleRowClick = useCallback((e) => {
+        if (isCompactInteractive(e.target)) return;
+        if (linkTarget && linkTarget !== '#') navigate(linkTarget);
+    }, [navigate, linkTarget]);
+
+    const stop = useCallback((e) => { e.stopPropagation(); }, []);
+
+    const handleToggleExpand = useCallback((e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        setExpanded((v) => !v);
+    }, []);
+
+    const handleShare = useCallback(async (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (!postId) return;
+        try {
+            const origin = (typeof window !== 'undefined' && window.location && window.location.origin)
+                ? window.location.origin
+                : '';
+            const url = `${origin}/p/${encodeURIComponent(postId)}`;
+            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(url);
+                setShareCopied(true);
+                setTimeout(() => setShareCopied(false), 2000);
+                return;
+            }
+            if (typeof window !== 'undefined') {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }
+        } catch (_) { /* noop */ }
+    }, [postId]);
+
+    const { mediaUrl, body } = useMemo(() => resolveCompactContent(post || {}), [post]);
+    const thumbUrl = useMemo(() => getCompactThumb(post || {}), [post]);
 
     if (!post || !post.post_id) return null;
     if (typeof post.title !== 'string' || post.title.trim() === '') return null;
     if (typeof post.topic !== 'string' || post.topic.trim() === '') return null;
     if (post.deleted || post.hidden_client) return null;
 
-    const postId = String(post.post_id);
-    const linkTarget = `/p/${postId}`;
     const topic = String(post.topic);
     const authorAddress = post.user_id || post.author || '';
     const displayAuthor = (() => {
@@ -451,42 +680,83 @@ function CompactRow({ post, state, updatePost }) {
     if (ts > 1e12) ts = Math.floor(ts / 1000);
 
     const commentCount = Number(post.comments) || 0;
-    const thumbUrl = getThumbUrl(post);
     const placeholderChar = (topic.trim()[0] || '#').toUpperCase();
 
     return (
-        <CompactRoot $flash={!!post.flash}>
-            <CompactVote>
-                <VoteSection state={state} post={post} updatePost={updatePost} />
-            </CompactVote>
-
+        <CompactRoot
+            $flash={!!post.flash}
+            onClick={handleRowClick}
+            role="link"
+            tabIndex={0}
+        >
             {thumbUrl ? (
-                <CompactThumb to={linkTarget} aria-label={post.title}>
+                <CompactThumbLink to={linkTarget} aria-label={post.title} onClick={stop}>
                     <img src={thumbUrl} alt="" loading="lazy" />
-                </CompactThumb>
+                </CompactThumbLink>
             ) : (
                 <CompactThumbPlaceholder aria-hidden="true">{placeholderChar}</CompactThumbPlaceholder>
             )}
 
-            <CompactContent>
-                <CompactTitle to={linkTarget}>{post.title}</CompactTitle>
-                <CompactMeta>
-                    <CompactMetaLink to={`/t/${encodeURIComponent(topic)}`}>#{topic}</CompactMetaLink>
-                    <CompactMetaSep>·</CompactMetaSep>
-                    <CompactMetaLink
-                        to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
-                        style={authorColor ? { color: authorColor } : undefined}
-                    >
-                        @{displayAuthor}
-                    </CompactMetaLink>
-                    <CompactMetaSep>·</CompactMetaSep>
-                    <span>{formatAge(ts)}</span>
-                    <CompactMetaSep>·</CompactMetaSep>
-                    <CompactMetaLink to={linkTarget}>
-                        {commentCount} comment{commentCount !== 1 ? 's' : ''}
-                    </CompactMetaLink>
-                </CompactMeta>
-            </CompactContent>
+            <CompactHeader>
+                <CompactTopicLink to={`/t/${encodeURIComponent(topic)}`} onClick={stop}>
+                    #{topic}
+                </CompactTopicLink>
+                <CompactHeaderDot>·</CompactHeaderDot>
+                <CompactUserLink
+                    to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
+                    onClick={stop}
+                    $tierColor={authorColor}
+                >
+                    @{displayAuthor}
+                </CompactUserLink>
+                <CompactHeaderDot>·</CompactHeaderDot>
+                <CompactTime>{formatAge(ts)}</CompactTime>
+            </CompactHeader>
+
+            <CompactTitle to={linkTarget} onClick={stop}>
+                {post.title}
+            </CompactTitle>
+
+            <CompactFooter onClick={stop}>
+                <VoteSection state={state} post={post} updatePost={updatePost} inline />
+                <CompactTextAction as={Link} to={linkTarget}>
+                    {commentCount} comment{commentCount !== 1 ? 's' : ''}
+                </CompactTextAction>
+                <CompactTextAction type="button" onClick={handleShare}>
+                    Share
+                </CompactTextAction>
+                {shareCopied && <CompactShareNote>link copied</CompactShareNote>}
+                <CompactSpacer />
+                <CompactExpandChip
+                    type="button"
+                    onClick={handleToggleExpand}
+                    aria-expanded={expanded}
+                    aria-label={expanded ? 'Collapse post' : 'Expand post'}
+                    title={expanded ? 'Collapse' : 'Expand'}
+                >
+                    {expanded ? <HiOutlineArrowsPointingIn /> : <HiOutlineArrowsPointingOut />}
+                </CompactExpandChip>
+            </CompactFooter>
+
+            {expanded && (mediaUrl || body) && (
+                <CompactExpandedBlock onClick={stop} data-no-card-click>
+                    {mediaUrl && (
+                        <CompactExpandedMedia>
+                            <InlineMedia
+                                url={mediaUrl}
+                                variant="root_post"
+                                autoPlay={false}
+                                mediaMeta={Array.isArray(post.media_meta) ? post.media_meta[0] || null : null}
+                            />
+                        </CompactExpandedMedia>
+                    )}
+                    {body && (
+                        <CompactExpandedBody>
+                            <MarkdownRenderer text={body} />
+                        </CompactExpandedBody>
+                    )}
+                </CompactExpandedBlock>
+            )}
         </CompactRoot>
     );
 }
