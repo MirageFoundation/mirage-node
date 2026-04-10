@@ -22,6 +22,12 @@ const Bar = styled.header`
     position: sticky;
     top: 0;
     z-index: 100;
+    /* Explicit, locked height so the Sidebar's sticky top offset always */
+    /* matches the real TopBar box, regardless of search input, avatar */
+    /* size, or font-size clamp. Prevents the Sidebar from jumping up on */
+    /* short (non-scrollable) pages like Create Post / Search. */
+    height: calc(2.5rem + 1px);
+    box-sizing: border-box;
     /* Match the mobile app's main background color (mirage-mobile-app surfaces.background) */
     background: ${({ theme }) => theme.colors.bg};
     border-bottom: 1px solid ${({ theme }) => theme.colors.headerBorder};
@@ -43,8 +49,12 @@ const BarInner = styled.div`
     gap: 1rem;
     max-width: 1400px;
     margin: 0 auto;
-    padding: 0.3rem 0.5rem;
+    padding: 0 0.5rem;
     box-sizing: border-box;
+    /* Fill the parent Bar locked height so children (brand, search, */
+    /* avatar) remain vertically centered - padding is 0 since Bar owns */
+    /* the height now. */
+    height: 100%;
 `;
 
 const BrandLink = styled(Link)`

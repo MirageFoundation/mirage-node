@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styled from 'styled-components';
+import { HiBars3 } from 'react-icons/hi2';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
@@ -44,10 +45,15 @@ const Layout = styled.div`
     margin: 0 auto;
     gap: 0;
     transition: grid-template-columns 0.18s ease;
+    /* Always fill at least the viewport height below the TopBar so the
+       vertical divider (and the sidebar column) never get visually cut
+       off on short routes like Create Post, Search, or loading states. */
+    min-height: calc(100vh - 2.5rem - 1px);
 
     @media (max-width: 1000px) {
         grid-template-columns: minmax(0, 1fr);
         max-width: none;
+        min-height: 0;
     }
 `;
 
@@ -74,13 +80,17 @@ const DividerCol = styled.div`
 `;
 
 const ToggleButton = styled.button`
-    position: absolute;
-    /* Pin to the top of the sidebar column, roughly aligned with the
-       first nav row ("Home"). */
-    top: 14px;
-    /* Center the button on the 1px divider line (at the column's left edge). */
-    left: 0;
-    transform: translateX(-50%);
+    /* Sticky (not absolute) so the button stays pinned next to the */
+    /* TopBar even when the main feed scrolls. The top value equals */
+    /* TopBar height + 14px inset (matches the first sidebar nav row). */
+    position: sticky;
+    top: calc(2.5rem + 1px + 14px);
+    /* Center the 32px button on the 1px divider line at the column's */
+    /* left edge: shift it left by half its width. */
+    margin-left: -16px;
+    /* 14px top inset from the top of DividerCol, which itself starts */
+    /* right below the TopBar. */
+    margin-top: 14px;
     width: 32px;
     height: 32px;
     display: inline-flex;
@@ -163,16 +173,7 @@ export default function MirageAppShell({ children, state }) {
                         aria-pressed={!hidden}
                         title={hidden ? 'Show sidebar' : 'Hide sidebar'}
                     >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M4 6h16M4 12h16M4 18h16"
-                            />
-                        </svg>
+                        <HiBars3 aria-hidden="true" />
                     </ToggleButton>
                 </DividerCol>
                 <Main>{children}</Main>
