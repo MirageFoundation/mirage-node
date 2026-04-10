@@ -35,16 +35,20 @@ Whenever desktop structure and mobile visuals conflict:
 
 ## Plans in this folder
 
-| Plan | Scope | Doc |
-|---|---|---|
-| 01 | Theme skeleton, tokens, registration | [`01-skeleton-and-tokens.md`](./01-skeleton-and-tokens.md) |
-| 02 | Shell, top nav, sidebar, mobile nav | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
-| 03 | Feed, card view, vote / action row | [`03-feed-and-card.md`](./03-feed-and-card.md) |
-| 04 | Post detail + profile | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
-| 05 | Inbox, search, settings, auth flows | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
-| 06 | Remaining routes, polish, QA | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
+| Plan | Scope | Status | Doc |
+|---|---|---|---|
+| 01 | Theme skeleton, tokens, registration | ✅ Done | [`01-skeleton-and-tokens.md`](./01-skeleton-and-tokens.md) |
+| 02 | Shell, top nav, sidebar, mobile nav | 🟡 In progress (Shell + TopBar shipped; Sidebar UI polish next) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
+| 03 | Feed, card view, vote / action row | ⏳ Not started | [`03-feed-and-card.md`](./03-feed-and-card.md) |
+| 04 | Post detail + profile | ⏳ Not started | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
+| 05 | Inbox, search, settings, auth flows | ⏳ Not started | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
+| 06 | Remaining routes, polish, QA | ⏳ Not started | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
 Each plan is designed to be one PR. Later plans depend on earlier ones landing first.
+
+### Current focus
+
+**Plan 02 → Sidebar UI polish.** TopBar is fully iterated (search pill with gradient/focus-blue border, DiceBear avatar with blurred halo hover, ghost Create button, theme-token hover/border system). Next up: restyle `components/Sidebar.js` to match the mobile app feel. Details in [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md).
 
 ---
 

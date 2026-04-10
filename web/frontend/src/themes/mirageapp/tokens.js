@@ -10,7 +10,10 @@ const mirageappDarkColors = {
     subtleText: '#98989D',          // mobile dark neutral
     panel: '#15181d',
     panelAlt: '#1c2026',
-    border: '#2A2F36',
+    // App-wide divider / border color (dark mode).
+    border: 'rgb(39, 40, 42)',
+    // TopBar / MobileHeader bottom divider (dark mode) — slightly stronger than `border`.
+    headerBorder: 'rgb(63, 65, 66)',
     accent: '#1c2026',
     accentHover: '#232830',
     accentDisabled: '#2A2F36',
@@ -63,6 +66,34 @@ const mirageappDarkColors = {
     buttonSuccessBorder: '#2f5e3a',
     buttonSuccessHoverBg: 'rgba(22, 163, 74, 0.28)',
     navActiveBg: '#1c2026',
+
+    // Main Mirage app gradient (ported from mirage-mobile-app quests/new-posts/feed-type)
+    // Used for primary CTAs and accent borders.
+    gradientStart: '#667eea',
+    gradientEnd: '#764ba2',
+    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+
+    // Mobile app's primary button blue (`brand: #4285f4` in mirage-mobile-app/src/config/theme.ts).
+    // Used for input focus rings and active states that should read as "interactive blue".
+    focusBlue: '#4285f4',
+
+    // Hover background for interactive surfaces in TopBar / Sidebar / menus.
+    // Dark mode: requested value from UI review.
+    hoverBg: 'rgb(25, 28, 31)',
+
+    // Search input inline action icons (clear "X" button, etc.) — dark mode.
+    inputIconColor: 'rgb(143, 161, 172)',
+    inputIconHoverBg: 'rgb(53, 61, 65)',
+
+    // Sidebar option colors (dark mode).
+    sidebarItemText: 'rgb(221, 228, 232)',
+    sidebarItemActiveText: '#FFFFFF',
+    sidebarItemActiveBg: 'rgb(44, 50, 54)',
+
+    // Sidebar collapse/menu toggle button (dark mode).
+    menuBtnBorder: 'rgb(134, 136, 137)',
+    menuBtnBorderHover: '#FFFFFF',
+    menuBtnIcon: '#FFFFFF',
 };
 
 const mirageappLightColors = {
@@ -72,7 +103,10 @@ const mirageappLightColors = {
     subtleText: '#6B7280',          // mobile light neutral
     panel: '#FFFFFF',
     panelAlt: '#F7F8FA',
-    border: '#E5E7EB',
+    // App-wide divider / border color (light mode).
+    border: 'rgb(230, 230, 230)',
+    // TopBar / MobileHeader bottom divider (light mode) — slightly stronger than `border`.
+    headerBorder: 'rgb(204, 204, 204)',
     accent: '#F3F4F6',
     accentHover: '#E5E7EB',
     accentDisabled: '#F3F4F6',
@@ -121,6 +155,32 @@ const mirageappLightColors = {
     buttonSuccessBorder: '#16A34A',
     buttonSuccessHoverBg: 'rgba(22, 163, 74, 0.2)',
     navActiveBg: '#EFF1F5',
+
+    // Main Mirage app gradient (ported from mirage-mobile-app quests/new-posts/feed-type)
+    gradientStart: '#667eea',
+    gradientEnd: '#764ba2',
+    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+
+    // Mobile app's primary button blue (`brand: #4285f4`).
+    focusBlue: '#4285f4',
+
+    // Hover background for interactive surfaces in TopBar / Sidebar / menus.
+    // Light mode: requested value from UI review.
+    hoverBg: 'rgb(246, 248, 249)',
+
+    // Search input inline action icons (clear "X" button, etc.) — light mode.
+    inputIconColor: 'rgb(95, 108, 115)',
+    inputIconHoverBg: 'rgb(221, 238, 232)',
+
+    // Sidebar option colors (light mode).
+    sidebarItemText: 'rgb(34, 39, 42)',
+    sidebarItemActiveText: '#000000',
+    sidebarItemActiveBg: 'rgb(230, 235, 238)',
+
+    // Sidebar collapse/menu toggle button (light mode).
+    menuBtnBorder: 'rgb(128, 128, 128)',
+    menuBtnBorderHover: '#000000',
+    menuBtnIcon: '#000000',
 };
 
 function buildLayout(colors) {
@@ -298,7 +358,9 @@ function buildLayout(colors) {
         clickableTabShowAfter: false,
         tabSizeTablet: '0.6rem',
 
-        flatMode: true,
+        // mirageapp is a mobile-app-inspired theme — pills + rounded panels are on-brand,
+        // so we opt out of the oldreddit-era `border-radius: 0 !important` reset in Style.js.
+        flatMode: false,
         maxVideoWidth: 600,
         inboxFullWidth: true,
         profilePostsFullWidth: true,
