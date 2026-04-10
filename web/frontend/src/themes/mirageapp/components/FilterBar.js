@@ -49,10 +49,11 @@ const Label = styled.span`
     color: ${({ theme, $textStyle }) => $textStyle === 'subtle'
         ? (theme.colors.subtleText)
         : (theme.colors.text)};
-    font-weight: ${({ $textStyle }) => $textStyle === 'subtle' ? 'normal' : 'bold'};
-    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
+    font-weight: ${({ $textStyle }) => $textStyle === 'subtle' ? '500' : '700'};
+    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.68rem' : '0.72rem'};
     font-family: inherit;
-    margin-right: 0.25rem;
+    margin-right: 0.3rem;
+    letter-spacing: 0.01em;
 `;
 
 // removed unused DropdownLabel
@@ -90,8 +91,8 @@ const HiddenMeasure = styled.span`
     position: absolute;
     visibility: hidden;
     white-space: nowrap;
-    font-weight: bold;
-    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
+    font-weight: 700;
+    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.68rem' : '0.72rem'};
     font-family: inherit;
     padding: 0;
     margin: 0;
@@ -101,8 +102,8 @@ const StyledSelect = styled.select`
     color: ${({ theme }) => theme.colors.link};
     background-color: transparent;
     border: none;
-    font-weight: bold;
-    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
+    font-weight: 700;
+    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.68rem' : '0.72rem'};
     font-family: inherit;
     cursor: pointer;
     padding: 0;
@@ -114,13 +115,13 @@ const StyledSelect = styled.select`
     line-height: 1.2;
     position: relative;
     z-index: 1;
-    
+
     option {
         background-color: ${({ theme }) => theme.colors.panel};
         color: ${({ theme }) => theme.colors.text};
         font-family: inherit;
-        font-weight: bold;
-        font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
+        font-weight: 700;
+        font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.68rem' : '0.72rem'};
     }
 `;
 
@@ -130,8 +131,8 @@ const InlineLink = styled.a`
     padding: 0;
     margin: 0;
     color: ${({ theme }) => theme.colors.subtleText};
-    font-weight: bold;
-    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
+    font-weight: 700;
+    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.68rem' : '0.72rem'};
     font-family: inherit;
     cursor: pointer;
     text-decoration: none;
@@ -143,10 +144,10 @@ const InlineLink = styled.a`
 
 const InlineParen = styled.span`
     color: ${({ theme }) => theme.colors.subtleText};
-    font-weight: normal;
-    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.6rem' : '0.65rem'};
+    font-weight: 500;
+    font-size: ${({ $textStyle }) => $textStyle === 'subtle' ? '0.68rem' : '0.72rem'};
     font-family: inherit;
-    margin-left: 0.25rem;
+    margin-left: 0.3rem;
 `;
 
 function FilterBar({

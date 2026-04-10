@@ -2,7 +2,6 @@ import { Helmet } from "react-helmet-async";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import QuestHeroCard from "../components/QuestHeroCard.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
@@ -878,57 +877,11 @@ const HeaderInlineLink = styled.a`
 
 // Removed old topics bar styled components (unused)
 
-/** Fills feed column with panel color so body bg does not show between stacked sections */
+/** Feed column fills the full width — background is the app-wide bg so
+ *  the feed reads as one continuous canvas (no panel/body color split). */
 const MainFeedPanel = styled.div`
     width: 100%;
-    background: ${({ theme }) => theme.colors.panel};
-`;
-
-/** Sidebar floats right inside the ListContainer, below the toolbar.
- *  Feed row borders extend full-width underneath it. */
-const SidebarFloat = styled.aside`
-    float: right;
-    width: 18rem;
-    margin: 0.35rem ${OLDREDDIT_SHELL_INSET_X} 0.5rem 0.75rem;
-    position: relative;
-    z-index: 5;
-
-    @media (max-width: 1000px) {
-        display: none;
-    }
-`;
-
-/** Single bordered sidebar widget containing quests + submit */
-const SidebarBox = styled.div`
-    box-sizing: border-box;
-    background: ${({ theme }) => theme.colors.panel};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    display: flex;
-    flex-direction: column;
-`;
-
-/** Sidebar action link — same visual weight as the quest header strip */
-const SidebarAction = styled(Link)`
-    display: block;
-    box-sizing: border-box;
-    width: 100%;
-    padding: 0.3rem 0.5rem;
-    font-size: 0.6rem;
-    font-weight: 700;
-    font-family: inherit;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    text-decoration: none;
-    text-align: left;
-    color: ${({ theme }) => theme.colors.text};
-    background: ${({ theme }) => theme.colors.panelAlt};
-    border: none;
-    border-top: 1px solid ${({ theme }) => theme.colors.border};
-    cursor: pointer;
-
-    &:hover {
-        color: ${({ theme }) => theme.colors.link};
-    }
+    background: ${({ theme }) => theme.colors.bg};
 `;
 
 const LoadingMoreIndicator = styled.div`
@@ -1186,7 +1139,6 @@ const MainView = ({
         showNsfwHero,
         isLoggedIn,
         inviteCodesEnabled,
-        questsEnabled,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,
@@ -1195,9 +1147,7 @@ const MainView = ({
         welcomeStats,
         welcomeStatsStale,
         inviteBannerCollapsed,
-        questCardCollapsed,
         toggleInviteBanner,
-        toggleQuestCard,
         nextAvailableCode,
         availableCodeCount,
         handleOpenInviteModal,
@@ -1607,19 +1557,10 @@ const MainView = ({
                                 const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
                                 return hasValidTitle && hasValidTopic && !p.deleted;
                             });
-                            const isTopicFeed = urlTopic && urlTopic !== 'home' && urlTopic !== 'following';
-                            const createPostLink = isTopicFeed
-                                ? `/create_post?topic=${encodeURIComponent(urlTopic)}`
-                                : '/create_post';
-                            const sidebarContent = (
-                                <SidebarFloat>
-                                    <SidebarBox>
-                                        {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
-                                        <SidebarAction to={createPostLink}>Create a new post</SidebarAction>
-                                    </SidebarBox>
-                                </SidebarFloat>
-                            );
-                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} sidebar={sidebarContent} />;
+                            // Feed header is now owned by ListFeedView (sort + view controls only).
+                            // Create-post action and nav tabs live in the left rail / sidebar,
+                            // so we no longer inject a sidebar column here.
+                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} />;
                         })()}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}

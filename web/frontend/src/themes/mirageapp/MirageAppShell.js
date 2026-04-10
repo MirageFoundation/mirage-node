@@ -129,11 +129,13 @@ const ToggleButton = styled.button`
 
 const Main = styled.main`
     min-width: 0;
-    padding: 1rem 1rem 3rem;
+    /* Top padding kept tight so the first feed row / toolbar control aligns
+       vertically with the first sidebar menu item. */
+    padding: 0.5rem 1rem 3rem;
     background: transparent;
 
     @media (max-width: 1000px) {
-        padding: 0.75rem 0.75rem 3rem;
+        padding: 0.5rem 0.75rem 3rem;
     }
 
     @media (max-width: 600px) {
