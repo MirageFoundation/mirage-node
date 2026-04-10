@@ -4,6 +4,7 @@
 
 **Depends on:** Plans 01, 02, 03, 04.
 **Unblocks:** Plan 06.
+**Next requested slice:** Onboarding UI first — focus `/login`, `/signup`, and `/welcome` before the broader inbox/search/settings pass.
 
 ---
 
@@ -91,6 +92,8 @@ Requirements:
 ---
 
 ## Auth flows (Login / CreateAccount / Welcome)
+
+> **Next task:** Start here. The onboarding/auth surfaces are the next requested implementation slice for `mirageapp`.
 
 References:
 - mobile `app/(auth)/login.tsx`, `recovery-phrase.tsx`, `username.tsx`

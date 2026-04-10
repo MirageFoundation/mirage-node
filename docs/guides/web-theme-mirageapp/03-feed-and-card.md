@@ -4,6 +4,7 @@
 
 **Depends on:** Plans 01 and 02.
 **Unblocks:** Plan 04 (post detail reuses these primitives).
+**Status:** ✅ Done — shipped in `mirageapp`. A manual cross-theme browser regression pass is still recommended.
 
 ---
 
@@ -125,6 +126,9 @@ Beyond the original scope, the following refinements were applied during iterati
 - **Post card** — Pressable whole-card navigation (`isInteractiveTarget` skips links/buttons/popovers), follow pill opens a Follow topic / Follow user popover, dedicated red Block icon opens a Block & report popover, 3-dot menu carries Copy / Edit / Delete / Follow / Unfollow / Gift flows (Award/Gift Mirage/Gift Subscription currently navigate to `/u/:user?action=...` instead of opening inline modals — flagged as a follow-up).
 - **Divider** — rendered by `RowSlot` in `ListFeedView` so it sits outside the card's rounded hover area.
 - **Tokens added** — `feedCtrlText/HoverBg`, `menuBg/SelectedBg/HeaderText/ItemHoverBg/ItemHoverText/DangerText`, `followBtnBg/BgHover/Border/BorderHover`, `actionIconBg/HoverBg`.
+- **Hidden-sidebar feed behavior** — when the desktop sidebar is collapsed, card view stays centered while compact view stays left-aligned and stretches to `80%` width.
+- **Compact-row polish** — compact mode now shows the same inline feed-bucket label as card mode, uses the Mirage gradient for the no-media placeholder tile, and swaps the old expand glyphs for a smaller chevron that is hidden when there is no extra media/body content to reveal.
+- **Metadata polish** — the top metadata row in both card and compact views now uses the compact action-row text color for topic / time / separators / feed tag, keeps usernames tier-colored, and uses a slightly smaller separator dot.
 
 ### Known follow-ups
 
