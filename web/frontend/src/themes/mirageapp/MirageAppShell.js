@@ -130,8 +130,10 @@ const ToggleButton = styled.button`
 const Main = styled.main`
     min-width: 0;
     /* Top padding kept tight so the first feed row / toolbar control aligns
-       vertically with the first sidebar menu item. */
-    padding: 0.5rem 1rem 3rem;
+       vertically with the first sidebar menu item. Right padding widens to
+       ~30px when the sidebar is hidden so the feed doesn't run to the
+       viewport edge. */
+    padding: ${({ $hidden }) => ($hidden ? '0.5rem 30px 3rem 1rem' : '0.5rem 1rem 3rem')};
     background: transparent;
 
     @media (max-width: 1000px) {
@@ -178,7 +180,7 @@ export default function MirageAppShell({ children, state }) {
                         <HiBars3 aria-hidden="true" />
                     </ToggleButton>
                 </DividerCol>
-                <Main>{children}</Main>
+                <Main $hidden={hidden}>{children}</Main>
             </Layout>
             <MobileBottomNav state={state} />
         </ShellRoot>

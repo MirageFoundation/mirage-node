@@ -30,25 +30,29 @@ const bounceDown = keyframes`
 
 // ─── Inline pill ───────────────────────────────────────────────────────────
 
+/* Inline vote pill
+ * ─ Container bg matches the share/block icon chips (`actionIconBg`).
+ * ─ No border (the tinted surface already separates it from the card bg).
+ * ─ Fixed 32px height so it lines up with the comment pill + action chips.
+ * ─ Root has NO hover state; only the individual arrow buttons change bg on
+ *   hover so hovering the upvote tint doesn't light up the whole pill. */
 const PillRoot = styled.div`
     display: inline-flex;
     align-items: center;
-    height: 30px;
-    padding: 0 2px;
+    height: 32px;
+    padding: 0;
     border-radius: 9999px;
-    border: 0.5px solid ${({ theme }) => theme.colors.border};
-    background: transparent;
+    border: none;
+    background: ${({ theme }) => theme.colors.actionIconBg};
     color: ${({ theme }) => theme.colors.text};
-    font-weight: 700;
-    font-size: 0.72rem;
+    font-weight: 600;
+    font-size: 0.66rem;
     line-height: 1;
+    overflow: hidden;
 `;
 
 const PillDivider = styled.span`
-    display: inline-block;
-    width: 1px;
-    height: 60%;
-    background: ${({ theme }) => theme.colors.border};
+    display: none;
 `;
 
 const PillButton = styled.button`
@@ -66,10 +70,12 @@ const PillButton = styled.button`
             ? ($up ? theme.colors.voteUp : theme.colors.voteDown)
             : theme.colors.text};
     font: inherit;
-    font-weight: 700;
+    font-weight: 600;
     height: 100%;
     line-height: 1;
-    transition: color 0.12s ease, transform 0.12s ease;
+    /* Only animate color + background; no transform so the glyph doesn't
+     * shift on hover/press (requested UX). */
+    transition: color 0.12s ease, background 0.12s ease;
 
     &:disabled {
         opacity: 0.6;
@@ -77,17 +83,15 @@ const PillButton = styled.button`
     }
 
     &:hover:not(:disabled) {
+        /* Only the arrow cell's background highlights, not the full pill. */
+        background: ${({ theme }) => theme.colors.actionIconHoverBg};
         color: ${({ $up, theme }) => ($up ? theme.colors.voteUp : theme.colors.voteDown)};
-    }
-
-    &:active:not(:disabled) {
-        transform: scale(0.92);
     }
 
     svg {
         display: block;
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         fill: currentColor;
     }
 
@@ -104,10 +108,13 @@ const PillCount = styled.span`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 1.2rem;
-    padding: 0 8px;
+    min-width: 1.1rem;
+    padding: 0 6px;
     font: inherit;
-    font-weight: 700;
+    /* Slightly smaller + lighter than the arrows so the number reads as
+     * metadata rather than a button label. */
+    font-size: 0.62rem;
+    font-weight: 500;
     line-height: 1;
     color: ${({ $up, $down, theme }) =>
         $up
@@ -193,15 +200,17 @@ const CollapseToggle = styled.span`
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 
+// Triangle icons ported from bluemoon/VoteSection so both themes share the
+// same up/down glyph language.
 const UpIcon = (props) => (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-        <path d="M12 4 l8 10 H15 V20 H9 V14 H4 Z" />
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" {...props}>
+        <path d="M8 3l5 8H3l5-8z" fill="currentColor" />
     </svg>
 );
 
 const DownIcon = (props) => (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-        <path d="M12 20 l-8 -10 H9 V4 H15 V10 H20 Z" />
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" {...props}>
+        <path d="M8 13l-5-8h10l-5 8z" fill="currentColor" />
     </svg>
 );
 

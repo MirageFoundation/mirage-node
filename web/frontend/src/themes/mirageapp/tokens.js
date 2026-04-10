@@ -104,6 +104,31 @@ const mirageappDarkColors = {
     menuBg: 'rgb(25, 28, 31)',
     menuSelectedBg: 'rgb(44, 50, 54)',
     menuHeaderText: 'rgb(187, 202, 211)',
+
+    // Follow button (post card header) — dark mode.
+    followBtnBg: 'rgb(42, 90, 195)',
+    followBtnBgHover: 'rgb(54, 110, 236)',
+    /* Border for the "Following" (active) state of the follow pill, plus
+     * the hover lift. Spec colors from UI review. */
+    followBtnBorder: 'rgb(140, 141, 143)',
+    followBtnBorderHover: '#FFFFFF',
+
+    // Bottom action-row icon button chip (block / share pills) — dark mode.
+    actionIconBg: 'rgb(44, 50, 54)',
+    // Hover tile for vote pill / comment pill / share / block / 3-dots
+    // at the bottom of a post card (dark mode).
+    actionIconHoverBg: 'rgb(53, 61, 65)',
+
+    // Dropdown menu option hover (dark mode): bg stays unchanged, but text
+    // + icons lift to pure white. We express this as a transparent hover
+    // bg + a dedicated hover text token so styled-components can branch
+    // cleanly on theme values (no runtime mode check).
+    menuItemHoverBg: 'transparent',
+    menuItemHoverText: '#FFFFFF',
+    /* Lighter red used for danger-labelled dropdown rows at rest (block,
+     * report, delete). Hover still uses the punchier `voteDown`, so the
+     * row picks up saturation when the pointer enters. */
+    menuDangerText: '#FF7B70',
 };
 
 const mirageappLightColors = {
@@ -200,6 +225,29 @@ const mirageappLightColors = {
     menuBg: 'rgb(255, 255, 255)',
     menuSelectedBg: 'rgb(230, 235, 238)',
     menuHeaderText: 'rgb(95, 108, 115)',
+
+    // Follow button (post card header) — light mode.
+    followBtnBg: 'rgb(30, 67, 150)',
+    followBtnBgHover: 'rgb(21, 46, 104)',
+    /* Border for the "Following" (active) state of the follow pill, plus
+     * the hover lift. Spec colors from UI review. */
+    followBtnBorder: 'rgb(124, 125, 125)',
+    followBtnBorderHover: '#000000',
+
+    // Bottom action-row icon button chip (block / share pills) — light mode.
+    actionIconBg: 'rgb(230, 235, 238)',
+    // Hover tile for vote pill / comment pill / share / block / 3-dots
+    // at the bottom of a post card (light mode).
+    actionIconHoverBg: 'rgb(221, 228, 232)',
+
+    // Dropdown menu option hover (light mode): bg lifts to a neutral tile,
+    // text stays the normal sidebar item color (unchanged).
+    menuItemHoverBg: 'rgb(246, 248, 249)',
+    menuItemHoverText: 'rgb(34, 39, 42)',
+    /* Lighter red used for danger-labelled dropdown rows at rest. Hover
+     * still uses the saturated `voteDown` so the row picks up emphasis
+     * when the pointer enters. */
+    menuDangerText: '#FF6A5E',
 };
 
 function buildLayout(colors) {
