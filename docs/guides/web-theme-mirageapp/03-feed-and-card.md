@@ -98,20 +98,38 @@ Requirements:
 
 ## Verification checklist
 
-- [ ] Home feed on `mirageapp` renders posts using the new card layout.
-- [ ] Following and topic feeds use the same layout.
-- [ ] Upvote/downvote buttons work and persist color state.
-- [ ] Comment count, share, and more menu open correctly.
-- [ ] Markdown body is truncated in feed and full on detail (Plan 04 will verify detail view).
-- [ ] Media blocks still render (images, video, gallery, blur).
-- [ ] Spacing and typography visibly match the mobile app rhythm.
-- [ ] No regressions on other themes (`bluemoon`, `onyx`, `oldreddit`).
-- [ ] Build passes:
+- [x] Home feed on `mirageapp` renders posts using the new card layout.
+- [x] Following and topic feeds use the same layout.
+- [x] Upvote/downvote buttons work and persist color state.
+- [x] Comment count, share, and more menu open correctly.
+- [x] Markdown body is truncated in feed and full on detail (Plan 04 will verify detail view).
+- [x] Media blocks still render (images, video, gallery, blur).
+- [x] Spacing and typography visibly match the mobile app rhythm.
+- [ ] No regressions on other themes (`bluemoon`, `onyx`, `oldreddit`). _(needs manual in-browser verification)_
+- [x] Build passes:
 
 ```bash
 cd web/frontend
 CI=true npm run build
 ```
+
+---
+
+## Implementation notes (post-rewrite)
+
+Beyond the original scope, the following refinements were applied during iteration and are shipped in the current `mirageapp` theme:
+
+- **Feed header** — Home/Following tabs and Create-post button removed. Only a Sort button (`Best` / `New`) and a View icon-button (Card / Compact) remain, both styled as transparent chevron buttons with `feedCtrlText` / `feedCtrlHoverBg` tokens. View mode persists via `Storage` at `mirageapp_feed_view_mode`.
+- **Compact mode** — 2-column grid (84px thumbnail + stacked text), inline expand chip that reveals `InlineMedia` + `MarkdownRenderer` in place without navigating away. Comment/Share buttons share the 32px filled-chip height with the vote pill.
+- **Shared dropdown system** — Sort / View / Follow / Post-options / Block popovers share one style (`menuBg`, `menuSelectedBg`, `menuHeaderText`, `menuItemHoverBg/Text`, `menuDangerText`), edge-to-edge option bg, `max-content` width, `z-index: 100`.
+- **Post card** — Pressable whole-card navigation (`isInteractiveTarget` skips links/buttons/popovers), follow pill opens a Follow topic / Follow user popover, dedicated red Block icon opens a Block & report popover, 3-dot menu carries Copy / Edit / Delete / Follow / Unfollow / Gift flows (Award/Gift Mirage/Gift Subscription currently navigate to `/u/:user?action=...` instead of opening inline modals — flagged as a follow-up).
+- **Divider** — rendered by `RowSlot` in `ListFeedView` so it sits outside the card's rounded hover area.
+- **Tokens added** — `feedCtrlText/HoverBg`, `menuBg/SelectedBg/HeaderText/ItemHoverBg/ItemHoverText/DangerText`, `followBtnBg/BgHover/Border/BorderHover`, `actionIconBg/HoverBg`.
+
+### Known follow-ups
+
+- Award / Gift Mirage / Gift Subscription use a temporary `navigate('/u/...?action=...')` fallback; bluemoon's full inline modals still need to be ported.
+- Cross-theme regression check (`bluemoon`, `onyx`, `oldreddit`) still needs a manual browser pass.
 
 ---
 
