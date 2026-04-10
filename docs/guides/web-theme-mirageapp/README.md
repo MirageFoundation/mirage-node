@@ -39,8 +39,8 @@ Whenever desktop structure and mobile visuals conflict:
 |---|---|---|---|
 | 01 | Theme skeleton, tokens, registration | ✅ Done | [`01-skeleton-and-tokens.md`](./01-skeleton-and-tokens.md) |
 | 02 | Shell, top nav, sidebar, mobile nav | ✅ Done (MobileBottomNav full restyle deferred) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
-| 03 | Feed, card view, vote / action row | ⏳ Not started — **next** | [`03-feed-and-card.md`](./03-feed-and-card.md) |
-| 04 | Post detail + profile | ⏳ Not started | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
+| 03 | Feed, card view, vote / action row | ✅ Done (manual cross-theme browser regression still recommended) | [`03-feed-and-card.md`](./03-feed-and-card.md) |
+| 04 | Post detail + profile | ⏳ Not started — **next** | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
 | 05 | Inbox, search, settings, auth flows | ⏳ Not started | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
 | 06 | Remaining routes, polish, QA | ⏳ Not started | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
@@ -48,7 +48,7 @@ Each plan is designed to be one PR. Later plans depend on earlier ones landing f
 
 ### Current focus
 
-**Plan 03 → Feed, card view, vote / action row.** Plan 02 is complete: Shell, TopBar, and Sidebar are fully iterated. The sidebar was restructured (Feeds primary nav + collapsible Topics/Users sections), restyled with new `sidebarItem*` tokens, migrated to Heroicons v2 via `react-icons`, and got a sticky collapse button + divider column inside `MirageAppShell`. Layout/scrollbar jump-fixes landed (`scrollbar-gutter: stable`, locked TopBar height, `Layout` `min-height`). Only `MobileBottomNav` full restyle is deferred. Next up: start Plan 03 — restyle the feed and card view. Details in [`03-feed-and-card.md`](./03-feed-and-card.md).
+**Next requested UI task → Onboarding UI** (`/login`, `/signup`, `/welcome` from Plan 05). Plan 03 is now shipped in `mirageapp`: the feed, CardView, VoteSection, compact mode, hidden-sidebar layout behavior, and related post-card polish are in place. Plan 02 remains complete as well, with only the `MobileBottomNav` full restyle deferred. Broader roadmap work for Plan 04 (post detail + profile) is still documented in sequence, but the next requested implementation slice is the onboarding/auth UI from [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md).
 
 ---
 
