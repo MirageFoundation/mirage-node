@@ -98,3 +98,5 @@ scripts/*
 
 cursor.md
 .cursor/
+.otto
+.npmrc
