@@ -52,13 +52,30 @@ const flashGlow = keyframes`
 
 // ─── Container primitives ─────────────────────────────────────────────────
 
-const FeedList = styled.div`
+const FeedList = styled.div.attrs(({ $viewMode }) => ({
+    'data-feed-view-mode': $viewMode,
+}))`
     display: flex;
     flex-direction: column;
     width: 100%;
     max-width: 720px;
     margin: 0;
     background: ${({ theme }) => theme.colors.bg};
+
+    @media (min-width: 1001px) {
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
+            width: 80%;
+            max-width: none;
+            margin: 0;
+        }
+    }
 `;
 
 /* Row slot owns the between-card divider so it sits OUTSIDE the card
@@ -893,7 +910,7 @@ export default function ListFeedView({
     const ViewIcon = viewMode === 'compact' ? IconCompact : IconCard;
 
     return (
-        <FeedList>
+        <FeedList $viewMode={viewMode}>
             {showSortTabs && (
                 <Toolbar aria-label="Feed sort and view">
                     <PopoverRoot ref={sortAnchorRef}>

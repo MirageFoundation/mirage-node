@@ -127,7 +127,9 @@ const ToggleButton = styled.button`
     }
 `;
 
-const Main = styled.main`
+const Main = styled.main.attrs(({ $hidden }) => ({
+    'data-sidebar-hidden': $hidden ? 'true' : 'false',
+}))`
     min-width: 0;
     /* Top padding kept tight so the first feed row / toolbar control aligns
        vertically with the first sidebar menu item. Right padding widens to

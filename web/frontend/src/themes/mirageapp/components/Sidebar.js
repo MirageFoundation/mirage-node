@@ -37,7 +37,7 @@ const Aside = styled.aside`
     width: 240px;
     max-height: calc(100vh - 2.5rem - 1px);
     overflow-y: auto;
-    padding: 0.25rem 0.75rem 2rem 0.5rem;
+    padding: 0.25rem 1rem 2rem 0.5rem;
     box-sizing: border-box;
     scrollbar-width: thin;
     scrollbar-color: ${({ theme }) => theme.colors.scrollbar} transparent;
@@ -74,7 +74,7 @@ const SectionHeader = styled.button`
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: 0.4rem 0.6rem;
+    padding: 0.48rem 0.6rem;
     margin: 0;
     background: transparent;
     border: none;
@@ -124,7 +124,7 @@ const Item = styled(Link)`
     /* Hard-locked row height: using fixed height (not min-height) so */
     /* swapping outline/filled Heroicons glyphs can never grow or shrink */
     /* the row — some solid variants have slightly different viewBoxes. */
-    height: 32px;
+    height: 34px;
     box-sizing: border-box;
     border-radius: 8px;
     color: ${({ theme, $active }) => ($active ? theme.colors.sidebarItemActiveText : theme.colors.sidebarItemText)};
@@ -167,7 +167,7 @@ const IconBox = styled.span`
 
 const TopicLink = styled(Link)`
     display: block;
-    padding: 0.25rem 0.6rem;
+    padding: 0.32rem 0.6rem;
     border-radius: 6px;
     font-size: 0.68rem;
     color: ${({ theme }) => theme.colors.sidebarItemText};
@@ -184,7 +184,7 @@ const TopicLink = styled(Link)`
 
 const UserLink = styled(Link)`
     display: block;
-    padding: 0.25rem 0.6rem;
+    padding: 0.32rem 0.6rem;
     border-radius: 6px;
     font-size: 0.68rem;
     color: ${({ theme }) => theme.colors.sidebarItemText};
@@ -200,7 +200,7 @@ const UserLink = styled(Link)`
 `;
 
 const EmptyRow = styled.div`
-    padding: 0.25rem 0.6rem;
+    padding: 0.32rem 0.6rem;
     font-size: 0.65rem;
     color: ${({ theme }) => theme.colors.subtleText};
 `;
