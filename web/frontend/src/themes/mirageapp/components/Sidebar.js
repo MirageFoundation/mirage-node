@@ -1,6 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation } from 'react-router-dom';
+import {
+    HiHome,
+    HiOutlineHome,
+    HiHeart,
+    HiOutlineHeart,
+    HiHashtag,
+    HiOutlineHashtag,
+    HiPlusCircle,
+    HiOutlinePlusCircle,
+    HiMagnifyingGlass,
+    HiOutlineMagnifyingGlass,
+    HiChevronDown,
+} from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
 import { fetchFollowedTopics, loadSubscriptions } from '../../../utils/Subscriptions';
 import { fetchFollowedUsers, loadFollowedAuthors } from '../../../utils/FollowUsers';
@@ -19,10 +32,10 @@ import { resolveUsernames } from '../../../utils/UsernameCache';
 
 const Aside = styled.aside`
     position: sticky;
-    top: calc(3.5rem + 1px);
+    top: calc(2.5rem + 1px);
     align-self: start;
     width: 240px;
-    max-height: calc(100vh - 3.5rem - 1px);
+    max-height: calc(100vh - 2.5rem - 1px);
     overflow-y: auto;
     padding: 0.25rem 0.75rem 2rem 0.5rem;
     box-sizing: border-box;
@@ -81,40 +94,45 @@ const SectionHeader = styled.button`
     }
 `;
 
-const Chevron = styled.svg`
-    width: 16px;
-    height: 16px;
+const ChevronWrap = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
     color: inherit;
     transition: transform 0.18s ease;
     transform: ${({ $expanded }) => ($expanded ? 'rotate(0deg)' : 'rotate(-90deg)')};
+
+    svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+    }
 `;
 
 const ChevronIcon = ({ expanded }) => (
-    <Chevron $expanded={expanded} viewBox="0 0 24 24" aria-hidden="true">
-        <path
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M6 9l6 6 6-6"
-        />
-    </Chevron>
+    <ChevronWrap $expanded={expanded} aria-hidden="true">
+        <HiChevronDown />
+    </ChevronWrap>
 );
 
 const Item = styled(Link)`
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    padding: 0.4rem 0.6rem;
+    padding: 0 0.6rem;
+    /* Hard-locked row height: using fixed height (not min-height) so */
+    /* swapping outline/filled Heroicons glyphs can never grow or shrink */
+    /* the row — some solid variants have slightly different viewBoxes. */
+    height: 32px;
+    box-sizing: border-box;
     border-radius: 8px;
     color: ${({ theme, $active }) => ($active ? theme.colors.sidebarItemActiveText : theme.colors.sidebarItemText)};
     background: ${({ theme, $active }) => ($active ? theme.colors.sidebarItemActiveBg : 'transparent')};
     font-size: 0.72rem;
     font-weight: 500;
     text-decoration: none;
-    line-height: 1.2;
+    line-height: 1;
 
     &:hover {
         background: ${({ theme, $active }) => ($active ? theme.colors.sidebarItemActiveBg : theme.colors.hoverBg)};
@@ -131,8 +149,20 @@ const IconBox = styled.span`
     height: 20px;
     flex-shrink: 0;
     color: inherit;
+    /* line-height: 0 removes the inline text baseline gap of the parent
+       span, so the SVG sits exactly at its explicit 18px height regardless
+       of the surrounding font metrics. */
+    line-height: 0;
 
-    svg { width: 18px; height: 18px; }
+    /* Force every react-icons glyph to render at exactly 18x18 as a */
+    /* block element - bypasses any width="1em" presentation attribute */
+    /* react-icons applies and kills the inline SVG descender space. */
+    svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+        flex-shrink: 0;
+    }
 `;
 
 const TopicLink = styled(Link)`
@@ -196,69 +226,14 @@ const ToggleMore = styled.button`
     }
 `;
 
-// Outline + filled icon pairs. `filled` is used when the item is active.
+// Outline + filled icon pairs from Heroicons v2 (`react-icons/hi2`).
+// `filled` (solid) is used when the item is active; `outline` otherwise.
 const icons = {
-    home: {
-        outline: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10.5Z" />
-            </svg>
-        ),
-        filled: (
-            <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10.5Z" />
-            </svg>
-        ),
-    },
-    following: {
-        outline: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10Z" />
-            </svg>
-        ),
-        filled: (
-            <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10Z" />
-            </svg>
-        ),
-    },
-    topics: {
-        outline: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 6h16M4 12h16M4 18h10" />
-            </svg>
-        ),
-        filled: (
-            <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h15a1.5 1.5 0 0 1 0 3h-15A1.5 1.5 0 0 1 3 5.5Zm0 6A1.5 1.5 0 0 1 4.5 10h15a1.5 1.5 0 0 1 0 3h-15A1.5 1.5 0 0 1 3 11.5Zm0 6A1.5 1.5 0 0 1 4.5 16h9a1.5 1.5 0 0 1 0 3h-9A1.5 1.5 0 0 1 3 17.5Z" />
-            </svg>
-        ),
-    },
-    create: {
-        outline: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14M5 12h14" />
-            </svg>
-        ),
-        filled: (
-            <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2a1.5 1.5 0 0 1 1.5 1.5V10.5h7a1.5 1.5 0 0 1 0 3h-7v7a1.5 1.5 0 0 1-3 0v-7h-7a1.5 1.5 0 0 1 0-3h7V3.5A1.5 1.5 0 0 1 12 2Z" />
-            </svg>
-        ),
-    },
-    search: {
-        outline: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m21 21-4.3-4.3" />
-            </svg>
-        ),
-        filled: (
-            <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10.5 3a7.5 7.5 0 1 1-4.74 13.32l-3.24 3.24a1.5 1.5 0 1 1-2.12-2.12l3.24-3.24A7.5 7.5 0 0 1 10.5 3Zm0 3a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z" />
-            </svg>
-        ),
-    },
+    home: { outline: HiOutlineHome, filled: HiHome },
+    following: { outline: HiOutlineHeart, filled: HiHeart },
+    topics: { outline: HiOutlineHashtag, filled: HiHashtag },
+    create: { outline: HiOutlinePlusCircle, filled: HiPlusCircle },
+    search: { outline: HiOutlineMagnifyingGlass, filled: HiMagnifyingGlass },
 };
 
 function isActivePath(pathname, target) {
@@ -269,9 +244,10 @@ function isActivePath(pathname, target) {
 
 function SidebarItem({ to, icon, label, pathname }) {
     const active = isActivePath(pathname, to);
+    const Glyph = active ? icon.filled : icon.outline;
     return (
         <Item to={to} $active={active}>
-            <IconBox>{active ? icon.filled : icon.outline}</IconBox>
+            <IconBox><Glyph /></IconBox>
             {label}
         </Item>
     );

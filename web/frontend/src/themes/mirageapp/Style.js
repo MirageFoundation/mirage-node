@@ -18,6 +18,23 @@ export const Style = createThemeStyleRules`
     font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
     min-height: 100vh;
     background-color: ${({ theme }) => theme.colors.panel};
+    /* Always reserve space for the viewport scrollbar so TopBar / Sidebar
+       don't shift horizontally when scrollable vs non-scrollable routes
+       swap in. Prevents "wobble" between Home (long) and Create/Search. */
+    scrollbar-gutter: stable;
+    /* Hide the viewport scrollbar itself (Firefox). Works together with
+       the webkit rule below to hide the feed scroll indicator while
+       keeping the gutter reserved. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  /* Hide the viewport scrollbar in WebKit/Blink (Chrome, Safari, Edge). */
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   @media (max-width: 1000px) {
