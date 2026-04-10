@@ -2,7 +2,7 @@
 
 **Goal:** Replace the Shell, top navigation, and sidebar inside the `mirageapp` theme so the site gets a Reddit-style desktop chrome with mobile-app visuals. This is the phase where the app starts to **look** different.
 
-**Status:** 🟡 In progress — Shell + TopBar shipped and polished; Sidebar UI polish is the next subtask.
+**Status:** ✅ Done — Shell, TopBar, Sidebar (polished), MobileHeader all shipped. Only `MobileBottomNav` full restyle is deferred to a later polish pass.
 
 **Depends on:** Plan 01 (theme must exist and be registered). ✅
 **Unblocks:** Plans 03–06 (all content surfaces live inside this shell).
@@ -91,16 +91,54 @@ Tokens added/updated (`tokens.js`):
 - `inputIconColor`: dark `rgb(143, 161, 172)` / light `rgb(95, 108, 115)`
 - `inputIconHoverBg`: dark `rgb(53, 61, 65)` / light `rgb(221, 238, 232)`
 
-### 🟡 Sidebar — built, needs UI polish
-Implemented in `components/Sidebar.js` as a desktop-only sticky rail (hidden below 1000px) with four sections:
-- **Feeds** — Home, Following, Topics, Create post, Search
-- **Account** — Profile, Inbox, Subscription, Settings
-- **Moderation** — Follows, Blocks, Agents, Reports
-- **Network** — This node, Stats, Referrals, Bridge
-- Footer "About Mirage" link
-- Inline SVG icons, 10px radius items, active state via pathname matching
+### ✅ Sidebar — done (polished)
+Implemented in `components/Sidebar.js` as a desktop-only sticky rail (hidden below 1000px). Restructured and restyled in full during the polish pass:
 
-**Pending:** UI polish to align with the mobile app. See **"Next subtask — Sidebar UI polish"** below.
+Structure:
+- **Primary nav (no section header)** — Home, Following, Topics, Create post, Search
+- **Topics** — collapsible list of followed topics (ported pattern from the `bluemoon` theme; `fetchFollowedTopics` / `loadSubscriptions`, persists expand state via `Storage`, `+N more` toggle with `sidebar_topics_limit`)
+- **Users** — collapsible list of followed users (`fetchFollowedUsers` / `loadFollowedAuthors` / `resolveUsernames`, same `+N more` pattern via `sidebar_people_limit`)
+- All previous `Account` / `Moderation` / `Network` sections and the "About Mirage" footer removed — those routes live on TopBar and deeper pages now.
+
+Styling:
+- Font sizes reduced: items `0.72rem`, section labels `0.6rem`, topic/user rows `0.68rem`.
+- Active state no longer changes font weight; uses **filled** (solid) icon variants.
+- Hover bg = `theme.colors.hoverBg` (`rgb(25,28,31)` dark / `rgb(246,248,249)` light).
+- Active bg uses new `sidebarItemActiveBg` token (`rgb(44,50,54)` dark / `rgb(230,235,238)` light).
+- Inactive text color = new `sidebarItemText` (`rgb(221,228,232)` dark / `rgb(34,39,42)` light).
+- Active text color = new `sidebarItemActiveText` (white on dark / black on light).
+- Section headers: `font-weight: 400`, hover bg only (text + chevron colors stay unchanged on hover). Section dividers drawn with `border-top: 1px solid theme.colors.border`, matching the rest of the app.
+- Row height is **hard-locked** at `32px` (fixed `height`, `line-height: 1`, `IconBox { line-height: 0; svg { display: block; width: 18px; height: 18px } }`) so outline↔filled icon swaps can never shift row position.
+
+Icons:
+- Migrated from inline SVG paths to **Heroicons v2** via `react-icons/hi2`:
+  - Home → `HiOutlineHome` / `HiHome`
+  - Following → `HiOutlineHeart` / `HiHeart`
+  - Topics → `HiOutlineHashtag` / `HiHashtag`
+  - Create → `HiOutlinePlusCircle` / `HiPlusCircle`
+  - Search → `HiOutlineMagnifyingGlass` / `HiMagnifyingGlass`
+  - Section chevron → `HiChevronDown` (rotates `-90deg → 0deg` on expand)
+- `react-icons@^5.6.0` added to `web/frontend/package.json`.
+
+Shell integration (`MirageAppShell.js`):
+- New `DividerCol` grid track (1px `border-left` + 16px right gap) between `SidebarCol` and `Main`, using the same `theme.colors.headerBorder` as the TopBar divider.
+- New sticky `ToggleButton` pinned next to the TopBar (`position: sticky; top: calc(2.5rem + 1px + 14px)`, centered on the divider line via `margin-left: -16px`), so the collapse handle stays visible while the feed scrolls. Renders `HiBars3` from Heroicons; 32×32 circle; border `rgb(128,128,128)` inactive / black hover in light mode, `rgb(134,136,137)` inactive / white hover in dark mode; bg always matches main bg; icon color white (dark) / black (light) in both states.
+- Collapse state persisted to `Storage` (`mirageapp_sidebar_hidden`) with a smooth grid-template-columns transition; divider + toggle stay mounted when collapsed so it can be reopened.
+- `Layout` gets `min-height: calc(100vh - 2.5rem - 1px)` so the divider fills the viewport on short routes (Create Post, Search, loading states).
+
+Wobble / jump fixes:
+- `Bar` (TopBar) now has an explicit `height: calc(2.5rem + 1px)` + `box-sizing: border-box`, so the Sidebar's sticky `top` offset always matches the real header box regardless of font-size clamp. Kills the "sidebar jumps up on Create Post / Search / loading" bug.
+- `BarInner` fills that locked height (`height: 100%; padding: 0 0.5rem`) so the header content stays vertically centered.
+- `Sidebar.Aside` and `Layout.min-height` updated in lockstep to `calc(2.5rem + 1px)` / `calc(100vh - 2.5rem - 1px)`.
+- `Style.js` globals add `html { scrollbar-gutter: stable }` so the TopBar / Sidebar never shift horizontally when a scrollable vs non-scrollable route mounts.
+- `Style.js` globals also hide the viewport scrollbar indicator itself (`html { scrollbar-width: none }` + `html::-webkit-scrollbar { display: none }`) while keeping the gutter reserved — the feed still scrolls, just with no visible indicator.
+
+Alignment:
+- TopBar's `BarInner` constrained to `max-width: 1400px; margin: 0 auto; padding: 0 0.5rem` so the "Mirage" brand lines up with the sidebar rail's left edge on wide viewports.
+
+New tokens (`tokens.js`):
+- `sidebarItemText`, `sidebarItemActiveText`, `sidebarItemActiveBg`
+- `menuBtnBorder`, `menuBtnBorderHover`, `menuBtnIcon` (both themes)
 
 ### ✅ MobileHeader — done
 Implemented in `components/MobileHeader.js` as a replacement for the previous null placeholder. Renders on `≤ 600px` only. Menu button + brand + search button + inbox icon with badge. Bottom border uses the new `headerBorder` token. Mirrors `mirage-mobile-app/src/components/molecules/feed-header.tsx`.
@@ -110,27 +148,9 @@ Currently the oldreddit clone is still in place but theme tokens resolve correct
 
 ---
 
-## Next subtask — Sidebar UI polish
+## Next subtask — move to Plan 03 (Feed & Card view)
 
-**Goal:** Refine `components/Sidebar.js` to match the mobile app's visual feel and improve structure / hierarchy of the sections on desktop.
-
-**Planned tweaks** (to be filled in as the user provides specifics — typical targets):
-- Section density and grouping
-- Row padding / radius / hover treatment using new `hoverBg` token
-- Icon size and color alignment with TopBar icons
-- Active-state styling (background, color, border/accent)
-- Section headers (typography, color, optional dividers)
-- Footer / node info panel styling
-- Possibly new or removed sections based on mobile app drawer content
-
-**Files likely touched:**
-- `web/frontend/src/themes/mirageapp/components/Sidebar.js`
-- `web/frontend/src/themes/mirageapp/tokens.js` (only if new tokens are needed — prefer reusing `hoverBg`, `border`, `text`, `subtleText`, `focusBlue`)
-
-**Verification:**
-```bash
-cd web/frontend && CI=true npm run build
-```
+Plan 02 is now complete apart from the deferred `MobileBottomNav` full restyle (tracked inline above — can land as a small follow-up PR). The next active work item is **Plan 03 — Feed, card view, vote / action row**. See [`03-feed-and-card.md`](./03-feed-and-card.md).
 
 ---
 
@@ -263,14 +283,19 @@ Required:
 
 ## Verification checklist
 
-- [ ] Switching to `mirageapp` shows the new TopBar and Sidebar on desktop.
-- [ ] Resizing below 1000px hides the Sidebar.
-- [ ] Resizing below 600px switches to MobileHeader + MobileBottomNav.
-- [ ] Primary nav active states update on route changes.
-- [ ] Inbox unread badge updates when `inboxCount` event fires.
-- [ ] User menu opens, closes on outside click, and navigates correctly.
-- [ ] Nothing from `themes/oldreddit/*` is imported.
-- [ ] Build passes:
+- [x] Switching to `mirageapp` shows the new TopBar and Sidebar on desktop.
+- [x] Resizing below 1000px hides the Sidebar.
+- [x] Resizing below 600px switches to MobileHeader + MobileBottomNav.
+- [x] Primary nav active states update on route changes.
+- [x] Inbox unread badge updates when `inboxCount` event fires.
+- [x] User menu opens, closes on outside click, and navigates correctly.
+- [x] Nothing from `themes/oldreddit/*` is imported.
+- [x] Sidebar does not jump vertically between routes / during loading.
+- [x] Divider between Sidebar and Main fills the viewport on short routes.
+- [x] TopBar + Sidebar do not shift horizontally when scrollable vs non-scrollable routes mount.
+- [x] Sidebar collapse button stays pinned next to the TopBar while the feed scrolls.
+- [x] Files parse cleanly with `@babel/parser` (`Sidebar.js`, `TopBar.js`, `MirageAppShell.js`, `Style.js`, `tokens.js`).
+- [ ] Full build passes (run before merging the polish pass):
 
 ```bash
 cd web/frontend

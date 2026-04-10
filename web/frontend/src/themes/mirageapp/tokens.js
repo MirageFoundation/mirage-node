@@ -94,6 +94,16 @@ const mirageappDarkColors = {
     menuBtnBorder: 'rgb(134, 136, 137)',
     menuBtnBorderHover: '#FFFFFF',
     menuBtnIcon: '#FFFFFF',
+
+    // Feed toolbar controls (sort button + view button) — dark mode.
+    // Text + icon share the same color; hover bg is a subtle neutral tile.
+    feedCtrlText: 'rgb(143, 161, 172)',
+    feedCtrlHoverBg: 'rgb(53, 61, 65)',
+
+    // Popover/menu surfaces (sort + view dropdowns) — dark mode.
+    menuBg: 'rgb(25, 28, 31)',
+    menuSelectedBg: 'rgb(44, 50, 54)',
+    menuHeaderText: 'rgb(187, 202, 211)',
 };
 
 const mirageappLightColors = {
@@ -181,6 +191,15 @@ const mirageappLightColors = {
     menuBtnBorder: 'rgb(128, 128, 128)',
     menuBtnBorderHover: '#000000',
     menuBtnIcon: '#000000',
+
+    // Feed toolbar controls (sort button + view button) — light mode.
+    feedCtrlText: 'rgb(95, 108, 115)',
+    feedCtrlHoverBg: 'rgb(221, 228, 232)',
+
+    // Popover/menu surfaces (sort + view dropdowns) — light mode.
+    menuBg: 'rgb(255, 255, 255)',
+    menuSelectedBg: 'rgb(230, 235, 238)',
+    menuHeaderText: 'rgb(95, 108, 115)',
 };
 
 function buildLayout(colors) {
