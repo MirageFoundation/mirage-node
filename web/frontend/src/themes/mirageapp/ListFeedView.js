@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styled, { css, keyframes, useTheme } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
-import { HiChevronDown, HiOutlineArrowsPointingOut, HiOutlineArrowsPointingIn } from "react-icons/hi2";
+import { HiChevronDown, HiOutlineArrowsPointingOut, HiOutlineXMark } from "react-icons/hi2";
 
 import CardView from "./components/CardView";
 import InlineMedia from "./components/InlineMedia";
@@ -277,10 +277,10 @@ const IconCompact = (props) => (
 
 const CompactRoot = styled.article`
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: 84px minmax(0, 1fr);
     grid-template-rows: auto auto auto;
     gap: 0.2rem 0.75rem;
-    padding: 0.75rem 1rem 0.65rem;
+    padding: 0.5rem 1rem 0.4rem;
     margin: 4px 0;
     background: ${({ theme }) => theme.colors.bg};
     border: 1px solid transparent;
@@ -305,9 +305,9 @@ const CompactRoot = styled.article`
     }
 
     @media (max-width: 600px) {
-        grid-template-columns: 60px minmax(0, 1fr);
+        grid-template-columns: 68px minmax(0, 1fr);
         gap: 0.15rem 0.6rem;
-        padding: 0.65rem 0.85rem 0.55rem;
+        padding: 0.45rem 0.85rem 0.35rem;
         border-radius: 6px;
     }
 `;
@@ -318,8 +318,8 @@ const CompactThumbLink = styled(Link)`
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    width: 72px;
-    height: 72px;
+    width: 84px;
+    height: 84px;
     border-radius: 8px;
     overflow: hidden;
     background: ${({ theme }) => theme.colors.actionIconBg};
@@ -333,8 +333,8 @@ const CompactThumbLink = styled(Link)`
     }
 
     @media (max-width: 600px) {
-        width: 60px;
-        height: 60px;
+        width: 68px;
+        height: 68px;
         border-radius: 6px;
     }
 `;
@@ -344,20 +344,20 @@ const CompactThumbPlaceholder = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 72px;
-    height: 72px;
+    width: 84px;
+    height: 84px;
     border-radius: 8px;
     background: ${({ theme }) => theme.colors.actionIconBg};
     color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 700;
     flex-shrink: 0;
 
     @media (max-width: 600px) {
-        width: 60px;
-        height: 60px;
+        width: 68px;
+        height: 68px;
         border-radius: 6px;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
     }
 `;
 
@@ -405,11 +405,11 @@ const CompactTime = styled.span`
 `;
 
 /* Title is smaller than CardView's title so the compact row stays short
- * and the thumbnail/title/footer fit the 72px thumbnail height. */
+ * and the thumbnail/title/footer fit the 84px thumbnail height. */
 const CompactTitle = styled(Link)`
     display: block;
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.82rem;
+    font-size: 0.72rem;
     font-weight: 700;
     line-height: 1.3;
     text-decoration: none;
@@ -420,7 +420,7 @@ const CompactTitle = styled(Link)`
     &:visited { color: ${({ theme }) => theme.colors.text}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.74rem;
+        font-size: 0.66rem;
     }
 `;
 
@@ -433,14 +433,18 @@ const CompactFooter = styled.div`
 `;
 
 /* Plain-text action button used for the "N comments" and "Share" labels.
- * Sits on a rounded rect hover tile (actionIconHoverBg) to match the card
- * action-row, but stays transparent at rest so the row reads as text. */
+ * Matches the 32px height of the vote pill + expand chip so the hover
+ * tile lines up visually with the sibling filled chips. */
 const CompactTextAction = styled.button`
     appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 12px;
+    margin: 0;
     background: transparent;
     border: none;
-    padding: 6px 10px;
-    margin: 0;
     border-radius: 9999px;
     font: inherit;
     font-size: 0.62rem;
@@ -477,8 +481,8 @@ const CompactExpandChip = styled.button`
     &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
 
     svg {
-        width: 16px;
-        height: 16px;
+        width: 20px;
+        height: 20px;
     }
 `;
 
@@ -734,7 +738,7 @@ function CompactRow({ post, state, updatePost }) {
                     aria-label={expanded ? 'Collapse post' : 'Expand post'}
                     title={expanded ? 'Collapse' : 'Expand'}
                 >
-                    {expanded ? <HiOutlineArrowsPointingIn /> : <HiOutlineArrowsPointingOut />}
+                    {expanded ? <HiOutlineXMark /> : <HiOutlineArrowsPointingOut />}
                 </CompactExpandChip>
             </CompactFooter>
 
