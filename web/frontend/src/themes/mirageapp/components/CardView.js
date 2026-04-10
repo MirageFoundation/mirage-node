@@ -109,33 +109,33 @@ const HeaderMeta = styled.div`
     min-width: 0;
     font-size: 0.62rem;
     font-weight: 400;
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     line-height: 1.2;
 `;
 
 const TopicLink = styled(Link)`
     font-weight: 500;
     font-size: 0.62rem;
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     text-decoration: none;
     &:hover { color: ${({ theme }) => theme.colors.text}; text-decoration: none; }
 `;
 
 const HeaderDot = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.9rem;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.75rem;
     font-weight: 700;
     line-height: 1;
 `;
 
 const TimeText = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     font-size: 0.62rem;
     font-weight: 400;
 `;
 
 const UserLink = styled(Link)`
-    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.subtleText};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.feedCtrlText};
     font-weight: 500;
     font-size: 0.62rem;
     text-decoration: none;
@@ -144,7 +144,7 @@ const UserLink = styled(Link)`
 
 /* Inline italic feed-bucket label ("following", "popular", "similar"…). */
 const FeedReasonInline = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     font-size: 0.62rem;
     font-weight: 400;
     font-style: italic;

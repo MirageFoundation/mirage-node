@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styled, { css, keyframes, useTheme } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
-import { HiChevronDown, HiOutlineArrowsPointingOut, HiOutlineXMark } from "react-icons/hi2";
+import { HiChevronDown } from "react-icons/hi2";
 
 import CardView from "./components/CardView";
 import InlineMedia from "./components/InlineMedia";
@@ -27,6 +27,18 @@ import Storage from "../../utils/Storage";
 const VIEW_MODE_KEY = 'mirageapp_feed_view_mode';
 const VIEW_MODE_DEFAULT = 'card';
 const VIEW_MODES = ['card', 'compact'];
+
+const FEED_BUCKET_LABELS = {
+    following: 'following',
+    similar: 'similar',
+    liked: 'liked',
+    discovery: 'discovery',
+    popular: 'popular',
+    discussion: 'discussed',
+    second_chance: 'second chance',
+    fresh: 'discover',
+    newest: 'newest',
+};
 
 const SORT_LABELS = {
     best: 'Best',
@@ -364,8 +376,8 @@ const CompactThumbPlaceholder = styled.div`
     width: 84px;
     height: 84px;
     border-radius: 8px;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme }) => theme.colors.subtleText};
+    background: ${({ theme }) => theme.colors.gradient};
+    color: ${({ theme }) => theme.colors.sidebarItemActiveText};
     font-size: 1.1rem;
     font-weight: 700;
     flex-shrink: 0;
@@ -388,20 +400,20 @@ const CompactHeader = styled.div`
     min-width: 0;
     font-size: 0.62rem;
     font-weight: 400;
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     line-height: 1.2;
 `;
 
 const CompactTopicLink = styled(Link)`
     font-weight: 500;
     font-size: 0.62rem;
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     text-decoration: none;
     &:hover { color: ${({ theme }) => theme.colors.text}; text-decoration: none; }
 `;
 
 const CompactUserLink = styled(Link)`
-    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.subtleText};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.feedCtrlText};
     font-weight: 500;
     font-size: 0.62rem;
     text-decoration: none;
@@ -409,16 +421,23 @@ const CompactUserLink = styled(Link)`
 `;
 
 const CompactHeaderDot = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.9rem;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.75rem;
     font-weight: 700;
     line-height: 1;
 `;
 
 const CompactTime = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     font-size: 0.62rem;
     font-weight: 400;
+`;
+
+const CompactFeedReasonInline = styled.span`
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.62rem;
+    font-weight: 400;
+    font-style: italic;
 `;
 
 /* Title is smaller than CardView's title so the compact row stays short
@@ -498,8 +517,8 @@ const CompactExpandChip = styled.button`
     &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
 
     svg {
-        width: 20px;
-        height: 20px;
+        width: 16px;
+        height: 16px;
     }
 `;
 
@@ -679,6 +698,7 @@ function CompactRow({ post, state, updatePost }) {
 
     const { mediaUrl, body } = useMemo(() => resolveCompactContent(post || {}), [post]);
     const thumbUrl = useMemo(() => getCompactThumb(post || {}), [post]);
+    const canExpand = Boolean(mediaUrl || (typeof body === 'string' && body.trim()));
 
     if (!post || !post.post_id) return null;
     if (typeof post.title !== 'string' || post.title.trim() === '') return null;
@@ -702,6 +722,10 @@ function CompactRow({ post, state, updatePost }) {
 
     const commentCount = Number(post.comments) || 0;
     const placeholderChar = (topic.trim()[0] || '#').toUpperCase();
+    const feedBucket = typeof post.feed_bucket === 'string' ? post.feed_bucket : '';
+    const feedBucketLabel = feedBucket && feedBucket !== 'guest'
+        ? (FEED_BUCKET_LABELS[feedBucket] || '')
+        : '';
 
     return (
         <CompactRoot
@@ -732,6 +756,12 @@ function CompactRow({ post, state, updatePost }) {
                 </CompactUserLink>
                 <CompactHeaderDot>·</CompactHeaderDot>
                 <CompactTime>{formatAge(ts)}</CompactTime>
+                {feedBucketLabel && (
+                    <>
+                        <CompactHeaderDot>·</CompactHeaderDot>
+                        <CompactFeedReasonInline>{feedBucketLabel}</CompactFeedReasonInline>
+                    </>
+                )}
             </CompactHeader>
 
             <CompactTitle to={linkTarget} onClick={stop}>
@@ -748,18 +778,20 @@ function CompactRow({ post, state, updatePost }) {
                 </CompactTextAction>
                 {shareCopied && <CompactShareNote>link copied</CompactShareNote>}
                 <CompactSpacer />
-                <CompactExpandChip
-                    type="button"
-                    onClick={handleToggleExpand}
-                    aria-expanded={expanded}
-                    aria-label={expanded ? 'Collapse post' : 'Expand post'}
-                    title={expanded ? 'Collapse' : 'Expand'}
-                >
-                    {expanded ? <HiOutlineXMark /> : <HiOutlineArrowsPointingOut />}
-                </CompactExpandChip>
+                {canExpand && (
+                    <CompactExpandChip
+                        type="button"
+                        onClick={handleToggleExpand}
+                        aria-expanded={expanded}
+                        aria-label={expanded ? 'Collapse post' : 'Expand post'}
+                        title={expanded ? 'Collapse' : 'Expand'}
+                    >
+                        <HiChevronDown style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' }} />
+                    </CompactExpandChip>
+                )}
             </CompactFooter>
 
-            {expanded && (mediaUrl || body) && (
+            {expanded && canExpand && (
                 <CompactExpandedBlock onClick={stop} data-no-card-click>
                     {mediaUrl && (
                         <CompactExpandedMedia>
