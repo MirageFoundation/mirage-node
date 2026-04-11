@@ -31,45 +31,54 @@ const PickerButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
-    border: none;
+    transition: background 0.12s ease, color 0.12s ease;
     font-family: inherit;
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    width: 36px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    border: 1px solid transparent;
+    box-shadow: none;
 
-    &:hover:not(:disabled) {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-        transform: translateY(-1px);
+    svg {
+        width: 28px;
+        height: 28px;
+        display: block;
     }
 
-    &:active:not(:disabled) {
-        transform: translateY(0);
+    &:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     &:disabled {
         opacity: 0.4;
         cursor: not-allowed;
-        transform: none !important;
     }
 
     &:focus {
         outline: none;
+    }
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => theme.colors.focusBlue};
+        outline-offset: 2px;
     }
 `;
 
 const Popover = styled.div`
     position: fixed;
     z-index: 10100;
-    background: ${({ theme }) => theme.colors.panel};
+    background: ${({ theme }) => theme.colors.pickerBg};
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    box-shadow: ${({ theme }) =>
+        theme.name === 'dark'
+            ? '0 12px 32px rgba(0, 0, 0, 0.55)'
+            : '0 12px 32px rgba(0, 0, 0, 0.18)'};
     width: 340px;
-    height: 420px;
+    height: 400px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -80,30 +89,34 @@ const Popover = styled.div`
         width: auto !important;
         bottom: 60px !important;
         top: auto !important;
-        max-height: 50vh;
+        max-height: 55vh;
     }
 `;
 
 const SearchHeader = styled.div`
     display: flex;
     align-items: center;
-    padding: 0.75rem;
+    padding: 0.5rem 0.6rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    gap: 0.5rem;
+    gap: 0.4rem;
 `;
 
 const SearchInput = styled.input`
     flex: 1;
-    background: ${({ theme }) => theme.colors.panelAlt};
+    background: ${({ theme }) => theme.colors.bg};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 6px;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8rem;
+    border-radius: 8px;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.7rem;
     color: ${({ theme }) => theme.colors.text};
     outline: none;
+    transition: border-color 0.12s ease;
 
+    &:hover {
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+    }
     &:focus {
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
     }
 
     &::placeholder {
@@ -113,65 +126,72 @@ const SearchInput = styled.input`
 
 const GifGrid = styled.div`
     display: grid;
-    grid-template-columns: repeat(2, 150px);
+    grid-template-columns: repeat(2, 1fr);
     grid-auto-rows: 100px;
-    gap: 8px;
-    padding: 0.75rem;
+    gap: 6px;
+    padding: 0.65rem;
     overflow-y: auto;
     flex: 1;
-    justify-content: center;
 `;
 
 const GifItem = styled.button`
-    width: 150px;
+    width: 100%;
     height: 100px;
-    border: none;
-    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid transparent;
+    background: transparent;
     border-radius: 8px;
     cursor: pointer;
     padding: 0;
-    transition: all 0.15s ease;
+    transition: background 0.12s ease, border-color 0.12s ease;
     overflow: hidden;
-    flex-shrink: 0;
 
     &:hover {
-        transform: scale(1.03);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        border-color: ${({ theme }) => theme.colors.borderSubtle};
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
     }
 
-    &:active {
-        transform: scale(0.98);
+    &:focus {
+        outline: none;
+    }
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => theme.colors.focusBlue};
+        outline-offset: 2px;
     }
 
     img {
         width: 100%;
         height: 100%;
         object-fit: cover;
+        display: block;
     }
 `;
 
 const CloseButton = styled.button`
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
+    flex-shrink: 0;
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    border: none;
-    background: #dc2626;
-    color: #ffffff;
+    border: 1px solid transparent;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.subtleText};
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1rem;
+    font-size: 0.9rem;
+    font-weight: 400;
     line-height: 1;
-    transition: all 0.15s ease;
-    z-index: 1;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    transition: background 0.12s ease, color 0.12s ease;
+    padding: 0;
+
+    & > * {
+        display: block;
+        line-height: 1;
+    }
 
     &:hover {
-        background: #b91c1c;
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -179,21 +199,31 @@ const LoadingText = styled.div`
     padding: 2rem;
     text-align: center;
     color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.8rem;
+    font-size: 0.7rem;
 `;
 
 const PoweredBy = styled.div`
-    padding: 0.5rem;
+    padding: 0.4rem 0.5rem;
     text-align: center;
-    font-size: 0.65rem;
+    font-size: 0.55rem;
+    font-weight: 500;
     color: ${({ theme }) => theme.colors.subtleText};
     border-top: 1px solid ${({ theme }) => theme.colors.border};
+    letter-spacing: 0.02em;
 `;
 
 const GifIcon = () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-        <rect x="2" y="4" width="20" height="16" rx="3" ry="3" fill="none" stroke="currentColor" strokeWidth="2" />
-        <text x="12" y="15" textAnchor="middle" fontSize="8" fontWeight="bold" fill="currentColor">GIF</text>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <text
+            x="12"
+            y="16"
+            textAnchor="middle"
+            fontSize="9"
+            fontFamily="-apple-system, system-ui, sans-serif"
+            fontWeight="800"
+            letterSpacing="0.3"
+            fill="currentColor"
+        >GIF</text>
     </svg>
 );
 
@@ -358,9 +388,6 @@ export default function GifPicker({ onSelect, disabled = false }) {
                     ref={popoverRef}
                     style={{ top: position.top, left: position.left }}
                 >
-                    <CloseButton onClick={() => setIsOpen(false)} aria-label="Close">
-                        ×
-                    </CloseButton>
                     <SearchHeader>
                         <SearchInput
                             ref={searchInputRef}
@@ -369,6 +396,7 @@ export default function GifPicker({ onSelect, disabled = false }) {
                             value={searchQuery}
                             onChange={handleSearchChange}
                         />
+                        <CloseButton onClick={() => setIsOpen(false)} aria-label="Close"><span>×</span></CloseButton>
                     </SearchHeader>
                     <GifGrid>
                         {loading ? (

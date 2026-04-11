@@ -13,33 +13,42 @@ export const MediaIconButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
-    border: none;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     font-family: inherit;
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    border: 1px solid transparent;
+    box-shadow: none;
+
+    svg, img {
+        width: 16px;
+        height: 16px;
+    }
 
     &:hover:not(:disabled) {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-        transform: translateY(-1px);
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
+        color: ${({ theme }) => theme.colors.text};
+        box-shadow: none;
     }
 
     &:active:not(:disabled) {
-        transform: translateY(0);
+        transform: none;
     }
 
     &:disabled {
         opacity: 0.4;
         cursor: not-allowed;
-        transform: none !important;
     }
 
     &:focus {
         outline: none;
+    }
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => theme.colors.focusBlue};
+        outline-offset: 2px;
     }
 `;
 
