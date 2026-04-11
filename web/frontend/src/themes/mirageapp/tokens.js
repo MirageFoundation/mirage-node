@@ -50,13 +50,14 @@ const mirageappDarkColors = {
     accentSubtle: '#15181d',
     cardHoverBorder: '#3a4049',
 
-    // Inbox reply rows
-    inboxReplyUnreadBg: 'rgba(255, 255, 255, 0.05)',
-    inboxReplyReadBg: 'rgba(255, 255, 255, 0.02)',
-    inboxReplyUnreadBorder: 'rgba(255, 255, 255, 0.12)',
-    inboxReplyReadBorder: 'rgba(255, 255, 255, 0.06)',
-    inboxReplyUnreadBgHover: 'rgba(255, 255, 255, 0.08)',
-    inboxReplyReadBgHover: 'rgba(255, 255, 255, 0.04)',
+    // Inbox reply rows — mobile-app style: transparent read rows on the bg
+    // canvas, a lifted neutral tile on unread rows. Colors from UI review.
+    inboxReplyUnreadBg: 'rgb(34, 39, 42)',
+    inboxReplyReadBg: 'transparent',
+    inboxReplyUnreadBorder: 'transparent',
+    inboxReplyReadBorder: 'transparent',
+    inboxReplyUnreadBgHover: 'rgb(44, 50, 54)',
+    inboxReplyReadBgHover: 'rgb(25, 28, 31)',
 
     // Button color variants tied to mobile success/error
     buttonDangerBg: 'rgba(255, 69, 58, 0.18)',
@@ -176,12 +177,15 @@ const mirageappLightColors = {
     accentSubtle: '#F7F8FA',
     cardHoverBorder: '#9CA3AF',
 
-    inboxReplyUnreadBg: '#EFF1F5',
-    inboxReplyReadBg: '#F7F8FA',
-    inboxReplyUnreadBorder: '#D1D5DB',
-    inboxReplyReadBorder: '#D1D5DB',
-    inboxReplyUnreadBgHover: 'rgba(0, 0, 0, 0.05)',
-    inboxReplyReadBgHover: 'rgba(0, 0, 0, 0.04)',
+    // Inbox reply rows — mobile-app style: transparent read rows on the bg
+    // canvas, a lifted neutral tile on unread rows. Light-mode pairs for
+    // the dark values in `mirageappDarkColors`.
+    inboxReplyUnreadBg: 'rgb(239, 241, 243)',
+    inboxReplyReadBg: 'transparent',
+    inboxReplyUnreadBorder: 'transparent',
+    inboxReplyReadBorder: 'transparent',
+    inboxReplyUnreadBgHover: 'rgb(230, 235, 238)',
+    inboxReplyReadBgHover: 'rgb(246, 248, 249)',
 
     buttonDangerBg: 'rgba(255, 59, 48, 0.12)',
     buttonDangerBorder: '#FF3B30',
