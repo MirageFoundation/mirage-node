@@ -58,6 +58,10 @@ const mirageappDarkColors = {
     inboxReplyReadBorder: 'transparent',
     inboxReplyUnreadBgHover: 'rgb(44, 50, 54)',
     inboxReplyReadBgHover: 'rgb(25, 28, 31)',
+    // Inbox header "Mark all as read" button text (rest color). Dark mode
+    // reuses the sidebar item text color; light mode diverges to a darker
+    // near-black per UI review. Hover still lifts to `sidebarItemActiveText`.
+    inboxMarkAllText: 'rgb(221, 228, 232)',
 
     // Button color variants tied to mobile success/error
     buttonDangerBg: 'rgba(255, 69, 58, 0.18)',
@@ -186,6 +190,9 @@ const mirageappLightColors = {
     inboxReplyReadBorder: 'transparent',
     inboxReplyUnreadBgHover: 'rgb(230, 235, 238)',
     inboxReplyReadBgHover: 'rgb(246, 248, 249)',
+    // Inbox header "Mark all as read" button text (rest color). Light-mode
+    // diverges from `sidebarItemText` to a darker near-black per UI review.
+    inboxMarkAllText: 'rgb(25, 28, 31)',
 
     buttonDangerBg: 'rgba(255, 59, 48, 0.12)',
     buttonDangerBorder: '#FF3B30',

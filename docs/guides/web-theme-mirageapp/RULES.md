@@ -164,6 +164,7 @@ If the user gives a **raw hex/rgb value** instead of a token name, pick the matc
 | `inboxReplyReadBorder`   | `transparent`        | `transparent`         | Reserved (borders via R3).         |
 | `inboxReplyUnreadBgHover`| `rgb(44, 50, 54)`    | `rgb(230, 235, 238)`  | Unread row hover tile (= `sidebarItemActiveBg`). |
 | `inboxReplyReadBgHover`  | `rgb(25, 28, 31)`    | `rgb(246, 248, 249)`  | Read row hover tile (= `hoverBg`). |
+| `inboxMarkAllText`       | `rgb(221, 228, 232)` | `rgb(25, 28, 31)`     | "Mark all as read" rest text. Hover → `sidebarItemActiveText`. |
 
 ### Brand gradient
 
