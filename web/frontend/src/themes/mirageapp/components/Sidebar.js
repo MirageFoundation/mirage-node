@@ -383,13 +383,9 @@ function Sidebar({ state }) {
         <Aside aria-label="Sidebar">
             <Section>
                 <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} />
-                {isLoggedIn && (
-                    <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
-                )}
+                <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
-                {isLoggedIn && (
-                    <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
-                )}
+                <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
                 <SidebarItem to="/search" icon={icons.search} label="Search" pathname={pathname} />
             </Section>
 
@@ -464,6 +460,7 @@ function Sidebar({ state }) {
                     )}
                 </Section>
             )}
+
         </Aside>
     );
 }
