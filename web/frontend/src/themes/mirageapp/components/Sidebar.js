@@ -30,6 +30,9 @@ import { resolveUsernames } from '../../../utils/UsernameCache';
  *   - Users you follow (collapsible)
  */
 
+const SIDEBAR_PAD_LEFT = '0.5rem';
+const SIDEBAR_PAD_RIGHT = '1rem';
+
 const Aside = styled.aside`
     position: sticky;
     top: calc(2.5rem + 1px);
@@ -37,7 +40,7 @@ const Aside = styled.aside`
     width: 240px;
     max-height: calc(100vh - 2.5rem - 1px);
     overflow-y: auto;
-    padding: 0.25rem 1rem 2rem 0.5rem;
+    padding: 0.25rem ${SIDEBAR_PAD_RIGHT} 2rem ${SIDEBAR_PAD_LEFT};
     box-sizing: border-box;
     scrollbar-width: thin;
     scrollbar-color: ${({ theme }) => theme.colors.scrollbar} transparent;
@@ -63,9 +66,19 @@ const Section = styled.nav`
     padding: 0.25rem 0 0;
 
     & + & {
+        position: relative;
         margin-top: 0.5rem;
         padding-top: 0.5rem;
-        border-top: 1px solid ${({ theme }) => theme.colors.border};
+    }
+
+    & + &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: calc(-1 * ${SIDEBAR_PAD_LEFT});
+        right: 0;
+        height: 1px;
+        background: ${({ theme }) => theme.colors.border};
     }
 `;
 
