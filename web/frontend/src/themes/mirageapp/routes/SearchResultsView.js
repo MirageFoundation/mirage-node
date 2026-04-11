@@ -393,6 +393,22 @@ export default function SearchResultsView({ state }) {
         [activeTab]
     );
 
+    // Tracks whether the current `activeTab` was picked by the user (as
+    // opposed to the default / an auto-jump). Once the user clicks a tab
+    // we stop auto-jumping even if that tab is empty — their explicit
+    // pick always wins and we show the per-tab "no results" state.
+    const [userPickedTab, setUserPickedTab] = useState(false);
+    const handleTabClick = useCallback((tabId) => {
+        setActiveTab(tabId);
+        setUserPickedTab(true);
+    }, []);
+
+    // Reset the "user picked" flag whenever the query changes so a fresh
+    // search can auto-jump to the first tab with results again.
+    useEffect(() => {
+        setUserPickedTab(false);
+    }, [query]);
+
     // Feed view mode shared with the home feed via `mirageapp_feed_view_mode`.
     // Default is `compact` (handled by `VIEW_MODE_DEFAULT` in ListFeedView).
     const [viewMode, setViewMode] = useState(() => loadViewMode());
@@ -403,9 +419,12 @@ export default function SearchResultsView({ state }) {
 
     // If the active tab has zero results but another tab has hits, auto-jump
     // to the first tab that has results. Keeps the page useful when a query
-    // only matches (for example) users.
+    // only matches (for example) users. Skipped once the user manually
+    // clicks a tab for the current query — their explicit pick wins and
+    // we render the per-tab empty state instead.
     useEffect(() => {
         if (loading || error) return;
+        if (userPickedTab) return;
         const counts = {
             posts: posts.length,
             topics: topics.length,
@@ -416,7 +435,7 @@ export default function SearchResultsView({ state }) {
         if (firstWithResults && firstWithResults.id !== activeTab) {
             setActiveTab(firstWithResults.id);
         }
-    }, [query, loading, error, posts.length, topics.length, users.length, activeTab]);
+    }, [query, loading, error, posts.length, topics.length, users.length, activeTab, userPickedTab]);
 
     const renderShell = (body) => (
         <ContentGrid>
@@ -772,7 +791,7 @@ export default function SearchResultsView({ state }) {
                             type="button"
                             aria-selected={isActive}
                             $active={isActive}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => handleTabClick(tab.id)}
                         >
                             {tab.label}
                             {count > 0 && (
