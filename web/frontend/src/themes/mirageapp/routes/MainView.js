@@ -1470,7 +1470,17 @@ const MainView = ({
                             // Feed header is now owned by ListFeedView (sort + view controls only).
                             // Create-post action and nav tabs live in the left rail / sidebar,
                             // so we no longer inject a sidebar column here.
-                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} />;
+                            // Feed header is shown on home / following / all and on
+                            // any topic feed. `feedTitle` anchors to the left of the
+                            // toolbar; sort + view controls sit on the right.
+                            const isTopicFeed = !!urlTopic && !['home', 'following', 'all'].includes(urlTopic);
+                            const showFeedToolbar = urlTopic === 'home' || urlTopic === 'following' || urlTopic === 'all' || isTopicFeed;
+                            let feedTitle = null;
+                            if (urlTopic === 'home') feedTitle = 'Home';
+                            else if (urlTopic === 'following') feedTitle = 'Following';
+                            else if (urlTopic === 'all') feedTitle = 'All';
+                            else if (isTopicFeed) feedTitle = `#${urlTopic}`;
+                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
                         })()}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
