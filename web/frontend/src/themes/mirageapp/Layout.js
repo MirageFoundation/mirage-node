@@ -69,8 +69,17 @@ export const ContainerTab = styled.div`
     }
 `;
 
+/**
+ * `ContainerBody` is the content column wrapper used by non-feed routes.
+ *
+ * Per `RULES.md` R1 (single background surface), it must paint the canvas
+ * with `theme.colors.bg` — NOT `panel` — so TopBar / Sidebar / feed / inbox /
+ * settings / profile all read as one continuous canvas. Contained surfaces
+ * (cards, menus, modals, unread row tints) can still lift with `panel` or
+ * `panelAlt`, but the column itself stays on `bg`.
+ */
 export const ContainerBody = styled.div`
-    background-color: ${({ theme }) => theme.colors.panel};
+    background-color: ${({ theme }) => theme.colors.bg};
     border: ${({ theme }) => theme.layout.containerBodyBorder};
     border-radius: ${({ theme }) => theme.layout.containerBodyRadius};
     overflow: visible;

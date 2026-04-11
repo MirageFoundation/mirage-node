@@ -4,7 +4,10 @@
 
 **Depends on:** Plans 01, 02, 03, 04.
 **Unblocks:** Plan 06.
-**Next requested slice:** Onboarding UI first — focus `/login`, `/signup`, and `/welcome` before the broader inbox/search/settings pass.
+
+**Status:** 🟡 In progress. Auth slice (`/login`, `/signup`, `/welcome`) ✅ done in commit `ceef3d7` — redesigned with styled components, new `AuthPageShell`, theme-aware light/dark backgrounds, and reusable header/brand primitives. `mirageapp` is now the default theme when available in the registry.
+
+**Sub-plans:** The remaining work is split into one-PR sub-plans under [`05-subplans/`](./05-subplans/README.md). Order: Inbox → Search → Settings → CreatePost → ChangeUsername → SignOut. **Next:** [`05-subplans/01-inbox.md`](./05-subplans/01-inbox.md).
 
 ---
 
@@ -91,9 +94,9 @@ Requirements:
 
 ---
 
-## Auth flows (Login / CreateAccount / Welcome)
+## Auth flows (Login / CreateAccount / Welcome) ✅ Done
 
-> **Next task:** Start here. The onboarding/auth surfaces are the next requested implementation slice for `mirageapp`.
+> Shipped in commit `ceef3d7`. Redesigned with styled components, a new `AuthPageShell`, theme-aware light/dark background helpers, and reusable header/brand primitives (`Header`, `BrandMark`, `Eyebrow`, `AuthTitle`). `mirageapp` is now the default theme when available in the registry.
 
 References:
 - mobile `app/(auth)/login.tsx`, `recovery-phrase.tsx`, `username.tsx`
@@ -115,7 +118,8 @@ Requirements:
 - [ ] `/settings` renders every section and saves changes.
 - [ ] Theme picker in Settings works (switching to/from `mirageapp`).
 - [ ] `/create_post` composes and submits successfully.
-- [ ] `/login`, `/signup`, `/welcome`, `/change_username`, `/sign_out` all render and behave like the current theme.
+- [x] `/login`, `/signup`, `/welcome` render and behave like the current theme. _(commit `ceef3d7`)_
+- [ ] `/change_username`, `/sign_out` all render and behave like the current theme.
 - [ ] No `themes/oldreddit/*` imports inside the new theme.
 - [ ] Build passes:
 

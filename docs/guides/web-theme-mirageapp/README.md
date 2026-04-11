@@ -7,6 +7,8 @@ This folder contains the plan for building a new Mirage web theme named **`mirag
 
 The work is split across six per-PR plans so each phase ships independently and stays reviewable.
 
+> **📐 Style rules:** Before touching any UI in `mirageapp`, read [`RULES.md`](./RULES.md). It covers background tokens, dark↔light color pairs, divider rules, and the required bluemoon + mobile reference check.
+
 ---
 
 ## Why a new theme family (not a restyle)
@@ -40,15 +42,26 @@ Whenever desktop structure and mobile visuals conflict:
 | 01 | Theme skeleton, tokens, registration | ✅ Done | [`01-skeleton-and-tokens.md`](./01-skeleton-and-tokens.md) |
 | 02 | Shell, top nav, sidebar, mobile nav | ✅ Done (MobileBottomNav full restyle deferred) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
 | 03 | Feed, card view, vote / action row | ✅ Done (manual cross-theme browser regression still recommended) | [`03-feed-and-card.md`](./03-feed-and-card.md) |
-| 04 | Post detail + profile | ⏳ Not started — **next** | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
-| 05 | Inbox, search, settings, auth flows | ⏳ Not started | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
+| 04 | Post detail + profile | ⏳ Not started | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
+| 05 | Inbox, search, settings, auth flows | 🟡 In progress — auth slice (`/login`, `/signup`, `/welcome`) ✅ done | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
 | 06 | Remaining routes, polish, QA | ⏳ Not started | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
 Each plan is designed to be one PR. Later plans depend on earlier ones landing first.
 
 ### Current focus
 
-**Next requested UI task → Onboarding UI** (`/login`, `/signup`, `/welcome` from Plan 05). Plan 03 is now shipped in `mirageapp`: the feed, CardView, VoteSection, compact mode, hidden-sidebar layout behavior, and related post-card polish are in place. Plan 02 remains complete as well, with only the `MobileBottomNav` full restyle deferred. Broader roadmap work for Plan 04 (post detail + profile) is still documented in sequence, but the next requested implementation slice is the onboarding/auth UI from [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md).
+**Onboarding UI is shipped.** `/login`, `/signup`, and `/welcome` in `mirageapp` were redesigned with styled components, a new `AuthPageShell`, theme-aware light/dark backgrounds, and reusable header/brand primitives (commit `ceef3d7`). `mirageapp` is now the default theme when available in the registry.
+
+**Next requested slice → remainder of Plan 05**, split into one-PR sub-plans under [`05-subplans/`](./05-subplans/README.md):
+
+1. [Inbox](./05-subplans/01-inbox.md) — **next**
+2. [Search](./05-subplans/02-search.md)
+3. [Settings](./05-subplans/03-settings.md)
+4. [Create Post](./05-subplans/04-create-post.md)
+5. [Change Username](./05-subplans/05-change-username.md)
+6. [Sign Out](./05-subplans/06-sign-out.md)
+
+Plan 04 (post detail + profile) remains documented but deferred until Plan 05 is fully landed. Plans 02 and 03 remain complete (with the `MobileBottomNav` full restyle still deferred).
 
 ---
 
