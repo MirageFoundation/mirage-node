@@ -52,16 +52,17 @@ Each plan is designed to be one PR. Later plans depend on earlier ones landing f
 
 **Onboarding UI is shipped.** `/login`, `/signup`, and `/welcome` in `mirageapp` were redesigned with styled components, a new `AuthPageShell`, theme-aware light/dark backgrounds, and reusable header/brand primitives (commit `ceef3d7`). `mirageapp` is now the default theme when available in the registry.
 
-**Next requested slice → remainder of Plan 05**, split into one-PR sub-plans under [`05-subplans/`](./05-subplans/README.md):
+**Plan 05 sub-plans** under [`05-subplans/`](./05-subplans/README.md) (order reshuffled: Post Details pulled forward so the feed → post flow is visually consistent end-to-end):
 
-1. [Inbox](./05-subplans/01-inbox.md) — **next**
-2. [Search](./05-subplans/02-search.md)
-3. [Settings](./05-subplans/03-settings.md)
-4. [Create Post](./05-subplans/04-create-post.md)
-5. [Change Username](./05-subplans/05-change-username.md)
-6. [Sign Out](./05-subplans/06-sign-out.md)
+1. [Inbox](./05-subplans/01-inbox.md) — ✅ Done
+2. [Search](./05-subplans/02-search.md) — ✅ Done
+3. [Post Details](./05-subplans/03-post-details.md) — **next**
+4. [Settings](./05-subplans/04-settings.md)
+5. [Create Post](./05-subplans/05-create-post.md)
+6. [Change Username](./05-subplans/06-change-username.md)
+7. [Sign Out](./05-subplans/07-sign-out.md)
 
-Plan 04 (post detail + profile) remains documented but deferred until Plan 05 is fully landed. Plans 02 and 03 remain complete (with the `MobileBottomNav` full restyle still deferred).
+Plan 04 (post detail + profile) was originally deferred, but the post-detail slice from it is being folded into Plan 05 as sub-plan 03 since feed → post is now a primary entry path after Search shipped. Profile polish remains deferred. Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 
 ---
 

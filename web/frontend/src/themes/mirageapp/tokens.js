@@ -63,6 +63,14 @@ const mirageappDarkColors = {
     // near-black per UI review. Hover still lifts to `sidebarItemActiveText`.
     inboxMarkAllText: 'rgb(221, 228, 232)',
 
+    // Reply composer live-preview surface. A subtly-lifted tile so the
+    // preview block reads distinct from the textarea (which sits on `bg`).
+    composerPreviewBg: 'rgb(26, 28, 31)',
+
+    // Sticker / GIF picker popover surface. Sits one tone above `bg` so
+    // the popover reads as a dedicated sheet without competing with menus.
+    pickerBg: 'rgb(25, 28, 31)',
+
     // Button color variants tied to mobile success/error
     buttonDangerBg: 'rgba(255, 69, 58, 0.18)',
     buttonDangerBorder: '#993332',
@@ -193,6 +201,12 @@ const mirageappLightColors = {
     // Inbox header "Mark all as read" button text (rest color). Light-mode
     // diverges from `sidebarItemText` to a darker near-black per UI review.
     inboxMarkAllText: 'rgb(25, 28, 31)',
+
+    // Reply composer live-preview surface (light-mode pair).
+    composerPreviewBg: 'rgb(246, 248, 249)',
+
+    // Sticker / GIF picker popover surface (light-mode pair).
+    pickerBg: 'rgb(246, 248, 249)',
 
     buttonDangerBg: 'rgba(255, 59, 48, 0.12)',
     buttonDangerBorder: '#FF3B30',

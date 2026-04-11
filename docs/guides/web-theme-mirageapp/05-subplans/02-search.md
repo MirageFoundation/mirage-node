@@ -162,3 +162,48 @@ No token changes, no RULES.md changes.
 ## PR description template
 
 > Ships Plan 05.2 Search: adds a TopBar dropdown sheet (recent searches + trending topics + debounced live results) and rewrites `/search` with a mobile-app-style tabbed layout (Posts / Topics / Users). Introduces a new `useSearchDropdown` hook for dropdown infrastructure — `useSearchResults` untouched. All colors routed through existing R2 tokens, dividers via `theme.colors.border` (R3), visuals from `mirage-mobile-app/src/pages/search-screen.tsx` with full bluemoon data parity (R4).
+
+---
+
+## Polish follow-ups (shipped after initial PR)
+
+Additional iterations landed on top of the initial ship during design review. All of them are visual-only and remain RULES-compliant.
+
+### Dropdown sheet polish
+
+- **Canvas + hover tokens.** Dropdown uses `menuBg` (`rgb(25,28,31)` dark / `rgb(255,255,255)` light). Row text at rest uses `sidebarItemText` (same as CardView post-options menu) and lifts to `menuItemHoverText` on hover. Hover background uses `menuSelectedBg` (the stronger pair) so rows have a visible tile under the cursor. Row leading icons inherit the text color lift on hover.
+- **Typography tightened.** Section labels `0.55rem / 500` with tighter tracking. Result row primary `0.66rem / 500`, secondary `0.56rem / 500`. Empty-state copy `0.62rem / 500`. Footer `SeeAllRow` `0.58rem / 500` with a tighter `gap: 0.3rem` so the magnifier and label read as one cluster (new `SeeAllIcon` inline primitive replaces the fixed-width `RowIcon` slot for the footer).
+- **Topic rows.** Removed the `#` prefix from topic primary text (both trending and live sections). The leading hashtag / fire icon already signals the row type — matches the mobile app pattern.
+- **Post-row thumbnails.** Added a `PostThumb` slot (28×28, `border-radius: 6px`). Prefers `post.thumbnail`, falls back to the first URL in `post.media[]` (strings or `{url|thumbnail|src}` objects). If no image → renders a `theme.colors.gradient` tile with the uppercase first letter of `post.username`. Image `onError` hides the broken asset so the gradient initial shows through.
+- **Always-reopenable input.** `SearchInput` also calls `setSearchFocused(true)` on `onMouseDown` + `onClick` (not just `onFocus`), so clicking a result → navigating → clicking back into the input reliably reopens the sheet. Previously the `preventDefault` on row `onMouseDown` kept the input focused, so subsequent clicks didn't fire `onFocus` again.
+- **"Search-as-you-type" stale-result fix.** `useSearchDropdown.js` now flips `isSearching` to `true` **immediately** on every non-empty raw-query change (before the debounce fires). Prevents the "No matches / press Enter" flash when typing `xyz → xyzabc` during the 300 ms debounce window. Empty-state copy also updated to `No matches for "q". Press Enter to see all results.`
+
+### Full results view polish
+
+- **Feed view toggle on Posts tab.** Imported standalone `FeedViewToggle` from `ListFeedView` (new exported primitive). Rendered in a `HeaderSubRow` flex row alongside the `Results for "q"` caption. Button ships the same `CtrlButton` + Card/Compact menu as the home feed and persists to the same `mirageapp_feed_view_mode` localStorage key, so switching view in Search syncs with the home feed.
+- **No layout shift on tab switch.** `HeaderSubRow` carries `min-height: 28px` (matches `CtrlButton` height). The toggle is wrapped in a `ViewToggleSlot` that stays mounted on every tab and flips between `visibility: visible/hidden` + `pointer-events: none` + `aria-hidden` based on whether the Posts tab is active with results. Prevents the tab bar from moving when switching between Posts / Topics / Users.
+- **Clicking empty tabs now works.** New `userPickedTab` flag gates the auto-jump `useEffect`. Once the user clicks a tab, their explicit pick wins — the per-tab "No posts / topics / users found" empty state renders instead of silently auto-jumping back to the first non-empty tab. Flag resets on `query` change so a fresh search can still auto-jump.
+- **Default view = compact.** `VIEW_MODE_DEFAULT` in `ListFeedView.js` flipped from `'card'` → `'compact'` (applies theme-wide, including Search + all feeds).
+- **Posts get feed dividers.** Post results now render inside the shared `RowSlot` primitive (exported from `ListFeedView`) which carries the `1px solid theme.colors.border` between-row divider used by the home feed. Compact / card rendering is picked by `viewMode === 'compact' ? MemoCompactRow : CardView`.
+- **Constant tab font weight.** `TabButton` weight is a constant `500` for both active and inactive states (was `600` / `500`). Prevents label reflow on tab switch — contrast is now carried entirely by color (`text` vs `subtleText`) + the `TabIndicator` underline.
+- **Plain `(N)` tab counts.** Dropped the `TabCountBadge` pill (blue fill). New `TabCount` is inline text (`0.68rem / 500`, `color: inherit`, `opacity: 0.75`) rendered as `{label} ({count})`. No background, no border, no blue.
+- **Inbox-matched row typography.** Topic / User rows use `RowPrimary` at `0.7rem / 500` and `RowMeta` at `0.6rem / 500`. Matches `InboxView.HeaderTextBlock` so full-bleed list routes share one typography rhythm.
+- **Topic prefix removed.** Full results Topics tab drops the `#{topic}` prefix — same rationale as the dropdown.
+
+### Theme-wide knock-ons
+
+- **`CardView` typography shrink.** `TitleLink` desktop `1rem → 0.88rem` (mobile `0.8 → 0.74`). `Body` desktop `0.85 → 0.74` (mobile `0.75 → 0.68`). Affects every feed / post-detail / profile render that uses `CardView`.
+- **Feed toolbar title.** New `ToolbarTitle` primitive in `ListFeedView`; `ListFeedView` now accepts a `feedTitle` prop. `MainView` wires it up for all feed routes: `Home`, `Following`, `All`, and `#<topic>`. Title anchors left; sort + view controls get right-aligned via `ToolbarTitle + * { margin-left: auto; }`. Sort popover now conditionally renders inside the toolbar (only when `showSortTabs` is true) so topic feeds get title + view toggle without a sort button.
+- **`ContainerBody` single-canvas fix.** Earlier Inbox work fixed `ContainerBody` to use `theme.colors.bg` instead of `theme.colors.panel` — the whole Search view inherits this correctly.
+
+### Files touched by polish
+
+- `web/frontend/src/themes/mirageapp/components/SearchDropdown.js`
+- `web/frontend/src/themes/mirageapp/components/TopBar.js`
+- `web/frontend/src/themes/mirageapp/routes/SearchResultsView.js`
+- `web/frontend/src/themes/mirageapp/ListFeedView.js` (exports + `FeedViewToggle` + `ToolbarTitle` + `feedTitle` prop + default `VIEW_MODE_DEFAULT: 'compact'`)
+- `web/frontend/src/themes/mirageapp/components/CardView.js` (typography shrink)
+- `web/frontend/src/themes/mirageapp/routes/MainView.js` (wires `feedTitle` per route)
+- `web/frontend/src/logic/useSearchDropdown.js` (immediate `isSearching` flip)
+
+No token changes. No RULES.md changes. Build still clean: `cd web/frontend && CI=true npm run build`.

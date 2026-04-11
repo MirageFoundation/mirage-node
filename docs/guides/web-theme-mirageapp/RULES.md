@@ -166,6 +166,13 @@ If the user gives a **raw hex/rgb value** instead of a token name, pick the matc
 | `inboxReplyReadBgHover`  | `rgb(25, 28, 31)`    | `rgb(246, 248, 249)`  | Read row hover tile (= `hoverBg`). |
 | `inboxMarkAllText`       | `rgb(221, 228, 232)` | `rgb(25, 28, 31)`     | "Mark all as read" rest text. Hover → `sidebarItemActiveText`. |
 
+### Reply composer
+
+| Token                 | Dark                | Light                | Use                                                |
+| --------------------- | ------------------- | -------------------- | -------------------------------------------------- |
+| `composerPreviewBg`   | `rgb(26, 28, 31)`   | `rgb(246, 248, 249)` | Live-preview tile inside the reply composer.       |
+| `pickerBg`            | `rgb(25, 28, 31)`   | `rgb(246, 248, 249)` | Sticker / GIF picker popover surface.              |
+
 ### Brand gradient
 
 | Token           | Dark / Light (shared)                             | Use                                    |
@@ -266,3 +273,5 @@ Before opening a PR for any mirageapp change, confirm:
 | 2026-04-12 | Initial rules: R1 bg, R2 pairs, R3 divider, R4 reference check. |
 | 2026-04-12 | Fixed `Layout.js::ContainerBody` to use `bg` instead of `panel` (R1). Updated inbox row tokens to mobile-app style (transparent read, primary-blue unread). |
 | 2026-04-12 | Inbox unread tokens switched from primary-blue tint to lifted neutral tile: dark `rgb(34,39,42)` / `rgb(44,50,54)` hover, light `rgb(239,241,243)` / `rgb(230,235,238)` hover. |
+| 2026-04-12 | Reply composer polish: new `composerPreviewBg` token (dark `rgb(26,28,31)` / light `rgb(246,248,249)`). Flattened `MediaIconButton`, `StickerPicker::PickerButton`, `GifPicker::PickerButton` (removed `linear-gradient(135deg, #667eea, #764ba2)` + box-shadows; now transparent → `feedCtrlHoverBg` on hover, 28x28). Composer textarea now sits on `bg` with neutral `borderStrong` focus (no blue ring). Custom checkbox for Preview toggle. Submit button: flat `focusBlue` pill, weight 500. Cancel button (data-mirageapp-cancel): ghost pill, weight 500. |
+| 2026-04-12 | Sticker / GIF picker polish: new `pickerBg` token (dark `rgb(25,28,31)` / light `rgb(246,248,249)`). Sticker pack tabs now text-only (no pill bg). GIF launcher icon redrawn (cleaner rounded-rect with centered "GIF" text). Close button moved into header rows as a real flex sibling so input/title and `×` share vertical center. Submit button color changed from `focusBlue` → `followBtnBg` to match the topic Follow pill across the theme. |

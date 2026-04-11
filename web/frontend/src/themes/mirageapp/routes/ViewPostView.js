@@ -17,156 +17,159 @@ import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
-import { useViewPost, pickCard, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
+import { useViewPost, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
 import { normalizeTag } from "../../../utils/ContentTags";
-// Card-based container matching front page style (width aligned with ModernPostFeed)
-// Supports $size prop ('compact' or 'large') to match feed view mode
-// No margins - ModernPostFeed's gap handles spacing (matches CardView behavior)
+/**
+ * Post Details — root post container.
+ *
+ * Matches `CardView::Card` rhythm exactly so the root post reads as the
+ * same feed card the user clicked to arrive here. Single-canvas per R1:
+ * transparent background that lifts to `hoverBg` on hover, vertical gap
+ * between header / title / body / action row driven by flex `gap`, not
+ * per-child margins. Ends with a `border-bottom` divider to separate
+ * from the comment thread below (R3).
+ *
+ * `$isNew` ("freshly seen" inbox highlight) paints a subtle inset left
+ * rail so R1 still holds.
+ */
 const PostCard = styled.div`
-    background: ${({
-    theme
-}) => pickCard(theme, 'card')};
-    border: 1px solid ${({
-    theme
-}) => pickCard(theme, 'cardBorder')};
-    border-radius: ${({
-    $size
-}) => $size === 'compact' ? '12px' : '16px'};
-    display: flex;    
-    min-height: auto;
-    flex-direction: row;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 0;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     text-align: left;
-    align-items: flex-start;
-    padding: ${({
-    $size
-}) => $size === 'compact' ? '0.85rem' : '1.25rem'};
-    /* No margins - gap is handled by ModernPostFeed via --card-gap CSS variable */
+    gap: 0.5rem;
+    padding: 0.75rem 1rem 0.8rem;
     margin: 0;
-    transition: background 0.3s ease;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    ${({
-    $isNew,
-    theme
-}) => $isNew ? `background: ${theme.colors.panelAlt};` : ''}
-
-    &:hover {
-        background: ${({
-    theme
-}) => pickCard(theme, 'cardAlt')};
-    }
-
     position: relative;
+    transition: background 0.12s ease;
+
+    ${({ $isNew, theme }) => $isNew ? `
+        /* Subtle left-rail accent for newly-seen content (R1: no bg fill). */
+        box-shadow: inset 3px 0 0 0 ${theme.colors.focusBlue};
+    ` : ''}
 
     @keyframes flashGlow {
-        0% { box-shadow: 0 0 50px rgba(255, 255, 255, 0.9), 0 4px 20px rgba(0, 0, 0, 0.1); }
-        100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
+        0%   { background: rgba(102, 126, 234, 0.12); }
+        100% { background: transparent; }
     }
 
     @media (max-width: 1000px) {
-        padding: ${({
-    $size
-}) => $size === 'compact' ? '0.7rem' : '1rem'};
-        border-radius: ${({
-    $size
-}) => $size === 'compact' ? '10px' : '12px'};
+        padding: 0.7rem 0.85rem 0.75rem;
+        gap: 0.45rem;
     }
 
-    @media (max-width: 768px) {
-        padding: 0.35rem 0.75rem;
-        border-radius: 8px;
+    @media (max-width: 600px) {
+        padding: 0.65rem 0.85rem 0.7rem;
+        gap: 0.4rem;
     }
 `;
 
-// Comment card with consistent, slightly tighter indentation per level
-// Inherits $size prop from PostCard for compact/large mode
-// Only margin-left for indentation - vertical spacing from ModernPostFeed gap
+/**
+ * Comment row — reddit + mobile-app hybrid.
+ *
+ * Full-bleed flat row with a **left thread rail** at every depth level
+ * (`1px solid theme.colors.border`, R3). No card background of its own;
+ * hover lifts to `hoverBg` matching the feed card rhythm. Indentation is
+ * carried by `margin-left` + the rail, matching mobile `comment-item.tsx`.
+ *
+ * Level-0 (direct replies to the root) get no rail since they already sit
+ * against the root post divider.
+ *
+ * Each comment also gets a subtle bottom divider between siblings so deep
+ * threads read cleanly, even when text lengths differ dramatically.
+ */
 const CommentCard = styled(PostCard)`
-    /* Each level indents by 1rem relative to the root card (tighter in compact mode) */
-    margin-left: ${({
-    $level,
-    $size
-}) => `${($size === 'compact' ? 0.75 : 1) * (Number($level) || 0)}rem`};
-    padding: ${({
-    $isCollapsed,
-    $size
-}) => $isCollapsed ? $size === 'compact' ? '0.35rem 0.75rem' : '0.5rem 1rem' : $size === 'compact' ? '0.7rem' : '1rem'};
-    
-    /* Persistent highlight for inbox-linked comments */
-    &.inbox-highlight {
-        border: 2px solid #FACC15 !important;
-        background: rgba(250, 204, 21, 0.15) !important;
-        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.3), 0 4px 20px rgba(0, 0, 0, 0.15) !important;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.borderSubtle};
+    box-shadow: none;
+    background: transparent;
+    gap: 0.35rem;
+
+    /* Each level indents a clean 1.15rem; deeper levels render a rail. */
+    margin-left: ${({ $level }) => `${Math.max(Number($level) || 0, 0) * 1.15}rem`};
+    padding: ${({ $isCollapsed, $level }) => {
+        const leftInset = Number($level) > 0 ? '0.9rem' : '1rem';
+        if ($isCollapsed) return `0.45rem ${leftInset} 0.45rem`;
+        return `0.65rem ${leftInset} 0.75rem`;
+    }};
+    border-left: ${({ $level, theme }) =>
+        Number($level) > 0 ? `1px solid ${theme.colors.border}` : 'none'};
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
     }
-    
+
+    /* Persistent highlight for inbox-linked comments: left-rail accent +
+     * subtle tinted background so the single-canvas rule still holds. */
+    &.inbox-highlight {
+        box-shadow: inset 3px 0 0 0 #FACC15 !important;
+        background: rgba(250, 204, 21, 0.06) !important;
+    }
+
     @media (max-width: 1000px) {
-        margin-left: ${({
-    $level,
-    $size
-}) => `${($size === 'compact' ? 0.45 : 0.6) * (Number($level) || 0)}rem`};
+        margin-left: ${({ $level }) => `${Math.max(Number($level) || 0, 0) * 0.9}rem`};
+        padding: ${({ $isCollapsed, $level }) => {
+            const leftInset = Number($level) > 0 ? '0.8rem' : '0.85rem';
+            if ($isCollapsed) return `0.4rem ${leftInset}`;
+            return `0.55rem ${leftInset} 0.65rem`;
+        }};
     }
 `;
+/**
+ * Thread reminder banner shown above the root post when a user is viewing
+ * a single comment's sub-thread via `/p/:commentId`. Flat row on `bg`,
+ * separated by a bottom divider (R3).
+ */
 const StyledThreadReminder = styled.div`
-    background: ${({
-    theme
-}) => pickCard(theme, 'card')};
-    border: 1px solid ${({
-    theme
-}) => pickCard(theme, 'cardBorder')};
-    border-radius: 12px;
-    padding: 0.75rem 1rem;
-    margin: 0.35rem 0;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-weight: 500;    
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 0;
+    padding: 0.65rem 1rem;
+    margin: 0;
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: 500;
     font-size: 0.7rem;
-    
+
     a {
         font-size: inherit;
-        color: ${({
-    theme
-}) => theme.colors.link};
+        color: ${({ theme }) => theme.colors.link};
         text-decoration: underline;
         font-weight: 600;
 
         &:hover {
-            color: ${({
-    theme
-}) => theme.colors.linkHover};
+            color: ${({ theme }) => theme.colors.linkHover};
         }
     }
-
-    @media (max-width: 1000px) {
-        margin: 0.25rem 0;
-    }
 `;
+/**
+ * "Continue this thread →" deep-link shown under a comment whose children
+ * haven't been loaded. Flat row, bottom divider, left-indented to match
+ * the parent comment rail depth.
+ */
 const ContinueThreadLink = styled(Link)`
     display: block;
-    background: ${({
-    theme
-}) => pickCard(theme, 'cardAlt')};
-    border: 1px solid ${({
-    theme
-}) => pickCard(theme, 'cardBorder')};
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    margin-left: ${({
-    $level
-}) => `${1 * (Number($level) || 0)}rem`};
-    margin-top: 0.25rem;
-    margin-bottom: 0.25rem;
-    color: ${({
-    theme
-}) => theme.colors.link};
-    font-size: 0.75rem;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    border-left: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 0;
+    padding: 0.55rem 0.85rem;
+    margin-left: ${({ $level }) => `${0.9 * Math.max(Number($level) || 0, 0) + 0.9}rem`};
+    margin-top: 0;
+    margin-bottom: 0;
+    color: ${({ theme }) => theme.colors.link};
+    font-size: 0.72rem;
     font-weight: 500;
     text-decoration: none;
-    transition: all 0.2s ease;
+    transition: color 0.15s ease, background 0.15s ease;
 
     &:hover {
-        background: ${({
-    theme
-}) => pickCard(theme, 'card')};
+        background: ${({ theme }) => theme.colors.hoverBg};
         color: ${({
     theme
 }) => theme.colors.linkHover};
@@ -184,19 +187,21 @@ const ContinueThreadLink = styled(Link)`
 // Topic hero container aligned with ModernPostFeed width
 const TopicHeroWrapper = styled.div`
     width: 100%;
-    margin: 0.5rem 0;
+    margin: 0;
 `;
+/**
+ * Flat header row above the root post — holds the back button (left) and
+ * follow-topic button (right). No card background; separated from the
+ * post below via the `PostCard` bottom divider (R3). Matches the Inbox /
+ * Search header rhythm.
+ */
 const TopicHeroCard = styled.div`
     width: 100%;
-    background: ${({
-    theme
-}) => pickCard(theme, 'cardAlt')};
-    border: 1px solid ${({
-    theme
-}) => pickCard(theme, 'cardBorder')};
-    border-radius: 12px;
-    padding: 0.3rem 1rem;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0.4rem 1rem 0.5rem;
+    box-shadow: none;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -205,8 +210,8 @@ const TopicHeroCard = styled.div`
 
     @media (max-width: 600px) {
         flex-direction: column;
-        gap: 0.5rem;
-        padding: 0.5rem 0.75rem;
+        gap: 0.35rem;
+        padding: 0.35rem 0.75rem 0.5rem;
     }
 `;
 const TopicHeroTopRow = styled.div`
@@ -238,21 +243,70 @@ const TopicAction = styled.div`
     }
 `;
 
-// Title line inside the root post, above the content
-const RootTitleRow = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-size: 0.9rem;
-    font-weight: bold;
-    margin-top: 0.25rem;
+/**
+ * Follow topic button in the post-details header. Matches
+ * `CardView::FollowButton` 1:1 so the same visual language is used
+ * across feed cards and the post-details top bar. Solid blue when not
+ * following; transparent with `followBtnBorder` outline when already
+ * following; hovers to `followBtnBgHover`. No brand-kit `Button` here —
+ * we want the same pill rhythm as the feed.
+ */
+const TopicFollowButton = styled.button`
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    font-size: 0.58rem;
+    font-weight: 700;
+    font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
+    border: 1.5px solid
+        ${({ $active, theme }) =>
+            $active ? theme.colors.followBtnBorder : theme.colors.followBtnBg};
+    background: ${({ $active, theme }) =>
+        $active ? 'transparent' : theme.colors.followBtnBg};
+    color: ${({ $active, theme }) =>
+        $active ? theme.colors.text : '#FFFFFF'};
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+    &:hover:not(:disabled) {
+        background: ${({ $active, theme }) =>
+            $active ? 'transparent' : theme.colors.followBtnBgHover};
+        border-color: ${({ $active, theme }) =>
+            $active ? theme.colors.followBtnBorderHover : theme.colors.followBtnBgHover};
+    }
+    &:disabled { opacity: 0.6; cursor: default; }
 `;
+
+/**
+ * Root post title line. Matches `CardView::TitleLink` exactly for visual
+ * parity with feed post cards (R4). No extra top margin — parent flex
+ * `gap` handles spacing.
+ */
+const RootTitleRow = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1.3;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    margin: 0;
+
+    @media (max-width: 1000px) {
+        font-size: 0.74rem;
+    }
+`;
+/**
+ * No-op placeholder — the old rendered a horizontal rule between title
+ * and body, but `CardView` has no such divider and the new flex `gap`
+ * handles spacing. Kept as a stub so the JSX `<TitleDivider />` sites
+ * below still compile without changes.
+ */
 const TitleDivider = styled.div`
-    height: 1px;
-    background: ${({
-    theme
-}) => theme.colors.border};
-    margin: 0.5rem 0;
+    display: none;
 `;
 
 // Reuse the same visual style as topic links in the feed
@@ -316,54 +370,88 @@ const BackButton = styled.button`
     }
 `;
 
-// Meta info row at top of card (topic, author, time, menu)
+/**
+ * Header row — matches `CardView::HeaderRow` so the post-details screen
+ * reads the same as the feed card. Left side holds the metadata cluster
+ * (topic · user · time · tag). Right side holds the actions (follow,
+ * menu). Flat row, no border, no margin — parent gap handles spacing.
+ */
 const MetaInfoRow = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.35rem;
-    margin-bottom: 0.35rem;
-    padding-bottom: 0.35rem;
-    border-bottom: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.65rem;
-    font-weight: 600;
-    line-height: 1.1;
-
-    & a {
-        color: ${({
-    theme
-}) => theme.colors.subtleText};
-        text-decoration: none;
-        font-weight: 600;
-    }
-
-    & a:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
-    }
+    gap: 0.5rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
 
     @media (max-width: 768px) {
         flex-wrap: wrap;
     }
 `;
+/**
+ * Metadata cluster (topic · user · time · tag) on the left side of the
+ * header row. Ported 1:1 from `CardView::HeaderMeta`: 0.62rem font,
+ * `feedCtrlText` color, flex-wrap, tight gap.
+ */
 const MetaInfoRowLeft = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.35rem;
     flex-wrap: wrap;
+    gap: 0.2rem 0.3rem;
+    min-width: 0;
+    font-size: 0.62rem;
+    font-weight: 400;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    line-height: 1.2;
+
+    & a {
+        color: ${({ theme }) => theme.colors.feedCtrlText};
+        text-decoration: none;
+        font-weight: 500;
+    }
+    & a:hover {
+        color: ${({ theme }) => theme.colors.text};
+        text-decoration: none;
+    }
+    & span {
+        font-size: 0.62rem;
+        font-weight: 400;
+    }
 `;
+/**
+ * Bullet separator between metadata items. Matches `CardView::HeaderDot`.
+ */
 const MetaSeparator = styled.span`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.9rem;
-    font-weight: 900;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+`;
+/**
+ * Inline collapse/expand toggle shown next to the comment timestamp.
+ * Rendered as a plain text chunk (no box, no button chrome) so it reads
+ * as quiet metadata in the same rhythm as author / time / tag. Lifts
+ * to `text` on hover.
+ */
+const CollapseToggle = styled.button`
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: color 0.12s ease;
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.text};
+    }
 `;
 
 // Mobile root post meta - two rows: author+menu, then topic+time
@@ -372,18 +460,14 @@ const MobileRootMeta = styled.div`
     @media (max-width: 600px) {
         display: flex;
         flex-direction: column;
-        gap: 0;
-        margin-bottom: 0.35rem;
-        padding-bottom: 0.35rem;
-        border-bottom: 1px solid ${({
-    theme
-}) => theme.colors.border};
-        color: ${({
-    theme
-}) => theme.colors.subtleText};
-        font-size: 0.65rem;
-        font-weight: 600;
-        line-height: 1;
+        gap: 0.15rem;
+        margin: 0;
+        padding: 0;
+        border: none;
+        color: ${({ theme }) => theme.colors.feedCtrlText};
+        font-size: 0.62rem;
+        font-weight: 400;
+        line-height: 1.2;
     }
 `;
 const MobileRootMetaTop = styled.div`
@@ -391,9 +475,9 @@ const MobileRootMetaTop = styled.div`
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-    font-size: 0.75rem;
-    line-height: 1;
-    margin-bottom: -0.1rem;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1.2;
     & a {
         font-size: inherit;
         line-height: inherit;
@@ -402,22 +486,21 @@ const MobileRootMetaTop = styled.div`
 const MobileRootMetaBottom = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    font-size: 0.65rem;
-    line-height: 1;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.3rem;
+    font-size: 0.62rem;
+    font-weight: 400;
+    line-height: 1.2;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
     & a {
-        color: ${({
-    theme
-}) => theme.colors.subtleText};
+        color: ${({ theme }) => theme.colors.feedCtrlText};
         text-decoration: none;
-        font-weight: 600;
+        font-weight: 500;
         font-size: inherit;
         line-height: inherit;
     }
     & a:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -448,99 +531,136 @@ const TagBadge = styled.span`
 }) => tagColors[$tag]?.border || tagColors.default.border};
 `;
 
-// Three-dots menu button
+/**
+ * Ellipsis more-menu button. Matches `CardView::MoreButton` (28x28
+ * circle, transparent fill, `feedCtrlHoverBg` on hover, no transform).
+ */
 const MenuButton = styled.button`
-    background: none;
+    appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 9999px;
     border: none;
-    padding: 0.2rem;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.text};
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    border-radius: 4px;
-    transition: all 0.2s ease;
+    padding: 0;
+    margin-right: -4px;
+    transition: background 0.12s ease;
 
-    &:hover {
-        background: ${({
-    theme
-}) => theme.colors.panelAlt};
-        color: ${({
-    theme
-}) => theme.colors.text};
-    }
+    &:hover { background: ${({ theme }) => theme.colors.feedCtrlHoverBg}; }
 
     svg {
-        width: 18px;
-        height: 18px;
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
     }
 `;
 const MenuContainer = styled.div`
     position: relative;
     display: inline-block;
 `;
+/**
+ * Post / comment options dropdown.
+ *
+ * Matches `CardView::Menu` 1:1 so every dropdown in the theme reads the
+ * same — same `menuBg` surface, same 10px radius, same border, same
+ * shadow. `position: fixed` is preserved from the old implementation
+ * because the dropdown gets portaled into `document.body` via
+ * `ReactDOM.createPortal` (so it escapes the post card and can anchor
+ * next to the ellipsis button on every screen size).
+ */
 const MenuDropdown = styled.div`
     position: fixed;
-    background: ${({
-    theme
-}) => theme.colors.panel};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    min-width: 180px;
+    min-width: max-content;
+    width: max-content;
+    padding: 0;
+    background: ${({ theme }) => theme.colors.menuBg};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
     overflow: hidden;
 `;
+/**
+ * Dropdown row — matches `CardView::MenuItemBtn` 1:1: 3 slots (leading
+ * icon → label → trailing gap), `sidebarItemText` at rest lifting to
+ * `menuItemHoverText` on hover, `menuSelectedBg` on hover for background
+ * tile. Danger rows saturate to `voteDown` on hover.
+ *
+ * The old implementation used a `data-danger="true"` attribute to flip
+ * the text red; we keep that working via an attribute selector AND the
+ * modern `$danger` transient prop so existing JSX doesn't need to
+ * change.
+ */
 const MenuItem = styled.button`
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    text-align: left;
-    background: none;
-    border: none;
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-size: 0.75rem;
-    cursor: pointer;
-    transition: background 0.2s ease;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-
-    &:hover {
-        background: ${({
-    theme
-}) => theme.colors.panelAlt};
-    }
-
-    &:not(:last-child) {
-        border-bottom: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    }
+    justify-content: flex-start;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 10px 14px;
+    white-space: nowrap;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: ${({ theme }) => theme.colors.sidebarItemText};
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 400;
+    text-align: left;
+    cursor: pointer;
+    line-height: 1;
+    transition: background 0.12s ease, color 0.12s ease;
 
     &[data-danger="true"] {
-        color: #ff6b6b;
+        color: ${({ theme }) => theme.colors.menuDangerText};
+    }
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.menuItemHoverBg};
+        color: ${({ theme }) => theme.colors.menuItemHoverText};
+    }
+
+    &[data-danger="true"]:hover {
+        background: ${({ theme }) => theme.colors.menuItemHoverBg};
+        color: ${({ theme }) => theme.colors.voteDown};
+    }
+
+    & > svg,
+    & > span > svg {
+        width: 17px;
+        height: 17px;
+        flex-shrink: 0;
+        color: inherit;
     }
 `;
+/**
+ * Markdown + media content slot inside the root post and each comment.
+ * Font size matches `CardView::Body` so the post-details view reads the
+ * same as feed cards (R4 visual parity with CardView).
+ */
 const StyledContentArea = styled.div`
-    margin-top: 0.25rem;
-    margin-left: 0rem;
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-weight: normal;    
-    font-size: 0.82rem;
-    padding-left: 0rem;
-    padding-right: 0rem;
+    margin: 0;
+    padding: 0;
+    color: ${({ theme }) => theme.colors.text};
+    font-weight: normal;
+    font-size: 0.74rem;
+    line-height: 1.5;
     overflow-wrap: anywhere;
     word-break: break-word;
     white-space: normal;
-    max-width: 800px;
+    max-width: 100%;
+
+    p { margin: 0 0 0.5rem; }
+    p:last-child { margin-bottom: 0; }
+    a { color: ${({ theme }) => theme.colors.link}; }
 
     img, video {
         max-width: 100%;
@@ -548,16 +668,18 @@ const StyledContentArea = styled.div`
     }
 
     @media (max-width: 1000px) {
-        font-size: 0.72rem;
-        max-width: 100%;
+        font-size: 0.68rem;
     }
 `;
+/**
+ * Column wrapper inside `PostCard` / `CommentCard`. Uses `display: contents`
+ * so its children inherit the parent card's flex `gap` rhythm — the card
+ * itself is already `flex-direction: column`, so no extra nesting is
+ * needed. This makes post/comment body + title + meta + action row all
+ * live in a single flex track, matching `CardView::Card` spacing exactly.
+ */
 const ColumnFlex = styled.div`
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    margin-bottom: 0;                 /* prevent trailing space below children */
-    padding-bottom: 0;
+    display: contents;
 `;
 const MainContentWrapper = styled.div`
     width: 100%;
@@ -566,20 +688,228 @@ const MainContentWrapper = styled.div`
     overflow-x: hidden;
     box-sizing: border-box;
 `;
+/**
+ * Inline reply composer block. Flat wrapper that sits under the active
+ * post/comment. Uses the feed card rhythm: no card chrome of its own,
+ * content separated from the surrounding post/comment by a top divider
+ * (R3), tight 0.45rem vertical gap so media row → editor → action row
+ * read as a single unit.
+ *
+ * Also overrides the nested `MarkdownEditor` shared component so the
+ * textarea + toolbar read against the mirageapp theme instead of the
+ * bluemoon-era `panelAlt` card look. The overrides are scoped to this
+ * wrapper via descendant selectors so `MarkdownEditor` stays untouched
+ * for any other route that uses it (CreatePost, edit flows, etc.).
+ */
 const StyledReply = styled.div`
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 0.5rem;
+    gap: 0.45rem;
     width: 100%;
-    padding: 0.75rem;
-    background: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 10px;
+    padding: 0.65rem 0 0.5rem;
+    margin-top: 0.25rem;
+    background: transparent;
+    border: none;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 0;
+
+    /* --- MarkdownEditor textarea override -----------------------------
+     * Sits flat on the main bg canvas (R1). Hover/focus stay subtle and
+     * neutral — no blue ring; uses borderStrong instead so the input
+     * doesn't compete with link/highlight blues elsewhere on the page.
+     */
+    textarea {
+        background: ${({ theme }) => theme.colors.bg} !important;
+        border: 1px solid ${({ theme }) => theme.colors.border} !important;
+        border-radius: 10px !important;
+        padding: 0.6rem 0.8rem !important;
+        font-size: 0.72rem !important;
+        font-weight: 400 !important;
+        line-height: 1.5 !important;
+        color: ${({ theme }) => theme.colors.text} !important;
+        transition: border-color 0.12s ease, background 0.12s ease !important;
+        box-shadow: none !important;
+    }
+    textarea:hover {
+        border-color: ${({ theme }) => theme.colors.borderStrong} !important;
+    }
+    textarea:focus {
+        outline: none !important;
+        border-color: ${({ theme }) => theme.colors.borderStrong} !important;
+        box-shadow: none !important;
+    }
+    textarea:disabled {
+        opacity: 0.55 !important;
+    }
+
+    /* --- MarkdownEditor toolbar override -------------------------------
+     * Scoped to [data-mirageapp-editor]. Toolbar buttons render as quiet
+     * 24x24 pills that lift to feedCtrlHoverBg on hover.
+     */
+    [data-mirageapp-editor] button[type='button'] {
+        background: transparent !important;
+        border: 1px solid transparent !important;
+        border-radius: 6px !important;
+        min-width: 24px !important;
+        height: 24px !important;
+        padding: 2px 4px !important;
+        color: ${({ theme }) => theme.colors.feedCtrlText} !important;
+        transition: background 0.12s ease, color 0.12s ease !important;
+        box-shadow: none !important;
+    }
+    [data-mirageapp-editor] button[type='button'] svg,
+    [data-mirageapp-editor] button[type='button'] .md-icon {
+        max-width: 14px !important;
+        max-height: 14px !important;
+        font-size: 0.78rem !important;
+    }
+    /* Bold (B) and Italic (I) glyphs render as text via styled spans, so
+     * the SVG/font-size rules above don't reach them. Shrink them here.
+     */
+    [data-mirageapp-editor] button[type='button'] > span {
+        font-size: 0.6rem !important;
+        line-height: 1 !important;
+    }
+    [data-mirageapp-editor] button[type='button']:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
+        color: ${({ theme }) => theme.colors.text} !important;
+        border-color: transparent !important;
+    }
+    [data-mirageapp-editor] button[type='button'][data-active='true'] {
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
+        color: ${({ theme }) => theme.colors.text} !important;
+        border-color: transparent !important;
+    }
+
+    /* --- Preview toggle (custom checkmark) ----------------------------
+     * Replaces the native checkbox with a small rounded square that
+     * lifts to focusBlue when checked, with a unicode checkmark inside.
+     */
+    [data-mirageapp-editor] label {
+        background: transparent !important;
+        border: 1px solid ${({ theme }) => theme.colors.border} !important;
+        border-radius: 6px !important;
+        padding: 0.2rem 0.45rem !important;
+        font-size: 0.6rem !important;
+        font-weight: 500 !important;
+        color: ${({ theme }) => theme.colors.feedCtrlText} !important;
+        gap: 0.35rem !important;
+        height: 24px !important;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+    }
+    [data-mirageapp-editor] label:hover {
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
+        color: ${({ theme }) => theme.colors.text} !important;
+        border-color: ${({ theme }) => theme.colors.borderStrong} !important;
+    }
+    [data-mirageapp-editor] label input[type='checkbox'] {
+        appearance: none !important;
+        -webkit-appearance: none !important;
+        width: 12px !important;
+        height: 12px !important;
+        border-radius: 3px !important;
+        border: 1px solid ${({ theme }) => theme.colors.borderStrong} !important;
+        background: transparent !important;
+        cursor: pointer !important;
+        position: relative !important;
+        margin: 0 !important;
+        flex-shrink: 0 !important;
+        transition: background 0.12s ease, border-color 0.12s ease !important;
+    }
+    [data-mirageapp-editor] label input[type='checkbox']:checked {
+        background: ${({ theme }) => theme.colors.focusBlue} !important;
+        border-color: ${({ theme }) => theme.colors.focusBlue} !important;
+    }
+    [data-mirageapp-editor] label input[type='checkbox']:checked::after {
+        content: '' !important;
+        position: absolute !important;
+        left: 3px !important;
+        top: 0px !important;
+        width: 4px !important;
+        height: 8px !important;
+        border: solid #fff !important;
+        border-width: 0 1.5px 1.5px 0 !important;
+        transform: rotate(45deg) !important;
+    }
+
+    /* --- Preview pane --------------------------------------------------
+     * LivePreviewContainer is the LAST child of EditorContainer (which is
+     * itself the only direct child of [data-mirageapp-editor]). Override
+     * it to a subtle composerPreviewBg tile with lighter body text.
+     */
+    [data-mirageapp-editor] > div > :last-child {
+        background: ${({ theme }) => theme.colors.composerPreviewBg} !important;
+        border: 1px solid ${({ theme }) => theme.colors.border} !important;
+        border-radius: 8px !important;
+        padding: 0.55rem 0.7rem !important;
+        font-size: 0.7rem !important;
+        font-weight: 400 !important;
+        color: ${({ theme }) => theme.colors.text} !important;
+    }
+    [data-mirageapp-editor] > div > :last-child p,
+    [data-mirageapp-editor] > div > :last-child li,
+    [data-mirageapp-editor] > div > :last-child span {
+        font-weight: 400 !important;
+    }
+    [data-mirageapp-editor] > div > :last-child > div:first-child {
+        font-size: 0.5rem !important;
+        font-weight: 600 !important;
+        color: ${({ theme }) => theme.colors.subtleText} !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    /* --- Submit / Cancel buttons --------------------------------------
+     * Submit: flat pill in followBtnBg (matches the topic Follow pill in
+     * CardView and the post-details header) so the primary CTA across the
+     * theme reads with the same blue. Cancel: ghost pill, lighter weight.
+     */
+    button[type='submit'] {
+        background: ${({ theme }) => theme.colors.followBtnBg} !important;
+        color: #ffffff !important;
+        border: 1px solid ${({ theme }) => theme.colors.followBtnBg} !important;
+        box-shadow: none !important;
+        font-weight: 500 !important;
+        font-size: 0.7rem !important;
+        padding: 0.35rem 0.85rem !important;
+        border-radius: 999px !important;
+        background-image: none !important;
+        text-transform: none !important;
+        transform: none !important;
+        transition: background 0.12s ease, border-color 0.12s ease !important;
+    }
+    button[type='submit']:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.followBtnBgHover} !important;
+        border-color: ${({ theme }) => theme.colors.followBtnBgHover} !important;
+        box-shadow: none !important;
+        transform: none !important;
+    }
+    button[type='submit']:disabled {
+        opacity: 0.55 !important;
+    }
+
+    /* Cancel button — flagged via data-mirageapp-cancel on the JSX so we
+     * never accidentally restyle other buttons in the composer.
+     */
+    button[data-mirageapp-cancel] {
+        background: transparent !important;
+        color: ${({ theme }) => theme.colors.subtleText} !important;
+        border: 1px solid ${({ theme }) => theme.colors.border} !important;
+        box-shadow: none !important;
+        font-weight: 500 !important;
+        font-size: 0.7rem !important;
+        padding: 0.35rem 0.85rem !important;
+        border-radius: 999px !important;
+        background-image: none !important;
+        transform: none !important;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+    }
+    button[data-mirageapp-cancel]:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
+        color: ${({ theme }) => theme.colors.text} !important;
+        border-color: ${({ theme }) => theme.colors.borderStrong} !important;
+        transform: none !important;
+    }
 `;
 
 // Mobile reply overlay - fullscreen focused reply experience (leaves room for bottom nav)
@@ -606,12 +936,8 @@ const MobileReplyHeader = styled.div`
     display: flex;
     align-items: center;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    background: ${({
-    theme
-}) => theme.colors.panel};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.bg};
     position: sticky;
     top: 0;
     z-index: 1;
@@ -645,14 +971,11 @@ const MobileReplyContent = styled.div`
     padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 `;
 const MobileReplyPostPreview = styled.div`
-    background: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 8px;
-    padding: 0.6rem 0.75rem;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 0;
+    padding: 0.5rem 0 0.65rem;
 `;
 const MobileReplyPostMeta = styled.div`
     font-size: 0.65rem;
@@ -671,23 +994,34 @@ const MobileReplyPostContent = styled.div`
 }) => theme.colors.text};
     line-height: 1.4;
 `;
+/**
+ * Submit button cluster on the right side of the composer action row.
+ * Keeps the submit + cancel buttons tightly grouped.
+ */
 const StyledSubmitButtonContainer = styled.div`
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 0.5rem;
     flex-wrap: nowrap;
+    flex-shrink: 0;
 `;
+/**
+ * Character counter under the reply editor. Tiny, `subtleText` at rest,
+ * `voteDown` when over the limit (same red the CardView action row uses).
+ */
 const ReplyCounter = styled.span`
-    font-size: 0.45rem;
-    color: ${({
-    $warn,
-    theme
-}) => $warn ? '#ff6b6b' : theme.colors.subtleText};
+    font-size: 0.58rem;
+    font-weight: 500;
     line-height: 1.2;
-    margin-left: 0.2rem;
-    margin-top: -0.25em;
+    color: ${({ $warn, theme }) =>
+        $warn ? theme.colors.voteDown : theme.colors.subtleText};
 `;
+/**
+ * Reply composer action row — character counter on the left, submit /
+ * cancel buttons on the right. Flat row with a top divider matching the
+ * feed-card separator rhythm.
+ */
 const ReplyActionsRow = styled.div`
     display: flex;
     align-items: center;
@@ -695,67 +1029,47 @@ const ReplyActionsRow = styled.div`
     width: 100%;
     gap: 0.5rem;
     flex-wrap: nowrap;
+    padding-top: 0.4rem;
+    border-top: 1px solid ${({ theme }) => theme.colors.borderSubtle};
 `;
+/**
+ * Inline error banner under the reply editor. Uses `voteDown` for tint
+ * and `buttonDangerBg` for the fill so the styling flows through the R2
+ * token pairs rather than raw hex values.
+ */
 const ReplyErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
+    background: ${({ theme }) => theme.colors.buttonDangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.buttonDangerBorder};
     border-radius: 8px;
     padding: 0.5rem 0.75rem;
     margin-top: 0.25rem;
-    color: #dc2626;
-    font-size: 0.7rem;
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.65rem;
+    font-weight: 500;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 `;
 
-// Action bar matching CardView style
+/**
+ * Action row — matches `CardView::ActionRow` rhythm. Flat row, no border,
+ * no top margin (parent `gap` handles spacing). Each action inside is
+ * rendered as an `ActionButton` styled like `ActionPill` / `ActionIconChip`
+ * from CardView: 32px tall rounded pills with `actionIconBg` fill and
+ * `actionIconHoverBg` on hover.
+ */
 const MetaRow = styled.div`
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-top: 0.5rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    margin: 0;
+    padding: 0;
+    border: none;
     line-height: 1;
 
-    & a {
-        color: ${({
-    theme
-}) => theme.colors.subtleText};
-        text-decoration: none;
-        font-size: 0.7rem;
-        font-weight: 600;
-        line-height: 1;
-    }
-
-    & a:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
-    }
-
-    & span {
-        font-size: 0.7rem;
-        font-weight: 600;
-        line-height: 1;
-    }
-
-    @media (max-width: 768px) {
+    @media (max-width: 600px) {
         flex-wrap: wrap;
-        font-size: 0.6rem;
         gap: 0.35rem;
-
-        & a, & span {
-            font-size: 0.6rem;
-        }
 
         /* Hide "share" text on mobile, keep icon */
         .share-text {
@@ -763,60 +1077,90 @@ const MetaRow = styled.div`
         }
     }
 `;
+/**
+ * Thin flex spacer that pushes the trailing actions (block/share) to the
+ * right edge. Matches `CardView::Spacer`.
+ */
 const MetaSeparatorAction = styled.span`
-    font-size: 2.5rem;
-    margin: 0 0.35rem;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-weight: 900;
-    line-height: 1;
-
-    @media (max-width: 768px) {
-        font-size: 2rem;
-        margin: 0 0.2rem;
-    }
+    flex: 1 1 auto;
+    min-width: 0;
 `;
+/**
+ * Inline bullet separator used between tightly-clustered action items
+ * (e.g. vote container and reply button) on the left side of the
+ * action row. Rendered as a small `·` glyph in `feedCtrlText` so it
+ * reads as quiet metadata, not a heavy divider.
+ */
+const DotSep = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    flex-shrink: 0;
+`;
+/**
+ * Leading glyph slot inside an `ActionButton`. The icon lives inside a
+ * pill so this just inherits sizing; kept as a span for compat with the
+ * existing JSX.
+ */
 const Icon = styled.span`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    color: inherit;
+
     svg {
         width: 18px;
         height: 18px;
         fill: currentColor;
     }
-
-    @media (max-width: 768px) {
-        width: 14px;
-        height: 14px;
-        svg {
-            width: 14px;
-            height: 14px;
-        }
-    }
 `;
+/**
+ * Pill-shaped action button — matches `CardView::ActionPill`. Used for
+ * comment count, reply, block/report, share. 32px tall, rounded, filled
+ * with `actionIconBg`, no border, no transform on hover. Anchor by
+ * default (legacy `<a>` usage across the file); `as="button"` works too.
+ */
 const ActionButton = styled.a`
-    &:visited { color: inherit; }
-    &:hover, &:visited:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
-    }
-    cursor: pointer;
-    font-size: inherit;
-    font-weight: 600;
-    color: inherit;
-    text-decoration: none;
-    white-space: nowrap;
+    appearance: none;
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
+    justify-content: center;
+    gap: 0.3rem;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 9999px;
+    border: none;
+    background: ${({ theme }) => theme.colors.actionIconBg};
+    color: ${({ theme, $danger }) =>
+        $danger ? theme.colors.voteDown : theme.colors.text};
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.12s ease;
+
+    &:visited { color: ${({ theme, $danger }) =>
+        $danger ? theme.colors.voteDown : theme.colors.text}; }
+    &:hover,
+    &:visited:hover {
+        background: ${({ theme }) => theme.colors.actionIconHoverBg};
+        color: ${({ theme, $danger }) =>
+            $danger ? theme.colors.voteDown : theme.colors.text};
+    }
+
+    svg { width: 16px; height: 16px; fill: currentColor; }
+
+    @media (max-width: 600px) {
+        height: 28px;
+        padding: 0 10px;
+    }
 `;
 const BlockErrorMessage = styled.div`
     background-color: rgba(220, 38, 38, 0.1);
@@ -1887,7 +2231,7 @@ function ViewPostView({
         if (!hasValidAccount) {
             return <MetaRow>
                 <VoteSection inline state={state} post={post} updatePost={updatePost} />
-                <MetaSeparatorAction>•</MetaSeparatorAction>
+                <DotSep aria-hidden="true">·</DotSep>
                 <Link to="/signup" style={{
                     fontSize: '0.7rem',
                     color: 'inherit',
@@ -1897,12 +2241,8 @@ function ViewPostView({
         }
         return <MetaRow>
             <VoteSection inline state={state} post={post} updatePost={updatePost} />
-            <MetaSeparatorAction>•</MetaSeparatorAction>
-            <ActionButton onClick={() => toggleReply(post.post_id)} style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.25rem'
-            }}>
+            <DotSep aria-hidden="true">·</DotSep>
+            <ActionButton onClick={() => toggleReply(post.post_id)}>
                 <Icon aria-hidden="true">
                     <svg viewBox="0 0 24 24">
                         <path d="M4 4h16v12H5.17L4 17.17V4zm0-2a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4z"></path>
@@ -1910,12 +2250,8 @@ function ViewPostView({
                 </Icon>
                 <span>reply</span>
             </ActionButton>
-            <MetaSeparatorAction>•</MetaSeparatorAction>
-            <ActionButton onClick={() => handleShare(post)} style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.25rem'
-            }}>
+            <MetaSeparatorAction />
+            <ActionButton onClick={() => handleShare(post)}>
                 <Icon aria-hidden="true">
                     <svg viewBox="0 0 458.624 458.624">
                         <path d="M339.588,314.529c-14.215,0-27.456,4.133-38.621,11.239l-112.682-78.67c1.809-6.315,2.798-12.976,2.798-19.871 c0-6.896-0.989-13.557-2.798-19.871l109.64-76.547c11.764,8.356,26.133,13.286,41.662,13.286c39.79,0,72.047-32.257,72.047-72.047 C411.634,32.258,379.378,0,339.588,0c-39.79,0-72.047,32.257-72.047,72.047c0,5.255,0.578,10.373,1.646,15.308l-112.424,78.491 c-10.974-6.759-23.892-10.666-37.727-10.666c-39.79,0-72.047,32.257-72.047,72.047s32.256,72.047,72.047,72.047 c13.834,0,26.753-3.907,37.727-10.666l113.292,79.097c-1.629,6.017-2.514,12.34-2.514,18.872c0,39.79,32.257,72.047,72.047,72.047 c39.79,0,72.047-32.257,72.047-72.047C411.635,346.787,379.378,314.529,339.588,314.529z" fill="currentColor" />
@@ -2098,7 +2434,7 @@ function ViewPostView({
                             </div>}
                         </MediaPreviewWrapper>}
                     </MediaRow>
-                    <div style={{
+                    <div data-mirageapp-editor style={{
                         position: 'relative'
                     }}>
                         <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} onSubmitShortcut={() => {
@@ -2290,7 +2626,7 @@ function ViewPostView({
                             <Button type="submit" size="sm" disabled={isBusy || !!replyIsUploading[post.post_id]} loading={isBusy}>
                                 {isBusy ? replySubmitStatus[post.post_id] === 'submitting' ? 'Submitting...' : replySubmitStatus[post.post_id] === 'verifying' ? 'Verifying...' : 'Processing' : isEdit ? 'Save Edit' : replyIsUploading[post.post_id] ? 'Uploading…' : 'Submit'}
                             </Button>
-                            <Button type="button" variant="ghost" size="sm" onClick={() => closeReply(post.post_id)} disabled={isBusy}>Cancel</Button>
+                            <Button data-mirageapp-cancel type="button" variant="ghost" size="sm" onClick={() => closeReply(post.post_id)} disabled={isBusy}>Cancel</Button>
                         </StyledSubmitButtonContainer>
                     </ReplyActionsRow>
                 </StyledReply>
@@ -2425,13 +2761,20 @@ function ViewPostView({
                                         </svg>
                                         Back
                                     </BackButton>
-                                    {hasValidAccount && <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="sm" minWidth="follow" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} onClick={() => {
-                                        if (!isTopicInProgress && displayTopic) {
-                                            handleTopicFollowToggle(displayTopic);
-                                        }
-                                    }} disabled={isTopicInProgress} loading={isTopicInProgress}>
-                                        {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? topicFollowHover ? 'Unfollow' : 'Following' : 'Follow'}
-                                    </Button>}
+                                    {hasValidAccount && <TopicFollowButton
+                                        type="button"
+                                        $active={isTopicFollowing}
+                                        onMouseEnter={() => setTopicFollowHover(true)}
+                                        onMouseLeave={() => setTopicFollowHover(false)}
+                                        onClick={() => {
+                                            if (!isTopicInProgress && displayTopic) {
+                                                handleTopicFollowToggle(displayTopic);
+                                            }
+                                        }}
+                                        disabled={isTopicInProgress}
+                                    >
+                                        {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? 'Unfollow' : 'Following') : 'Follow'}
+                                    </TopicFollowButton>}
                                 </TopicHeroTopRow>
 
                                 {/* Desktop: Back section */}
@@ -2454,13 +2797,20 @@ function ViewPostView({
 
                                 {/* Desktop: Follow button */}
                                 <TopicAction>
-                                    {hasValidAccount && <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="sm" minWidth="follow" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} onClick={() => {
-                                        if (!isTopicInProgress && displayTopic) {
-                                            handleTopicFollowToggle(displayTopic);
-                                        }
-                                    }} disabled={isTopicInProgress} loading={isTopicInProgress}>
-                                        {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? topicFollowHover ? `Unfollow #${displayTopic}` : `Following #${displayTopic}` : `Follow #${displayTopic}`}
-                                    </Button>}
+                                    {hasValidAccount && <TopicFollowButton
+                                        type="button"
+                                        $active={isTopicFollowing}
+                                        onMouseEnter={() => setTopicFollowHover(true)}
+                                        onMouseLeave={() => setTopicFollowHover(false)}
+                                        onClick={() => {
+                                            if (!isTopicInProgress && displayTopic) {
+                                                handleTopicFollowToggle(displayTopic);
+                                            }
+                                        }}
+                                        disabled={isTopicInProgress}
+                                    >
+                                        {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Unfollow #${displayTopic}` : `Following #${displayTopic}`) : `Follow #${displayTopic}`}
+                                    </TopicFollowButton>}
                                 </TopicAction>
                             </TopicHeroCard>
                         </TopicHeroWrapper>;
@@ -2525,20 +2875,21 @@ function ViewPostView({
                                     {/* Desktop meta info row (hidden on mobile for root posts) */}
                                     <DesktopMetaInfoRow $hideOnMobile={isRoot}>
                                         <MetaInfoRowLeft>
-                                            {!isRoot && <>
-                                                <span onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)} style={{
-                                                    cursor: 'pointer',
-                                                    fontWeight: 'bold'
-                                                }} aria-label={post.collapsed ? 'Expand' : 'Collapse'}>
-                                                    [{post.collapsed ? '+' : '−'}]
-                                                </span>
-                                                <MetaSeparator>·</MetaSeparator>
-                                            </>}
                                             {renderAuthorLink(post)}
                                             <MetaSeparator>·</MetaSeparator>
                                             <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
                                                 {formatElapsed(post.timestamp)} ago
                                             </Tooltip>
+                                            {!isRoot && <>
+                                                <MetaSeparator>·</MetaSeparator>
+                                                <CollapseToggle
+                                                    type="button"
+                                                    onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
+                                                    aria-label={post.collapsed ? 'Expand' : 'Collapse'}
+                                                >
+                                                    [{post.collapsed ? '+' : '−'}]
+                                                </CollapseToggle>
+                                            </>}
                                             {/* Only show topic for root posts - comments inherit from root */}
                                             {isRoot && (() => {
                                                 const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';

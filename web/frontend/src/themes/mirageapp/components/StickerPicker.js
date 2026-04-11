@@ -114,45 +114,52 @@ const PickerButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
-    border: none;
+    transition: background 0.12s ease, color 0.12s ease;
     font-family: inherit;
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    border: 1px solid transparent;
+    box-shadow: none;
 
-    &:hover:not(:disabled) {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
-        transform: translateY(-1px);
+    svg {
+        width: 16px;
+        height: 16px;
     }
 
-    &:active:not(:disabled) {
-        transform: translateY(0);
+    &:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
+        color: ${({ theme }) => theme.colors.text};
     }
 
     &:disabled {
         opacity: 0.4;
         cursor: not-allowed;
-        transform: none !important;
     }
 
     &:focus {
         outline: none;
+    }
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => theme.colors.focusBlue};
+        outline-offset: 2px;
     }
 `;
 
 const Popover = styled.div`
     position: fixed;
     z-index: 10100;
-    background: ${({ theme }) => theme.colors.panel};
+    background: ${({ theme }) => theme.colors.pickerBg};
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    width: 340px;
-    height: 400px;
+    box-shadow: ${({ theme }) =>
+        theme.name === 'dark'
+            ? '0 12px 32px rgba(0, 0, 0, 0.55)'
+            : '0 12px 32px rgba(0, 0, 0, 0.18)'};
+    width: 320px;
+    height: 380px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -163,79 +170,84 @@ const Popover = styled.div`
         width: auto !important;
         bottom: 60px !important;
         top: auto !important;
-        max-height: 50vh;
+        max-height: 55vh;
     }
 `;
 
 const PopoverHeader = styled.div`
     display: flex;
     align-items: center;
-    padding: 0.75rem 1rem;
+    padding: 0.5rem 0.6rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    gap: 0.5rem;
+    gap: 0.3rem;
+`;
+
+const PackTabs = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.4rem;
+    flex: 1 1 auto;
     flex-wrap: wrap;
+    min-width: 0;
 `;
 
 const PackTab = styled.button`
-    padding: 0.4rem 0.8rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    border-radius: 6px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.68rem;
+    font-weight: ${({ $active }) => ($active ? 600 : 500)};
+    border-radius: 0;
     border: none;
     cursor: pointer;
-    transition: all 0.15s ease;
-    background: ${({ $active, theme }) =>
-        $active
-            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-            : (theme.colors.panelAlt)};
-    color: ${({ $active }) => ($active ? '#fff' : '#aaa')};
+    transition: color 0.12s ease;
+    background: transparent;
+    color: ${({ $active, theme }) =>
+        $active ? theme.colors.text : theme.colors.subtleText};
 
-    &:hover {
-        background: ${({ $active }) =>
-            $active
-                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                : 'rgba(102, 126, 234, 0.2)'};
-        color: #fff;
+    &:hover:not(:disabled) {
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
 const StickerGrid = styled.div`
     display: grid;
-    grid-template-columns: repeat(5, 56px);
-    grid-auto-rows: 56px;
-    gap: 8px;
-    padding: 0.75rem;
+    grid-template-columns: repeat(5, 1fr);
+    grid-auto-rows: 52px;
+    gap: 6px;
+    padding: 0.65rem;
     overflow-y: auto;
     flex: 1;
-    justify-content: center;
 
     @media (max-width: 600px) {
-        grid-template-columns: repeat(4, 56px);
+        grid-template-columns: repeat(4, 1fr);
     }
 `;
 
 const StickerItem = styled.button`
-    width: 56px;
-    height: 56px;
-    border: none;
-    background: ${({ theme }) => theme.colors.panelAlt};
+    width: 100%;
+    height: 52px;
+    border: 1px solid transparent;
+    background: transparent;
     border-radius: 8px;
     cursor: pointer;
     padding: 4px;
-    transition: all 0.15s ease;
+    transition: background 0.12s ease, border-color 0.12s ease;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    flex-shrink: 0;
 
     &:hover {
-        background: rgba(102, 126, 234, 0.25);
-        transform: scale(1.08);
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
+        border-color: ${({ theme }) => theme.colors.borderSubtle};
     }
 
-    &:active {
-        transform: scale(0.95);
+    &:focus {
+        outline: none;
+    }
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => theme.colors.focusBlue};
+        outline-offset: 2px;
     }
 
     img {
@@ -248,27 +260,31 @@ const StickerItem = styled.button`
 `;
 
 const CloseButton = styled.button`
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
+    flex-shrink: 0;
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    border: none;
-    background: #dc2626;
-    color: #ffffff;
+    border: 1px solid transparent;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.subtleText};
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1rem;
+    font-size: 0.9rem;
+    font-weight: 400;
     line-height: 1;
-    transition: all 0.15s ease;
-    z-index: 1;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    transition: background 0.12s ease, color 0.12s ease;
+    padding: 0;
+
+    & > * {
+        display: block;
+        line-height: 1;
+    }
 
     &:hover {
-        background: #b91c1c;
+        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
+        color: ${({ theme }) => theme.colors.text};
     }
 `;
 
@@ -379,19 +395,19 @@ export default function StickerPicker({ onSelect, disabled = false }) {
                     ref={popoverRef}
                     style={{ top: position.top, left: position.left }}
                 >
-                    <CloseButton onClick={() => setIsOpen(false)} aria-label="Close">
-                        ×
-                    </CloseButton>
                     <PopoverHeader>
-                        {Object.entries(STICKER_PACKS).map(([packId, pack]) => (
-                            <PackTab
-                                key={packId}
-                                $active={activePack === packId}
-                                onClick={() => setActivePack(packId)}
-                            >
-                                {pack.name}
-                            </PackTab>
-                        ))}
+                        <PackTabs>
+                            {Object.entries(STICKER_PACKS).map(([packId, pack]) => (
+                                <PackTab
+                                    key={packId}
+                                    $active={activePack === packId}
+                                    onClick={() => setActivePack(packId)}
+                                >
+                                    {pack.name}
+                                </PackTab>
+                            ))}
+                        </PackTabs>
+                        <CloseButton onClick={() => setIsOpen(false)} aria-label="Close"><span>×</span></CloseButton>
                     </PopoverHeader>
                     <StickerGrid>
                         {stickers.map((url, index) => (
