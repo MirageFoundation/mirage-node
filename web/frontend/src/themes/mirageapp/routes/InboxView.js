@@ -112,7 +112,7 @@ const MarkAllButton = styled.button`
     font-family: inherit;
     font-size: 0.68rem;
     font-weight: 600;
-    color: ${({ theme }) => theme.colors.sidebarItemText};
+    color: ${({ theme }) => theme.colors.inboxMarkAllText};
     cursor: pointer;
     transition: color 0.15s ease;
 
@@ -293,7 +293,7 @@ const MarkReadButton = styled.button.attrs({ className: 'mark-read' })`
     padding: 0.15rem 0.5rem;
     font-family: inherit;
     font-size: 0.55rem;
-    font-weight: 600;
+    font-weight: 500;
     color: ${({ theme }) => theme.colors.sidebarItemText};
     background: transparent;
     border: 1px solid transparent;
