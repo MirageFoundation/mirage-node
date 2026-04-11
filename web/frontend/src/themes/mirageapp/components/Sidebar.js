@@ -205,6 +205,23 @@ const EmptyRow = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
+const EmptyPrompt = styled.div`
+    padding: 0.35rem 0.6rem 0.5rem;
+    font-size: 0.65rem;
+    line-height: 1.5;
+    color: ${({ theme }) => theme.colors.subtleText};
+
+    a {
+        color: ${({ theme }) => theme.colors.link};
+        font-weight: 500;
+        text-decoration: none;
+    }
+
+    a:hover {
+        text-decoration: underline;
+    }
+`;
+
 const ToggleMore = styled.button`
     margin: 0.25rem 0 0 0.3rem;
     padding: 0.2rem 0.5rem;
@@ -389,77 +406,81 @@ function Sidebar({ state }) {
                 <SidebarItem to="/search" icon={icons.search} label="Search" pathname={pathname} />
             </Section>
 
-            {isLoggedIn && (
-                <Section>
-                    <SectionHeader
-                        type="button"
-                        onClick={() => setTopicsOpen(v => !v)}
-                        aria-expanded={topicsOpen}
-                    >
-                        <span>Topics</span>
-                        <ChevronIcon expanded={topicsOpen} />
-                    </SectionHeader>
-                    {topicsOpen && (
-                        <div>
-                            {topicsToShow.length === 0 ? (
-                                <EmptyRow>None followed</EmptyRow>
-                            ) : (
-                                topicsToShow.map((topic) => (
-                                    <TopicLink key={topic} to={`/t/${topic}`}>
-                                        #{topic}
-                                    </TopicLink>
-                                ))
-                            )}
-                            {topics.length > topicsLimit && (
-                                <ToggleMore type="button" onClick={() => setShowAllTopics(v => !v)}>
-                                    {showAllTopics ? 'Show less' : `+${topics.length - topicsLimit} more`}
-                                    <ChevronIcon expanded={showAllTopics} />
-                                </ToggleMore>
-                            )}
-                        </div>
-                    )}
-                </Section>
-            )}
+            <Section>
+                <SectionHeader
+                    type="button"
+                    onClick={() => setTopicsOpen(v => !v)}
+                    aria-expanded={topicsOpen}
+                >
+                    <span>Topics</span>
+                    <ChevronIcon expanded={topicsOpen} />
+                </SectionHeader>
+                {topicsOpen && (
+                    <div>
+                        {!isLoggedIn ? (
+                            <EmptyPrompt>
+                                <Link to="/login">Sign in</Link> or <Link to="/signup">create an account</Link> to follow topics.
+                            </EmptyPrompt>
+                        ) : topicsToShow.length === 0 ? (
+                            <EmptyRow>None followed</EmptyRow>
+                        ) : (
+                            topicsToShow.map((topic) => (
+                                <TopicLink key={topic} to={`/t/${topic}`}>
+                                    #{topic}
+                                </TopicLink>
+                            ))
+                        )}
+                        {isLoggedIn && topics.length > topicsLimit && (
+                            <ToggleMore type="button" onClick={() => setShowAllTopics(v => !v)}>
+                                {showAllTopics ? 'Show less' : `+${topics.length - topicsLimit} more`}
+                                <ChevronIcon expanded={showAllTopics} />
+                            </ToggleMore>
+                        )}
+                    </div>
+                )}
+            </Section>
 
-            {isLoggedIn && (
-                <Section>
-                    <SectionHeader
-                        type="button"
-                        onClick={() => setUsersOpen(v => !v)}
-                        aria-expanded={usersOpen}
-                    >
-                        <span>Users</span>
-                        <ChevronIcon expanded={usersOpen} />
-                    </SectionHeader>
-                    {usersOpen && (
-                        <div>
-                            {usersToShow.length === 0 ? (
-                                <EmptyRow>None followed</EmptyRow>
-                            ) : (
-                                usersToShow.map((addr) => {
-                                    const lower = String(addr || '').toLowerCase();
-                                    const uname = usernamesMap?.[lower];
-                                    const identity = (uname && typeof uname === 'string' && uname.trim().length > 0) ? uname.trim() : addr;
-                                    return (
-                                        <UserLink
-                                            key={addr}
-                                            to={`/u/${encodeURIComponent(identity)}?tab=posts`}
-                                        >
-                                            {renderUserLabel(addr)}
-                                        </UserLink>
-                                    );
-                                })
-                            )}
-                            {people.length > peopleLimit && (
-                                <ToggleMore type="button" onClick={() => setShowAllUsers(v => !v)}>
-                                    {showAllUsers ? 'Show less' : `+${people.length - peopleLimit} more`}
-                                    <ChevronIcon expanded={showAllUsers} />
-                                </ToggleMore>
-                            )}
-                        </div>
-                    )}
-                </Section>
-            )}
+            <Section>
+                <SectionHeader
+                    type="button"
+                    onClick={() => setUsersOpen(v => !v)}
+                    aria-expanded={usersOpen}
+                >
+                    <span>Users</span>
+                    <ChevronIcon expanded={usersOpen} />
+                </SectionHeader>
+                {usersOpen && (
+                    <div>
+                        {!isLoggedIn ? (
+                            <EmptyPrompt>
+                                <Link to="/login">Sign in</Link> or <Link to="/signup">create an account</Link> to follow users.
+                            </EmptyPrompt>
+                        ) : usersToShow.length === 0 ? (
+                            <EmptyRow>None followed</EmptyRow>
+                        ) : (
+                            usersToShow.map((addr) => {
+                                const lower = String(addr || '').toLowerCase();
+                                const uname = usernamesMap?.[lower];
+                                const identity = (uname && typeof uname === 'string' && uname.trim().length > 0) ? uname.trim() : addr;
+                                return (
+                                    <UserLink
+                                        key={addr}
+                                        to={`/u/${encodeURIComponent(identity)}?tab=posts`}
+                                    >
+                                        {renderUserLabel(addr)}
+                                    </UserLink>
+                                );
+                            })
+                        )}
+                        {isLoggedIn && people.length > peopleLimit && (
+                            <ToggleMore type="button" onClick={() => setShowAllUsers(v => !v)}>
+                                {showAllUsers ? 'Show less' : `+${people.length - peopleLimit} more`}
+                                <ChevronIcon expanded={showAllUsers} />
+                            </ToggleMore>
+                        )}
+                    </div>
+                )}
+            </Section>
 
         </Aside>
     );
