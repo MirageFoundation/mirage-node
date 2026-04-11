@@ -227,7 +227,7 @@ const IconButton = styled(Link)`
     height: 40px;
     border-radius: 999px;
     color: ${({ theme }) => theme.colors.text};
-    background: ${({ theme, $active }) => ($active ? theme.colors.panelAlt : 'transparent')};
+    background: transparent;
     text-decoration: none;
 
     &:hover {
