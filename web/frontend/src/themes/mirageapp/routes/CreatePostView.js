@@ -4,6 +4,7 @@ import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
+import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody, CappedPageColumn } from "../Layout";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import StickerPicker from "../components/StickerPicker.js";
@@ -250,6 +251,42 @@ const TagToggle = styled.label`
     }
 `;
 function CreatePostView({
+    state,
+    setPosts,
+    updatePost
+}) {
+    const isLoggedIn = !!(state && state.publicKey && state.publicKey !== 'guest');
+    if (!isLoggedIn) {
+        return <ContentGrid>
+            <Helmet>
+                <title>Create Post | Mirage</title>
+            </Helmet>
+            <div>
+                <ModernPostFeed>
+                    <MobileHeader />
+                    <LoggedOutPromptCard
+                        role="region"
+                        aria-label="Create a post on Mirage"
+                        eyebrow="Create post"
+                        title="Sign in to post on Mirage"
+                        description="Create an account or sign in to publish posts, join topics, and participate on-chain."
+                        links={[
+                            { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                            { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                        ]}
+                        inviteText="Have an invite code? Join the community today."
+                        primaryLabel="Create account"
+                        secondaryLabel="Sign in"
+                        emoji="✍️"
+                    />
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>;
+    }
+    return <CreatePostAuthenticated state={state} setPosts={setPosts} updatePost={updatePost} />;
+}
+
+function CreatePostAuthenticated({
     state,
     setPosts,
     updatePost

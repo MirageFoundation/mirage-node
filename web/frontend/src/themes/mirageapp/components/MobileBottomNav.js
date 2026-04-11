@@ -370,12 +370,10 @@ function MobileBottomNav({ state }) {
     // Don't render on desktop, hidden routes, or when keyboard is open
     if (!isMobile || shouldHide || isInputFocused) return null;
 
-    // If not signed in, Create button redirects to sign up
-    const createLink = hasPublicKey
-        ? (currentTopic
-            ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
-            : '/create_post')
-        : '/signup';
+    // Create link always points at /create_post; logged-out users see the welcome prompt there.
+    const createLink = hasPublicKey && currentTopic
+        ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
+        : '/create_post';
 
     return ReactDOM.createPortal(
         <>

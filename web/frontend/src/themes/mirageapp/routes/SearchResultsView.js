@@ -1,8 +1,9 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
+import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import CardView from "../components/CardView.js";
 import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -240,9 +241,32 @@ export default function SearchResultsView({
   } = useSearchResults({
     state
   });
-  // Redirect non-logged-in users to home (shows welcome banner)
   if (!isLoggedIn) {
-    return <Navigate to="/home" replace />;
+    return <ContentGrid>
+            <Helmet>
+                <title>{query ? `Search: ${query}` : 'Search'} | Mirage</title>
+            </Helmet>
+            <div>
+                <ModernPostFeed>
+                    <MobileHeader />
+                    <LoggedOutPromptCard
+                        role="region"
+                        aria-label="Search on Mirage"
+                        eyebrow="Search Mirage"
+                        title={query ? 'Sign in to search Mirage' : 'Search Mirage'}
+                        description={query ? `You searched for "${displayQuery}". Create an account or sign in to search topics, users, and posts.` : 'Search topics, users, and posts after you sign in.'}
+                        links={[
+                            { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                            { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                        ]}
+                        inviteText="Have an invite code? Join the community today."
+                        primaryLabel="Create account"
+                        secondaryLabel="Sign in"
+                        emoji="✨"
+                    />
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>;
   }
   return <ContentGrid>
             <Helmet>

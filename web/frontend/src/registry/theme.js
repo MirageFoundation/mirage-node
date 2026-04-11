@@ -29,8 +29,8 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
     }
 }());
 
-/** Default when storage is missing, invalid, or an unknown id (first entry in THEME_MANIFESTS). */
-export const DEFAULT_THEME_ID = THEME_MANIFESTS[0].id;
+/** Default when storage is missing, invalid, or an unknown id. */
+export const DEFAULT_THEME_ID = THEMES.mirageapp ? 'mirageapp' : THEME_MANIFESTS[0].id;
 
 /**
  * Map legacy ids and unknown values to a registered theme id. Persists corrected values via callers.

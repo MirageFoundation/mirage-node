@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Storage from '../../../utils/Storage';
+import { THEME_MANIFESTS } from '../../manifests';
+import { normalizeThemeId } from '../../../registry/theme';
 
 /**
  * Reddit-style TopBar for the mirageapp theme.
@@ -392,18 +394,322 @@ const MenuDivider = styled.div`
     margin: 0.35rem 0;
 `;
 
-const SignInLink = styled(Link)`
+const LoginPillLink = styled(Link)`
     display: inline-flex;
     align-items: center;
-    padding: 0.45rem 0.95rem;
+    padding: 0.42rem 0.95rem;
     border-radius: 999px;
     background: ${({ theme }) => theme.colors.gradient};
     color: #fff;
-    font-weight: 700;
-    font-size: 0.8rem;
+    font-weight: 500;
+    font-size: 0.76rem;
     text-decoration: none;
-    &:hover { filter: brightness(1.08); }
+    line-height: 1;
+    border: none;
+    box-shadow: none;
+    transition: filter 0.16s ease;
+
+    &:hover {
+        filter: brightness(1.08);
+        text-decoration: none;
+        box-shadow: none;
+    }
+
+    &:focus,
+    &:focus-visible,
+    &:active {
+        outline: none;
+        box-shadow: none;
+    }
 `;
+
+const MoreButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: ${({ theme, $open }) => ($open ? theme.colors.hoverBg : 'transparent')};
+    color: ${({ theme }) => theme.colors.text};
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    &:focus,
+    &:focus-visible,
+    &:active {
+        outline: none;
+        box-shadow: none;
+    }
+
+    svg {
+        width: 20px;
+        height: 20px;
+        display: block;
+    }
+`;
+
+const MenuSectionLabel = styled.div`
+    padding: 0.4rem 0.9rem 0.3rem;
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+
+const ThemeRowButton = styled.button`
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.4rem 0.9rem;
+    border: none;
+    background: ${({ theme, $active }) =>
+        $active ? theme.colors.hoverBg : 'transparent'};
+    color: ${({ theme }) => theme.colors.text};
+    font-family: inherit;
+    font-size: 0.76rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+`;
+
+const ThemeSwatchDot = styled.span`
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: ${({ $bg }) => $bg || '#667eea'};
+    border: 1px solid rgba(0, 0, 0, 0.12);
+`;
+
+const ThemeNameText = styled.span`
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+`;
+
+const ActiveDot = styled.span`
+    width: 0.32rem;
+    height: 0.32rem;
+    border-radius: 999px;
+    background: ${({ theme }) => theme.colors.link};
+    flex-shrink: 0;
+`;
+
+const ModeTrack = styled.div`
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    margin: 0.3rem 0.9rem 0.2rem;
+    padding: 4px;
+    border-radius: 10px;
+    background: ${({ theme }) => theme.colors.hoverBg};
+    box-sizing: border-box;
+`;
+
+const ModeIconButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0;
+    border: none;
+    border-radius: 7px;
+    background: ${({ theme, $active }) =>
+        $active ? theme.colors.panel : 'transparent'};
+    color: ${({ theme, $active }) =>
+        $active ? theme.colors.text : theme.colors.subtleText};
+    cursor: pointer;
+    box-shadow: ${({ $active }) => ($active ? '0 1px 2px rgba(0, 0, 0, 0.18)' : 'none')};
+    transition: background 0.16s ease, color 0.16s ease;
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.text};
+    }
+`;
+
+// Swatch colors per theme id used by the guest dropdown theme list.
+const THEME_SWATCHES = {
+    mirageapp: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    bluemoon: 'linear-gradient(135deg, #4f7fff 0%, #1b3bbf 100%)',
+    onyx: 'linear-gradient(135deg, #2a2a2a 0%, #000000 100%)',
+    oldreddit: 'linear-gradient(135deg, #ff6a33 0%, #cc3700 100%)',
+};
+
+/**
+ * 3-dots menu shown on the right side of the TopBar for logged-out users.
+ * Contains: Login, Signup, and a Theme picker with light/dark/auto mode toggle.
+ */
+function GuestMenu() {
+    const [open, setOpen] = useState(false);
+    const wrapRef = useRef(null);
+    const location = useLocation();
+
+    const [activeThemeId, setActiveThemeId] = useState(() => {
+        try {
+            return normalizeThemeId(Storage.load('theme_id', 'mirageapp'));
+        } catch (_) {
+            return 'mirageapp';
+        }
+    });
+    const [themeMode, setThemeMode] = useState(() => {
+        try {
+            const v = Storage.load('theme_mode', 'time');
+            return v === 'light' || v === 'dark' || v === 'time' ? v : 'time';
+        } catch (_) {
+            return 'time';
+        }
+    });
+
+    useEffect(() => {
+        const onDoc = (e) => {
+            if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+        };
+        document.addEventListener('mousedown', onDoc, true);
+        return () => document.removeEventListener('mousedown', onDoc, true);
+    }, []);
+
+    useEffect(() => { setOpen(false); }, [location.pathname]);
+
+    useEffect(() => {
+        const onThemeIdChanged = (e) => {
+            const next = e?.detail?.themeId;
+            if (next) setActiveThemeId(next);
+        };
+        const onThemeModeChanged = (e) => {
+            const next = e?.detail?.mode;
+            if (next) setThemeMode(next);
+        };
+        window.addEventListener('themeIdChanged', onThemeIdChanged);
+        window.addEventListener('themeModeChanged', onThemeModeChanged);
+        return () => {
+            window.removeEventListener('themeIdChanged', onThemeIdChanged);
+            window.removeEventListener('themeModeChanged', onThemeModeChanged);
+        };
+    }, []);
+
+    const handleThemePick = (id) => {
+        const normalized = normalizeThemeId(id);
+        if (normalized === activeThemeId) return;
+        setActiveThemeId(normalized);
+        Storage.save('theme_id', normalized);
+        try {
+            window.dispatchEvent(new CustomEvent('themeIdChanged', { detail: { themeId: normalized } }));
+        } catch (_) { }
+    };
+
+    const handleModePick = (mode) => {
+        if (mode === themeMode) return;
+        setThemeMode(mode);
+        Storage.save('theme_mode', mode);
+        try {
+            window.dispatchEvent(new CustomEvent('themeModeChanged', { detail: { mode } }));
+        } catch (_) { }
+    };
+
+    return (
+        <UserMenuWrapper ref={wrapRef}>
+            <MoreButton
+                type="button"
+                $open={open}
+                onClick={() => setOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                aria-label="More options"
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="5" cy="12" r="1.9" fill="currentColor" />
+                    <circle cx="12" cy="12" r="1.9" fill="currentColor" />
+                    <circle cx="19" cy="12" r="1.9" fill="currentColor" />
+                </svg>
+            </MoreButton>
+            {open && (
+                <Dropdown role="menu">
+                    <MenuSectionLabel>Account</MenuSectionLabel>
+                    <MenuItem to="/signup" onClick={() => setOpen(false)}>Sign up</MenuItem>
+                    <MenuItem to="/login" onClick={() => setOpen(false)}>Log in</MenuItem>
+                    <MenuDivider />
+                    <MenuSectionLabel>Theme</MenuSectionLabel>
+                    {THEME_MANIFESTS.map((m) => {
+                        const active = m.id === activeThemeId;
+                        return (
+                            <ThemeRowButton
+                                key={m.id}
+                                type="button"
+                                $active={active}
+                                onClick={() => handleThemePick(m.id)}
+                                aria-pressed={active}
+                                title={m.label || m.id}
+                            >
+                                <ThemeSwatchDot $bg={THEME_SWATCHES[m.id]} />
+                                <ThemeNameText>{m.label || m.id}</ThemeNameText>
+                                {active && <ActiveDot aria-hidden="true" />}
+                            </ThemeRowButton>
+                        );
+                    })}
+                    <ModeTrack role="group" aria-label="Theme mode">
+                        <ModeIconButton
+                            type="button"
+                            $active={themeMode === 'light'}
+                            onClick={() => handleModePick('light')}
+                            aria-pressed={themeMode === 'light'}
+                            aria-label="Light mode"
+                            title="Light"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="4" />
+                                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                            </svg>
+                        </ModeIconButton>
+                        <ModeIconButton
+                            type="button"
+                            $active={themeMode === 'dark'}
+                            onClick={() => handleModePick('dark')}
+                            aria-pressed={themeMode === 'dark'}
+                            aria-label="Dark mode"
+                            title="Dark"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                            </svg>
+                        </ModeIconButton>
+                        <ModeIconButton
+                            type="button"
+                            $active={themeMode === 'time'}
+                            onClick={() => handleModePick('time')}
+                            aria-pressed={themeMode === 'time'}
+                            aria-label="Auto mode"
+                            title="Auto"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="4" width="18" height="12" rx="2" />
+                                <path d="M8 20h8M12 16v4" />
+                            </svg>
+                        </ModeIconButton>
+                    </ModeTrack>
+                </Dropdown>
+            )}
+        </UserMenuWrapper>
+    );
+}
 
 // Shared profile menu content — also used by MobileBottomNav and the user-menu dropdown.
 export function ProfileMenuContent({ displayName, onItemClick }) {
@@ -614,7 +920,10 @@ function TopBar({ state }) {
                         )}
                     </UserMenuWrapper>
                 ) : (
-                    <SignInLink to="/login">Sign in</SignInLink>
+                    <>
+                        <LoginPillLink to="/login">Sign in</LoginPillLink>
+                        <GuestMenu />
+                    </>
                 )}
             </RightSpacer>
             </BarInner>

@@ -1,6 +1,7 @@
 import { Helmet } from "react-helmet-async";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
+import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import MobileHeader from "../components/MobileHeader.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
@@ -9,84 +10,6 @@ import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopi
 import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
-
-// Invite-only hero — flat, left-aligned (classic old.reddit density, not a marketing card)
-const InviteOnlyHero = styled.div`
-    margin-top: 0.35rem;
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    padding: 0.35rem ${OLDREDDIT_SHELL_INSET_X} 0.45rem;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    text-align: left;
-    gap: 0.3rem;
-    width: 100%;
-    box-sizing: border-box;
-`;
-const InviteOnlyHeroTitle = styled.h1`
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: ${({ theme }) => theme.colors.text};
-    margin: 0;
-    line-height: 1.25;
-    text-transform: none;
-`;
-const InviteOnlyHeroSubtitle = styled.div`
-    font-size: 0.6rem;
-    font-weight: 600;
-    color: ${({ theme }) => theme.colors.link};
-`;
-const InviteOnlyHeroDescription = styled.p`
-    font-size: 0.65rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-    line-height: 1.45;
-    margin: 0;
-    max-width: none;
-`;
-const InviteOnlyHeroStats = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem;
-    font-size: 0.6rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-`;
-const InviteOnlyHeroStat = styled.span`
-    font-weight: 600;
-    color: ${({ theme }) => theme.colors.subtleText};
-
-    strong {
-        color: ${({ theme }) => theme.colors.text};
-        font-weight: 700;
-    }
-`;
-const InviteOnlyHeroLinks = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.6rem;
-    font-weight: 600;
-    color: ${({ theme }) => theme.colors.subtleText};
-
-    a {
-        color: ${({ theme }) => theme.colors.link};
-        text-decoration: underline;
-        font-weight: 600;
-    }
-`;
-const InviteOnlyHeroSep = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
-`;
-const InviteOnlyHeroButtons = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
-    margin-top: 0.2rem;
-`;
 
 // Mobile header branding for home/following feeds
 
@@ -1511,42 +1434,29 @@ const MainView = ({
                         </LoadingCard>}
 
                         {/* Invite-only hero - shown to logged-out users on all feeds */}
-                        {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
-                            <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
-                                fontSize: '0.55em',
-                                marginLeft: '0.25em',
-                                verticalAlign: 'super',
-                                opacity: 0.75
-                            }}>BETA</sup></InviteOnlyHeroTitle>
-                            <InviteOnlyHeroSubtitle>Currently in Private Beta — Invite Only</InviteOnlyHeroSubtitle>
-                            <InviteOnlyHeroDescription>
-                                Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
-                            </InviteOnlyHeroDescription>
-                            {welcomeStats && welcomeStats.userCount > 0 && <InviteOnlyHeroStats>
-                                <InviteOnlyHeroStat>
-                                    <strong>Users:</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}
-                                </InviteOnlyHeroStat>
-                                <InviteOnlyHeroStat>
-                                    <strong>Active (24h):</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}
-                                </InviteOnlyHeroStat>
-                                <InviteOnlyHeroStat>
-                                    <strong>Posts (24h):</strong> {welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}
-                                </InviteOnlyHeroStat>
-                            </InviteOnlyHeroStats>}
-                            <InviteOnlyHeroLinks>
-                                <a href="https://www.youtube.com/watch?v=TOvP32ihQ0M" target="_blank" rel="noopener noreferrer"><strong>Watch Introduction (YouTube)</strong></a>
-                                <InviteOnlyHeroSep aria-hidden="true">·</InviteOnlyHeroSep>
-                                <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer">Learn More</a>
-                            </InviteOnlyHeroLinks>
-                            <InviteOnlyHeroButtons>
-                                <Button to="/signup" size="xs">
-                                    Create account
-                                </Button>
-                                <Button to="/login" variant="ghost" size="xs">
-                                    Sign in
-                                </Button>
-                            </InviteOnlyHeroButtons>
-                        </InviteOnlyHero>}
+                        {!isLoggedIn && <LoggedOutPromptCard
+                            role="region"
+                            aria-label="Welcome to Mirage"
+                            eyebrow={urlTopic === 'following' ? 'Following feed' : 'Join Mirage'}
+                            title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
+                            notice="Currently in Private Beta — Invite Only"
+                            description={urlTopic === 'following'
+                                ? 'Sign in to unlock your following feed and keep up with the people and topics you care about.'
+                                : 'Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.'}
+                            stats={welcomeStats && welcomeStats.userCount > 0 ? [
+                                { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },
+                                { label: 'Active (24h)', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.active24h.toLocaleString()}` },
+                                { label: 'Posts (24h)', value: `${welcomeStatsStale ? '~' : ''}${(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}` },
+                            ] : []}
+                            links={[
+                                { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                                { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                            ]}
+                            inviteText="Have an invite code? Join the community today."
+                            primaryLabel="Create account"
+                            secondaryLabel="Sign in"
+                            emoji="✨"
+                        />}
 
                         {/* Posts grid - only show to logged-in users */}
                         {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
