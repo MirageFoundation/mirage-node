@@ -244,7 +244,7 @@ const MoreButton = styled.button`
 const TitleLink = styled(Link)`
     display: block;
     color: ${({ theme }) => theme.colors.text};
-    font-size: 1rem;
+    font-size: 0.88rem;
     font-weight: 700;
     line-height: 1.3;
     text-decoration: none;
@@ -254,13 +254,13 @@ const TitleLink = styled(Link)`
     &:visited { color: ${({ theme }) => theme.colors.text}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.8rem;
+        font-size: 0.74rem;
     }
 `;
 
 const Body = styled.div`
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.85rem;
+    font-size: 0.74rem;
     line-height: 1.5;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -271,7 +271,7 @@ const Body = styled.div`
     a { color: ${({ theme }) => theme.colors.link}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.75rem;
+        font-size: 0.68rem;
     }
 `;
 

@@ -12,8 +12,8 @@ Plan 05 is too broad to ship in one PR. This folder splits it into focused, one-
 |---|---|---|---|---|
 | 0 | Auth flows | `/login`, `/signup`, `/welcome` | ✅ Done (`ceef3d7`) | _see parent plan_ |
 | 1 | Inbox | `/inbox` | ✅ Done | [`01-inbox.md`](./01-inbox.md) |
-| 2 | Search | `/search` | ⏳ Not started — **next** | [`02-search.md`](./02-search.md) |
-| 3 | Settings | `/settings` | ⏳ Not started | [`03-settings.md`](./03-settings.md) |
+| 2 | Search | `/search` + TopBar dropdown | ✅ Done | [`02-search.md`](./02-search.md) |
+| 3 | Settings | `/settings` | ⏳ Not started — **next** | [`03-settings.md`](./03-settings.md) |
 | 4 | Create Post | `/create_post` | ⏳ Not started | [`04-create-post.md`](./04-create-post.md) |
 | 5 | Change Username | `/change_username` | ⏳ Not started | [`05-change-username.md`](./05-change-username.md) |
 | 6 | Sign Out | `/sign_out` | ⏳ Not started | [`06-sign-out.md`](./06-sign-out.md) |

@@ -24,9 +24,9 @@ import Storage from "../../utils/Storage";
 
 // ─── Storage keys ──────────────────────────────────────────────────────────
 
-const VIEW_MODE_KEY = 'mirageapp_feed_view_mode';
-const VIEW_MODE_DEFAULT = 'card';
-const VIEW_MODES = ['card', 'compact'];
+export const VIEW_MODE_KEY = 'mirageapp_feed_view_mode';
+export const VIEW_MODE_DEFAULT = 'compact';
+export const VIEW_MODES = ['card', 'compact'];
 
 const FEED_BUCKET_LABELS = {
     following: 'following',
@@ -94,7 +94,7 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
  * (the card's hover bg no longer bleeds into the divider line, and the
  * divider clearly reads as "below the card" rather than as its border).
  * The last slot omits the divider so the feed doesn't end with a hairline. */
-const RowSlot = styled.div`
+export const RowSlot = styled.div`
     position: relative;
     opacity: 1;
     animation: ${slideIn} 0.25s ease-out;
@@ -582,13 +582,18 @@ function formatAge(tsSec) {
     });
 }
 
-function loadViewMode() {
+export function loadViewMode() {
     try {
         const raw = Storage.load(VIEW_MODE_KEY, VIEW_MODE_DEFAULT);
         return VIEW_MODES.includes(raw) ? raw : VIEW_MODE_DEFAULT;
     } catch (_) {
         return VIEW_MODE_DEFAULT;
     }
+}
+
+export function saveViewMode(next) {
+    if (!VIEW_MODES.includes(next)) return;
+    try { Storage.save(VIEW_MODE_KEY, next); } catch (_) { /* noop */ }
 }
 
 /* Resolve the post's primary media URL + post body. Mirrors the helper in
@@ -814,7 +819,7 @@ function CompactRow({ post, state, updatePost }) {
     );
 }
 
-const MemoCompactRow = memo(CompactRow, (prev, next) => {
+export const MemoCompactRow = memo(CompactRow, (prev, next) => {
     const p = prev.post;
     const n = next.post;
     if (p === n) return prev.state === next.state;
@@ -889,6 +894,75 @@ function useOutsideClick(ref, onClose, active) {
             document.removeEventListener('keydown', key);
         };
     }, [ref, onClose, active]);
+}
+
+// ─── Standalone feed view toggle ──────────────────────────────────────────
+
+/**
+ * Small, standalone view-toggle button usable outside the feed toolbar
+ * (e.g. the Search results header). Renders the same grid-icon +
+ * chevron `CtrlButton` + Card/Compact popover menu as the main feed.
+ *
+ * Controlled: caller owns `viewMode` and receives changes via
+ * `onChange(next)`. Persisting to localStorage is the caller's
+ * responsibility (use `saveViewMode(next)`) so the host page can decide
+ * whether the choice should sync with the home feed.
+ */
+export function FeedViewToggle({ viewMode, onChange, className }) {
+    const [open, setOpen] = useState(false);
+    const anchorRef = useRef(null);
+    useOutsideClick(anchorRef, () => setOpen(false), open);
+
+    const ViewIcon = viewMode === 'compact' ? IconCompact : IconCard;
+    const handleChange = useCallback((next) => {
+        if (!VIEW_MODES.includes(next)) return;
+        if (typeof onChange === 'function') onChange(next);
+        setOpen(false);
+    }, [onChange]);
+
+    return (
+        <PopoverRoot ref={anchorRef} className={className}>
+            <CtrlButton
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                aria-label="Change feed view"
+                onClick={() => setOpen((v) => !v)}
+            >
+                <ViewIconSlot>
+                    <ViewIcon />
+                </ViewIconSlot>
+                <ChevronWrap $expanded={open}>
+                    <HiChevronDown />
+                </ChevronWrap>
+            </CtrlButton>
+            {open && (
+                <Menu role="menu" aria-label="View">
+                    <MenuHeader>View</MenuHeader>
+                    <MenuItem
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={viewMode === 'card'}
+                        $active={viewMode === 'card'}
+                        onClick={() => handleChange('card')}
+                    >
+                        <span>Card</span>
+                        <IconCard />
+                    </MenuItem>
+                    <MenuItem
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={viewMode === 'compact'}
+                        $active={viewMode === 'compact'}
+                        onClick={() => handleChange('compact')}
+                    >
+                        <span>Compact</span>
+                        <IconCompact />
+                    </MenuItem>
+                </Menu>
+            )}
+        </PopoverRoot>
+    );
 }
 
 // ─── Default export ────────────────────────────────────────────────────────

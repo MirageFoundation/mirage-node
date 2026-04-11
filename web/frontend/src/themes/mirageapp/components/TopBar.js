@@ -4,6 +4,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Storage from '../../../utils/Storage';
 import { THEME_MANIFESTS } from '../../manifests';
 import { normalizeThemeId } from '../../../registry/theme';
+import SearchDropdown from './SearchDropdown.js';
+import { useSearchDropdown } from '../../../logic/useSearchDropdown';
 
 /**
  * Reddit-style TopBar for the mirageapp theme.
@@ -816,13 +818,71 @@ function TopBar({ state }) {
     }, []);
     useEffect(() => { setMenuOpen(false); }, [location.pathname]);
 
-    const [query, setQuery] = useState('');
+    // Search dropdown: drives recent searches, trending topics, and
+    // debounced live results while the user is typing.
+    const {
+        rawQuery: query,
+        setQuery,
+        resetQuery,
+        isSearching,
+        liveResults,
+        liveError,
+        hasQuery,
+        hasLiveResults,
+        trendingTopics,
+        isLoadingTrending,
+        recentSearches,
+        addRecentSearch,
+        removeRecentSearch,
+        clearRecentSearches,
+    } = useSearchDropdown();
+
+    const [searchFocused, setSearchFocused] = useState(false);
+    const searchWrapRef = useRef(null);
+    const searchInputRef = useRef(null);
+
+    // Close the dropdown whenever the route changes.
+    useEffect(() => {
+        setSearchFocused(false);
+    }, [location.pathname, location.search]);
+
+    // Click outside → close dropdown.
+    useEffect(() => {
+        if (!searchFocused) return undefined;
+        const onDoc = (e) => {
+            if (searchWrapRef.current && !searchWrapRef.current.contains(e.target)) {
+                setSearchFocused(false);
+            }
+        };
+        document.addEventListener('mousedown', onDoc, true);
+        return () => document.removeEventListener('mousedown', onDoc, true);
+    }, [searchFocused]);
+
+    const submitQuery = useCallback((raw) => {
+        const q = String(raw || '').trim();
+        if (!q) return;
+        addRecentSearch(q);
+        setSearchFocused(false);
+        if (searchInputRef.current) searchInputRef.current.blur();
+        navigate(`/search?q=${encodeURIComponent(q)}`);
+    }, [addRecentSearch, navigate]);
+
     const handleSearchSubmit = useCallback((e) => {
         e.preventDefault();
-        const q = query.trim();
-        if (!q) return;
-        navigate(`/search?q=${encodeURIComponent(q)}`);
-    }, [query, navigate]);
+        submitQuery(query);
+    }, [query, submitQuery]);
+
+    const handleRecentClick = useCallback((entry) => {
+        submitQuery(entry.query);
+    }, [submitQuery]);
+
+    const handleSearchKeyDown = useCallback((e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            setSearchFocused(false);
+            if (searchInputRef.current) searchInputRef.current.blur();
+        }
+    }, []);
 
     return (
         <Bar>
@@ -831,7 +891,7 @@ function TopBar({ state }) {
 
             <LeftSpacer />
 
-            <SearchWrapper role="search" onSubmit={handleSearchSubmit}>
+            <SearchWrapper ref={searchWrapRef} role="search" onSubmit={handleSearchSubmit}>
                 <SearchInner>
                     <SearchIcon viewBox="0 0 24 24" aria-hidden="true">
                         <path
@@ -844,16 +904,27 @@ function TopBar({ state }) {
                         />
                     </SearchIcon>
                     <SearchInput
+                        ref={searchInputRef}
                         type="search"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
+                        onFocus={() => setSearchFocused(true)}
+                        onMouseDown={() => setSearchFocused(true)}
+                        onClick={() => setSearchFocused(true)}
+                        onKeyDown={handleSearchKeyDown}
                         placeholder="Search Mirage"
                         aria-label="Search"
+                        aria-expanded={searchFocused}
+                        autoComplete="off"
                     />
                     {query.length > 0 && (
                         <ClearButton
                             type="button"
-                            onClick={() => setQuery('')}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                                resetQuery();
+                                if (searchInputRef.current) searchInputRef.current.focus();
+                            }}
                             aria-label="Clear search"
                         >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -869,6 +940,24 @@ function TopBar({ state }) {
                         </ClearButton>
                     )}
                 </SearchInner>
+                {searchFocused && (
+                    <SearchDropdown
+                        rawQuery={query}
+                        hasQuery={hasQuery}
+                        isSearching={isSearching}
+                        liveResults={liveResults}
+                        liveError={liveError}
+                        hasLiveResults={hasLiveResults}
+                        trendingTopics={trendingTopics}
+                        isLoadingTrending={isLoadingTrending}
+                        recentSearches={recentSearches}
+                        onRecentClick={handleRecentClick}
+                        onRemoveRecent={removeRecentSearch}
+                        onClearRecents={clearRecentSearches}
+                        onResultNavigate={() => setSearchFocused(false)}
+                        onSubmitQuery={submitQuery}
+                    />
+                )}
             </SearchWrapper>
 
             <RightSpacer>
