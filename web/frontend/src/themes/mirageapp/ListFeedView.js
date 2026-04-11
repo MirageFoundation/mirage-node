@@ -131,6 +131,31 @@ const Toolbar = styled.div`
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
+/* Optional title that can sit at the left of the toolbar (e.g. the
+ * topic name on `/t/:topic` feeds). Anchors to the leading edge and
+ * pushes any sort/view controls to the right via `margin-left: auto`
+ * on the first adjacent `PopoverRoot`. */
+const ToolbarTitle = styled.h1`
+    margin: 0;
+    padding: 0 0.5rem 0 0.5rem;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+
+    /* When a title is present, the first control to its right gets an
+     * auto left margin so the control cluster hugs the right edge. */
+    & + * {
+        margin-left: auto;
+    }
+`;
+
 const CtrlButton = styled.button`
     display: inline-flex;
     align-items: center;
@@ -977,6 +1002,7 @@ export default function ListFeedView({
     sortMode,
     onSortChange,
     showSortTabs = false,
+    feedTitle = null,
     // feedNavTopic and sidebar props are intentionally ignored — the new
     // header no longer renders nav tabs or a sidebar action column.
 }) {
@@ -1010,45 +1036,49 @@ export default function ListFeedView({
         return posts.filter(Boolean);
     }, [posts]);
 
-    if (rows.length === 0 && !showSortTabs) return null;
+    const hasToolbar = showSortTabs || !!feedTitle;
+    if (rows.length === 0 && !hasToolbar) return null;
 
     const currentSortLabel = SORT_LABELS[sortMode] || SORT_LABELS.best;
     const ViewIcon = viewMode === 'compact' ? IconCompact : IconCard;
 
     return (
         <FeedList $viewMode={viewMode}>
-            {showSortTabs && (
-                <Toolbar aria-label="Feed sort and view">
-                    <PopoverRoot ref={sortAnchorRef}>
-                        <CtrlButton
-                            type="button"
-                            aria-haspopup="menu"
-                            aria-expanded={sortOpen}
-                            onClick={() => setSortOpen((v) => !v)}
-                        >
-                            <span>{currentSortLabel}</span>
-                            <ChevronWrap $expanded={sortOpen}>
-                                <HiChevronDown />
-                            </ChevronWrap>
-                        </CtrlButton>
-                        {sortOpen && (
-                            <Menu role="menu" aria-label="Sort posts">
-                                <MenuHeader>Sort by</MenuHeader>
-                                {['best', 'new'].map((key) => (
-                                    <MenuItem
-                                        key={key}
-                                        type="button"
-                                        role="menuitemradio"
-                                        aria-checked={sortMode === key}
-                                        $active={sortMode === key}
-                                        onClick={() => changeSort(key)}
-                                    >
-                                        <span>{SORT_LABELS[key]}</span>
-                                    </MenuItem>
-                                ))}
-                            </Menu>
-                        )}
-                    </PopoverRoot>
+            {hasToolbar && (
+                <Toolbar aria-label="Feed header">
+                    {feedTitle && <ToolbarTitle>{feedTitle}</ToolbarTitle>}
+                    {showSortTabs && (
+                        <PopoverRoot ref={sortAnchorRef}>
+                            <CtrlButton
+                                type="button"
+                                aria-haspopup="menu"
+                                aria-expanded={sortOpen}
+                                onClick={() => setSortOpen((v) => !v)}
+                            >
+                                <span>{currentSortLabel}</span>
+                                <ChevronWrap $expanded={sortOpen}>
+                                    <HiChevronDown />
+                                </ChevronWrap>
+                            </CtrlButton>
+                            {sortOpen && (
+                                <Menu role="menu" aria-label="Sort posts">
+                                    <MenuHeader>Sort by</MenuHeader>
+                                    {['best', 'new'].map((key) => (
+                                        <MenuItem
+                                            key={key}
+                                            type="button"
+                                            role="menuitemradio"
+                                            aria-checked={sortMode === key}
+                                            $active={sortMode === key}
+                                            onClick={() => changeSort(key)}
+                                        >
+                                            <span>{SORT_LABELS[key]}</span>
+                                        </MenuItem>
+                                    ))}
+                                </Menu>
+                            )}
+                        </PopoverRoot>
+                    )}
 
                     <PopoverRoot ref={viewAnchorRef}>
                         <CtrlButton
