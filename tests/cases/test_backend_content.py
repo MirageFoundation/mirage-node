@@ -1099,3 +1099,155 @@ def test_tag_normalization_porn_to_adult(backend: str) -> None:
         _pass("tag_normalize.stored_as_adult")
     else:
         _fail("tag_normalize.stored_as_adult", f"expected 'adult', got '{stored_tag}'")
+
+
+def test_seen_posts(backend: str) -> None:
+    """Test seen-post tracking: piggyback ingestion, feed filtering, idempotency."""
+    free = WALLETS.get("free")
+    viewer = WALLETS.get("sub1")
+    if not free or not viewer:
+        _skip("seen_posts.setup", "wallet not available")
+        return
+
+    free_addr = str(free.address())
+    viewer_addr = str(viewer.address())
+    topic = "test"
+    title = f"Seen Test {_rand_str(6)}"
+    content = f"Body {_rand_str(10)}"
+
+    def _seen_sig(wallet, addr: str):
+        ts = _now_ms()
+        nonce = _fresh_nonce()
+        sig = sign_canonical(wallet, f"seen_posts:{addr.lower()}:{ts}:{nonce}".encode("utf-8"))
+        return {
+            "pubkey": _b64(wallet.public_key().public_key_bytes),
+            "signature": _b64(sig),
+            "timestamp": ts,
+            "envelope_nonce": str(nonce),
+        }
+
+    txh = _do_post(backend, free, topic, title, content)
+    if not txh:
+        _fail("seen_posts.create_post")
+        return
+    txh = txh.lower()
+    _pass("seen_posts.create_post", tx=txh)
+
+    if not _wait_indexed(backend, free_addr, txh):
+        _fail("seen_posts.indexed")
+        return
+    _pass("seen_posts.indexed")
+
+    # Verify post appears in home feed for another user
+    found_before = False
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
+        code, feed = _get(f"{backend}/api/get_posts", {
+            "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr
+        })
+        posts = (feed or {}).get("posts") or []
+        if any(str(p.get("post_id", "")).lower() == txh for p in posts):
+            found_before = True
+            break
+        time.sleep(1)
+    if found_before:
+        _pass("seen_posts.visible_before_mark")
+    else:
+        _fail("seen_posts.visible_before_mark", "post not in home feed")
+        return
+
+    # Mark as seen via piggyback (signed)
+    sig_viewer = _seen_sig(viewer, viewer_addr)
+    code, feed2 = _get(f"{backend}/api/get_posts", {
+        "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
+        "seen": f"{txh}:open",
+        "seen_pubkey": sig_viewer["pubkey"],
+        "seen_signature": sig_viewer["signature"],
+        "seen_timestamp": sig_viewer["timestamp"],
+        "seen_envelope_nonce": sig_viewer["envelope_nonce"],
+    })
+    if code == 200:
+        _pass("seen_posts.piggyback_accepted")
+    else:
+        _fail("seen_posts.piggyback_accepted", f"code={code}")
+        return
+
+    # Verify post is filtered from subsequent feed for the viewer
+    code, feed3 = _get(f"{backend}/api/get_posts", {
+        "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
+    })
+    posts3 = (feed3 or {}).get("posts") or []
+    viewer_still_visible = any(str(p.get("post_id", "")).lower() == txh for p in posts3)
+    if not viewer_still_visible:
+        _pass("seen_posts.filtered_after_mark")
+    else:
+        _fail("seen_posts.filtered_after_mark", "post still visible after mark")
+
+    # Verify the author's own feed still shows their post
+    code_self, feed_self = _get(f"{backend}/api/get_posts", {
+        "feed": "home", "by": "newest", "limit": 50, "address": free_addr,
+    })
+    posts_self = (feed_self or {}).get("posts") or []
+    own_visible = any(str(p.get("post_id", "")).lower() == txh for p in posts_self)
+    if own_visible:
+        _pass("seen_posts.own_post_not_filtered")
+    else:
+        _fail("seen_posts.own_post_not_filtered", "own post was filtered from feed")
+
+    # Test idempotency: send same seen ID again
+    sig_viewer2 = _seen_sig(viewer, viewer_addr)
+    code, _ = _get(f"{backend}/api/get_posts", {
+        "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
+        "seen": f"{txh}:open",
+        "seen_pubkey": sig_viewer2["pubkey"],
+        "seen_signature": sig_viewer2["signature"],
+        "seen_timestamp": sig_viewer2["timestamp"],
+        "seen_envelope_nonce": sig_viewer2["envelope_nonce"],
+    })
+    if code == 200:
+        _pass("seen_posts.idempotent")
+    else:
+        _fail("seen_posts.idempotent", f"code={code}")
+
+    # Test beacon fallback endpoint
+    sig_viewer3 = _seen_sig(viewer, viewer_addr)
+    code2, resp2 = _post(f"{backend}/api/seen_posts", {
+        "address": viewer_addr,
+        "posts": [{"id": txh, "reason": "dwell"}],
+        **sig_viewer3,
+    })
+    if code2 == 200 and (resp2 or {}).get("ok"):
+        _pass("seen_posts.beacon_fallback")
+    else:
+        _fail("seen_posts.beacon_fallback", f"code={code2} resp={resp2}")
+
+    # Test guest requests ignore seen param
+    code3, feed4 = _get(f"{backend}/api/get_posts", {
+        "feed": "home", "by": "newest", "limit": 50,
+        "seen": f"{txh}:open",
+    })
+    if code3 == 200:
+        _pass("seen_posts.guest_ignores_seen")
+    else:
+        _fail("seen_posts.guest_ignores_seen", f"code={code3}")
+
+    # Test beacon with guest address returns ok with 0 ingested
+    code4, resp4 = _post(f"{backend}/api/seen_posts", {
+        "address": "guest",
+        "posts": [{"id": txh}],
+    })
+    if code4 == 200 and (resp4 or {}).get("ingested") == 0:
+        _pass("seen_posts.guest_beacon_noop")
+    else:
+        _fail("seen_posts.guest_beacon_noop", f"code={code4} resp={resp4}")
+
+    # Test view_count increments: send same ID again via beacon and verify it's accepted
+    sig_viewer4 = _seen_sig(viewer, viewer_addr)
+    code5, resp5 = _post(f"{backend}/api/seen_posts", {
+        "address": viewer_addr,
+        "posts": [{"id": txh, "reason": "dwell"}],
+        **sig_viewer4,
+    })
+    if code5 == 200 and (resp5 or {}).get("ingested") == 1:
+        _pass("seen_posts.view_count_increment")
+    else:
+        _fail("seen_posts.view_count_increment", f"code={code5} resp={resp5}")

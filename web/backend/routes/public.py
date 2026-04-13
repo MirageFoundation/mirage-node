@@ -31,6 +31,7 @@ from flask import Blueprint, jsonify, request, has_request_context
 from error_utils import safe_error, api_error_code
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
+from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id, parse_seen_param
 from user_last_seen import update_user_last_seen
 from params import load_params, expect_params
 from settings import (
@@ -1216,10 +1217,11 @@ def _load_following_candidates(
     max_candidates: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
-) -> tuple[list[dict], set[str], set[str]]:
+    seen_posts: dict[str, int] | None = None,
+) -> tuple[list[dict], set[str], set[str], list[dict]]:
     """
     Load candidate posts for the following feed.
-    Returns (candidates, followed_topics, followed_users).
+    Returns (candidates, followed_topics, followed_users, seen_fallback).
     """
     cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner) = %s", (viewer_lower,))
     followed_topics = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
@@ -1275,6 +1277,9 @@ def _load_following_candidates(
     )
 
     seen: set[str] = set()
+    seen_stats = {"filtered": 0}
+    seen_fallback: list[dict] = []
+    seen_fallback_ids: set[str] = set()
     candidates: list[dict] = []
     for row in cur.fetchall():
         post = _row_to_post(
@@ -1286,12 +1291,22 @@ def _load_following_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer_lower,
+            persisted_seen=seen_posts,
+            seen_stats=seen_stats,
+            seen_fallback=seen_fallback,
+            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "following"
             candidates.append(post)
 
-    return candidates, followed_topics, followed_users
+    if seen_stats.get("filtered"):
+        logger.debug(
+            "seen_posts.filtered feed=following viewer=%s count=%d",
+            viewer_lower[:12],
+            seen_stats["filtered"],
+        )
+    return candidates, followed_topics, followed_users, seen_fallback
 
 
 def _get_following_feed(
@@ -1305,6 +1320,7 @@ def _get_following_feed(
     sort_mode: str = "magic",
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Following feed:
@@ -1331,8 +1347,15 @@ def _get_following_feed(
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    max_candidates = limit * page * 4
-    candidates, followed_topics, followed_users = _load_following_candidates(
+    seen_count = len(seen_posts) if seen_posts else 0
+    base_factor = 4
+    if seen_count > 0:
+        seen_ratio = min(seen_count / max(1, 200), 0.8)
+        factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
+    else:
+        factor = base_factor
+    max_candidates = limit * page * factor
+    candidates, followed_topics, followed_users, seen_fallback = _load_following_candidates(
         cur,
         viewer_lower,
         blocked_posts,
@@ -1341,13 +1364,18 @@ def _get_following_feed(
         max_candidates,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
+        seen_posts=seen_posts,
     )
 
-    if not candidates:
+    if not candidates and not seen_fallback:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
     # ── Newest: fast path (no scoring) ──────────────────────────────
     if sort_mode == "newest":
+        need = limit * page + 1
+        if len(candidates) < need and seen_fallback:
+            seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
+            candidates.extend(seen_fallback)
         # Already chronological from DB query
         start = (page - 1) * limit
         end = start + limit
@@ -1391,6 +1419,10 @@ def _get_following_feed(
             "limit": limit,
             "has_more": has_more,
         }
+
+    if len(candidates) < (limit * page) and seen_fallback:
+        seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
+        candidates.extend(seen_fallback)
 
     # ── Magic: full scoring path ────────────────────────────────────
     post_ids = [c["post_id"] for c in candidates]
@@ -1491,6 +1523,7 @@ def _get_home_feed(
     sort_mode: str = "magic",
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Home feed.
@@ -1516,6 +1549,7 @@ def _get_home_feed(
             allowed_tags,
             blocked_topics=blocked_topics,
             blocked_topic_prefixes=blocked_topic_prefixes,
+            seen_posts=seen_posts,
         )
 
     # Guest users: magic-style scoring without personalization
@@ -1544,6 +1578,7 @@ def _get_home_feed(
         seed=seed,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
+        seen_posts=seen_posts,
     )
 
 
@@ -1557,6 +1592,7 @@ def _get_home_feed_newest(
     allowed_tags: set[str],
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Fast chronological feed — no scoring, no similarity, no preferences.
@@ -1581,9 +1617,19 @@ def _get_home_feed_newest(
     # Blocked/tag filtering can discard a large fraction, so we fetch in batches using
     # cursor-based pagination (created_at < ?) to avoid scanning the entire table.
     need = page * limit + 1
+    seen_count = len(seen_posts) if seen_posts else 0
+    base_factor = 3
+    if seen_count > 0:
+        seen_ratio = min(seen_count / max(1, 200), 0.8)
+        factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
+    else:
+        factor = base_factor
     seen: set[str] = set()
+    seen_stats = {"filtered": 0}
+    seen_fallback: list[dict] = []
+    seen_fallback_ids: set[str] = set()
     posts: list[dict] = []
-    batch_size = max(500, need * 3)
+    batch_size = max(500, need * factor)
     last_ts = None
 
     while len(posts) < need:
@@ -1612,6 +1658,10 @@ def _get_home_feed_newest(
                 blocked_topics,
                 blocked_topic_prefixes,
                 viewer=viewer,
+                persisted_seen=seen_posts,
+                seen_stats=seen_stats,
+                seen_fallback=seen_fallback,
+                seen_fallback_ids=seen_fallback_ids,
             )
             if post:
                 posts.append(post)
@@ -1619,8 +1669,12 @@ def _get_home_feed_newest(
         if len(rows) < batch_size:
             break
 
-    if not posts:
+    if not posts and not seen_fallback:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+
+    if len(posts) < need and seen_fallback:
+        seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
+        posts.extend(seen_fallback)
 
     start = (page - 1) * limit
     end = start + limit
@@ -1647,6 +1701,13 @@ def _get_home_feed_newest(
         post["user_vote"] = user_votes.get(pid, 0)
         post["user_weight"] = user_weight_map.get(pid, 0.0)
 
+    if seen_stats.get("filtered"):
+        logger.debug(
+            "seen_posts.filtered feed=home.newest viewer=%s count=%d",
+            (viewer or "")[:12],
+            seen_stats["filtered"],
+        )
+
     return {
         "posts": page_posts,
         "total": len(posts),
@@ -1667,6 +1728,7 @@ def _get_home_feed_magic(
     seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Magic feed algorithm.
@@ -1695,8 +1757,15 @@ def _get_home_feed_magic(
     similar_addrs = set(sim_lookup.keys())
 
     # 3. Load candidate posts (small targeted pool + random exploration)
-    per_source = limit * page * 4  # ~60 per source for page 1
-    candidates = _load_home_candidates(
+    seen_count = len(seen_posts) if seen_posts else 0
+    base_factor = 4
+    if seen_count > 0:
+        seen_ratio = min(seen_count / max(1, 200), 0.8)
+        factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
+    else:
+        factor = base_factor
+    per_source = limit * page * factor
+    candidates, seen_fallback = _load_home_candidates(
         cur,
         viewer_lower,
         similar_addrs,
@@ -1707,7 +1776,12 @@ def _get_home_feed_magic(
         now_ts,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
+        seen_posts=seen_posts,
     )
+
+    if len(candidates) < (limit * page) and seen_fallback:
+        seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
+        candidates.extend(seen_fallback)
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -2221,7 +2295,8 @@ def _load_home_candidates(
     now_ts: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
-) -> list[dict]:
+    seen_posts: dict[str, int] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """
     Load candidate posts for home feed from multiple sources:
     1. Posts by similar users (recent)
@@ -2231,6 +2306,9 @@ def _load_home_candidates(
     """
     results = []
     seen = set()
+    seen_stats = {"filtered": 0}
+    seen_fallback: list[dict] = []
+    seen_fallback_ids: set[str] = set()
 
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
@@ -2269,6 +2347,9 @@ def _load_home_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer,
+            seen_stats=seen_stats,
+            seen_fallback=seen_fallback,
+            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "own"
@@ -2299,6 +2380,10 @@ def _load_home_candidates(
                 blocked_topics,
                 blocked_topic_prefixes,
                 viewer=viewer,
+                persisted_seen=seen_posts,
+                seen_stats=seen_stats,
+                seen_fallback=seen_fallback,
+                seen_fallback_ids=seen_fallback_ids,
             )
             if post:
                 post["_source"] = "similar_author"
@@ -2332,6 +2417,10 @@ def _load_home_candidates(
                 blocked_topics,
                 blocked_topic_prefixes,
                 viewer=viewer,
+                persisted_seen=seen_posts,
+                seen_stats=seen_stats,
+                seen_fallback=seen_fallback,
+                seen_fallback_ids=seen_fallback_ids,
             )
             if post:
                 post["_source"] = "similar_upvoted"
@@ -2358,6 +2447,10 @@ def _load_home_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer,
+            persisted_seen=seen_posts,
+            seen_stats=seen_stats,
+            seen_fallback=seen_fallback,
+            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "recent"
@@ -2392,12 +2485,22 @@ def _load_home_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer,
+            persisted_seen=seen_posts,
+            seen_stats=seen_stats,
+            seen_fallback=seen_fallback,
+            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "explore"
             results.append(post)
 
-    return results
+    if seen_stats.get("filtered"):
+        logger.debug(
+            "seen_posts.filtered feed=home viewer=%s count=%d",
+            (viewer or "")[:12],
+            seen_stats["filtered"],
+        )
+    return results, seen_fallback
 
 
 def _row_to_post(
@@ -2409,6 +2512,10 @@ def _row_to_post(
     blocked_topics: set[str] | None = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
+    persisted_seen: dict[str, int] | None = None,
+    seen_stats: dict | None = None,
+    seen_fallback: list | None = None,
+    seen_fallback_ids: set | None = None,
 ) -> dict | None:
     """Convert a DB row to a post dict, or None if should be skipped."""
     import json as _json
@@ -2498,8 +2605,7 @@ def _row_to_post(
     except Exception:
         media = []
 
-    seen.add(pid)
-    return {
+    post = {
         "post_id": pid,
         "author": author,
         "user_id": author,
@@ -2520,6 +2626,17 @@ def _row_to_post(
         "media_meta": [],
         "relayer": relayer_lower,
     }
+    if not is_own and persisted_seen and pid in persisted_seen:
+        if seen_stats is not None:
+            seen_stats["filtered"] = seen_stats.get("filtered", 0) + 1
+        if seen_fallback is not None:
+            if seen_fallback_ids is None or pid not in seen_fallback_ids:
+                if seen_fallback_ids is not None:
+                    seen_fallback_ids.add(pid)
+                seen_fallback.append(post)
+        return None
+    seen.add(pid)
+    return post
 
 
 def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]) -> dict[str, list[str]]:
@@ -4890,6 +5007,33 @@ def get_posts():
             except Exception:
                 pass
 
+            # ── Seen-posts: load persisted map for feed filtering ────
+            persisted_seen: dict[str, int] = {}
+            if address and address.lower() != "guest":
+                try:
+                    persisted_seen = get_seen_map(address)
+                except Exception:
+                    logger.debug("get_posts.seen_load.err addr=%s", address[:12])
+
+            # ── Seen-posts: piggyback ingestion ──────────────────────
+            seen_raw = request.args.get("seen", default="", type=str)
+            seen_entries = parse_seen_param(seen_raw) if seen_raw else []
+            if seen_entries and address and address.lower() != "guest":
+                pub_b64 = request.args.get("seen_pubkey", default="", type=str)
+                sig_b64 = request.args.get("seen_signature", default="", type=str)
+                ts_raw = request.args.get("seen_timestamp")
+                nonce_raw = request.args.get("seen_envelope_nonce")
+                user_addr, err = _verify_seen_signature(address, pub_b64, sig_b64, ts_raw, nonce_raw)
+                if not user_addr:
+                    conn.close()
+                    return jsonify({"error": err or "invalid seen signature"}), 400
+                for pid, _ in seen_entries:
+                    persisted_seen[pid] = persisted_seen.get(pid, 0) + 1
+                try:
+                    ingest_seen_batch(user_addr, seen_entries)
+                except Exception:
+                    logger.debug("get_posts.seen_ingest.err addr=%s", address[:12])
+
             # Home feed uses new similarity-based algorithm
             if feed == "home":
                 resp = _get_home_feed(
@@ -4904,6 +5048,7 @@ def get_posts():
                     sort_mode=sort_mode,
                     blocked_topics=blocked_topics_exact,
                     blocked_topic_prefixes=blocked_topic_prefixes,
+                    seen_posts=persisted_seen,
                 )
             else:
                 resp = _get_following_feed(
@@ -4917,6 +5062,7 @@ def get_posts():
                     sort_mode=sort_mode,
                     blocked_topics=blocked_topics_exact,
                     blocked_topic_prefixes=blocked_topic_prefixes,
+                    seen_posts=persisted_seen,
                 )
 
             if resp.get("posts"):
@@ -6809,6 +6955,93 @@ def get_inbox():
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
         return safe_error(e, context="get_inbox")
+
+
+def _verify_seen_signature(
+    address: str,
+    pub_b64: str,
+    sig_b64: str,
+    timestamp_raw: str | int | None,
+    nonce_raw: str | int | None,
+):
+    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
+
+    if not (pub_b64 and sig_b64):
+        return None, "missing required fields"
+    try:
+        timestamp = int(timestamp_raw)
+    except (TypeError, ValueError):
+        return None, "invalid timestamp"
+    nonce, err = _parse_envelope_nonce({"envelope_nonce": nonce_raw})
+    if err is not None:
+        return None, "invalid envelope_nonce"
+
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return None, "invalid relay fields"
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return None, "invalid relay fields"
+
+    user_addr = _derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, "invalid pubkey"
+    if address and address.lower() != user_addr.lower():
+        return None, "address does not match pubkey"
+
+    signed_payload = f"seen_posts:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return None, "invalid signature"
+
+    ok, guard_err = _guard_push_request(user_addr, "seen_posts", timestamp, nonce)
+    if not ok:
+        return None, "invalid nonce"
+    return user_addr.lower(), None
+
+
+@public_bp.route("/api/seen_posts", methods=["POST"])
+def seen_posts_beacon():
+    """Fallback endpoint for sendBeacon flush of seen post IDs on tab close."""
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or "").strip().lower()
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
+    timestamp_raw = data.get("timestamp")
+    nonce_raw = data.get("envelope_nonce")
+    if not address:
+        return jsonify({"error": "address required"}), 400
+    if address == "guest":
+        return jsonify({"ok": True, "ingested": 0})
+    user_addr, err = _verify_seen_signature(address, pub_b64, sig_b64, timestamp_raw, nonce_raw)
+    if not user_addr:
+        return jsonify({"error": err or "invalid signature"}), 400
+
+    posts_raw = data.get("posts") or []
+    if not isinstance(posts_raw, list):
+        return jsonify({"error": "posts must be a list"}), 400
+    entries = []
+    fallback_reason = str(data.get("reason", "view")).strip().lower()
+    for entry in posts_raw[:100]:
+        if isinstance(entry, str):
+            pid = normalize_post_id(entry)
+            reason = fallback_reason
+        elif isinstance(entry, dict) and entry.get("id"):
+            pid = normalize_post_id(entry.get("id"))
+            reason = str(entry.get("reason") or fallback_reason).strip().lower()
+        else:
+            continue
+        if pid:
+            entries.append((pid, reason))
+
+    try:
+        count = ingest_seen_batch(user_addr, entries, fallback_reason)
+    except Exception:
+        logger.debug("seen_posts_beacon.err addr=%s", address[:12])
+        count = 0
+    return jsonify({"ok": True, "ingested": count})
 
 
 @public_bp.route("/api/mark_inbox_viewed", methods=["POST"])

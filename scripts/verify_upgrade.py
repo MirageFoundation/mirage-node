@@ -452,6 +452,7 @@ def check_backend_schema(conn: psycopg.Connection) -> None:
         "pending_rewards",
         "reward_suspensions",
         "inbox_events",
+        "user_seen_posts",
     ]
     with conn.cursor() as cur:
         cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")

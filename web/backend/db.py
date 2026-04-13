@@ -515,6 +515,33 @@ def init_backend_schema() -> None:
                 {"owner", "suspended_until", "suspended_by", "reason", "updated_at"},
             )
 
+            # ── Seen posts (server-side feed dedup) ────────────────────
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_seen_posts (
+                    owner TEXT NOT NULL,
+                    post_id TEXT NOT NULL,
+                    seen_at BIGINT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT 'view',
+                    view_count INT NOT NULL DEFAULT 1,
+                    PRIMARY KEY (owner, post_id),
+                    CONSTRAINT user_seen_posts_owner_lower CHECK (owner = LOWER(owner))
+                )
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_seen_posts_owner_seen "
+                "ON user_seen_posts(owner, seen_at DESC)"
+            )
+            cur.execute(
+                "ALTER TABLE user_seen_posts ADD COLUMN IF NOT EXISTS "
+                "view_count INT NOT NULL DEFAULT 1"
+            )
+            _assert_table_schema(
+                "user_seen_posts",
+                {"owner", "post_id", "seen_at", "reason", "view_count"},
+            )
+
             # ── Inbox state (replaces profiles.inbox_last_viewed_at) ─────
             cur.execute(
                 """

@@ -1,8 +1,25 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { PostGrid, AnimatedCard } from './Layout';
 import CardView from './components/CardView';
+import { useSeenPosts } from '../../logic/useSeenPosts';
 
 export default function BlueMoonFeedView({ posts, state, updatePost, hidingPostsSet, flashingPostsSet, viewerAddress }) {
+    const { observePost, unobservePost } = useSeenPosts();
+
+    function ObservedCard({ postId, children, ...rest }) {
+        const ref = useRef(null);
+        useEffect(() => {
+            const el = ref.current;
+            if (el) observePost(el);
+            return () => { if (el) unobservePost(el); };
+        }, [observePost, unobservePost]);
+        return (
+            <AnimatedCard ref={ref} data-post-id={postId} {...rest}>
+                {children}
+            </AnimatedCard>
+        );
+    }
+
     if (!posts || posts.length === 0) return null;
 
     return (
@@ -28,8 +45,9 @@ export default function BlueMoonFeedView({ posts, state, updatePost, hidingPosts
                 const animDelay = isHiding ? 0 : Math.min(index * 50, 250);
 
                 return (
-                    <AnimatedCard
+                    <ObservedCard
                         key={post.post_id}
+                        postId={post.post_id}
                         $hiding={isHiding}
                         $flash={isFlashing}
                         style={{
@@ -41,7 +59,7 @@ export default function BlueMoonFeedView({ posts, state, updatePost, hidingPosts
                             post={post}
                             updatePost={updatePost}
                         />
-                    </AnimatedCard>
+                    </ObservedCard>
                 );
             })}
         </PostGrid>

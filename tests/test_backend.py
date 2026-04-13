@@ -33,6 +33,7 @@ from tests.cases.test_backend_content import (
     test_content_limits,
     test_annotate,
     test_edit_target_immutability,
+    test_seen_posts,
 )
 from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
 from tests.cases.test_backend_tokens import test_pow, test_tokens
@@ -79,6 +80,7 @@ ALL_CATEGORIES = {
     "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
     "subscribe_gift_agent": test_subscribe_gift_agent,
+    "seen_posts": test_seen_posts,
 }
 
 STATELESS_CATEGORIES = {
