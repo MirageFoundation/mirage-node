@@ -17,7 +17,7 @@ let _listenerCount = 0;
 let _visibilityHandler = null;
 let _pageHideHandler = null;
 let _flushInterval = null;
-const FLUSH_INTERVAL_MS = 15_000;
+const FLUSH_INTERVAL_MS = 10_000;
 
 function _getAddress() {
     try {
@@ -64,6 +64,16 @@ function _encodeEntries(entries) {
     return entries.map((entry) => `${entry.id}:${entry.reason}`).join(",");
 }
 
+function _ensureFlushInterval() {
+    if (_flushInterval) return;
+    _flushInterval = setInterval(() => {
+        if (_seenBuffer.length > 0) {
+            _LOG(`TIMER  ${_seenBuffer.length} buffered → flush`);
+            void flushSeenBeacon();
+        }
+    }, FLUSH_INTERVAL_MS);
+}
+
 function markSeen(pid, reason) {
     const addr = _getAddress();
     if (!addr || addr === "guest") return;
@@ -73,6 +83,7 @@ function markSeen(pid, reason) {
     const finalReason = VALID_REASONS.has(reason) ? reason : "view";
     _seenBuffer.push({ id, reason: finalReason });
     _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}`);
+    _ensureFlushInterval();
     if (_seenBuffer.length >= MAX_BUFFER) {
         void flushSeenBeacon();
     }
@@ -169,14 +180,7 @@ export function useSeenPosts() {
             _pageHideHandler = () => { void flushSeenBeacon(); };
             window.addEventListener("pagehide", _pageHideHandler);
         }
-        if (!_flushInterval) {
-            _flushInterval = setInterval(() => {
-                if (_seenBuffer.length > 0) {
-                    _LOG(`TIMER  ${_seenBuffer.length} buffered → flush`);
-                    void flushSeenBeacon();
-                }
-            }, FLUSH_INTERVAL_MS);
-        }
+        _ensureFlushInterval();
         return () => {
             _listenerCount -= 1;
             if (_listenerCount <= 0) {
@@ -187,10 +191,6 @@ export function useSeenPosts() {
                 if (_pageHideHandler) {
                     window.removeEventListener("pagehide", _pageHideHandler);
                     _pageHideHandler = null;
-                }
-                if (_flushInterval) {
-                    clearInterval(_flushInterval);
-                    _flushInterval = null;
                 }
             }
         };

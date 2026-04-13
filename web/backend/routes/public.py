@@ -67,6 +67,10 @@ from chain import (
 )
 
 
+def _now_epoch() -> int:
+    return int(time.time())
+
+
 def _get_balance(address) -> int:
     """Read balance from indexer DB."""
     if not address:
@@ -233,11 +237,13 @@ def _filter_posts_by_allowed_tags(
     if not posts:
         return posts
     viewer_lower = (viewer or "").strip().lower()
+    now = _now_epoch()
     filtered = []
     own_kept = 0
     for post in posts:
         author_lower = (post.get("author") or post.get("user_id") or "").strip().lower()
-        if viewer_lower and author_lower == viewer_lower:
+        post_ts = int(post.get("timestamp") or 0)
+        if viewer_lower and author_lower == viewer_lower and post_ts >= now - 3600:
             own_kept += 1
             filtered.append(post)
             continue
@@ -274,12 +280,14 @@ def _filter_user_posts_by_allowed_tags(
     if not posts:
         return posts
     viewer_lower = (viewer or "").strip().lower()
+    now = _now_epoch()
     filtered = []
     removed = 0
     own_kept = 0
     for post in posts:
         author_lower = (post.get("user_id") or post.get("author") or "").strip().lower()
-        if viewer_lower and author_lower == viewer_lower:
+        post_ts = int(post.get("timestamp") or 0)
+        if viewer_lower and author_lower == viewer_lower and post_ts >= now - 3600:
             own_kept += 1
             filtered.append(post)
             continue
@@ -1092,6 +1100,9 @@ def _load_candidate_posts(
         root_topic_lower = root_topic_raw.lower()
 
         is_own = viewer_lower and author == viewer_lower
+        post_ts = int(ts) if ts else 0
+        if is_own and post_ts < _now_epoch() - 3600:
+            is_own = False
         if not is_own and (pid in blocked_posts or author in blocked_users):
             continue
         if not is_own and _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
@@ -1107,7 +1118,7 @@ def _load_candidate_posts(
                 "username": username or "",
                 "author_level": int(author_level) if author_level else 0,
                 "author_is_new": _is_new_user(int(author_created_at or 0)),
-                "timestamp": int(ts) if ts else 0,
+                "timestamp": post_ts,
                 "topic": topic_raw,
                 "topic_lower": topic_lower,
                 "root_topic": root_topic_raw,
@@ -2586,7 +2597,10 @@ def _row_to_post(
 
     relayer_lower = (relayer or "").strip().lower()
     viewer_lower = (viewer or "").strip().lower()
+    post_ts = int(ts) if ts else 0
     is_own = viewer_lower and author == viewer_lower
+    if is_own and post_ts < _now_epoch() - 3600:
+        is_own = False
     if pid in seen:
         return None
     if not is_own and (pid in blocked_posts or author in blocked_users):
