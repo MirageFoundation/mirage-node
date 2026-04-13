@@ -59,6 +59,7 @@ not_seen ──→ exposed ──→ seen
 3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
 4. **Deduplicate**: Keep a `Set<string>` of already-reported IDs. Never emit the same ID twice in a single session. Persist this set in `sessionStorage` (web) or equivalent (mobile) so it survives page refreshes. Cap at 2000 IDs; if exceeded, clear and start fresh.
 5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
+6. **First trigger wins**: Dwell and glance timers run in parallel. Whichever fires first marks the post as seen; cancel the other timer immediately. For example, if glance reaches 2 exposures before the 3s dwell elapses, cancel the dwell timer (and vice versa).
 
 ## Reporting Protocol
 
@@ -73,7 +74,7 @@ GET /api/get_posts?feed=home&page=1&address=mirage1...&seen=<txhash>:open,<txhas
 - Comma-separated `id:reason` pairs (full txhash)
 - Maximum **100 IDs** per request
 - The server ingests them as a side-effect and filters them from the response
-- Piggyback works on **all** `get_posts` calls (any feed, not just home/following)
+- Piggyback works on **all** `get_posts` calls (any feed). Ingestion always happens; server-side filtering of seen posts currently applies to **home** and **following** feeds only.
 - **Zero extra HTTP requests** — the data rides along with requests you're already making
 
 Requests must include a signed payload to authenticate the address:

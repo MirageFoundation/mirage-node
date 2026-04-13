@@ -274,7 +274,6 @@ export function useSeenPosts() {
                         }
 
                         if (entry.isIntersecting) {
-                            _LOG(`IN     ${id.slice(0, 12)}…  ratio=${entry.intersectionRatio.toFixed(2)}  dwell timer starting`);
                             if (!dwellTimersRef.current.get(id)) {
                                 const timer = setTimeout(() => {
                                     dwellTimersRef.current.delete(id);
@@ -294,13 +293,17 @@ export function useSeenPosts() {
                                     }
                                     if (nextCount >= GLANCE_COUNT) {
                                         glanceCountsRef.current.delete(id);
+                                        const pendingDwell = dwellTimersRef.current.get(id);
+                                        if (pendingDwell) {
+                                            clearTimeout(pendingDwell);
+                                            dwellTimersRef.current.delete(id);
+                                        }
                                         markSeen(id, "glance");
                                     }
                                 }, GLANCE_MS);
                                 glanceTimersRef.current.set(id, timer);
                             }
                         } else {
-                            _LOG(`OUT    ${id.slice(0, 12)}…  timers cleared`);
                             const dwell = dwellTimersRef.current.get(id);
                             if (dwell) clearTimeout(dwell);
                             dwellTimersRef.current.delete(id);
