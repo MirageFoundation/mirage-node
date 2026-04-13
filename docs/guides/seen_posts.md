@@ -47,8 +47,8 @@ not_seen ──→ exposed ──→ seen
 | Click / open | User taps post to view detail | `open` |
 | Vote | User up/downvotes the post | `vote` |
 | Reply | User replies to the post | `reply` |
-| Dwell | ≥50% of card visible in center 40% of viewport for ≥5 seconds, tab/app in foreground | `dwell` |
-| Repeated glance | 3+ exposures of ≥400ms each with ≥40% card visibility | `glance` |
+| Dwell | ≥50% of card visible in center 40% of viewport for ≥3 seconds, tab/app in foreground | `dwell` |
+| Repeated glance | 2+ exposures of ≥500ms each with ≥40% card visibility | `glance` |
 
 ### Rules
 
@@ -57,7 +57,7 @@ not_seen ──→ exposed ──→ seen
    - Mobile: track `onResume` / `onPause` lifecycle events
 2. **Center band**: For dwell detection, only count time when the card is in the middle 40% of the viewport (top 30% and bottom 30% are excluded). This avoids counting posts that are barely on-screen at the edges.
 3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
-4. **Deduplicate**: Keep an in-session `Set<string>` of already-reported IDs. Never emit the same ID twice in a single session.
+4. **Deduplicate**: Keep a `Set<string>` of already-reported IDs. Never emit the same ID twice in a single session. Persist this set in `sessionStorage` (web) or equivalent (mobile) so it survives page refreshes. Cap at 2000 IDs; if exceeded, clear and start fresh.
 5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
 
 ## Reporting Protocol
@@ -73,6 +73,7 @@ GET /api/get_posts?feed=home&page=1&address=mirage1...&seen=<txhash>:open,<txhas
 - Comma-separated `id:reason` pairs (full txhash)
 - Maximum **100 IDs** per request
 - The server ingests them as a side-effect and filters them from the response
+- Piggyback works on **all** `get_posts` calls (any feed, not just home/following)
 - **Zero extra HTTP requests** — the data rides along with requests you're already making
 
 Requests must include a signed payload to authenticate the address:
@@ -113,6 +114,7 @@ Content-Type: application/json
 
 - Web: use `navigator.sendBeacon()` on `visibilitychange` / `pagehide`
 - Mobile: call this endpoint from `onPause` or equivalent lifecycle callback
+- **Periodic flush**: In addition to background-triggered flushes, run a **10-second interval timer** that flushes the buffer if non-empty. This timer should start on the first `markSeen` call and run for the lifetime of the app session (not tied to any single screen).
 - Maximum **100 entries** per batch
 - Response: `{"ok": true, "ingested": <count>}`
 
@@ -133,7 +135,7 @@ Use `onViewableItemsChanged` with a custom viewability config:
 ```javascript
 const viewabilityConfig = {
   itemVisiblePercentThreshold: 40,
-  minimumViewTime: 400,
+  minimumViewTime: 500,
 };
 
 const onViewableItemsChanged = useCallback(({ viewableItems }) => {
@@ -141,12 +143,12 @@ const onViewableItemsChanged = useCallback(({ viewableItems }) => {
   for (const item of viewableItems) {
     const pid = item.item?.post_id;
     if (!pid) continue;
-    recordExposure(pid); // increment glance count
+    recordExposure(pid); // increment glance count, mark at 2
   }
 }, []);
 ```
 
-For dwell detection, start a 5-second timer when a post becomes viewable and cancel it when it leaves. Only count time while `AppState.currentState === 'active'`.
+For dwell detection, start a 3-second timer when a post becomes viewable and cancel it when it leaves. Only count time while `AppState.currentState === 'active'`.
 
 ### Native Android (RecyclerView)
 
@@ -155,6 +157,12 @@ Attach an `OnScrollListener` or use a custom `LayoutManager` callback to track w
 ### Native iOS (UICollectionView)
 
 Use `UICollectionViewDelegate` methods (`willDisplay` / `didEndDisplaying`) combined with a periodic check for center-band positioning. Gate on `UIApplication.State.active`.
+
+### Mark on Navigation
+
+When the user taps a post to open the detail view, immediately call `markSeen(postId, "open")`. This must work regardless of which screen the user is on — the buffer and flush timer are global, not tied to the feed screen.
+
+Similarly, call `markSeen(postId, "vote")` on vote and `markSeen(postId, "reply")` on reply. These are instant transitions — no visibility check needed.
 
 ### Flush on Background
 
@@ -181,8 +189,8 @@ useEffect(() => {
 
 - The server stores full post IDs per user and keeps only the **most recent 1000** entries (deque semantics).
 - Each seen entry tracks a **view count** that increments on every subsequent report of the same post. Re-sending an already-seen ID is not a no-op — it bumps the counter and refreshes the timestamp.
-- On feed requests (`feed=home` or `feed=following`), the server loads the user's seen map and filters matching candidates from the response.
-- The user's **own posts are never filtered** — you always see your own content.
+- On feed requests, the server loads the user's seen map and filters matching candidates from the response.
+- The user's **own posts from the last hour are never filtered**. Own posts older than 1 hour are treated like any other post (subject to seen filtering, tag filtering, etc.).
 - Guest users have no seen tracking.
 - If all candidates are seen, the server reintroduces seen posts **sorted by view count ascending** (least-viewed first) to avoid empty feeds.
 - The seen map (post ID → view count) is cached in-memory on the server (120s TTL) so repeated page loads don't hit the database.

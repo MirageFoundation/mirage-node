@@ -2,16 +2,59 @@ import { useRef, useEffect, useCallback } from "react";
 import Storage from "../utils/Storage";
 import { signPlainPayload } from "../utils/signPlain";
 
-const DWELL_MS = 5000;
-const GLANCE_MS = 400;
-const GLANCE_COUNT = 3;
+const DWELL_MS = 3000;
+const GLANCE_MS = 500;
+const GLANCE_COUNT = 2;
 const MAX_BUFFER = 100;
 const POST_ID_RE = /^[0-9a-f]{64}$/;
 const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);
 const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
 
+const _SS_KEY = "_seenReported";
+const _SS_CAP = 2000;
+const _SAVE_DEBOUNCE_MS = 1000;
+
+function _loadReportedSet() {
+    try {
+        const raw = sessionStorage.getItem(_SS_KEY);
+        if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length <= _SS_CAP) return new Set(arr);
+        }
+    } catch (_) { /* noop */ }
+    return new Set();
+}
+
+function _saveReportedSetNow() {
+    try {
+        if (_reportedSet.size > _SS_CAP) {
+            _reportedSet.clear();
+            sessionStorage.removeItem(_SS_KEY);
+            return;
+        }
+        sessionStorage.setItem(_SS_KEY, JSON.stringify([..._reportedSet]));
+    } catch (_) { /* noop */ }
+}
+
+function _scheduleReportedSetSave() {
+    if (_saveTimer) return;
+    _saveTimer = setTimeout(() => {
+        _saveTimer = null;
+        _saveReportedSetNow();
+    }, _SAVE_DEBOUNCE_MS);
+}
+
+function _flushReportedSetSave() {
+    if (_saveTimer) {
+        clearTimeout(_saveTimer);
+        _saveTimer = null;
+    }
+    _saveReportedSetNow();
+}
+
 let _seenBuffer = [];
-let _reportedSet = new Set();
+let _reportedSet = _loadReportedSet();
+let _saveTimer = null;
 let _drainLock = false;
 let _listenerCount = 0;
 let _visibilityHandler = null;
@@ -80,9 +123,10 @@ function markSeen(pid, reason) {
     const id = _normalizeId(pid);
     if (!id || _reportedSet.has(id)) return;
     _reportedSet.add(id);
+    _scheduleReportedSetSave();
     const finalReason = VALID_REASONS.has(reason) ? reason : "view";
     _seenBuffer.push({ id, reason: finalReason });
-    _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}`);
+    _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}  persisted=${_reportedSet.size}`);
     _ensureFlushInterval();
     if (_seenBuffer.length >= MAX_BUFFER) {
         void flushSeenBeacon();
@@ -167,6 +211,7 @@ export function useSeenPosts() {
             _visibilityHandler = () => {
                 visibleRef.current = document.visibilityState === "visible";
                 if (!visibleRef.current) {
+                    _flushReportedSetSave();
                     for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
                     for (const timer of glanceTimersRef.current.values()) clearTimeout(timer);
                     dwellTimersRef.current.clear();
@@ -177,7 +222,10 @@ export function useSeenPosts() {
             document.addEventListener("visibilitychange", _visibilityHandler);
         }
         if (!_pageHideHandler) {
-            _pageHideHandler = () => { void flushSeenBeacon(); };
+            _pageHideHandler = () => {
+                _flushReportedSetSave();
+                void flushSeenBeacon();
+            };
             window.addEventListener("pagehide", _pageHideHandler);
         }
         _ensureFlushInterval();
