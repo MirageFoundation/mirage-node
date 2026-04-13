@@ -395,6 +395,12 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
         return raw || null;
     }, [post?.content, mediaArr]);
 
+    useEffect(() => {
+        const el = rowRef.current;
+        if (el) observePost(el);
+        return () => { if (el) unobservePost(el); };
+    }, [observePost, unobservePost]);
+
     if (!post || !post.post_id) return null;
     const isComment = !!(post.target && String(post.target).trim());
     if (!isComment && (typeof post.title !== 'string' || typeof post.topic !== 'string')) {
@@ -475,12 +481,6 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
             )}
         </ActionsLine>
     );
-
-    useEffect(() => {
-        const el = rowRef.current;
-        if (el) observePost(el);
-        return () => { if (el) unobservePost(el); };
-    }, [observePost, unobservePost]);
 
     return (
         <>
