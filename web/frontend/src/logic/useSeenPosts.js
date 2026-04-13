@@ -8,6 +8,7 @@ const GLANCE_COUNT = 3;
 const MAX_BUFFER = 100;
 const POST_ID_RE = /^[0-9a-f]{64}$/;
 const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);
+const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
 
 let _seenBuffer = [];
 let _reportedSet = new Set();
@@ -15,6 +16,8 @@ let _drainLock = false;
 let _listenerCount = 0;
 let _visibilityHandler = null;
 let _pageHideHandler = null;
+let _flushInterval = null;
+const FLUSH_INTERVAL_MS = 15_000;
 
 function _getAddress() {
     try {
@@ -69,6 +72,7 @@ function markSeen(pid, reason) {
     _reportedSet.add(id);
     const finalReason = VALID_REASONS.has(reason) ? reason : "view";
     _seenBuffer.push({ id, reason: finalReason });
+    _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}`);
     if (_seenBuffer.length >= MAX_BUFFER) {
         void flushSeenBeacon();
     }
@@ -80,11 +84,13 @@ export async function drainSeenBatch() {
     if (!addr || addr === "guest") return null;
     _drainLock = true;
     const entries = _seenBuffer.splice(0, MAX_BUFFER);
+    _LOG(`DRAIN  ${entries.length} entries → piggyback`);
     try {
         const sig = await signPlainPayload((ts, n) => `seen_posts:${addr}:${ts}:${n}`);
         return { address: addr, entries, sig, encoded: _encodeEntries(entries) };
     } catch (_) {
         _seenBuffer = entries.concat(_seenBuffer);
+        _LOG("DRAIN  sign failed, restored to buffer");
         return null;
     } finally {
         _drainLock = false;
@@ -97,6 +103,7 @@ export function restoreSeenBatch(batch) {
     const restored = batch.entries.filter((entry) => !existing.has(entry.id));
     if (restored.length) {
         _seenBuffer = restored.concat(_seenBuffer);
+        _LOG(`RESTORE  ${restored.length} entries back to buffer (total=${_seenBuffer.length})`);
     }
 }
 
@@ -125,10 +132,12 @@ async function flushSeenBeacon() {
             _buildUrl("seen_posts"),
             new Blob([payload], { type: "application/json" }),
         );
+        _LOG(`BEACON  ${batch.entries.length} posts → ${ok ? "sent ✓" : "FAILED ✗"}`);
         if (!ok) {
             restoreSeenBatch(batch);
         }
-    } catch (_) {
+    } catch (e) {
+        _LOG("BEACON  error:", e.message);
         restoreSeenBatch(batch);
     }
 }
@@ -160,6 +169,14 @@ export function useSeenPosts() {
             _pageHideHandler = () => { void flushSeenBeacon(); };
             window.addEventListener("pagehide", _pageHideHandler);
         }
+        if (!_flushInterval) {
+            _flushInterval = setInterval(() => {
+                if (_seenBuffer.length > 0) {
+                    _LOG(`TIMER  ${_seenBuffer.length} buffered → flush`);
+                    void flushSeenBeacon();
+                }
+            }, FLUSH_INTERVAL_MS);
+        }
         return () => {
             _listenerCount -= 1;
             if (_listenerCount <= 0) {
@@ -170,6 +187,10 @@ export function useSeenPosts() {
                 if (_pageHideHandler) {
                     window.removeEventListener("pagehide", _pageHideHandler);
                     _pageHideHandler = null;
+                }
+                if (_flushInterval) {
+                    clearInterval(_flushInterval);
+                    _flushInterval = null;
                 }
             }
         };
@@ -205,9 +226,11 @@ export function useSeenPosts() {
                         }
 
                         if (entry.isIntersecting) {
+                            _LOG(`IN     ${id.slice(0, 12)}…  ratio=${entry.intersectionRatio.toFixed(2)}  dwell timer starting`);
                             if (!dwellTimersRef.current.get(id)) {
                                 const timer = setTimeout(() => {
                                     dwellTimersRef.current.delete(id);
+                                    _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
                                     markSeen(id, "dwell");
                                 }, DWELL_MS);
                                 dwellTimersRef.current.set(id, timer);
@@ -217,6 +240,7 @@ export function useSeenPosts() {
                                     glanceTimersRef.current.delete(id);
                                     const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
                                     glanceCountsRef.current.set(id, nextCount);
+                                    _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}`);
                                     if (glanceCountsRef.current.size > 5000) {
                                         glanceCountsRef.current.clear();
                                     }
@@ -228,6 +252,7 @@ export function useSeenPosts() {
                                 glanceTimersRef.current.set(id, timer);
                             }
                         } else {
+                            _LOG(`OUT    ${id.slice(0, 12)}…  timers cleared`);
                             const dwell = dwellTimersRef.current.get(id);
                             if (dwell) clearTimeout(dwell);
                             dwellTimersRef.current.delete(id);

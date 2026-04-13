@@ -210,21 +210,18 @@ async function get(path, params, options) {
     let finalParams = withInboxLastViewed(params);
     try {
         if (path === 'get_posts' && finalParams && typeof finalParams === 'object') {
-            const feed = String(finalParams.feed || '').trim().toLowerCase();
-            if (feed === 'home' || feed === 'following') {
-                const seenMod = _loadSeenModule();
-                if (seenMod && typeof seenMod.drainSeenBatch === 'function') {
-                    seenBatch = await seenMod.drainSeenBatch();
-                    if (seenBatch && seenBatch.encoded) {
-                        finalParams = {
-                            ...finalParams,
-                            seen: seenBatch.encoded,
-                            seen_pubkey: seenBatch.sig?.pubkey,
-                            seen_signature: seenBatch.sig?.signature,
-                            seen_timestamp: seenBatch.sig?.timestamp,
-                            seen_envelope_nonce: seenBatch.sig?.envelope_nonce,
-                        };
-                    }
+            const seenMod = _loadSeenModule();
+            if (seenMod && typeof seenMod.drainSeenBatch === 'function') {
+                seenBatch = await seenMod.drainSeenBatch();
+                if (seenBatch && seenBatch.encoded) {
+                    finalParams = {
+                        ...finalParams,
+                        seen: seenBatch.encoded,
+                        seen_pubkey: seenBatch.sig?.pubkey,
+                        seen_signature: seenBatch.sig?.signature,
+                        seen_timestamp: seenBatch.sig?.timestamp,
+                        seen_envelope_nonce: seenBatch.sig?.envelope_nonce,
+                    };
                 }
             }
         }
