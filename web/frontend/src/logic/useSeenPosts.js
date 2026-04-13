@@ -60,7 +60,7 @@ let _listenerCount = 0;
 let _visibilityHandler = null;
 let _pageHideHandler = null;
 let _flushInterval = null;
-const FLUSH_INTERVAL_MS = 10_000;
+const FLUSH_INTERVAL_MS = 3_000;
 
 function _getAddress() {
     try {
@@ -247,7 +247,7 @@ export function useSeenPosts() {
     useEffect(() => {
         const createObserver = () => {
             const vh = window.innerHeight || document.documentElement.clientHeight;
-            const marginTop = Math.round(vh * 0.3);
+            const marginTop = Math.round(vh * 0.15);
             const marginBottom = Math.round(vh * 0.3);
             const rootMargin = `-${marginTop}px 0px -${marginBottom}px 0px`;
 

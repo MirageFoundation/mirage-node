@@ -47,7 +47,7 @@ not_seen ──→ exposed ──→ seen
 | Click / open | User taps post to view detail | `open` |
 | Vote | User up/downvotes the post | `vote` |
 | Reply | User replies to the post | `reply` |
-| Dwell | ≥50% of card visible in center 40% of viewport for ≥3 seconds, tab/app in foreground | `dwell` |
+| Dwell | ≥50% of card visible in the active viewport zone (top 15% and bottom 30% excluded) for ≥3 seconds, tab/app in foreground | `dwell` |
 | Repeated glance | 2+ exposures of ≥500ms each with ≥40% card visibility | `glance` |
 
 ### Rules
@@ -55,7 +55,7 @@ not_seen ──→ exposed ──→ seen
 1. **Foreground only**: Only count visibility time when the app is in the foreground.
    - Web: `document.visibilityState === 'visible'`
    - Mobile: track `onResume` / `onPause` lifecycle events
-2. **Center band**: For dwell detection, only count time when the card is in the middle 40% of the viewport (top 30% and bottom 30% are excluded). This avoids counting posts that are barely on-screen at the edges.
+2. **Active zone**: For dwell/glance detection, only count time when the card is in the active zone of the viewport (top 15% and bottom 30% excluded — an asymmetric band that covers the top 55% of the middle area). The top exclusion is smaller so the first visible post on page load still triggers.
 3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
 4. **Deduplicate**: Keep a `Set<string>` of already-reported IDs. Never emit the same ID twice in a single session. Persist this set in `sessionStorage` (web) or equivalent (mobile) so it survives page refreshes. Cap at 2000 IDs; if exceeded, clear and start fresh.
 5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
@@ -115,7 +115,7 @@ Content-Type: application/json
 
 - Web: use `navigator.sendBeacon()` on `visibilitychange` / `pagehide`
 - Mobile: call this endpoint from `onPause` or equivalent lifecycle callback
-- **Periodic flush**: In addition to background-triggered flushes, run a **10-second interval timer** that flushes the buffer if non-empty. This timer should start on the first `markSeen` call and run for the lifetime of the app session (not tied to any single screen).
+- **Periodic flush**: In addition to background-triggered flushes, run a **3-second interval timer** that flushes the buffer if non-empty. This timer should start on the first `markSeen` call and run for the lifetime of the app session (not tied to any single screen).
 - Maximum **100 entries** per batch
 - Response: `{"ok": true, "ingested": <count>}`
 
