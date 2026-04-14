@@ -90,7 +90,7 @@ const ThemeSelect = styled.select`
     
     &:focus {
         outline: none;
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -240,7 +240,7 @@ const PasswordInput = styled.input`
 
     &:focus {
         outline: none;
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};

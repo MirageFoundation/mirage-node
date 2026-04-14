@@ -103,7 +103,7 @@ const StyledInputBox = styled.input`
 }) => theme.colors.subtleText};
     }
     &:focus {
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};
@@ -152,7 +152,7 @@ const StyledSelect = styled.select`
 }) => theme.colors.subtleText};
     }
     &:focus {
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
         box-shadow: ${({
     theme
 }) => theme.layout.focusRing};

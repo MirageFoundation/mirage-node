@@ -38,7 +38,7 @@ const SelectorButton = styled.button`
     
     &:focus {
         outline: none;
-        border-color: #667eea;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
         box-shadow: ${({ theme }) => theme.layout.focusRing};
     }
 

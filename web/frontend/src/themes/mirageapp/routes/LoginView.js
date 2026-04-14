@@ -27,11 +27,25 @@ const LabelRow = styled.div`
 `;
 
 const WordCount = styled.span`
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: ${({ theme, $isValid }) =>
+    $isValid
+      ? (theme.name === 'dark' ? 'rgba(52, 199, 89, 0.12)' : 'rgba(52, 199, 89, 0.1)')
+      : (theme.name === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)')};
   color: ${({ theme, $isValid }) =>
     $isValid ? theme.colors.voteUp : theme.colors.subtleText};
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  border: 1px solid ${({ theme, $isValid }) =>
+    $isValid
+      ? (theme.name === 'dark' ? 'rgba(52, 199, 89, 0.2)' : 'rgba(52, 199, 89, 0.18)')
+      : theme.colors.border};
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 `;
 
 const VaultRow = styled.div`
@@ -67,7 +81,7 @@ const VaultTitle = styled.div`
 `;
 
 const PrimaryButton = styled(Button)`
-  border: 1px solid rgba(102, 126, 234, 0.45) !important;
+  border: ${({ theme }) => theme.name === 'dark' ? '0.5px' : '1px'} solid rgba(102, 126, 234, 0.45) !important;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
   box-shadow: 0 6px 16px rgba(102, 126, 234, 0.22) !important;
 
