@@ -36,10 +36,6 @@ const Bar = styled.header`
     background: ${({ theme }) => theme.colors.bg};
     border-bottom: 1px solid ${({ theme }) => theme.colors.headerBorder};
     backdrop-filter: saturate(1.1);
-
-    @media (max-width: 600px) {
-        display: none;
-    }
 `;
 
 /**
@@ -55,10 +51,12 @@ const BarInner = styled.div`
     margin: 0 auto;
     padding: 0 0.5rem;
     box-sizing: border-box;
-    /* Fill the parent Bar locked height so children (brand, search, */
-    /* avatar) remain vertically centered - padding is 0 since Bar owns */
-    /* the height now. */
     height: 100%;
+
+    @media (max-width: 600px) {
+        gap: 0.5rem;
+        padding: 0 0.35rem;
+    }
 `;
 
 const BrandLink = styled(Link)`
@@ -72,6 +70,10 @@ const BrandLink = styled(Link)`
     flex-shrink: 0;
 
     &:hover { text-decoration: none; }
+
+    @media (max-width: 600px) {
+        font-size: 1.02rem;
+    }
 `;
 
 const LeftSpacer = styled.div`
@@ -422,6 +424,80 @@ const LoginPillLink = styled(Link)`
     &:active {
         outline: none;
         box-shadow: none;
+    }
+
+    @media (max-width: 1000px) {
+        display: none;
+    }
+`;
+
+const SidebarToggleButton = styled.button`
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: none;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.text};
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    &:focus,
+    &:focus-visible {
+        outline: none;
+        box-shadow: none;
+    }
+
+    @media (max-width: 1000px) {
+        display: inline-flex;
+    }
+
+    @media (max-width: 600px) {
+        width: 36px;
+        height: 36px;
+    }
+`;
+
+const CompactSearchButton = styled.button`
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: none;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.text};
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    &:focus,
+    &:focus-visible {
+        outline: none;
+        box-shadow: none;
+    }
+
+    @media (max-width: 800px) {
+        display: inline-flex;
+    }
+
+    @media (max-width: 600px) {
+        width: 36px;
+        height: 36px;
     }
 `;
 
@@ -777,7 +853,7 @@ function dicebearUrl(seed, pxSize) {
     return `https://api.dicebear.com/9.x/identicon/png?seed=${safeSeed}&size=${size}`;
 }
 
-function TopBar({ state }) {
+function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     const location = useLocation();
     const navigate = useNavigate();
     const path = location.pathname;
@@ -887,6 +963,16 @@ function TopBar({ state }) {
     return (
         <Bar>
             <BarInner>
+            <SidebarToggleButton
+                type="button"
+                onClick={onToggleDrawer}
+                aria-label="Toggle sidebar"
+            >
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                    <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </SidebarToggleButton>
+
             <BrandLink to="/home" aria-label="Mirage home">Mirage</BrandLink>
 
             <LeftSpacer />
@@ -961,6 +1047,15 @@ function TopBar({ state }) {
             </SearchWrapper>
 
             <RightSpacer>
+                <CompactSearchButton
+                    type="button"
+                    onClick={() => navigate('/search')}
+                    aria-label="Search"
+                >
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                        <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
+                    </svg>
+                </CompactSearchButton>
                 {isLoggedIn && (
                     <CreateButton to="/create_post" aria-label="Create post">
                         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">

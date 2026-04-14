@@ -6,7 +6,6 @@ import AuthPageShell, {
   AuthStack,
   AuthSubtlePanel,
 } from "../components/AuthPageShell.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useWelcome } from "../../../logic/useWelcome";
 
@@ -241,13 +240,12 @@ function WelcomeView({
       </Helmet>
       <div>
         <ModernPostFeed>
-          <MobileHeader />
           <AuthPageShell
             showTabs={false}
             eyebrow="Account ready"
             title="Welcome to Mirage"
             description="Save your recovery phrase below — it's the only way to restore this account."
-            icon="🎉"
+
           >
             <AuthStack>
               <AuthSubtlePanel>

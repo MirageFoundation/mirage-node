@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { useFollows, shortenAddress } from "../../../logic/useFollows";
 const ValueBox = styled.div`
@@ -136,7 +135,6 @@ export default function FollowsView({
             <title>Follows | Mirage</title>
         </Helmet>
             <ModernPostFeed>
-                <MobileHeader />
                 <OldRedditContentBleed>
                     <OldRedditTabsStrip>
                         <OldRedditTabsRow role="tablist" aria-label="Follows sections">

@@ -14,7 +14,6 @@ import AuthPageShell, {
   AuthStack,
   AuthSubtlePanel,
 } from "../components/AuthPageShell.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { getMaxInputLength } from "../../../utils/chainParams";
 import { formatError } from "../../../utils/errorMessages";
@@ -211,13 +210,11 @@ function CreateAccountView({
       </Helmet>
       <div>
         <ModernPostFeed>
-          <MobileHeader />
           <AuthPageShell
             activeTab="create"
             eyebrow="Mirage onboarding"
             title={title}
             description={body}
-            icon="⚠️"
             footer={footer}
           >
             <AuthSubtlePanel>
@@ -252,13 +249,11 @@ function CreateAccountView({
       </Helmet>
       <div>
         <ModernPostFeed>
-          <MobileHeader />
           <AuthPageShell
             activeTab="create"
             eyebrow={fromRecovery ? "Recovery setup" : "Join Mirage"}
             title={pageTitle}
             description={pageDescription}
-            icon="✨"
             footer={footer}
           >
             <AuthStack as="form" onSubmit={handleContinue}>

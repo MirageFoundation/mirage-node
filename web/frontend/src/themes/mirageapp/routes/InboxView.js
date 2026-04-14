@@ -10,7 +10,6 @@ import {
     HiOutlineBellAlert,
     HiExclamationTriangle,
 } from "react-icons/hi2";
-import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -477,7 +476,6 @@ export default function InboxView({ state }) {
             </Helmet>
             <div>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <TabbedContainer>
                         <ContainerTab>Inbox</ContainerTab>
                         <ContainerBody $fullWidth>

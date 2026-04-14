@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styled from 'styled-components';
+import { useLocation } from 'react-router-dom';
 import { HiBars3 } from 'react-icons/hi2';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
-import MobileBottomNav from './components/MobileBottomNav';
 import Storage from '../../utils/Storage';
 
 /**
@@ -44,6 +44,7 @@ const Layout = styled.div`
     max-width: 1400px;
     margin: 0 auto;
     gap: 0;
+    overflow: visible;
     transition: grid-template-columns 0.18s ease;
     /* Always fill at least the viewport height below the TopBar so the
        vertical divider (and the sidebar column) never get visually cut
@@ -143,11 +144,54 @@ const Main = styled.main.attrs(({ $hidden }) => ({
     }
 
     @media (max-width: 600px) {
-        padding: 0 0.75rem 80px;
+        padding: 0 0.75rem 1.5rem;
+    }
+`;
+
+const DrawerOverlay = styled.div`
+    display: none;
+
+    @media (max-width: 1000px) {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        background: rgba(0, 0, 0, 0.5);
+        opacity: ${({ $open }) => ($open ? 1 : 0)};
+        pointer-events: ${({ $open }) => ($open ? 'auto' : 'none')};
+        transition: opacity 0.2s ease;
+    }
+`;
+
+const DrawerPanel = styled.div`
+    display: none;
+
+    @media (max-width: 1000px) {
+        display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 260px;
+        z-index: 201;
+        background: ${({ theme }) => theme.colors.bg};
+        border-right: 1px solid ${({ theme }) => theme.colors.headerBorder};
+        transform: translateX(${({ $open }) => ($open ? '0' : '-100%')});
+        transition: transform 0.2s ease;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+
+        & > aside {
+            display: block !important;
+            position: static;
+            width: 100%;
+            max-height: none;
+        }
     }
 `;
 
 export default function MirageAppShell({ children, state }) {
+    const location = useLocation();
     const [hidden, setHidden] = useState(() => {
         try {
             return Storage.load(SIDEBAR_HIDDEN_KEY, false) === true;
@@ -160,13 +204,29 @@ export default function MirageAppShell({ children, state }) {
         try { Storage.save(SIDEBAR_HIDDEN_KEY, hidden); } catch (_) {}
     }, [hidden]);
 
+    const [drawerOpen, setDrawerOpen] = useState(false);
+
+    useEffect(() => {
+        setDrawerOpen(false);
+    }, [location.pathname]);
+
+    useEffect(() => {
+        const onToggle = () => setDrawerOpen(v => !v);
+        window.addEventListener('mirageToggleDrawer', onToggle);
+        return () => window.removeEventListener('mirageToggleDrawer', onToggle);
+    }, []);
+
     const toggleSidebar = useCallback(() => {
         setHidden(v => !v);
     }, []);
 
+    const toggleDrawer = useCallback(() => {
+        setDrawerOpen(v => !v);
+    }, []);
+
     return (
         <ShellRoot>
-            <TopBar state={state} />
+            <TopBar state={state} onToggleSidebar={toggleSidebar} onToggleDrawer={toggleDrawer} sidebarHidden={hidden} />
             <Layout $hidden={hidden}>
                 <SidebarCol $hidden={hidden} aria-hidden={hidden}>
                     <Sidebar state={state} />
@@ -184,7 +244,10 @@ export default function MirageAppShell({ children, state }) {
                 </DividerCol>
                 <Main $hidden={hidden}>{children}</Main>
             </Layout>
-            <MobileBottomNav state={state} />
+            <DrawerOverlay $open={drawerOpen} onClick={() => setDrawerOpen(false)} />
+            <DrawerPanel $open={drawerOpen}>
+                <Sidebar state={state} />
+            </DrawerPanel>
         </ShellRoot>
     );
 }

@@ -2,7 +2,6 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody, CappedPageColumn, OldRedditContentBleed } from "../Layout";
 import { useDiscover, tagColors } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
@@ -191,7 +190,6 @@ export default function DiscoverView({
             <title>Topics | Mirage</title>
         </Helmet>
         <ModernPostFeed>
-            <MobileHeader />
             <CappedPageColumn>
                 <TopicsSearchStrip>
                     <TopicsSearchInner>

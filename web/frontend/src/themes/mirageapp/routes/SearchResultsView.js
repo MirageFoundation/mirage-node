@@ -9,7 +9,6 @@ import {
     HiOutlineMagnifyingGlass,
     HiExclamationTriangle,
 } from "react-icons/hi2";
-import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import CardView from "../components/CardView.js";
@@ -444,7 +443,6 @@ export default function SearchResultsView({ state }) {
             </Helmet>
             <div>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <TabbedContainer>
                         <ContainerTab>Search</ContainerTab>
                         <ContainerBody $fullWidth>
@@ -464,7 +462,6 @@ export default function SearchResultsView({ state }) {
                 </Helmet>
                 <div>
                     <ModernPostFeed>
-                        <MobileHeader />
                         <LoggedOutPromptCard
                             role="region"
                             aria-label="Search on Mirage"
@@ -490,7 +487,6 @@ export default function SearchResultsView({ state }) {
                             inviteText="Have an invite code? Join the community today."
                             primaryLabel="Create account"
                             secondaryLabel="Sign in"
-                            emoji="✨"
                         />
                     </ModernPostFeed>
                 </div>

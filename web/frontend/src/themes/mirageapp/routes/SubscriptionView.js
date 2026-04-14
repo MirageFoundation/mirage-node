@@ -2,7 +2,6 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { formatMirage, formatMirageCompact } from "../../../utils/formatters";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from "../../../logic/useSubscription";
@@ -421,7 +420,6 @@ function SubscriptionPageShell({
             <title>Subscription | Mirage</title>
         </Helmet>
         <ModernPostFeed>
-            <MobileHeader />
             <CappedPageColumn>
                 <SubscriptionTabbedContainer>
                     <SubscriptionShellBody>

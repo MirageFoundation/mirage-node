@@ -2,7 +2,6 @@ import React from "react";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
 import { useStats, TIER_NAMES, TIER_COLORS, InfoIcon } from "../../../logic/useStats";
@@ -370,7 +369,6 @@ export default function StatsView() {
                 </Helmet>
                 <div>
                     <ModernPostFeed>
-                        <MobileHeader />
                         <OldRedditContentBleed>
                             <OldRedditTabsStrip>
                                 <OldRedditTabsRow role="tablist" aria-label="Stats sections">
@@ -491,7 +489,6 @@ export default function StatsView() {
             </Helmet>
             <div>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <OldRedditContentBleed>
                         <OldRedditTabsStrip>
                             <OldRedditTabsRow role="tablist" aria-label="Stats sections">

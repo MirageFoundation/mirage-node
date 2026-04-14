@@ -1,7 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link, useParams } from "react-router-dom";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed } from "../Layout";
 import { useReferrals, compareISOWeeks, shiftISOWeek, formatWeekRange } from "../../../logic/useReferrals";
 
@@ -242,7 +241,6 @@ function ReferralsView({ state }) {
         <Helmet><title>{pageTitle}</title></Helmet>
         <div>
             <ModernPostFeed>
-                <MobileHeader />
                 <OldRedditContentBleed>
                     <ControlsBox>
                         <ControlsRow>
