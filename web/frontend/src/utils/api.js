@@ -160,14 +160,6 @@ function withInboxLastViewed(params) {
     }
 }
 
-let _seenModule = null;
-function _loadSeenModule() {
-    if (_seenModule) return _seenModule;
-    try {
-        _seenModule = require('../logic/useSeenPosts');
-    } catch (_) { /* noop */ }
-    return _seenModule;
-}
 
 async function readErrorDetail(resp) {
     if (!resp) return 'request failed';
@@ -206,26 +198,7 @@ async function readErrorDetail(resp) {
  * @param {RequestOptions=} options
  */
 async function get(path, params, options) {
-    let seenBatch = null;
-    let finalParams = withInboxLastViewed(params);
-    try {
-        if (path === 'get_posts' && finalParams && typeof finalParams === 'object') {
-            const seenMod = _loadSeenModule();
-            if (seenMod && typeof seenMod.drainSeenBatch === 'function') {
-                seenBatch = await seenMod.drainSeenBatch();
-                if (seenBatch && seenBatch.encoded) {
-                    finalParams = {
-                        ...finalParams,
-                        seen: seenBatch.encoded,
-                        seen_pubkey: seenBatch.sig?.pubkey,
-                        seen_signature: seenBatch.sig?.signature,
-                        seen_timestamp: seenBatch.sig?.timestamp,
-                        seen_envelope_nonce: seenBatch.sig?.envelope_nonce,
-                    };
-                }
-            }
-        }
-    } catch (_) { /* noop */ }
+    const finalParams = withInboxLastViewed(params);
     const url = buildUrl(path, finalParams);
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
@@ -246,16 +219,6 @@ async function get(path, params, options) {
         }
         const detail = await readErrorDetail(resp);
         throw new Error(`HTTP ${resp && typeof resp.status === 'number' ? resp.status : 'ERR'}: ${detail}`);
-    } catch (err) {
-        if (seenBatch) {
-            try {
-                const seenMod = _loadSeenModule();
-                if (seenMod && typeof seenMod.restoreSeenBatch === 'function') {
-                    seenMod.restoreSeenBatch(seenBatch);
-                }
-            } catch (_) { /* noop */ }
-        }
-        throw err;
     } finally {
         clearTimeout(id);
     }

@@ -103,10 +103,6 @@ function _buildUrl(path) {
     return new URL(base + '/' + p, window.location.origin).toString();
 }
 
-function _encodeEntries(entries) {
-    return entries.map((entry) => `${entry.id}:${entry.reason}`).join(",");
-}
-
 function _ensureFlushInterval() {
     if (_flushInterval) return;
     _flushInterval = setInterval(() => {
@@ -133,16 +129,16 @@ function markSeen(pid, reason) {
     }
 }
 
-export async function drainSeenBatch() {
+async function _drainSeenBatch() {
     if (_drainLock || _seenBuffer.length === 0) return null;
     const addr = _getAddress();
     if (!addr || addr === "guest") return null;
     _drainLock = true;
     const entries = _seenBuffer.splice(0, MAX_BUFFER);
-    _LOG(`DRAIN  ${entries.length} entries → piggyback`);
+    _LOG(`DRAIN  ${entries.length} entries`);
     try {
         const sig = await signPlainPayload((ts, n) => `seen_posts:${addr}:${ts}:${n}`);
-        return { address: addr, entries, sig, encoded: _encodeEntries(entries) };
+        return { address: addr, entries, sig };
     } catch (_) {
         _seenBuffer = entries.concat(_seenBuffer);
         _LOG("DRAIN  sign failed, restored to buffer");
@@ -152,7 +148,7 @@ export async function drainSeenBatch() {
     }
 }
 
-export function restoreSeenBatch(batch) {
+function _restoreSeenBatch(batch) {
     if (!batch || !Array.isArray(batch.entries) || batch.entries.length === 0) return;
     const existing = new Set(_seenBuffer.map((entry) => entry.id));
     const restored = batch.entries.filter((entry) => !existing.has(entry.id));
@@ -175,7 +171,7 @@ export function markPostReplied(pid) {
 }
 
 async function flushSeenBeacon() {
-    const batch = await drainSeenBatch();
+    const batch = await _drainSeenBatch();
     if (!batch) return;
     try {
         const payload = JSON.stringify({
@@ -189,11 +185,11 @@ async function flushSeenBeacon() {
         );
         _LOG(`BEACON  ${batch.entries.length} posts → ${ok ? "sent ✓" : "FAILED ✗"}`);
         if (!ok) {
-            restoreSeenBatch(batch);
+            _restoreSeenBatch(batch);
         }
     } catch (e) {
         _LOG("BEACON  error:", e.message);
-        restoreSeenBatch(batch);
+        _restoreSeenBatch(batch);
     }
 }
 

@@ -6,22 +6,21 @@ This document defines the viewability protocol that clients (web and mobile) mus
 
 ```
 Client                              Server
-┌──────────────────────┐           ┌───────────────────────────┐
-│ IntersectionObserver  │           │ GET /api/get_posts        │
-│ or onViewableItems    │           │   ?feed=home              │
-│         ↓             │           │   &seen=<id:reason,...>   │
-│ State machine:        │  ──────> │         ↓                 │
-│  not_seen → exposed   │           │ 1. Ingest seen IDs        │
-│           → seen      │           │ 2. Load seen set (cached) │
-│         ↓             │           │ 3. Filter candidates      │
-│ In-memory buffer      │           │ 4. Return fresh posts     │
+┌───────────────────────┐
+│ IntersectionObserver  │           ┌───────────────────────────┐
+│ or onViewableItems    │           │ POST /api/seen_posts      │
+│         ↓             │           │                           │
+│ State machine:        │  ──────>  │ 1. Ingest seen IDs        │
+│  not_seen → exposed   │           │ 2. Update view counts     │
+│           → seen      │           │                           │
 │         ↓             │           └───────────────────────────┘
-│ Piggyback on next     │
-│ get_posts request     │           ┌───────────────────────────┐
-│         ↓             │           │ POST /api/seen_posts      │
-│ sendBeacon / onPause  │  ──────> │ (fallback flush endpoint) │
-│ flush on background   │           └───────────────────────────┘
-└──────────────────────┘
+│ In-memory buffer      │
+│         ↓             │           ┌───────────────────────────┐
+│ 3s periodic flush     │           │ GET /api/get_posts        │
+│ + background/pagehide │           │ 1. Load seen map (cached) │
+│                       │           │ 2. Filter candidates      │
+│                       │           │ 3. Return fresh posts     │
+└───────────────────────┘           └───────────────────────────┘
 ```
 
 ## Post ID Format
@@ -63,38 +62,17 @@ not_seen ──→ exposed ──→ seen
 
 ## Reporting Protocol
 
-### Primary: Piggyback on `get_posts`
-
-When the client makes a feed request, attach buffered seen IDs as a query parameter (include the reason per entry):
-
-```
-GET /api/get_posts?feed=home&page=1&address=mirage1...&seen=<txhash>:open,<txhash>:glance
-```
-
-- Comma-separated `id:reason` pairs (full txhash)
-- Maximum **100 IDs** per request
-- The server ingests them as a side-effect and filters them from the response
-- Piggyback works on **all** `get_posts` calls (any feed). Ingestion always happens; server-side filtering of seen posts currently applies to **home** and **following** feeds only.
-- **Zero extra HTTP requests** — the data rides along with requests you're already making
-
-Requests must include a signed payload to authenticate the address:
-
-```
-seen_pubkey=<base64 pubkey>
-seen_signature=<base64 signature>
-seen_timestamp=<ms>
-seen_envelope_nonce=<uint64>
-```
-
-Signature payload string (client-side):
+All seen reports must be signed. Signature payload string (client-side):
 
 ```
 seen_posts:<address-lowercase>:<timestamp-ms>:<envelope_nonce>
 ```
 
-### Fallback: Beacon flush on background
+Include `pubkey`, `signature`, `timestamp`, and `envelope_nonce` in the POST body.
 
-When the app goes to background (tab close, app pause), flush any remaining buffered IDs via:
+### Delivery: Periodic beacon flush (every 3 seconds)
+
+A global 3-second interval timer flushes the buffer via `POST /api/seen_posts` whenever it has entries. This timer fires continuously regardless of which screen the user is on. It also fires immediately on app background / tab hide / page close.
 
 ```
 POST /api/seen_posts
@@ -113,21 +91,13 @@ Content-Type: application/json
 }
 ```
 
-- Web: use `navigator.sendBeacon()` on `visibilitychange` / `pagehide`
-- Mobile: call this endpoint from `onPause` or equivalent lifecycle callback
-- **Periodic flush**: In addition to background-triggered flushes, run a **3-second interval timer** that flushes the buffer if non-empty. This timer should start on the first `markSeen` call and run for the lifetime of the app session (not tied to any single screen).
+- Web: use `navigator.sendBeacon()` for the POST
+- Mobile: use a standard HTTP POST
+- The timer starts on the first `markSeen` call and runs for the lifetime of the app session (not tied to any single screen)
 - Maximum **100 entries** per batch
 - Response: `{"ok": true, "ingested": <count>}`
 
 ## Mobile Implementation Guide
-
-Seen reporting must be signed. Use the user's key to sign the payload string:
-
-```
-seen_posts:<address-lowercase>:<timestamp-ms>:<envelope_nonce>
-```
-
-Include `pubkey`, `signature`, `timestamp`, and `envelope_nonce` with both piggyback GET requests and the beacon POST.
 
 ### React Native (FlatList / FlashList)
 

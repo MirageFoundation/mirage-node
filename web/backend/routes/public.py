@@ -31,7 +31,7 @@ from flask import Blueprint, jsonify, request, has_request_context
 from error_utils import safe_error, api_error_code
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
-from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id, parse_seen_param
+from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from user_last_seen import update_user_last_seen
 from params import load_params, expect_params
 from settings import (
@@ -5028,25 +5028,6 @@ def get_posts():
                     persisted_seen = get_seen_map(address)
                 except Exception:
                     logger.debug("get_posts.seen_load.err addr=%s", address[:12])
-
-            # ── Seen-posts: piggyback ingestion ──────────────────────
-            seen_raw = request.args.get("seen", default="", type=str)
-            seen_entries = parse_seen_param(seen_raw) if seen_raw else []
-            if seen_entries and address and address.lower() != "guest":
-                pub_b64 = request.args.get("seen_pubkey", default="", type=str)
-                sig_b64 = request.args.get("seen_signature", default="", type=str)
-                ts_raw = request.args.get("seen_timestamp")
-                nonce_raw = request.args.get("seen_envelope_nonce")
-                user_addr, err = _verify_seen_signature(address, pub_b64, sig_b64, ts_raw, nonce_raw)
-                if not user_addr:
-                    conn.close()
-                    return jsonify({"error": err or "invalid seen signature"}), 400
-                for pid, _ in seen_entries:
-                    persisted_seen[pid] = persisted_seen.get(pid, 0) + 1
-                try:
-                    ingest_seen_batch(user_addr, seen_entries)
-                except Exception:
-                    logger.debug("get_posts.seen_ingest.err addr=%s", address[:12])
 
             # Home feed uses new similarity-based algorithm
             if feed == "home":
