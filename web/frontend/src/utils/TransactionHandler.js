@@ -581,17 +581,14 @@ class TransactionHandler {
                             const latestForReturned = this._latestVoteTxByTarget.get(tLower);
                             if (latestForReturned && latestForReturned !== String(txHash).toLowerCase()) return;
                         }
-                        const serverPoints = details.target_points;
-                        if (typeof serverPoints === 'number' && this.updatePost && this.getPost) {
+                        if (this.updatePost && this.getPost) {
                             let postKey = tLower;
                             if (!this.getPost(tLower)) {
                                 const exactKey = String(target).trim();
                                 if (this.getPost(exactKey)) postKey = exactKey;
                             }
-                            // Update points, direction, and user_weight from server
                             const serverDir = vote > 0 ? 1 : (vote < 0 ? -1 : 0);
-                            const updateData = { points: serverPoints, direction: serverDir };
-                            // Include user_weight so VoteSection formula calculates correctly
+                            const updateData = { direction: serverDir };
                             if (typeof weight === 'number') {
                                 updateData.user_weight = weight;
                             }

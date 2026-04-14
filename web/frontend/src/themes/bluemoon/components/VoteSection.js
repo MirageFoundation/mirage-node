@@ -65,7 +65,7 @@ const VoteButton = styled.button`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     padding: 0;
 
     &:hover {

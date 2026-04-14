@@ -1,24 +1,27 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, memo } from 'react';
 import { PostGrid, AnimatedCard } from './Layout';
 import CardView from './components/CardView';
 import { useSeenPosts } from '../../logic/useSeenPosts';
 
+const ObservedCard = memo(React.forwardRef(function ObservedCard(
+    { postId, observePost, unobservePost, children, ...rest },
+    _fwdRef,
+) {
+    const ref = useRef(null);
+    useEffect(() => {
+        const el = ref.current;
+        if (el) observePost(el);
+        return () => { if (el) unobservePost(el); };
+    }, [observePost, unobservePost]);
+    return (
+        <AnimatedCard ref={ref} data-post-id={postId} {...rest}>
+            {children}
+        </AnimatedCard>
+    );
+}));
+
 export default function BlueMoonFeedView({ posts, state, updatePost, hidingPostsSet, flashingPostsSet, viewerAddress }) {
     const { observePost, unobservePost } = useSeenPosts();
-
-    function ObservedCard({ postId, children, ...rest }) {
-        const ref = useRef(null);
-        useEffect(() => {
-            const el = ref.current;
-            if (el) observePost(el);
-            return () => { if (el) unobservePost(el); };
-        }, [observePost, unobservePost]);
-        return (
-            <AnimatedCard ref={ref} data-post-id={postId} {...rest}>
-                {children}
-            </AnimatedCard>
-        );
-    }
 
     if (!posts || posts.length === 0) return null;
 
@@ -48,6 +51,8 @@ export default function BlueMoonFeedView({ posts, state, updatePost, hidingPosts
                     <ObservedCard
                         key={post.post_id}
                         postId={post.post_id}
+                        observePost={observePost}
+                        unobservePost={unobservePost}
                         $hiding={isHiding}
                         $flash={isFlashing}
                         style={{
