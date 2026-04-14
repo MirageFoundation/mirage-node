@@ -56,8 +56,8 @@ const Input = styled.input`
 
     &:focus {
         outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        box-shadow: none;
     }
 `;
 

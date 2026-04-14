@@ -44,11 +44,11 @@ const mirageappDarkColors = {
     surface2: '#1c2026',
     surface3: '#232830',
     borderSubtle: '#1f242b',
-    borderStrong: '#3a4049',
+    borderStrong: '#525b66',
     textSecondary: '#98989D',
     inputBackground: '#1c2026',
     accentSubtle: '#15181d',
-    cardHoverBorder: '#3a4049',
+    cardHoverBorder: '#525b66',
 
     // Inbox reply rows — mobile-app style: transparent read rows on the bg
     // canvas, a lifted neutral tile on unread rows. Colors from UI review.
@@ -279,7 +279,8 @@ function buildLayout(colors) {
     return {
         // Form rows
 
-        fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+        contentFontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
         formRowColumns: 'minmax(140px, 260px) minmax(0, 1fr)',
         formRowGap: '0.25rem',
         formRowMargin: '0.15rem 0',
@@ -462,7 +463,8 @@ function buildLayout(colors) {
 export const dark = {
     name: 'dark',
     themeId: 'mirageapp',
-    fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    contentFontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
     colors: mirageappDarkColors,
     layout: buildLayout(mirageappDarkColors),
 };
@@ -470,7 +472,8 @@ export const dark = {
 export const light = {
     name: 'light',
     themeId: 'mirageapp',
-    fontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    contentFontFamily: "Verdana, Geneva, 'DejaVu Sans', sans-serif",
     colors: mirageappLightColors,
     layout: buildLayout(mirageappLightColors),
 };

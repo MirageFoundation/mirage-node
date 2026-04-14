@@ -6,6 +6,7 @@ import { visit } from "unist-util-visit";
 import InlineMedia from "./InlineMedia";
 
 const Container = styled.div`
+	font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
 	/* Headers with underline */
 	& h1, & h2, & h3, & h4, & h5, & h6 {
 		margin: 1rem 0 0.5rem 0;

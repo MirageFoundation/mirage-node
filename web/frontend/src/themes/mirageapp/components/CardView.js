@@ -260,6 +260,7 @@ const TitleLink = styled(Link)`
 
 const Body = styled.div`
     color: ${({ theme }) => theme.colors.text};
+    font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
     font-size: 0.74rem;
     line-height: 1.5;
     word-break: break-word;

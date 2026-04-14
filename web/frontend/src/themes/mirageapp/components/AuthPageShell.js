@@ -226,8 +226,8 @@ const fieldStyles = css`
 
     &:focus {
         outline: none;
-        border-color: ${({ theme }) => theme.colors.focusBlue || theme.colors.link};
-        box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.16);
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        box-shadow: none;
         background: ${({ theme }) => getInputHoverBg(theme)};
     }
 

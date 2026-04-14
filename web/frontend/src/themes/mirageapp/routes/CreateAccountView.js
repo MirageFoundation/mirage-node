@@ -147,7 +147,7 @@ const PreviewBadge = styled.span`
 `;
 
 const PrimaryButton = styled(Button)`
-  border: 1px solid rgba(102, 126, 234, 0.45) !important;
+  border: ${({ theme }) => theme.name === 'dark' ? '0.5px' : '1px'} solid rgba(102, 126, 234, 0.45) !important;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
   box-shadow: 0 6px 16px rgba(102, 126, 234, 0.22) !important;
 
