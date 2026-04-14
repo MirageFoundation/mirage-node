@@ -1,24 +1,8 @@
-import React, { useEffect, useRef, memo } from 'react';
+import React from 'react';
 import { PostGrid, AnimatedCard } from './Layout';
 import CardView from './components/CardView';
+import ObservedCard from '../../components/ObservedCard';
 import { useSeenPosts } from '../../logic/useSeenPosts';
-
-const ObservedCard = memo(React.forwardRef(function ObservedCard(
-    { postId, observePost, unobservePost, children, ...rest },
-    _fwdRef,
-) {
-    const ref = useRef(null);
-    useEffect(() => {
-        const el = ref.current;
-        if (el) observePost(el);
-        return () => { if (el) unobservePost(el); };
-    }, [observePost, unobservePost]);
-    return (
-        <AnimatedCard ref={ref} data-post-id={postId} {...rest}>
-            {children}
-        </AnimatedCard>
-    );
-}));
 
 export default function OnyxFeedView({ posts, state, updatePost, hidingPostsSet, flashingPostsSet, viewerAddress }) {
     const { observePost, unobservePost } = useSeenPosts();
@@ -51,6 +35,7 @@ export default function OnyxFeedView({ posts, state, updatePost, hidingPostsSet,
                     <ObservedCard
                         key={post.post_id}
                         postId={post.post_id}
+                        CardComponent={AnimatedCard}
                         observePost={observePost}
                         unobservePost={unobservePost}
                         $hiding={isHiding}
