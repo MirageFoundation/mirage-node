@@ -106,6 +106,8 @@ const DownIcon = (props) => (
     </svg>
 );
 
+function _voteClick(e, fn) { fn(); if (e.currentTarget) e.currentTarget.blur(); }
+
 function OldRedditVoteSection({ state, post, updatePost, showToggle = true, inline = false }) {
     const { handleVote, isPending, isLocallyPending } = useVoteHandler({ state, updatePost });
 
@@ -118,11 +120,11 @@ function OldRedditVoteSection({ state, post, updatePost, showToggle = true, inli
     if (inline) {
         return (
             <InlineVoteArea>
-                <VoteButton $up $active={upActive} disabled={hasPendingVote} onClick={() => handleVote(post, +1)}>
+                <VoteButton $up $active={upActive} disabled={hasPendingVote} onClick={(e) => _voteClick(e, () => handleVote(post, +1))}>
                     <UpIcon />
                 </VoteButton>
                 <InlineVoteCount>{displayVotes}</InlineVoteCount>
-                <VoteButton $active={downActive} disabled={hasPendingVote} onClick={() => handleVote(post, -1)}>
+                <VoteButton $active={downActive} disabled={hasPendingVote} onClick={(e) => _voteClick(e, () => handleVote(post, -1))}>
                     <DownIcon />
                 </VoteButton>
             </InlineVoteArea>
@@ -142,23 +144,23 @@ function OldRedditVoteSection({ state, post, updatePost, showToggle = true, inli
                 </CollapseToggle>
             )}
             {!isComment && (
-                <VoteButton $up $active={upActive} disabled={hasPendingVote} onClick={() => handleVote(post, +1)}>
+                <VoteButton $up $active={upActive} disabled={hasPendingVote} onClick={(e) => _voteClick(e, () => handleVote(post, +1))}>
                     <UpIcon />
                 </VoteButton>
             )}
             {isComment && !isCollapsed && (
-                <VoteButton $up $active={upActive} disabled={hasPendingVote} onClick={() => handleVote(post, +1)}>
+                <VoteButton $up $active={upActive} disabled={hasPendingVote} onClick={(e) => _voteClick(e, () => handleVote(post, +1))}>
                     <UpIcon />
                 </VoteButton>
             )}
             {!isComment && <VoteCount>{displayVotes}</VoteCount>}
             {!isComment && (
-                <VoteButton $active={downActive} disabled={hasPendingVote} onClick={() => handleVote(post, -1)}>
+                <VoteButton $active={downActive} disabled={hasPendingVote} onClick={(e) => _voteClick(e, () => handleVote(post, -1))}>
                     <DownIcon />
                 </VoteButton>
             )}
             {isComment && !isCollapsed && (
-                <VoteButton $active={downActive} disabled={hasPendingVote} onClick={() => handleVote(post, -1)}>
+                <VoteButton $active={downActive} disabled={hasPendingVote} onClick={(e) => _voteClick(e, () => handleVote(post, -1))}>
                     <DownIcon />
                 </VoteButton>
             )}
