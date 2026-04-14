@@ -1,6 +1,6 @@
 # Seen Posts Tracking — Integration Guide
 
-This document defines the viewability protocol that clients (web and mobile) must implement to track which posts a user has seen, so the server can filter them from future feed responses.
+This document defines the viewability protocol that clients (web and mobile) must implement to track which posts a user has seen, so the server can downrank them in future feed responses.
 
 ## Architecture
 
@@ -18,10 +18,31 @@ Client                              Server
 │         ↓             │           ┌───────────────────────────┐
 │ 3s periodic flush     │           │ GET /api/get_posts        │
 │ + background/pagehide │           │ 1. Load seen map (cached) │
-│                       │           │ 2. Filter candidates      │
-│                       │           │ 3. Return fresh posts     │
+│                       │           │ 2. Score with novelty (N) │
+│                       │           │ 3. Return ranked posts    │
 └───────────────────────┘           └───────────────────────────┘
 ```
+
+## How Seen Data Affects the Feed
+
+Seen posts are **not filtered** from feed responses. Instead, the server applies a **novelty factor (N)** that downranks previously-seen content:
+
+```
+N = 1 / (1 + 3 × view_count)
+```
+
+| view_count | N      | Effect on a post with base score 12 |
+|------------|--------|-------------------------------------|
+| 0 (unseen) | 1.000 | 12.00 — full score                  |
+| 1          | 0.250  | 3.00 — strong downrank              |
+| 2          | 0.143  | 1.71                                |
+| 3          | 0.100  | 1.20                                |
+
+- **Magic feeds**: final score = `(S + V + U + P + A) × R × N`
+- **Newest feeds**: posts are reordered by `timestamp × N`, so seen posts drift down while still appearing
+- **All feed modes** (home, following, topic, all) apply the novelty factor
+- Seen posts **can still appear** even when unseen posts exist — they just rank lower
+- The `feed_debug` object in each post includes `N` and `seen_count` for transparency
 
 ## Post ID Format
 
@@ -153,15 +174,14 @@ useEffect(() => {
 
 - **Bounded retries**: Maximum 2 retries for the beacon/flush endpoint. Drop buffer after that.
 - **No infinite loops**: If flush fails twice, discard the buffer and move on.
-- **Graceful degradation**: If seen tracking fails entirely, the feed still works — users just see some repeat posts.
+- **Graceful degradation**: If seen tracking fails entirely, the feed still works — users just see some repeat posts (with full scores, since N defaults to 1.0).
 - **No blocking**: Seen ingestion must never block the feed response or the UI thread.
 
 ## Server Behavior
 
 - The server stores full post IDs per user and keeps only the **most recent 1000** entries (deque semantics).
 - Each seen entry tracks a **view count** that increments on every subsequent report of the same post. Re-sending an already-seen ID is not a no-op — it bumps the counter and refreshes the timestamp.
-- On feed requests, the server loads the user's seen map and filters matching candidates from the response.
-- The user's **own posts from the last hour are never filtered**. Own posts older than 1 hour are treated like any other post (subject to seen filtering, tag filtering, etc.).
-- Guest users have no seen tracking.
-- If all candidates are seen, the server reintroduces seen posts **sorted by view count ascending** (least-viewed first) to avoid empty feeds.
+- On feed requests, the server loads the user's seen map and applies a **novelty multiplier** `N = 1 / (1 + 3 × view_count)` to downrank seen content. Seen posts are never hard-filtered.
+- The user's **own posts from the last hour** are always included in the feed. Own posts older than 1 hour are treated like any other post.
+- Guest users have no seen tracking (N = 1.0 for all posts).
 - The seen map (post ID → view count) is cached in-memory on the server (120s TTL) so repeated page loads don't hit the database.

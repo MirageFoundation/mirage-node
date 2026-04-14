@@ -1228,11 +1228,10 @@ def _load_following_candidates(
     max_candidates: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
-    seen_posts: dict[str, int] | None = None,
-) -> tuple[list[dict], set[str], set[str], list[dict]]:
+) -> tuple[list[dict], set[str], set[str]]:
     """
     Load candidate posts for the following feed.
-    Returns (candidates, followed_topics, followed_users, seen_fallback).
+    Returns (candidates, followed_topics, followed_users).
     """
     cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner) = %s", (viewer_lower,))
     followed_topics = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
@@ -1288,9 +1287,6 @@ def _load_following_candidates(
     )
 
     seen: set[str] = set()
-    seen_stats = {"filtered": 0}
-    seen_fallback: list[dict] = []
-    seen_fallback_ids: set[str] = set()
     candidates: list[dict] = []
     for row in cur.fetchall():
         post = _row_to_post(
@@ -1302,22 +1298,12 @@ def _load_following_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer_lower,
-            persisted_seen=seen_posts,
-            seen_stats=seen_stats,
-            seen_fallback=seen_fallback,
-            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "following"
             candidates.append(post)
 
-    if seen_stats.get("filtered"):
-        logger.debug(
-            "seen_posts.filtered feed=following viewer=%s count=%d",
-            viewer_lower[:12],
-            seen_stats["filtered"],
-        )
-    return candidates, followed_topics, followed_users, seen_fallback
+    return candidates, followed_topics, followed_users
 
 
 def _get_following_feed(
@@ -1358,15 +1344,9 @@ def _get_following_feed(
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    seen_count = len(seen_posts) if seen_posts else 0
-    base_factor = 4
-    if seen_count > 0:
-        seen_ratio = min(seen_count / max(1, 200), 0.8)
-        factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
-    else:
-        factor = base_factor
+    factor = _seen_overfetch_factor(seen_posts, 4)
     max_candidates = limit * page * factor
-    candidates, followed_topics, followed_users, seen_fallback = _load_following_candidates(
+    candidates, followed_topics, followed_users = _load_following_candidates(
         cur,
         viewer_lower,
         blocked_posts,
@@ -1375,25 +1355,29 @@ def _get_following_feed(
         max_candidates,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
-        seen_posts=seen_posts,
     )
 
-    if not candidates and not seen_fallback:
+    if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # ── Newest: fast path (no scoring) ──────────────────────────────
+    # ── Newest: chronological with seen-novelty reordering ──────────
     if sort_mode == "newest":
-        need = limit * page + 1
-        if len(candidates) < need and seen_fallback:
-            seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
-            candidates.extend(seen_fallback)
-        # Already chronological from DB query
+        if seen_posts:
+            for c in candidates:
+                vc = seen_posts.get(c["post_id"], 0)
+                c["_N"] = _novelty_factor(vc)
+                c["_seen_count"] = vc
+            candidates.sort(key=lambda c: -(c.get("timestamp", 0) * c["_N"]))
+        else:
+            for c in candidates:
+                c["_N"] = 1.0
+                c["_seen_count"] = 0
+
         start = (page - 1) * limit
         end = start + limit
         page_posts = candidates[start:end] if start < len(candidates) else []
         has_more = len(candidates) > end
 
-        # Only load stats for the page slice
         page_ids = [p["post_id"] for p in page_posts]
         vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
             cur, page_ids, blocked_posts, blocked_users, viewer_lower
@@ -1402,6 +1386,8 @@ def _get_following_feed(
 
         for post in page_posts:
             pid = post["post_id"]
+            sc = post.pop("_seen_count", 0)
+            n_val = post.pop("_N", 1.0)
             author_lower = (post.get("author") or "").strip().lower()
             is_own = author_lower == viewer_lower
             by_followed_user = author_lower in followed_users if author_lower else False
@@ -1412,6 +1398,8 @@ def _get_following_feed(
                 reason = "From a followed user"
             else:
                 reason = "From a followed topic"
+            if sc > 0:
+                reason += " · You've seen this before"
 
             post["points"] = vote_totals.get(pid, 0.0)
             post["comments"] = comment_counts.get(pid, 0)
@@ -1419,7 +1407,12 @@ def _get_following_feed(
             post["children"] = []
             post["feed_type"] = "following"
             post["feed_bucket"] = "newest"
-            post["feed_debug"] = {"reason": reason, "bucket": "newest"}
+            post["feed_debug"] = {
+                "reason": reason,
+                "bucket": "newest",
+                "N": round(n_val, 4),
+                "seen_count": sc,
+            }
             post["user_vote"] = user_votes.get(pid, 0)
             post["user_weight"] = user_weight_map.get(pid, 0.0)
 
@@ -1430,10 +1423,6 @@ def _get_following_feed(
             "limit": limit,
             "has_more": has_more,
         }
-
-    if len(candidates) < (limit * page) and seen_fallback:
-        seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
-        candidates.extend(seen_fallback)
 
     # ── Magic: full scoring path ────────────────────────────────────
     post_ids = [c["post_id"] for c in candidates]
@@ -1453,6 +1442,7 @@ def _get_following_feed(
     topic_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
 
+    seen_penalized = 0
     for post in candidates:
         pid = post["post_id"]
         pts = float(vote_totals.get(pid, 0.0) or 0.0)
@@ -1479,9 +1469,13 @@ def _get_following_feed(
             False,
             unique_awarders,
             viewer=viewer_lower,
+            seen_posts=seen_posts,
         )
         if should_hide:
             continue
+
+        if debug.get("seen_count", 0) > 0:
+            seen_penalized += 1
 
         if is_own_post:
             reason = "Your post"
@@ -1502,6 +1496,12 @@ def _get_following_feed(
         post["user_weight"] = user_weight_map.get(pid, 0.0)
         debug["follow_reason"] = reason
         post["feed_debug"] = debug
+
+    if seen_penalized:
+        logger.debug(
+            "seen_penalty feed=following.magic viewer=%s penalized=%d/%d",
+            viewer_lower[:12], seen_penalized, len(candidates),
+        )
 
     candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
 
@@ -1540,15 +1540,15 @@ def _get_home_feed(
     Home feed.
 
     Sort modes:
-    - magic: Magic (unified score + reasons)
-    - newest: chronological ordering with the same debug breakdown
+    - magic: Magic (unified score + reasons + novelty penalty)
+    - newest: chronological with seen-novelty reordering
     """
     viewer_lower = viewer.strip().lower() if viewer else ""
     sort_mode = (sort_mode or "magic").strip().lower()
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    # Newest: fast chronological path (no scoring overhead)
+    # Newest: chronological with seen-novelty reordering
     if sort_mode == "newest":
         return _get_home_feed_newest(
             cur,
@@ -1606,10 +1606,10 @@ def _get_home_feed_newest(
     seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
-    Fast chronological feed — no scoring, no similarity, no preferences.
+    Chronological feed with seen-novelty reordering.
 
-    Just fetches the newest root posts, filters blocked/tags, attaches
-    vote/comment stats, and paginates.
+    Posts are fetched newest-first, then reordered by timestamp × N so
+    previously-seen content drifts down while still appearing.
     """
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
@@ -1624,21 +1624,10 @@ def _get_home_feed_newest(
         blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
     )
 
-    # We need (page * limit) + 1 surviving posts to fill the page and know if there's more.
-    # Blocked/tag filtering can discard a large fraction, so we fetch in batches using
-    # cursor-based pagination (created_at < ?) to avoid scanning the entire table.
+    # Fetch in batches using cursor-based pagination (created_at < ?).
     need = page * limit + 1
-    seen_count = len(seen_posts) if seen_posts else 0
-    base_factor = 3
-    if seen_count > 0:
-        seen_ratio = min(seen_count / max(1, 200), 0.8)
-        factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
-    else:
-        factor = base_factor
+    factor = _seen_overfetch_factor(seen_posts, 3)
     seen: set[str] = set()
-    seen_stats = {"filtered": 0}
-    seen_fallback: list[dict] = []
-    seen_fallback_ids: set[str] = set()
     posts: list[dict] = []
     batch_size = max(500, need * factor)
     last_ts = None
@@ -1669,10 +1658,6 @@ def _get_home_feed_newest(
                 blocked_topics,
                 blocked_topic_prefixes,
                 viewer=viewer,
-                persisted_seen=seen_posts,
-                seen_stats=seen_stats,
-                seen_fallback=seen_fallback,
-                seen_fallback_ids=seen_fallback_ids,
             )
             if post:
                 posts.append(post)
@@ -1680,12 +1665,20 @@ def _get_home_feed_newest(
         if len(rows) < batch_size:
             break
 
-    if not posts and not seen_fallback:
+    if not posts:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    if len(posts) < need and seen_fallback:
-        seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
-        posts.extend(seen_fallback)
+    # Reorder by timestamp × N so seen posts drift down
+    if seen_posts:
+        for p in posts:
+            vc = seen_posts.get(p["post_id"], 0)
+            p["_N"] = _novelty_factor(vc)
+            p["_seen_count"] = vc
+        posts.sort(key=lambda p: -(p.get("timestamp", 0) * p["_N"]))
+    else:
+        for p in posts:
+            p["_N"] = 1.0
+            p["_seen_count"] = 0
 
     start = (page - 1) * limit
     end = start + limit
@@ -1702,22 +1695,25 @@ def _get_home_feed_newest(
 
     for post in page_posts:
         pid = post["post_id"]
+        sc = post.pop("_seen_count", 0)
+        n_val = post.pop("_N", 1.0)
+        reason = "Newest"
+        if sc > 0:
+            reason += " · You've seen this before"
         post["points"] = vote_totals.get(pid, 0.0)
         post["comments"] = comment_counts.get(pid, 0)
         post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = "newest"
-        post["feed_debug"] = {"reason": "Newest", "bucket": "newest"}
+        post["feed_debug"] = {
+            "reason": reason,
+            "bucket": "newest",
+            "N": round(n_val, 4),
+            "seen_count": sc,
+        }
         post["user_vote"] = user_votes.get(pid, 0)
         post["user_weight"] = user_weight_map.get(pid, 0.0)
-
-    if seen_stats.get("filtered"):
-        logger.debug(
-            "seen_posts.filtered feed=home.newest viewer=%s count=%d",
-            (viewer or "")[:12],
-            seen_stats["filtered"],
-        )
 
     return {
         "posts": page_posts,
@@ -1744,14 +1740,16 @@ def _get_home_feed_magic(
     """
     Magic feed algorithm.
 
-    Single unified score: (S + V + U + P) × R
+    Single unified score: (S + V + U + P + A) × R × N
 
     Where:
     - S = similarity boost from similar users who upvoted
     - V = vote score (sqrt scaling)
     - U = unique commenter score (sqrt scaling)
     - P = preference boost from topic/author prefs (sqrt scaling)
+    - A = award score
     - R = recency decay (exponential)
+    - N = novelty factor from seen view_count
     """
     import time
     from similarity import get_or_compute_similarities
@@ -1768,15 +1766,8 @@ def _get_home_feed_magic(
     similar_addrs = set(sim_lookup.keys())
 
     # 3. Load candidate posts (small targeted pool + random exploration)
-    seen_count = len(seen_posts) if seen_posts else 0
-    base_factor = 4
-    if seen_count > 0:
-        seen_ratio = min(seen_count / max(1, 200), 0.8)
-        factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
-    else:
-        factor = base_factor
-    per_source = limit * page * factor
-    candidates, seen_fallback = _load_home_candidates(
+    per_source = limit * page * _seen_overfetch_factor(seen_posts, 4)
+    candidates = _load_home_candidates(
         cur,
         viewer_lower,
         similar_addrs,
@@ -1787,12 +1778,7 @@ def _get_home_feed_magic(
         now_ts,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
-        seen_posts=seen_posts,
     )
-
-    if len(candidates) < (limit * page) and seen_fallback:
-        seen_fallback.sort(key=lambda p: seen_posts.get(p["post_id"], 1) if seen_posts else 1)
-        candidates.extend(seen_fallback)
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -1811,6 +1797,7 @@ def _get_home_feed_magic(
     # 6. Score each post with Magic algorithm
     scored_posts = []
 
+    seen_penalized = 0
     for post in candidates:
         score, debug, should_hide = _score_magic(
             post,
@@ -1824,10 +1811,14 @@ def _get_home_feed_magic(
             True,
             unique_awarders,
             viewer=viewer_lower,
+            seen_posts=seen_posts,
         )
 
         if should_hide:
             continue
+
+        if debug.get("seen_count", 0) > 0:
+            seen_penalized += 1
 
         pid = post["post_id"]
         post["_score"] = score
@@ -1842,6 +1833,12 @@ def _get_home_feed_magic(
         post["user_vote"] = user_votes.get(post["post_id"], 0)
         post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
         scored_posts.append(post)
+
+    if seen_penalized:
+        logger.debug(
+            "seen_penalty feed=home.magic viewer=%s penalized=%d/%d",
+            viewer_lower[:12], seen_penalized, len(scored_posts),
+        )
 
     # 7. Sort by score descending
     scored_posts.sort(key=lambda p: -p["_score"])
@@ -2032,6 +2029,26 @@ def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -
     return interleaved
 
 
+_SEEN_K = 3.0
+
+
+def _novelty_factor(view_count: int) -> float:
+    """N = 1 / (1 + K * view_count).  Unseen → 1.0, seen once → 0.25, etc."""
+    return 1.0 / (1.0 + _SEEN_K * max(0, view_count))
+
+
+def _seen_overfetch_factor(
+    seen_posts: dict[str, int] | None,
+    base_factor: int,
+    max_factor: int = 6,
+) -> int:
+    if not seen_posts:
+        return base_factor
+    seen_ratio = min(len(seen_posts) / max(1, 1000), 0.8)
+    factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
+    return min(max_factor, factor)
+
+
 def _score_magic(
     post: dict,
     sim_lookup: dict[str, float],
@@ -2044,9 +2061,10 @@ def _score_magic(
     use_prefs: bool = True,
     unique_awarders: dict[str, int] | None = None,
     viewer: str = "",
+    seen_posts: dict[str, int] | None = None,
 ) -> tuple[float, dict, bool]:
     """
-    Magic scoring: (S + V + U + P + A) × R
+    Magic scoring: (S + V + U + P + A) × R × N
 
     Components (uniform weighting):
     - S = sqrt(similarity_sum)
@@ -2055,6 +2073,7 @@ def _score_magic(
     - P = sqrt(max(0, topic_pref + author_pref))
     - A = sqrt(unique_award_givers)
     - R = 1 / (1 + (age_hours/9)^1.585) — decay: 4.5h=0.75, 9h=0.5, 18h=0.25, 36h=0.11
+    - N = 1 / (1 + 3 * view_count) — novelty: unseen=1.0, seen once=0.25
 
     Returns (score, debug_info, should_hide).
     """
@@ -2074,7 +2093,6 @@ def _score_magic(
     author = post["author"]
     topic_lower = (post.get("topic") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
-    is_own = viewer and (author or "").strip().lower() == viewer
 
     if use_prefs:
         # Check user preference - hide severely disliked content
@@ -2082,7 +2100,7 @@ def _score_magic(
         author_pref = _clamp_pref_raw(float(author_prefs.get(author, 0) or 0.0))
         combined_pref = topic_pref + author_pref
 
-        if combined_pref <= HIDE_THRESHOLD and not is_own:
+        if combined_pref <= HIDE_THRESHOLD:
             return 0.0, {}, True
     else:
         # Non-home feeds: preferences are not part of the score (P=0) and we do not hide.
@@ -2098,7 +2116,7 @@ def _score_magic(
 
     # S = Similarity boost (always >= 0)
     upvoters = similar_upvotes.get(pid, [])
-    raw_sim = 1.0 if is_own else sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
+    raw_sim = sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
     S = math.sqrt(max(0.0, raw_sim))
 
     # V = Vote score (signed sqrt: negative votes hurt the score)
@@ -2110,9 +2128,6 @@ def _score_magic(
     U = math.sqrt(max(0.0, float(unique_count)))
 
     # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
-    if is_own:
-        author_pref = PREF_RAW_CAP
-        combined_pref = topic_pref + author_pref
     P = _sqrt_signed(combined_pref)
 
     # A = Award score (unique awarders, always >= 0)
@@ -2124,8 +2139,12 @@ def _score_magic(
     age_hours = max(0, (now_ts - timestamp) / 3600)
     R = 1 / (1 + (age_hours / 9) ** 1.585)
 
+    # N = Novelty factor from seen view_count
+    seen_count = (seen_posts or {}).get(pid, 0)
+    N = _novelty_factor(seen_count)
+
     # Final score
-    score = (S + V + U + P + A) * R
+    score = (S + V + U + P + A) * R * N
 
     # Determine primary reason based on dominant component
     components = [("S", S), ("V", V), ("U", U), ("P", P), ("A", A)]
@@ -2152,18 +2171,22 @@ def _score_magic(
         reason = "Fresh content"
         bucket = "discovery"
 
+    if seen_count > 0:
+        reason += " · You've seen this before"
+
     debug = {
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score), 4),
-        "equation": "(√S + √V + √U + √P + √A) × R",
-        # Raw input values (before sqrt) so the formula makes sense
+        "equation": "(√S + √V + √U + √P + √A) × R × N",
         "S": round(raw_sim, 3),
         "V": round(net_vote, 3),
         "U": unique_count,
         "P": round(combined_pref, 3),
         "A": award_count,
         "R": round(R, 4),
+        "N": round(N, 4),
+        "seen_count": seen_count,
         "age_hours": round(age_hours, 1),
         "t_pref": round(topic_pref, 1),
         "a_pref": round(author_pref, 1),
@@ -2306,8 +2329,7 @@ def _load_home_candidates(
     now_ts: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
-    seen_posts: dict[str, int] | None = None,
-) -> tuple[list[dict], list[dict]]:
+) -> list[dict]:
     """
     Load candidate posts for home feed from multiple sources:
     1. Posts by similar users (recent)
@@ -2317,9 +2339,6 @@ def _load_home_candidates(
     """
     results = []
     seen = set()
-    seen_stats = {"filtered": 0}
-    seen_fallback: list[dict] = []
-    seen_fallback_ids: set[str] = set()
 
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
@@ -2358,9 +2377,6 @@ def _load_home_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer,
-            seen_stats=seen_stats,
-            seen_fallback=seen_fallback,
-            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "own"
@@ -2391,10 +2407,6 @@ def _load_home_candidates(
                 blocked_topics,
                 blocked_topic_prefixes,
                 viewer=viewer,
-                persisted_seen=seen_posts,
-                seen_stats=seen_stats,
-                seen_fallback=seen_fallback,
-                seen_fallback_ids=seen_fallback_ids,
             )
             if post:
                 post["_source"] = "similar_author"
@@ -2428,10 +2440,6 @@ def _load_home_candidates(
                 blocked_topics,
                 blocked_topic_prefixes,
                 viewer=viewer,
-                persisted_seen=seen_posts,
-                seen_stats=seen_stats,
-                seen_fallback=seen_fallback,
-                seen_fallback_ids=seen_fallback_ids,
             )
             if post:
                 post["_source"] = "similar_upvoted"
@@ -2458,10 +2466,6 @@ def _load_home_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer,
-            persisted_seen=seen_posts,
-            seen_stats=seen_stats,
-            seen_fallback=seen_fallback,
-            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "recent"
@@ -2496,22 +2500,12 @@ def _load_home_candidates(
             blocked_topics,
             blocked_topic_prefixes,
             viewer=viewer,
-            persisted_seen=seen_posts,
-            seen_stats=seen_stats,
-            seen_fallback=seen_fallback,
-            seen_fallback_ids=seen_fallback_ids,
         )
         if post:
             post["_source"] = "explore"
             results.append(post)
 
-    if seen_stats.get("filtered"):
-        logger.debug(
-            "seen_posts.filtered feed=home viewer=%s count=%d",
-            (viewer or "")[:12],
-            seen_stats["filtered"],
-        )
-    return results, seen_fallback
+    return results
 
 
 def _row_to_post(
@@ -2523,10 +2517,6 @@ def _row_to_post(
     blocked_topics: set[str] | None = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
-    persisted_seen: dict[str, int] | None = None,
-    seen_stats: dict | None = None,
-    seen_fallback: list | None = None,
-    seen_fallback_ids: set | None = None,
 ) -> dict | None:
     """Convert a DB row to a post dict, or None if should be skipped."""
     import json as _json
@@ -2640,15 +2630,6 @@ def _row_to_post(
         "media_meta": [],
         "relayer": relayer_lower,
     }
-    if not is_own and persisted_seen and pid in persisted_seen:
-        if seen_stats is not None:
-            seen_stats["filtered"] = seen_stats.get("filtered", 0) + 1
-        if seen_fallback is not None:
-            if seen_fallback_ids is None or pid not in seen_fallback_ids:
-                if seen_fallback_ids is not None:
-                    seen_fallback_ids.add(pid)
-                seen_fallback.append(post)
-        return None
     seen.add(pid)
     return post
 
@@ -5007,6 +4988,15 @@ def get_posts():
             return jsonify({"error": "unsupported sort mode", "sort_mode": sort_mode}), 400
 
         sort_mode = sort_mode or "magic"
+
+        # ── Seen-posts: load persisted map for novelty scoring ────
+        persisted_seen: dict[str, int] = {}
+        if address and address.lower() != "guest":
+            try:
+                persisted_seen = get_seen_map(address)
+            except Exception:
+                logger.debug("get_posts.seen_load.err addr=%s", address[:12])
+
         if feed in ("home", "following"):
             try:
                 log_event(
@@ -5020,14 +5010,6 @@ def get_posts():
                 )
             except Exception:
                 pass
-
-            # ── Seen-posts: load persisted map for feed filtering ────
-            persisted_seen: dict[str, int] = {}
-            if address and address.lower() != "guest":
-                try:
-                    persisted_seen = get_seen_map(address)
-                except Exception:
-                    logger.debug("get_posts.seen_load.err addr=%s", address[:12])
 
             # Home feed uses new similarity-based algorithm
             if feed == "home":
@@ -5105,7 +5087,7 @@ def get_posts():
 
         # Fetch candidate posts. For magic mode we must rank in Python using the same Magic scorer.
         # (Eligibility comes from the topic filter; ranking is always via `_score_magic`.)
-        max_candidates = max(500, limit * page * 3)
+        max_candidates = max(500, limit * page * _seen_overfetch_factor(persisted_seen, 3))
         order_clause = "ORDER BY p.created_at DESC"
 
         t_select = time.monotonic()
@@ -5314,6 +5296,7 @@ def get_posts():
                     False,
                     unique_awarders,
                     viewer=address_lower,
+                    seen_posts=persisted_seen,
                 )
                 if should_hide:
                     continue
@@ -5338,7 +5321,18 @@ def get_posts():
             for p in result:
                 p.pop("_score", None)
         else:
-            # newest: just return the newest candidates (already by created_at desc)
+            # newest: chronological with seen-novelty reordering
+            if persisted_seen:
+                for c in candidates:
+                    vc = persisted_seen.get(c["post_id"], 0)
+                    c["_N"] = _novelty_factor(vc)
+                    c["_seen_count"] = vc
+                candidates.sort(key=lambda c: -(c.get("timestamp", 0) * c["_N"]))
+            else:
+                for c in candidates:
+                    c["_N"] = 1.0
+                    c["_seen_count"] = 0
+
             start = (page - 1) * limit
             end = start + limit
             page_posts = candidates[start:end] if start < len(candidates) else []
@@ -5347,6 +5341,11 @@ def get_posts():
             result = []
             for post in page_posts:
                 pid = post["post_id"]
+                sc = post.pop("_seen_count", 0)
+                n_val = post.pop("_N", 1.0)
+                reason = "Newest"
+                if sc > 0:
+                    reason += " · You've seen this before"
                 post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
                 post["awards"] = award_details.get(pid, [])
@@ -5357,10 +5356,9 @@ def get_posts():
                 post["user_weight"] = user_weight_map.get(pid, 0.0)
                 post["feed_debug"] = {
                     "bucket": "newest",
-                    "reason": "Newest",
-                    "score": float(post.get("timestamp", 0) or 0),
-                    "equation": "timestamp",
-                    "formula": f"ts = {int(post.get('timestamp', 0) or 0)}",
+                    "reason": reason,
+                    "N": round(n_val, 4),
+                    "seen_count": sc,
                 }
                 result.append(post)
 

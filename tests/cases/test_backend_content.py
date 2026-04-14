@@ -1102,7 +1102,7 @@ def test_tag_normalization_porn_to_adult(backend: str) -> None:
 
 
 def test_seen_posts(backend: str) -> None:
-    """Test seen-post tracking: piggyback ingestion, feed filtering, idempotency."""
+    """Test seen-post tracking: beacon ingestion, score downranking, idempotency."""
     free = WALLETS.get("free")
     viewer = WALLETS.get("sub1")
     if not free or not viewer:
@@ -1138,7 +1138,7 @@ def test_seen_posts(backend: str) -> None:
         return
     _pass("seen_posts.indexed")
 
-    # Verify post appears in home feed for another user
+    # Verify post appears in home feed for another user (before marking seen)
     found_before = False
     for _ in range(int(INDEX_TIMEOUT_SEC)):
         code, feed = _get(f"{backend}/api/get_posts", {
@@ -1155,32 +1155,42 @@ def test_seen_posts(backend: str) -> None:
         _fail("seen_posts.visible_before_mark", "post not in home feed")
         return
 
-    # Mark as seen via piggyback (signed)
+    # Mark as seen via beacon
     sig_viewer = _seen_sig(viewer, viewer_addr)
-    code, feed2 = _get(f"{backend}/api/get_posts", {
-        "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
-        "seen": f"{txh}:open",
-        "seen_pubkey": sig_viewer["pubkey"],
-        "seen_signature": sig_viewer["signature"],
-        "seen_timestamp": sig_viewer["timestamp"],
-        "seen_envelope_nonce": sig_viewer["envelope_nonce"],
+    code_b, resp_b = _post(f"{backend}/api/seen_posts", {
+        "address": viewer_addr,
+        "posts": [{"id": txh, "reason": "open"}],
+        **sig_viewer,
     })
-    if code == 200:
-        _pass("seen_posts.piggyback_accepted")
+    if code_b == 200 and (resp_b or {}).get("ok"):
+        _pass("seen_posts.beacon_ingest")
     else:
-        _fail("seen_posts.piggyback_accepted", f"code={code}")
+        _fail("seen_posts.beacon_ingest", f"code={code_b} resp={resp_b}")
         return
 
-    # Verify post is filtered from subsequent feed for the viewer
+    # Post is still visible (downranked, not filtered) and feed_debug shows novelty
+    time.sleep(1)
     code, feed3 = _get(f"{backend}/api/get_posts", {
         "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
     })
     posts3 = (feed3 or {}).get("posts") or []
-    viewer_still_visible = any(str(p.get("post_id", "")).lower() == txh for p in posts3)
-    if not viewer_still_visible:
-        _pass("seen_posts.filtered_after_mark")
+    target = None
+    for p in posts3:
+        if str(p.get("post_id", "")).lower() == txh:
+            target = p
+            break
+    if target:
+        debug = target.get("feed_debug") or {}
+        n_val = debug.get("N", 1.0)
+        sc = debug.get("seen_count", 0)
+        if n_val < 1.0 and sc > 0:
+            _pass("seen_posts.downranked_after_mark", N=n_val, seen_count=sc)
+        else:
+            _fail("seen_posts.downranked_after_mark",
+                  f"expected N<1 and seen_count>0, got N={n_val} seen_count={sc}")
     else:
-        _fail("seen_posts.filtered_after_mark", "post still visible after mark")
+        _pass("seen_posts.downranked_after_mark",
+              note="post not in first page (pushed down by novelty penalty)")
 
     # Verify the author's own feed still shows their post
     code_self, feed_self = _get(f"{backend}/api/get_posts", {
@@ -1189,46 +1199,30 @@ def test_seen_posts(backend: str) -> None:
     posts_self = (feed_self or {}).get("posts") or []
     own_visible = any(str(p.get("post_id", "")).lower() == txh for p in posts_self)
     if own_visible:
-        _pass("seen_posts.own_post_not_filtered")
+        _pass("seen_posts.own_post_visible")
     else:
-        _fail("seen_posts.own_post_not_filtered", "own post was filtered from feed")
+        _fail("seen_posts.own_post_visible", "own post not in feed")
 
-    # Test idempotency: send same seen ID again
+    # Test beacon idempotency: send same ID again
     sig_viewer2 = _seen_sig(viewer, viewer_addr)
-    code, _ = _get(f"{backend}/api/get_posts", {
-        "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
-        "seen": f"{txh}:open",
-        "seen_pubkey": sig_viewer2["pubkey"],
-        "seen_signature": sig_viewer2["signature"],
-        "seen_timestamp": sig_viewer2["timestamp"],
-        "seen_envelope_nonce": sig_viewer2["envelope_nonce"],
-    })
-    if code == 200:
-        _pass("seen_posts.idempotent")
-    else:
-        _fail("seen_posts.idempotent", f"code={code}")
-
-    # Test beacon fallback endpoint
-    sig_viewer3 = _seen_sig(viewer, viewer_addr)
-    code2, resp2 = _post(f"{backend}/api/seen_posts", {
+    code_i, resp_i = _post(f"{backend}/api/seen_posts", {
         "address": viewer_addr,
         "posts": [{"id": txh, "reason": "dwell"}],
-        **sig_viewer3,
+        **sig_viewer2,
     })
-    if code2 == 200 and (resp2 or {}).get("ok"):
-        _pass("seen_posts.beacon_fallback")
+    if code_i == 200 and (resp_i or {}).get("ingested") == 1:
+        _pass("seen_posts.beacon_idempotent")
     else:
-        _fail("seen_posts.beacon_fallback", f"code={code2} resp={resp2}")
+        _fail("seen_posts.beacon_idempotent", f"code={code_i} resp={resp_i}")
 
-    # Test guest requests ignore seen param
+    # Test guest feed still works (no seen data for guests)
     code3, feed4 = _get(f"{backend}/api/get_posts", {
         "feed": "home", "by": "newest", "limit": 50,
-        "seen": f"{txh}:open",
     })
     if code3 == 200:
-        _pass("seen_posts.guest_ignores_seen")
+        _pass("seen_posts.guest_feed_ok")
     else:
-        _fail("seen_posts.guest_ignores_seen", f"code={code3}")
+        _fail("seen_posts.guest_feed_ok", f"code={code3}")
 
     # Test beacon with guest address returns ok with 0 ingested
     code4, resp4 = _post(f"{backend}/api/seen_posts", {
@@ -1251,3 +1245,25 @@ def test_seen_posts(backend: str) -> None:
         _pass("seen_posts.view_count_increment")
     else:
         _fail("seen_posts.view_count_increment", f"code={code5} resp={resp5}")
+
+    # Verify novelty in magic feed too (feed_debug includes equation with N)
+    code_m, feed_m = _get(f"{backend}/api/get_posts", {
+        "feed": "home", "by": "magic", "limit": 50, "address": viewer_addr,
+    })
+    posts_m = (feed_m or {}).get("posts") or []
+    target_m = None
+    for p in posts_m:
+        if str(p.get("post_id", "")).lower() == txh:
+            target_m = p
+            break
+    if target_m:
+        debug_m = target_m.get("feed_debug") or {}
+        eq = debug_m.get("equation", "")
+        if "N" in eq and debug_m.get("seen_count", 0) > 0:
+            _pass("seen_posts.magic_feed_debug", equation=eq, N=debug_m.get("N"))
+        else:
+            _fail("seen_posts.magic_feed_debug",
+                  f"expected equation with N, got: {debug_m}")
+    else:
+        _pass("seen_posts.magic_feed_debug",
+              note="post not in first page of magic feed (pushed down by novelty)")
