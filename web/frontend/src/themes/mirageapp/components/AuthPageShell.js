@@ -6,10 +6,10 @@ const getOnboardingContainerBg = (theme) =>
     theme.name === "light" ? "#FFFFFF" : "rgb(25, 28, 31)";
 
 const getInputBg = (theme) =>
-    theme.name === "light" ? "rgb(230, 235, 238)" : "rgb(44, 50, 54)";
+    theme.colors.inputBackground || (theme.name === "light" ? "rgb(230, 235, 238)" : "rgb(44, 50, 54)");
 
 const getInputHoverBg = (theme) =>
-    theme.name === "light" ? "rgb(221, 228, 232)" : "rgb(53, 61, 65)";
+    theme.colors.surface3 || (theme.name === "light" ? "rgb(221, 228, 232)" : "rgb(53, 61, 65)");
 
 const getTileBg = (theme) =>
     theme.name === "light" ? "rgb(243, 243, 243)" : "rgb(36, 39, 45)";
@@ -245,7 +245,10 @@ export const AuthTextArea = styled.textarea`
     ${fieldStyles}
     min-height: 6.5rem;
     resize: vertical;
-    font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-family: ${({ theme }) => theme.fontFamily || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"};
+    font-size: 0.82rem;
+    letter-spacing: 0.01em;
+    line-height: 1.55;
 `;
 
 export const AuthHelperText = styled.p`
