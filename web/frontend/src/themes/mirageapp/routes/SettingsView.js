@@ -4,7 +4,6 @@ import { Navigate } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
 import { THEMES } from "../../../registry/theme";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn, OldRedditContentBleed } from "../Layout";
 import { useSettings, CheckboxInput, RadioInput } from "../../../logic/useSettings";
 const Row = styled.div`
@@ -511,7 +510,6 @@ export default function SettingsView({
             <title>Settings | Mirage</title>
         </Helmet>
         <ModernPostFeed>
-            <MobileHeader />
             <CappedPageColumn>
                 <SettingsTabbedContainer>
                     <SettingsShellBody>

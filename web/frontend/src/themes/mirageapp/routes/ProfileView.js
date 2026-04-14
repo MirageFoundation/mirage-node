@@ -1,7 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useProfile } from "../../../logic/useProfile";
@@ -459,7 +458,6 @@ export default function ProfileView({
                 <title>{routeIdentity ? `@${routeIdentity}` : 'Profile'} | Mirage</title>
             </Helmet>
             <ModernPostFeed>
-                <MobileHeader />
                 <CappedPageColumn>
                     <TabbedContainer>
                         <ContainerBody style={{
@@ -488,7 +486,6 @@ export default function ProfileView({
             <title>{profileTitle} | Mirage</title>
         </Helmet>
         <ModernPostFeed>
-            <MobileHeader />
             <OldRedditContentBleed>
                 <OldRedditTabsStrip>
                     <ProfileTabsRow role="tablist" aria-label="Profile sections">

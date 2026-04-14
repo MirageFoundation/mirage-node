@@ -3,7 +3,6 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { useAgents, MOBILE_ACTION_HEIGHT, formatTimeAgo } from "../../../logic/useAgents";
 const SectionSubtitle = styled.div`
@@ -225,7 +224,6 @@ export default function AgentsView({
             </Helmet>
             <div>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <TabbedContainer>
                         <ContainerTab>Agents</ContainerTab>
                         <ContainerBody>

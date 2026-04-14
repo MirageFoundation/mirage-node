@@ -1,6 +1,5 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import MobileHeader from "../components/MobileHeader.js";
 import Button from "../components/Button.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useNotFound } from "../../../logic/useNotFound";
@@ -64,7 +63,6 @@ function NotFoundView({
                     <title>404 - Mirage</title>
                 </Helmet>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <NotFoundCard>
                         <NotFoundCode>404</NotFoundCode>
                         <NotFoundTitle>Page not found</NotFoundTitle>

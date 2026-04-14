@@ -2,7 +2,6 @@ import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
 import { Link } from "react-router-dom";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getMaxInputLength } from "../../../utils/chainParams";
 import { useChangeUsername } from "../../../logic/useChangeUsername";
@@ -198,7 +197,6 @@ function ChangeUsernameView({
             <ContentGrid>
                 <div>
                     <ModernPostFeed>
-                        <MobileHeader />
                         <TabbedContainer>
                             <ContainerTab>Change Username</ContainerTab>
                             <ContainerBody>

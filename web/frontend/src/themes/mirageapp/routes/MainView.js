@@ -2,7 +2,6 @@ import { Helmet } from "react-helmet-async";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
-import MobileHeader from "../components/MobileHeader.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
@@ -1245,7 +1244,6 @@ const MainView = ({
                 {header}
                 <MainFeedPanel>
                     <ModernPostFeed>
-                        <MobileHeader />
 
                         {isLoggedIn && isCurrentTopic && showHero && <TopicHeroCard>
                             <TopicHeroHeader>
@@ -1455,7 +1453,6 @@ const MainView = ({
                             inviteText="Have an invite code? Join the community today."
                             primaryLabel="Create account"
                             secondaryLabel="Sign in"
-                            emoji="✨"
                         />}
 
                         {/* Posts grid - only show to logged-in users */}

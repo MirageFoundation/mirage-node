@@ -6,7 +6,6 @@ import Button from "../components/Button.js";
 import { Link, Navigate } from "react-router-dom";
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
@@ -1498,7 +1497,6 @@ function ViewPostView({
         return <ContentGrid>
             <div>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <BackButton onClick={goBackToFeed}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -2735,7 +2733,6 @@ function ViewPostView({
                     <meta name="twitter:image" content={imageUrl} />
                 </Helmet>
                 <ModernPostFeed>
-                    <MobileHeader />
                     {/* Topic Hero Card */}
                     {(() => {
                         const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || actualRootPost?.topic || '';
@@ -3101,7 +3098,6 @@ function ViewPostView({
         return <ContentGrid>
             <MainContentWrapper>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <BackButton onClick={goBackToFeed}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="19" y1="12" x2="5" y2="12"></line>

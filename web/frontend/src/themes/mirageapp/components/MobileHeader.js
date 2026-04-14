@@ -88,6 +88,11 @@ const BrandMark = styled.span`
     font-size: 0.7rem;
     font-weight: 900;
     flex-shrink: 0;
+
+    & > svg {
+        width: 14px;
+        height: 14px;
+    }
 `;
 
 const BrandText = styled.span`
@@ -147,12 +152,8 @@ function MobileHeader() {
     }, [isLoggedIn]);
 
     const handleMenuClick = useCallback(() => {
-        // MobileBottomNav already exposes primary nav; menu button scrolls-to-top
-        // and emits the refresh event used by other themes. A full drawer can be
-        // added later without changing this call site.
         try {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            window.dispatchEvent(new CustomEvent('mirageRefreshFeed'));
+            window.dispatchEvent(new CustomEvent('mirageToggleDrawer'));
         } catch (_) { /* noop */ }
     }, []);
 
@@ -169,7 +170,6 @@ function MobileHeader() {
             </IconButton>
 
             <BrandLink to="/home" aria-label="Mirage home">
-                <BrandMark>M</BrandMark>
                 <BrandText>Mirage</BrandText>
             </BrandLink>
 

@@ -15,7 +15,6 @@ import AuthPageShell, {
   AuthTextArea,
   AuthTextButton,
 } from "../components/AuthPageShell.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useLogin } from "../../../logic/useLogin";
 
@@ -107,13 +106,12 @@ function LoginView({
       </Helmet>
       <div>
         <ModernPostFeed>
-          <MobileHeader />
           <AuthPageShell
             activeTab="login"
             eyebrow="Welcome back"
             title="Sign in to Mirage"
             description="Enter your 12-word recovery phrase to unlock your account."
-            icon="🔑"
+
             footer={(
               <AuthLinkRow>
                 Don&apos;t have an account?

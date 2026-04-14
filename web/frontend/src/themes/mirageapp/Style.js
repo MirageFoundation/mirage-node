@@ -17,7 +17,7 @@ export const Style = createThemeStyleRules`
     -webkit-text-size-adjust: 100%;
     font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
     min-height: 100vh;
-    background-color: ${({ theme }) => theme.colors.panel};
+    background-color: ${({ theme }) => theme.colors.bg};
     /* Always reserve space for the viewport scrollbar so TopBar / Sidebar
        don't shift horizontally when scrollable vs non-scrollable routes
        swap in. Prevents "wobble" between Home (long) and Create/Search. */
@@ -37,9 +37,7 @@ export const Style = createThemeStyleRules`
     display: none;
   }
 
-  @media (max-width: 1000px) {
-    html { font-size: 130%; }
-  }
+
 
   *, *::before, *::after {
     box-sizing: inherit;
@@ -54,7 +52,7 @@ export const Style = createThemeStyleRules`
   body {
     min-height: 100vh;
     color: ${({ theme }) => theme.colors.text};
-    background-color: ${({ theme }) => theme.colors.panel};
+    background-color: ${({ theme }) => theme.colors.bg};
     word-break: normal;
     overflow-wrap: normal;
     text-indent: 0;
@@ -62,7 +60,7 @@ export const Style = createThemeStyleRules`
 
   @media (max-width: 600px) {
     html, body {
-      padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+      padding-bottom: env(safe-area-inset-bottom, 0px) !important;
       overflow-x: hidden !important;
       max-width: 100vw;
     }

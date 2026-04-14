@@ -1,7 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import styled, { keyframes, css } from "styled-components";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useSolanaBridgeInFlow, useBridgeInPanel, useBridge, NETWORKS, truncateAddress, SOURCE_NETWORKS } from "../../../logic/useBridge";
@@ -1657,7 +1656,6 @@ export default function BridgeView({
         </Helmet>
         <div>
             <ModernPostFeed>
-                <MobileHeader />
                 <OldRedditContentBleed>
                     <OldRedditTabsStrip>
                         <OldRedditTabsRow role="tablist" aria-label="Bridge sections">

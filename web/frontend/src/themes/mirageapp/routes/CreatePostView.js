@@ -3,7 +3,6 @@ import styled from "styled-components";
 import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody, CappedPageColumn } from "../Layout";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
@@ -263,7 +262,6 @@ function CreatePostView({
             </Helmet>
             <div>
                 <ModernPostFeed>
-                    <MobileHeader />
                     <LoggedOutPromptCard
                         role="region"
                         aria-label="Create a post on Mirage"
@@ -277,7 +275,6 @@ function CreatePostView({
                         inviteText="Have an invite code? Join the community today."
                         primaryLabel="Create account"
                         secondaryLabel="Sign in"
-                        emoji="✍️"
                     />
                 </ModernPostFeed>
             </div>
@@ -343,7 +340,6 @@ function CreatePostAuthenticated({
         </Helmet>
         <CappedPageColumn>
             <ModernPostFeed>
-                <MobileHeader />
                 <TabbedContainer>
                     <ContainerTab>{isEditMode ? 'Edit Post' : 'Create Post'}</ContainerTab>
                     <ContainerBody style={{

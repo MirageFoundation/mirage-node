@@ -1,7 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
-import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, OldRedditContentBleed, OldRedditTabsStrip, OldRedditTabsRow, OldRedditTab } from "../Layout";
 import { formatMirage } from "../../../utils/formatters";
 import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
@@ -663,7 +662,6 @@ export default function NetworkView({
             <title>Network | Mirage</title>
         </Helmet>
         <ModernPostFeed>
-            <MobileHeader />
                 <OldRedditContentBleed>
                     <OldRedditTabsStrip>
                         <OldRedditTabsRow role="tablist" aria-label="Network sections">
