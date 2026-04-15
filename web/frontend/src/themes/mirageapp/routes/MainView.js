@@ -109,13 +109,11 @@ const InviteBannerButton = styled.button`
 
     @media (max-width: 1000px) {
         padding: 0.4rem 0.75rem;
-        font-size: 0.6rem;
     }
 
     @media (max-width: 768px) {
         width: 100%;
         padding: 0.5rem 1rem;
-        font-size: 0.65rem;
     }
 `;
 const InviteBannerCount = styled.span`
@@ -124,7 +122,6 @@ const InviteBannerCount = styled.span`
     font-weight: 500;
 
     @media (max-width: 1000px) {
-        font-size: 0.5rem;
     }
 `;
 
@@ -239,7 +236,6 @@ const InviteCodeText = styled.div`
     margin-bottom: 0.5rem;
 
     @media (max-width: 768px) {
-        font-size: 1.5rem;
     }
 `;
 const InviteCodeSubtext = styled.div`
@@ -404,7 +400,6 @@ const NsfwHeroTitle = styled.div`
     line-height: 1.2;
 
     @media (max-width: 768px) {
-        font-size: 0.9rem;
     }
 `;
 const NsfwHeroEmoji = styled.span`
@@ -419,7 +414,6 @@ const NsfwHeroDescription = styled.div`
     line-height: 1.6;
 
     @media (max-width: 768px) {
-        font-size: 0.75rem;
     }
 
     strong {
@@ -450,7 +444,6 @@ const NsfwHeroButton = styled.button`
 
     @media (max-width: 768px) {
         padding: 0.45rem 1rem;
-        font-size: 0.8rem;
         flex: 1;
         min-width: 80px;
     }
@@ -525,7 +518,6 @@ const AndroidHeroTitle = styled.div`
     line-height: 1.2;
 
     @media (max-width: 768px) {
-        font-size: 0.9rem;
     }
 `;
 const AndroidHeroEmoji = styled.span`
@@ -540,7 +532,6 @@ const AndroidHeroDescription = styled.div`
     line-height: 1.6;
 
     @media (max-width: 768px) {
-        font-size: 0.75rem;
     }
 `;
 const AndroidHeroButtons = styled.div`
@@ -573,7 +564,6 @@ const AndroidHeroButton = styled.a`
 
     @media (max-width: 768px) {
         padding: 0.45rem 1rem;
-        font-size: 0.8rem;
         flex: 1;
         min-width: 80px;
     }
@@ -596,7 +586,6 @@ const AndroidHeroDismiss = styled.button`
 
     @media (max-width: 768px) {
         padding: 0.45rem 1rem;
-        font-size: 0.8rem;
         flex: 1;
         min-width: 80px;
     }
@@ -640,7 +629,6 @@ const IPhoneHeroButton = styled.a`
 
     @media (max-width: 768px) {
         padding: 0.45rem 1rem;
-        font-size: 0.8rem;
         flex: 1;
         min-width: 80px;
     }
@@ -657,7 +645,6 @@ const HomeFeedInfoTitle = styled.div`
     line-height: 1;
 
     @media (max-width: 1000px) {
-        font-size: 0.6rem;
     }
 `;
 const HomeFeedHeaderRow = styled.div`
@@ -680,7 +667,6 @@ const HomeFeedInfoEmoji = styled.span`
     transform: translateY(-1px);
 
     @media (max-width: 1000px) {
-        font-size: 0.75rem;
     }
 `;
 const HomeFeedInfoDescription = styled.div`
@@ -691,7 +677,6 @@ const HomeFeedInfoDescription = styled.div`
     line-height: 1.5;
 
     @media (max-width: 1000px) {
-        font-size: 0.55rem;
     }
 
     strong {
@@ -944,7 +929,6 @@ const TopicHeroTitle = styled.div`
     line-height: 1;
 
     @media (max-width: 1000px) {
-        font-size: 0.6rem;
     }
 `;
 const TopicHeroHeader = styled.div`
@@ -962,7 +946,6 @@ const TopicHeroDescription = styled.div`
     line-height: 1.5;
 
     @media (max-width: 1000px) {
-        font-size: 0.55rem;
         line-height: 1.4;
     }
 

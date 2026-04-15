@@ -172,7 +172,7 @@ const DrawerPanel = styled.div`
         top: 0;
         left: 0;
         bottom: 0;
-        width: 260px;
+        width: 240px;
         z-index: 201;
         background: ${({ theme }) => theme.colors.bg};
         border-right: 1px solid ${({ theme }) => theme.colors.headerBorder};

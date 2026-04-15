@@ -4,7 +4,7 @@
  * styled-components calls its helper `createGlobalStyle` (historical name: it injects rules
  * that can target `html`/`body`). That does **not** mean Mirage shares one global stylesheet
  * across themes — each theme ships its own `Style.js`. We alias the import so our code reads
- * in terms of this theme’s rules only.
+ * in terms of this theme's rules only.
  */
 import { createGlobalStyle as createThemeStyleRules } from 'styled-components'
 
@@ -15,7 +15,7 @@ export const Style = createThemeStyleRules`
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
-    font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
+    font-size: 20px;
     min-height: 100vh;
     background-color: ${({ theme }) => theme.colors.bg};
     /* Always reserve space for the viewport scrollbar so TopBar / Sidebar
@@ -29,6 +29,10 @@ export const Style = createThemeStyleRules`
     -ms-overflow-style: none;
   }
 
+  html.auth-page {
+    font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
+  }
+
   /* Hide the viewport scrollbar in WebKit/Blink (Chrome, Safari, Edge). */
   html::-webkit-scrollbar,
   body::-webkit-scrollbar {
@@ -36,8 +40,6 @@ export const Style = createThemeStyleRules`
     height: 0;
     display: none;
   }
-
-
 
   *, *::before, *::after {
     box-sizing: inherit;

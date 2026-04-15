@@ -1,9 +1,9 @@
-import React from "react";
+import React, { useEffect } from "react";
 import styled, { css } from "styled-components";
 import { useNavigate } from "react-router-dom";
 
 const getOnboardingContainerBg = (theme) =>
-    theme.name === "light" ? "#FFFFFF" : "rgb(25, 28, 31)";
+    theme.colors.bg;
 
 const getInputBg = (theme) =>
     theme.colors.inputBackground || (theme.name === "light" ? "rgb(230, 235, 238)" : "rgb(44, 50, 54)");
@@ -352,6 +352,11 @@ function AuthPageShell({
     footer,
 }) {
     const navigate = useNavigate();
+
+    useEffect(() => {
+        document.documentElement.classList.add('auth-page');
+        return () => document.documentElement.classList.remove('auth-page');
+    }, []);
 
     const handleSelect = (tab) => {
         if (tab === activeTab) return;

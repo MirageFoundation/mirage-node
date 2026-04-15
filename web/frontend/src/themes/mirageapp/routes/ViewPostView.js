@@ -179,7 +179,6 @@ const ContinueThreadLink = styled(Link)`
         margin-left: ${({
     $level
 }) => `${0.6 * (Number($level) || 0)}rem`};
-        font-size: 0.7rem;
         padding: 0.4rem 0.6rem;
     }
 `;
@@ -296,7 +295,6 @@ const RootTitleRow = styled.div`
     margin: 0;
 
     @media (max-width: 1000px) {
-        font-size: 0.74rem;
     }
 `;
 /**
@@ -479,7 +477,6 @@ const MobileRootMeta = styled.div`
         padding: 0;
         border: none;
         color: ${({ theme }) => theme.colors.feedCtrlText};
-        font-size: 0.62rem;
         font-weight: 400;
         line-height: 1.2;
     }
@@ -682,7 +679,6 @@ const StyledContentArea = styled.div`
     }
 
     @media (max-width: 1000px) {
-        font-size: 0.68rem;
     }
 `;
 /**

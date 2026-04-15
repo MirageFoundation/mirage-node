@@ -254,7 +254,6 @@ const TitleLink = styled(Link)`
     &:visited { color: ${({ theme }) => theme.colors.text}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.74rem;
     }
 `;
 
@@ -272,7 +271,6 @@ const Body = styled.div`
     a { color: ${({ theme }) => theme.colors.link}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.68rem;
     }
 `;
 

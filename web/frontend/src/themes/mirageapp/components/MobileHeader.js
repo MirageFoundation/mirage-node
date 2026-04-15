@@ -25,7 +25,7 @@ const Bar = styled.header`
         align-items: center;
         gap: 0.5rem;
         padding: 0.45rem 0.75rem;
-        background: ${({ theme }) => theme.colors.panel};
+        background: ${({ theme }) => theme.colors.bg};
         border-bottom: 1px solid ${({ theme }) => theme.colors.headerBorder};
         margin: 0 calc(-1 * 0.75rem) 0.5rem;
     }
