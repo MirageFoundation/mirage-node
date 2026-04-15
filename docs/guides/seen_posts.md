@@ -28,15 +28,17 @@ Client                              Server
 Seen posts are **not filtered** from feed responses. Instead, the server applies a **novelty factor (N)** that downranks previously-seen content:
 
 ```
-N = 1 / (1 + 3 × view_count)
+N = 1 / (1 + 0.9 × view_count)
 ```
 
 | view_count | N      | Effect on a post with base score 12 |
 |------------|--------|-------------------------------------|
 | 0 (unseen) | 1.000 | 12.00 — full score                  |
-| 1          | 0.250  | 3.00 — strong downrank              |
-| 2          | 0.143  | 1.71                                |
-| 3          | 0.100  | 1.20                                |
+| 1          | 0.526  | 6.32 — moderate downrank            |
+| 2          | 0.357  | 4.29                                |
+| 3          | 0.270  | 3.24                                |
+| 5          | 0.182  | 2.18                                |
+| 10         | 0.100  | 1.20                                |
 
 - **Magic feeds** (home, following, topic, all): final score = `(S + V + U + P + A) × R × N`
 - **Newest feeds**: ordered strictly by timestamp; `N` is always `1.0`

@@ -1847,11 +1847,11 @@ def _get_home_feed_magic(
     }
 
 
-_SEEN_K = 3.0
+_SEEN_K = 0.9
 
 
 def _novelty_factor(view_count: int) -> float:
-    """N = 1 / (1 + K * view_count).  Unseen → 1.0, seen once → 0.25, etc."""
+    """N = 1 / (1 + K * view_count).  Unseen → 1.0, seen once → 0.526, etc."""
     return 1.0 / (1.0 + _SEEN_K * max(0, view_count))
 
 
