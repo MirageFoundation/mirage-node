@@ -574,7 +574,7 @@ const CompactExpandedMedia = styled.div`
 `;
 
 const CompactExpandedBody = styled.div`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.cardBodyText};
     font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
     font-size: 0.7rem;
     line-height: 1.45;
