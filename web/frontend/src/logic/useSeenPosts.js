@@ -330,6 +330,7 @@ export function useSeenPosts() {
                             continue;
                         }
                         if (_reportedSet.has(id)) {
+                            _LOG(`DEDUP  ${id.slice(0, 12)}…  already in reportedSet → skip`);
                             const dwell = dwellTimersRef.current.get(id);
                             if (dwell) clearTimeout(dwell);
                             dwellTimersRef.current.delete(id);
@@ -341,6 +342,7 @@ export function useSeenPosts() {
                         const ratio = entry.intersectionRatio || 0;
                         const glanceVisible = entry.isIntersecting && ratio >= 0.3;
                         const dwellVisible = entry.isIntersecting && ratio >= 0.4;
+                        _LOG(`IO  ${id.slice(0, 12)}…  intersecting=${entry.isIntersecting}  ratio=${ratio.toFixed(3)}  glance=${glanceVisible}  dwell=${dwellVisible}  hasDwellTimer=${dwellTimersRef.current.has(id)}`);
 
                         if (glanceVisible) {
                             if (!entryTimesRef.current.has(id)) {
@@ -383,7 +385,7 @@ export function useSeenPosts() {
                     }
                 },
                 {
-                    threshold: [0.3, 0.4],
+                    threshold: [0, 0.3, 0.4],
                     rootMargin,
                 }
             );
@@ -392,10 +394,15 @@ export function useSeenPosts() {
             }
         };
 
-        const handleResize = () => createObserver();
+        let resizeTimer = null;
+        const handleResize = () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => { resizeTimer = null; createObserver(); }, 500);
+        };
         createObserver();
         window.addEventListener("resize", handleResize);
         return () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
             window.removeEventListener("resize", handleResize);
             if (observerRef.current) {
                 observerRef.current.disconnect();

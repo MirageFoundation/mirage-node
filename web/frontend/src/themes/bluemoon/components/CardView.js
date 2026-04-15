@@ -382,8 +382,10 @@ const MobileCardTitleBar = styled.div`
 
 const HideOnMobileTitle = styled.div`
     margin: 0.4rem 0;
+    display: flex;
+    align-items: baseline;
     @media (max-width: 600px) {
-        display: none;
+        display: none !important;
     }
 `
 
@@ -2061,24 +2063,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     })()}
                                                 />
                                             </Link>
-                                            {post && post.title ? (
-                                                <MobileCardTitleBar>
-                                                    <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ color: 'inherit', textDecoration: 'none' }}>
-                                                        {post.title}
-                                                    </Link>
-                                                </MobileCardTitleBar>
-                                            ) : null}
-                                        </>
-                                    );
+                                            );
                                 } else {
                                     return (
-                                        <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
-                                            <MobileCardFitText titleText={post && post.title ? post.title : ''} />
-                                        </Link>
-                                    );
+                                            <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
+                                                <MobileCardFitText titleText={post && post.title ? post.title : ''} />
+                                            </Link>
+                                            );
                                 }
                             })()}
-                        </MobileCardSquare>
+                                        </MobileCardSquare >
                     </MobileCardWrapper>}
                     <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>
@@ -2348,7 +2342,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             </span>
                         </div>
                     ) : (
-                        <HideOnMobileTitle style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
+                        <HideOnMobileTitle style={compactTitleStyle || undefined}>
                             {title}
                             <span
                                 onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}
