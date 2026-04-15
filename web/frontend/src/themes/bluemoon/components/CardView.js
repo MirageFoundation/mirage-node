@@ -2225,6 +2225,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     {post.feed_debug.age_hours !== undefined && ` [${post.feed_debug.age_hours}h ago]`}
                                                 </FeedDebugValue>
                                             </FeedDebugRow>
+                                            {post.feed_debug.N !== undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>N (novelty):</FeedDebugLabel>
+                                                    <FeedDebugValue>
+                                                        {post.feed_debug.N?.toFixed(4) || '1.0000'}
+                                                        {post.feed_debug.seen_count > 0 && ` [seen ${post.feed_debug.seen_count}×]`}
+                                                    </FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
                                             {/* Only show Prefs row for older debug formats (Magic shows it inline with P) */}
                                             {post.feed_debug.P === undefined && (
                                                 <FeedDebugRow>

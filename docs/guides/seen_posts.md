@@ -68,7 +68,7 @@ not_seen ──→ exposed ──→ seen
 | Vote | User up/downvotes the post | `vote` |
 | Reply | User replies to the post | `reply` |
 | Dwell | ≥50% of card visible in the active viewport zone (top 15% and bottom 30% excluded) for ≥3 seconds, tab/app in foreground | `dwell` |
-| Repeated glance | 2+ exposures of ≥500ms each with ≥40% card visibility | `glance` |
+| Repeated glance | 2+ scroll-bys where card was ≥40% visible for ≥150ms each | `glance` |
 
 ### Rules
 
@@ -127,7 +127,7 @@ Use `onViewableItemsChanged` with a custom viewability config:
 ```javascript
 const viewabilityConfig = {
   itemVisiblePercentThreshold: 40,
-  minimumViewTime: 500,
+  minimumViewTime: 150,
 };
 
 const onViewableItemsChanged = useCallback(({ viewableItems }) => {

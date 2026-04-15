@@ -3,7 +3,7 @@ import Storage from "../utils/Storage";
 import { signPlainPayload } from "../utils/signPlain";
 
 const DWELL_MS = 3000;
-const GLANCE_MS = 500;
+const GLANCE_MS = 150;
 const GLANCE_COUNT = 2;
 const MAX_BUFFER = 100;
 const POST_ID_RE = /^[0-9a-f]{64}$/;
@@ -196,7 +196,7 @@ async function flushSeenBeacon() {
 export function useSeenPosts() {
     const observerRef = useRef(null);
     const dwellTimersRef = useRef(new Map());
-    const glanceTimersRef = useRef(new Map());
+    const entryTimesRef = useRef(new Map());
     const glanceCountsRef = useRef(new Map());
     const observedElementsRef = useRef(new Set());
     const visibleRef = useRef(true);
@@ -209,9 +209,8 @@ export function useSeenPosts() {
                 if (!visibleRef.current) {
                     _flushReportedSetSave();
                     for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
-                    for (const timer of glanceTimersRef.current.values()) clearTimeout(timer);
                     dwellTimersRef.current.clear();
-                    glanceTimersRef.current.clear();
+                    entryTimesRef.current.clear();
                     void flushSeenBeacon();
                 }
             };
@@ -253,23 +252,21 @@ export function useSeenPosts() {
             observerRef.current = new IntersectionObserver(
                 (entries) => {
                     if (!visibleRef.current) return;
+                    const now = Date.now();
                     for (const entry of entries) {
                         const el = entry.target;
                         const pid = el.dataset.postId;
                         if (!pid) continue;
                         const id = _normalizeId(pid);
                         if (!id || _reportedSet.has(id)) {
-                            const dwell = dwellTimersRef.current.get(id);
-                            if (dwell) clearTimeout(dwell);
-                            const glance = glanceTimersRef.current.get(id);
-                            if (glance) clearTimeout(glance);
                             dwellTimersRef.current.delete(id);
-                            glanceTimersRef.current.delete(id);
+                            entryTimesRef.current.delete(id);
                             glanceCountsRef.current.delete(id);
                             continue;
                         }
 
                         if (entry.isIntersecting) {
+                            entryTimesRef.current.set(id, now);
                             if (!dwellTimersRef.current.get(id)) {
                                 const timer = setTimeout(() => {
                                     dwellTimersRef.current.delete(id);
@@ -278,34 +275,25 @@ export function useSeenPosts() {
                                 }, DWELL_MS);
                                 dwellTimersRef.current.set(id, timer);
                             }
-                            if (!glanceTimersRef.current.get(id)) {
-                                const timer = setTimeout(() => {
-                                    glanceTimersRef.current.delete(id);
-                                    const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
-                                    glanceCountsRef.current.set(id, nextCount);
-                                    _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}`);
-                                    if (glanceCountsRef.current.size > 5000) {
-                                        glanceCountsRef.current.clear();
-                                    }
-                                    if (nextCount >= GLANCE_COUNT) {
-                                        glanceCountsRef.current.delete(id);
-                                        const pendingDwell = dwellTimersRef.current.get(id);
-                                        if (pendingDwell) {
-                                            clearTimeout(pendingDwell);
-                                            dwellTimersRef.current.delete(id);
-                                        }
-                                        markSeen(id, "glance");
-                                    }
-                                }, GLANCE_MS);
-                                glanceTimersRef.current.set(id, timer);
-                            }
                         } else {
+                            const enterTime = entryTimesRef.current.get(id);
+                            entryTimesRef.current.delete(id);
                             const dwell = dwellTimersRef.current.get(id);
                             if (dwell) clearTimeout(dwell);
                             dwellTimersRef.current.delete(id);
-                            const glance = glanceTimersRef.current.get(id);
-                            if (glance) clearTimeout(glance);
-                            glanceTimersRef.current.delete(id);
+
+                            if (enterTime && (now - enterTime) >= GLANCE_MS) {
+                                const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
+                                glanceCountsRef.current.set(id, nextCount);
+                                _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}  visible=${now - enterTime}ms`);
+                                if (glanceCountsRef.current.size > 5000) {
+                                    glanceCountsRef.current.clear();
+                                }
+                                if (nextCount >= GLANCE_COUNT) {
+                                    glanceCountsRef.current.delete(id);
+                                    markSeen(id, "glance");
+                                }
+                            }
                         }
                     }
                 },
