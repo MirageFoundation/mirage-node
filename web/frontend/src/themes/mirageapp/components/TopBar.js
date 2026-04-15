@@ -236,6 +236,12 @@ const IconButton = styled(Link)`
     &:hover {
         background: ${({ theme }) => theme.colors.hoverBg};
     }
+
+    @media (max-width: 1000px) {
+        width: 34px;
+        height: 34px;
+        svg { width: 20px; height: 20px; }
+    }
 `;
 
 const CreateButton = styled(Link)`
@@ -325,8 +331,8 @@ const AvatarGlow = styled.img`
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
     border-radius: 9999px;
     transform: translate(-50%, -50%) scale(0.95);
     filter: blur(10px);
@@ -353,6 +359,11 @@ const AvatarImg = styled.img`
     flex-shrink: 0;
     object-fit: cover;
     overflow: hidden;
+
+    @media (max-width: 1000px) {
+        width: 28px;
+        height: 28px;
+    }
 `;
 
 const Dropdown = styled.div`
@@ -460,8 +471,8 @@ const SidebarToggleButton = styled.button`
     }
 
     @media (max-width: 600px) {
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
     }
 `;
 
@@ -495,8 +506,8 @@ const CompactSearchButton = styled.button`
     }
 
     @media (max-width: 600px) {
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
     }
 `;
 
