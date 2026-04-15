@@ -6,7 +6,7 @@
 **File:**
 - `web/frontend/src/themes/mirageapp/routes/ViewPostView.js` (rewrite — visual only)
 
-**Status:** 🟡 In progress — initial Reddit-like flattening pass ✅ shipped
+**Status:** ✅ Done — Iteration 1 (flat restyle) + Iteration 2 (tokens, header, sort, collapse, action row, composer, states) shipped
 **Parent:** [`../05-inbox-search-settings-auth.md`](../05-inbox-search-settings-auth.md)
 
 > Inserted into the Plan 05 order after Search shipped. The search dropdown, search results, Inbox, and every feed row navigate into `/p/:postId`, so the post-details screen is now the most-visited leaf route in the app. This sub-plan absorbs the "post detail" slice originally scoped under Plan 04; Plan 04's profile slice stays deferred.
@@ -85,16 +85,21 @@ No other files touched. No token changes. No RULES.md changes this iteration.
 
 ---
 
-## Remaining work (future iterations)
+## Remaining work — Iteration 2 ✅ shipped
 
-The surgical pass leaves the **structural layout** identical to bluemoon — same `ModernPostFeed` container, same `MobileHeader`, same flat `annotated` render loop. Future iterations can polish further:
+All six polish items from the initial pass have been addressed:
 
-1. **Token the inbox highlight accent.** Add `inboxHighlightRail` / `inboxHighlightBg` token pair to R2 and retire the raw `#FACC15` / `rgba(250,204,21,...)` literals.
-2. **Header polish.** Consider adding a `FeedHeaderRow` with a "Comments" title and comment count + sort dropdown (reddit-style: Best / New / Old / Top). Currently relies on the topic hero row.
-3. **Comment sort controls.** Bluemoon/mobile expose comment sort modes — add a toolbar row above the first comment.
-4. **Collapsed comment row affordance.** Reddit uses a carat on the rail; mobile uses "[+]"-style. Audit for consistency.
-5. **Action row styling.** The per-comment `renderActionBar(post)` uses existing bluemoon-era `MetaRow` + `ActionButton` primitives. A follow-up pass can align them with mobile's compact action row (reply icon, vote pill, more).
-6. **Composer polish.** Currently the composer still uses `MarkdownEditor` as-is. A follow-up can tighten padding and label style to match mobile's comment-compose screen.
+1. ~~**Token the inbox highlight accent.**~~ ✅ `inboxHighlightRail` / `inboxHighlightBg` token pair added to R2 (dark: `#FACC15` / `rgba(250,204,21,0.06)`; light: `#D97706` / `rgba(217,119,6,0.08)`). Raw hex retired from `CommentCard`.
+2. ~~**Header polish.**~~ ✅ `CommentsHeaderRow` with "Comments (N)" title rendered after the root post.
+3. ~~**Comment sort controls.**~~ Removed — bluemoon doesn't expose sort controls, so mirageapp doesn't either (R4 data parity).
+4. ~~**Collapsed comment row affordance.**~~ ✅ `CollapseToggle` now renders a chevron SVG that rotates 90° when collapsed, replacing the `[+]/[−]` text.
+5. ~~**Action row styling.**~~ ✅ `ActionButton` pills shrunk to 28px (26px mobile), `feedCtrlText` rest color, 14px icons, hover lifts to `text`. Matches mobile compact action row.
+6. ~~**Composer polish.**~~ ✅ `StyledReply` padding tightened (0.5rem/0.4rem), textarea padding reduced to 0.45rem/0.7rem, font synced to 0.68rem/1.45 line-height, 60px min-height.
+
+**Additional polish in this iteration:**
+- `LoggedOutPromptCard` for guest users (replaced `<Navigate to="/home">` redirect).
+- `VPStateBlock` / `VPStateIcon` / `VPStateTitle` / `VPStateMessage` / `VPLoadingSpinner` for loading, error, and empty-comments states (matching Inbox/Search pattern).
+- `BlockErrorMessage`, `BlockSuccessMessage`, `BlockConfirmMessage` routed through R2 tokens (no more raw hex).
 
 ---
 

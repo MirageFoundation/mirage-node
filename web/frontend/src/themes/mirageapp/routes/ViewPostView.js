@@ -3,7 +3,8 @@ import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
 import Button from "../components/Button.js";
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
+import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
@@ -105,8 +106,8 @@ const CommentCard = styled(PostCard)`
     /* Persistent highlight for inbox-linked comments: left-rail accent +
      * subtle tinted background so the single-canvas rule still holds. */
     &.inbox-highlight {
-        box-shadow: inset 3px 0 0 0 #FACC15 !important;
-        background: rgba(250, 204, 21, 0.06) !important;
+        box-shadow: inset 3px 0 0 0 ${({ theme }) => theme.colors.inboxHighlightRail} !important;
+        background: ${({ theme }) => theme.colors.inboxHighlightBg} !important;
     }
 
     @media (max-width: 1000px) {
@@ -438,15 +439,29 @@ const CollapseToggle = styled.button`
     appearance: none;
     background: none;
     border: none;
-    padding: 0;
+    padding: 0 0.15rem;
     margin: 0;
     color: ${({ theme }) => theme.colors.feedCtrlText};
     font-family: inherit;
     font-size: 0.62rem;
     font-weight: 500;
-    line-height: 1.2;
+    line-height: 1;
     cursor: pointer;
     transition: color 0.12s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    svg {
+        width: 12px;
+        height: 12px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 0.15s ease;
+    }
 
     &:hover {
         color: ${({ theme }) => theme.colors.text};
@@ -704,10 +719,10 @@ const StyledReply = styled.div`
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 0.45rem;
+    gap: 0.35rem;
     width: 100%;
-    padding: 0.65rem 0 0.5rem;
-    margin-top: 0.25rem;
+    padding: 0.5rem 0 0.4rem;
+    margin-top: 0.15rem;
     background: transparent;
     border: none;
     border-top: 1px solid ${({ theme }) => theme.colors.border};
@@ -722,13 +737,14 @@ const StyledReply = styled.div`
         background: ${({ theme }) => theme.colors.bg} !important;
         border: 1px solid ${({ theme }) => theme.colors.border} !important;
         border-radius: 10px !important;
-        padding: 0.6rem 0.8rem !important;
-        font-size: 0.72rem !important;
+        padding: 0.45rem 0.7rem !important;
+        font-size: 0.68rem !important;
         font-weight: 400 !important;
-        line-height: 1.5 !important;
+        line-height: 1.45 !important;
         color: ${({ theme }) => theme.colors.text} !important;
         transition: border-color 0.12s ease, background 0.12s ease !important;
         box-shadow: none !important;
+        min-height: 60px !important;
     }
     textarea:hover {
         border-color: ${({ theme }) => theme.colors.borderStrong} !important;
@@ -1050,13 +1066,82 @@ const ReplyErrorMessage = styled.div`
     gap: 0.5rem;
 `;
 
-/**
- * Action row — matches `CardView::ActionRow` rhythm. Flat row, no border,
- * no top margin (parent `gap` handles spacing). Each action inside is
- * rendered as an `ActionButton` styled like `ActionPill` / `ActionIconChip`
- * from CardView: 32px tall rounded pills with `actionIconBg` fill and
- * `actionIconHoverBg` on hover.
- */
+const CommentsHeaderRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 1rem 0.45rem;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+    @media (max-width: 600px) {
+        padding: 0.45rem 0.85rem 0.35rem;
+    }
+`;
+const CommentsHeaderTitle = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.2;
+`;
+const CommentsHeaderCount = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: 500;
+`;
+const VPStateBlock = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem 1.25rem;
+    text-align: center;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+const VPStateIcon = styled.div`
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+
+    svg {
+        width: 22px;
+        height: 22px;
+        color: ${({ $tone, theme }) => $tone === 'danger' ? theme.colors.voteDown : theme.colors.subtleText};
+    }
+`;
+const VPStateTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.85rem;
+    font-weight: 700;
+`;
+const VPStateMessage = styled.div`
+    font-size: 0.72rem;
+    line-height: 1.55;
+    max-width: 24rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+const VPLoadingSpinner = styled.div`
+    width: 28px;
+    height: 28px;
+    border: 3px solid ${({ theme }) => theme.colors.border};
+    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
+    border-radius: 50%;
+    animation: vpSpin 0.8s linear infinite;
+
+    @keyframes vpSpin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+`;
+
 const MetaRow = styled.div`
     display: flex;
     align-items: center;
@@ -1135,7 +1220,7 @@ const ActionButton = styled.a`
     border: none;
     background: ${({ theme }) => theme.colors.actionIconBg};
     color: ${({ theme, $danger }) =>
-        $danger ? theme.colors.voteDown : theme.colors.text};
+        $danger ? theme.colors.voteDown : theme.colors.feedCtrlText};
     font-family: inherit;
     font-size: 0.62rem;
     font-weight: 500;
@@ -1143,10 +1228,10 @@ const ActionButton = styled.a`
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
-    transition: background 0.12s ease;
+    transition: background 0.12s ease, color 0.12s ease;
 
     &:visited { color: ${({ theme, $danger }) =>
-        $danger ? theme.colors.voteDown : theme.colors.text}; }
+        $danger ? theme.colors.voteDown : theme.colors.feedCtrlText}; }
     &:hover,
     &:visited:hover {
         background: ${({ theme }) => theme.colors.actionIconHoverBg};
@@ -1157,42 +1242,42 @@ const ActionButton = styled.a`
     svg { width: 16px; height: 16px; fill: currentColor; }
 
     @media (max-width: 600px) {
-        height: 28px;
+        height: 32px;
         padding: 0 10px;
     }
 `;
 const BlockErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
-    border-radius: 3px;
-    padding: 0.75rem 1rem;
-    margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #dc2626;
-    font-size: 0.9rem;
+    background: ${({ theme }) => theme.colors.buttonDangerBg};
+    border: 1px solid ${({ theme }) => theme.colors.buttonDangerBorder};
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin: 0.35rem 0;
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.65rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 `;
 const BlockSuccessMessage = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: 3px;
-    padding: 0.75rem 1rem;
-    margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #22c55e;
-    font-size: 0.9rem;
+    background: ${({ theme }) => theme.colors.buttonSuccessBg};
+    border: 1px solid ${({ theme }) => theme.colors.buttonSuccessBorder};
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin: 0.35rem 0;
+    color: ${({ theme }) => theme.colors.voteUp};
+    font-size: 0.65rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 `;
 const BlockConfirmMessage = styled.div`
-    background-color: rgba(251, 191, 36, 0.1);
-    border: 1px solid #f59e0b;
-    border-radius: 3px;
-    padding: 0.75rem 1rem;
-    margin: 0.5rem 0.5rem 0.5rem 0;
-    color: #f59e0b;
-    font-size: 0.9rem;
+    background: ${({ theme }) => theme.colors.inboxHighlightBg};
+    border: 1px solid ${({ theme }) => theme.colors.inboxHighlightRail};
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin: 0.35rem 0;
+    color: ${({ theme }) => theme.colors.inboxHighlightRail};
+    font-size: 0.65rem;
     display: flex;
     flex-direction: column;          /* message on top, buttons below */
     align-items: flex-start;         /* left align content */
@@ -1387,6 +1472,7 @@ function ViewPostView({
         state,
         updatePost
     });
+
     const commentsRequestRef = useRef(0);
     const commentsAutoOpenTimersRef = useRef(new Set());
     useEffect(() => {
@@ -1504,31 +1590,20 @@ function ViewPostView({
                         </svg>
                         Back
                     </BackButton>
-                    {loading ? <PostCard $size={cardSize} style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        textAlign: 'center',
-                        padding: '2rem',
-                        gap: '0.35rem'
-                    }}>
-                        <span style={{
-                            color: '#888'
-                        }}>Loading post...</span>
-                    </PostCard> : <PostCard $size={cardSize} style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        textAlign: 'center',
-                        padding: '2rem',
-                        gap: '0.5rem'
-                    }}>
-                        <span style={{
-                            color: '#ff6b6b'
-                        }}>{depthError || error}</span>
-                    </PostCard>}
+                    {loading ? <VPStateBlock role="status" aria-live="polite">
+                        <VPLoadingSpinner />
+                        <VPStateTitle>Loading post…</VPStateTitle>
+                    </VPStateBlock> : <VPStateBlock role="alert">
+                        <VPStateIcon $tone="danger">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </VPStateIcon>
+                        <VPStateTitle>Couldn't load post</VPStateTitle>
+                        <VPStateMessage>{depthError || error}</VPStateMessage>
+                    </VPStateBlock>}
                 </ModernPostFeed>
             </div>
         </ContentGrid>;
@@ -2706,9 +2781,27 @@ function ViewPostView({
     // Check if user is logged in
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
-    // Redirect non-logged-in users to home (shows welcome banner)
     if (!isLoggedIn) {
-        return <Navigate to="/home" replace />;
+        return <ContentGrid>
+            <div>
+                <ModernPostFeed>
+                    <LoggedOutPromptCard
+                        role="region"
+                        aria-label="View post on Mirage"
+                        eyebrow="Post Details"
+                        title="Sign in to view this post"
+                        description="Create an account or sign in to read posts, vote, and join the conversation."
+                        links={[
+                            { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },
+                            { label: "Learn More", href: "https://mirage.foundation", external: true },
+                        ]}
+                        inviteText="Have an invite code? Join the community today."
+                        primaryLabel="Create account"
+                        secondaryLabel="Sign in"
+                    />
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>;
     }
     if (root) {
         const origin = typeof window !== 'undefined' && window.location && window.location.origin ? window.location.origin : 'https://mirage.vote';
@@ -2884,7 +2977,9 @@ function ViewPostView({
                                                     onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
                                                     aria-label={post.collapsed ? 'Expand' : 'Collapse'}
                                                 >
-                                                    [{post.collapsed ? '+' : '−'}]
+                                                    <svg viewBox="0 0 24 24" style={{ transform: post.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
+                                                        <polyline points="6 9 12 15 18 9" />
+                                                    </svg>
                                                 </CollapseToggle>
                                             </>}
                                             {/* Only show topic for root posts - comments inherit from root */}
@@ -3068,6 +3163,21 @@ function ViewPostView({
                                     {' '}to view the full thread.
                                 </>}
                             </StyledThreadReminder>}
+                            {isRoot && <CommentsHeaderRow>
+                                <CommentsHeaderTitle>
+                                    Comments
+                                    {typeof (mergedRoot?.comments ?? root?.comments) === 'number' && <CommentsHeaderCount>({mergedRoot?.comments ?? root?.comments})</CommentsHeaderCount>}
+                                </CommentsHeaderTitle>
+                            </CommentsHeaderRow>}
+                            {isRoot && annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id) && p.level > 0).length === 0 && <VPStateBlock>
+                                <VPStateIcon>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                    </svg>
+                                </VPStateIcon>
+                                <VPStateTitle>No comments yet</VPStateTitle>
+                                <VPStateMessage>Be the first to share your thoughts.</VPStateMessage>
+                            </VPStateBlock>}
                             {/* Continue thread link for deeply nested comments with unloaded children */}
                             {(() => {
                                 // Don't show for root post
@@ -3105,14 +3215,17 @@ function ViewPostView({
                         </svg>
                         Back
                     </BackButton>
-                    <PostCard $size={cardSize} style={{
-                        textAlign: 'center',
-                        padding: '2rem'
-                    }}>
-                        <span style={{
-                            color: '#ff6b6b'
-                        }}>Unable to load post.</span>
-                    </PostCard>
+                    <VPStateBlock role="alert">
+                        <VPStateIcon $tone="danger">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </VPStateIcon>
+                        <VPStateTitle>Unable to load post</VPStateTitle>
+                        <VPStateMessage>Something went wrong. Try going back and opening the post again.</VPStateMessage>
+                    </VPStateBlock>
                 </ModernPostFeed>
             </MainContentWrapper>
         </ContentGrid>;

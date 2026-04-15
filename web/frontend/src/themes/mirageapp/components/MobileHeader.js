@@ -76,25 +76,6 @@ const BrandLink = styled(Link)`
     min-width: 0;
 `;
 
-const BrandMark = styled.span`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 6px;
-    background: ${({ theme }) => theme.colors.link};
-    color: #fff;
-    font-size: 0.7rem;
-    font-weight: 900;
-    flex-shrink: 0;
-
-    & > svg {
-        width: 14px;
-        height: 14px;
-    }
-`;
-
 const BrandText = styled.span`
     overflow: hidden;
     text-overflow: ellipsis;

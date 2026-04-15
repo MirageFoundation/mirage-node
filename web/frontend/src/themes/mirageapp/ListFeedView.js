@@ -577,18 +577,19 @@ const CompactExpandedMedia = styled.div`
 
 const CompactExpandedBody = styled.div`
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.85rem;
-    line-height: 1.5;
+    font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
+    font-size: 0.7rem;
+    line-height: 1.45;
     word-break: break-word;
     overflow-wrap: anywhere;
 
-    p { margin: 0 0 0.5rem; }
+    p { margin: 0 0 0.4rem; }
     p:last-child { margin-bottom: 0; }
 
     a { color: ${({ theme }) => theme.colors.link}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.75rem;
+        font-size: 0.64rem;
     }
 `;
 
