@@ -57,8 +57,8 @@ Each plan is designed to be one PR. Later plans depend on earlier ones landing f
 1. [Inbox](./05-subplans/01-inbox.md) — ✅ Done
 2. [Search](./05-subplans/02-search.md) — ✅ Done
 3. [Post Details](./05-subplans/03-post-details.md) — ✅ Done
-4. [Settings](./05-subplans/04-settings.md) — **next**
-5. [Create Post](./05-subplans/05-create-post.md)
+4. [Settings](./05-subplans/04-settings.md) — ✅ Done
+5. [Create Post](./05-subplans/05-create-post.md) — **next**
 6. [Change Username](./05-subplans/06-change-username.md)
 7. [Sign Out](./05-subplans/07-sign-out.md)
 
