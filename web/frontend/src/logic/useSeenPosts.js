@@ -4,7 +4,7 @@ import { signPlainPayload } from "../utils/signPlain";
 
 const DWELL_MS = 3000;
 const GLANCE_MS = 150;
-const GLANCE_COUNT = 2;
+const GLANCE_COUNT = 1;
 const MAX_BUFFER = 100;
 const POST_ID_RE = /^[0-9a-f]{64}$/;
 const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);

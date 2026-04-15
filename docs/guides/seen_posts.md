@@ -67,19 +67,19 @@ not_seen ──→ exposed ──→ seen
 | Click / open | User taps post to view detail | `open` |
 | Vote | User up/downvotes the post | `vote` |
 | Reply | User replies to the post | `reply` |
-| Dwell | ≥50% of card visible in the active viewport zone (top 15% and bottom 30% excluded) for ≥3 seconds, tab/app in foreground | `dwell` |
-| Repeated glance | 2+ scroll-bys where card was ≥40% visible for ≥150ms each | `glance` |
+| Dwell | ≥40% of card visible in the active viewport zone (top 8% and bottom 15% excluded) for ≥3 seconds, tab/app in foreground | `dwell` |
+| Glance | Card was ≥30% visible for ≥150ms then scrolled away | `glance` |
 
 ### Rules
 
 1. **Foreground only**: Only count visibility time when the app is in the foreground.
    - Web: `document.visibilityState === 'visible'`
    - Mobile: track `onResume` / `onPause` lifecycle events
-2. **Active zone**: For dwell/glance detection, only count time when the card is in the active zone of the viewport (top 15% and bottom 30% excluded — an asymmetric band that covers the top 55% of the middle area). The top exclusion is smaller so the first visible post on page load still triggers.
+2. **Active zone**: For dwell/glance detection, only count time when the card is in the active zone of the viewport (top 8% and bottom 15% excluded — covering the middle 77% of the viewport). The margins are intentionally small so the first and second visible posts on page load both trigger reliably.
 3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
-4. **Deduplicate**: Keep a `Set<string>` of already-reported IDs. Never emit the same ID twice in a single session. Persist this set in `sessionStorage` (web) or equivalent (mobile) so it survives page refreshes. Cap at 2000 IDs; if exceeded, clear and start fresh.
+4. **Deduplicate**: Keep an in-memory `Set<string>` of already-reported IDs. Never emit the same ID twice in a single page view. The set is **cleared on each page load** — each navigation/refresh starts a fresh tracking session. Re-sending an already-seen post to the server is fine (bumps `view_count`).
 5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
-6. **First trigger wins**: Dwell and glance timers run in parallel. Whichever fires first marks the post as seen; cancel the other timer immediately. For example, if glance reaches 2 exposures before the 3s dwell elapses, cancel the dwell timer (and vice versa).
+6. **First trigger wins**: Dwell and glance run in parallel. Whichever fires first marks the post as seen; cancel the other. For example, if the user scrolls past a card (glance fires after a single 150ms+ exposure) before the 3s dwell elapses, the dwell timer is cancelled (and vice versa).
 
 ## Reporting Protocol
 
@@ -126,7 +126,7 @@ Use `onViewableItemsChanged` with a custom viewability config:
 
 ```javascript
 const viewabilityConfig = {
-  itemVisiblePercentThreshold: 40,
+  itemVisiblePercentThreshold: 30,
   minimumViewTime: 150,
 };
 
@@ -135,7 +135,7 @@ const onViewableItemsChanged = useCallback(({ viewableItems }) => {
   for (const item of viewableItems) {
     const pid = item.item?.post_id;
     if (!pid) continue;
-    recordExposure(pid); // increment glance count, mark at 2
+    recordExposure(pid); // single glance marks as seen
   }
 }, []);
 ```
@@ -144,7 +144,7 @@ For dwell detection, start a 3-second timer when a post becomes viewable and can
 
 ### Native Android (RecyclerView)
 
-Attach an `OnScrollListener` or use a custom `LayoutManager` callback to track which `ViewHolder` items have ≥40% visibility. Use `Lifecycle.Event.ON_PAUSE` / `ON_RESUME` to gate tracking.
+Attach an `OnScrollListener` or use a custom `LayoutManager` callback to track which `ViewHolder` items have ≥30% visibility. Use `Lifecycle.Event.ON_PAUSE` / `ON_RESUME` to gate tracking.
 
 ### Native iOS (UICollectionView)
 
