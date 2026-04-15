@@ -59,7 +59,7 @@ Each plan is designed to be one PR. Later plans depend on earlier ones landing f
 3. [Post Details](./05-subplans/03-post-details.md) — ✅ Done
 4. [Settings](./05-subplans/04-settings.md) — ✅ Done
 5. [Create Post](./05-subplans/05-create-post.md) — **next**
-6. [Change Username](./05-subplans/06-change-username.md)
+6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
 7. [Sign Out](./05-subplans/07-sign-out.md)
 
 Plan 04 (post detail + profile) was originally deferred, but the post-detail slice from it is being folded into Plan 05 as sub-plan 03 since feed → post is now a primary entry path after Search shipped. Profile polish remains deferred. Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).

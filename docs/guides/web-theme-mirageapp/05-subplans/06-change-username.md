@@ -2,7 +2,7 @@
 
 **Route:** `/change_username`
 **File:** `web/frontend/src/themes/mirageapp/routes/ChangeUsernameView.js`
-**Status:** ⏳ Not started
+**Status:** ✅ Done
 **Parent:** [`../05-inbox-search-settings-auth.md`](../05-inbox-search-settings-auth.md)
 
 ---
