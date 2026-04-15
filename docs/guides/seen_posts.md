@@ -68,19 +68,27 @@ not_seen ──→ exposed ──→ seen
 | Click / open | User taps post to view detail | `open` |
 | Vote | User up/downvotes the post | `vote` |
 | Reply | User replies to the post | `reply` |
-| Dwell | ≥40% of card visible in the active viewport zone (top 8% and bottom 15% excluded) for ≥3 seconds, tab/app in foreground | `dwell` |
-| Glance | Card was ≥30% visible for ≥150ms then scrolled away, 2 exposures | `glance` |
+| Dwell | Mouse hovers over card for ≥3s (desktop) or ≥40% visible in active zone for ≥3s (mobile) | `dwell` |
+| Glance | Mouse hovered ≥150ms then left, 2 exposures (desktop) or ≥30% visible then scrolled away, 2 exposures (mobile) | `glance` |
+
+### Detection Modes
+
+The client detects the viewport width and picks the appropriate strategy:
+
+- **Desktop (≥769px wide)**: Uses `mouseenter`/`mouseleave` events on each card. Only the card under the cursor is tracked. Hovering ≥3s triggers dwell; hovering ≥150ms and moving away counts toward glance (2 hovers needed).
+- **Mobile (<769px wide)**: Uses `IntersectionObserver` with an active zone (top 8%, bottom 15% excluded). Cards ≥40% visible for ≥3s trigger dwell; cards ≥30% visible for ≥150ms then scrolled away count toward glance (2 scroll-bys needed).
+
+The mode is re-evaluated on window resize (500ms debounce).
 
 ### Rules
 
 1. **Foreground only**: Only count visibility time when the app is in the foreground.
    - Web: `document.visibilityState === 'visible'`
    - Mobile: track `onResume` / `onPause` lifecycle events
-2. **Active zone**: For dwell/glance detection, only count time when the card is in the active zone of the viewport (top 8% and bottom 15% excluded — covering the middle 77% of the viewport). The margins are intentionally small so the first and second visible posts on page load both trigger reliably.
-3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
-4. **No client-side dedup**: Every glance/dwell event is sent to the server. If a user scrolls past the same post 10 times, `view_count` increments 10 times. The backend `ON CONFLICT` upsert handles accumulation.
-5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
-6. **One mark per viewing**: Dwell and glance run in parallel but only one fires per enter/exit cycle. If dwell fires (3s), glance state is cleared so the subsequent scroll-away doesn't double-count. If glance fires first (2 quick scroll-bys before 3s), the dwell timer is cancelled.
+2. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
+3. **No client-side dedup**: Every glance/dwell event is sent to the server. If a user scrolls past the same post 10 times, `view_count` increments 10 times. The backend `ON CONFLICT` upsert handles accumulation.
+4. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
+5. **One mark per viewing**: Dwell and glance run in parallel but only one fires per enter/exit cycle. If dwell fires (3s), glance state is cleared so the subsequent mouse-leave/scroll-away doesn't double-count. If glance fires first (2 hovers/scroll-bys before 3s), the dwell timer is cancelled.
 
 ## Reporting Protocol
 

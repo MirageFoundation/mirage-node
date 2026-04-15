@@ -212,13 +212,29 @@ async function flushSeenBeacon() {
     }
 }
 
+const DESKTOP_MIN_WIDTH = 769;
+
+function _isDesktop() {
+    return window.innerWidth >= DESKTOP_MIN_WIDTH;
+}
+
 export function useSeenPosts() {
     const observerRef = useRef(null);
     const dwellTimersRef = useRef(new Map());
     const entryTimesRef = useRef(new Map());
     const glanceCountsRef = useRef(new Map());
     const observedElementsRef = useRef(new Set());
+    const mouseHandlersRef = useRef(new Map());
     const visibleRef = useRef(true);
+    const modeRef = useRef(_isDesktop() ? "desktop" : "mobile");
+
+    const _clearTimers = useCallback((id) => {
+        const dwell = dwellTimersRef.current.get(id);
+        if (dwell) clearTimeout(dwell);
+        dwellTimersRef.current.delete(id);
+        entryTimesRef.current.delete(id);
+        glanceCountsRef.current.delete(id);
+    }, []);
 
     useEffect(() => {
         _listenerCount += 1;
@@ -258,94 +274,181 @@ export function useSeenPosts() {
         };
     }, []);
 
-    useEffect(() => {
-        const createObserver = () => {
-            const vh = window.innerHeight || document.documentElement.clientHeight;
-            const marginTop = Math.round(vh * 0.08);
-            const marginBottom = Math.round(vh * 0.15);
-            const rootMargin = `-${marginTop}px 0px -${marginBottom}px 0px`;
+    // ── Desktop: mouse-based tracking ──────────────────────────────
+    const _attachMouseHandlers = useCallback((el) => {
+        const pid = el.dataset?.postId;
+        const id = _normalizeId(pid);
+        if (!id) return;
+        if (mouseHandlersRef.current.has(el)) return;
 
-            _LOG(`OBSERVER  vh=${vh}  rootMargin="${rootMargin}"  observed=${observedElementsRef.current.size}`);
+        const onEnter = () => {
+            if (!visibleRef.current) return;
+            entryTimesRef.current.set(id, Date.now());
+            if (!dwellTimersRef.current.get(id)) {
+                const timer = setTimeout(() => {
+                    dwellTimersRef.current.delete(id);
+                    entryTimesRef.current.delete(id);
+                    glanceCountsRef.current.delete(id);
+                    _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms hover → mark`);
+                    markSeen(id, "dwell");
+                }, DWELL_MS);
+                dwellTimersRef.current.set(id, timer);
+            }
+            _LOG(`MOUSE-ENTER  ${id.slice(0, 12)}…`);
+        };
+
+        const onLeave = () => {
+            const enterTime = entryTimesRef.current.get(id);
+            entryTimesRef.current.delete(id);
+            const dwell = dwellTimersRef.current.get(id);
+            if (dwell) clearTimeout(dwell);
+            dwellTimersRef.current.delete(id);
+
+            if (enterTime && (Date.now() - enterTime) >= GLANCE_MS) {
+                const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
+                glanceCountsRef.current.set(id, nextCount);
+                _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}  hover=${Date.now() - enterTime}ms`);
+                if (glanceCountsRef.current.size > 5000) {
+                    glanceCountsRef.current.clear();
+                }
+                if (nextCount >= GLANCE_COUNT) {
+                    glanceCountsRef.current.delete(id);
+                    markSeen(id, "glance");
+                }
+            }
+            _LOG(`MOUSE-LEAVE  ${id.slice(0, 12)}…`);
+        };
+
+        el.addEventListener("mouseenter", onEnter);
+        el.addEventListener("mouseleave", onLeave);
+        mouseHandlersRef.current.set(el, { onEnter, onLeave });
+    }, []);
+
+    const _detachMouseHandlers = useCallback((el) => {
+        const handlers = mouseHandlersRef.current.get(el);
+        if (handlers) {
+            el.removeEventListener("mouseenter", handlers.onEnter);
+            el.removeEventListener("mouseleave", handlers.onLeave);
+            mouseHandlersRef.current.delete(el);
+        }
+    }, []);
+
+    const _detachAllMouseHandlers = useCallback(() => {
+        for (const [el, handlers] of mouseHandlersRef.current) {
+            el.removeEventListener("mouseenter", handlers.onEnter);
+            el.removeEventListener("mouseleave", handlers.onLeave);
+        }
+        mouseHandlersRef.current.clear();
+    }, []);
+
+    // ── Mobile: IntersectionObserver-based tracking ────────────────
+    useEffect(() => {
+        const setup = () => {
+            const desktop = _isDesktop();
+            const mode = desktop ? "desktop" : "mobile";
+            modeRef.current = mode;
 
             if (observerRef.current) {
                 observerRef.current.disconnect();
+                observerRef.current = null;
             }
-            observerRef.current = new IntersectionObserver(
-                (entries) => {
-                    if (!visibleRef.current) return;
-                    const now = Date.now();
-                    for (const entry of entries) {
-                        const el = entry.target;
-                        const pid = el.dataset.postId;
-                        if (!pid) continue;
-                        const id = _normalizeId(pid);
-                        if (!id) {
-                            _LOG(`SKIP  pid=${String(pid).slice(0, 12)}…  invalid id`);
-                            continue;
-                        }
-                        const ratio = entry.intersectionRatio || 0;
-                        const glanceVisible = entry.isIntersecting && ratio >= 0.3;
-                        const dwellVisible = entry.isIntersecting && ratio >= 0.4;
-                        _LOG(`IO  ${id.slice(0, 12)}…  intersecting=${entry.isIntersecting}  ratio=${ratio.toFixed(3)}  glance=${glanceVisible}  dwell=${dwellVisible}  hasDwellTimer=${dwellTimersRef.current.has(id)}`);
+            _detachAllMouseHandlers();
 
-                        if (glanceVisible) {
-                            if (!entryTimesRef.current.has(id)) {
-                                entryTimesRef.current.set(id, now);
-                            }
-                        } else {
-                            const enterTime = entryTimesRef.current.get(id);
-                            entryTimesRef.current.delete(id);
-                            if (enterTime && (now - enterTime) >= GLANCE_MS) {
-                                const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
-                                glanceCountsRef.current.set(id, nextCount);
-                                _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}  visible=${now - enterTime}ms`);
-                                if (glanceCountsRef.current.size > 5000) {
-                                    glanceCountsRef.current.clear();
-                                }
-                                if (nextCount >= GLANCE_COUNT) {
-                                    glanceCountsRef.current.delete(id);
-                                    const pendingDwell = dwellTimersRef.current.get(id);
-                                    if (pendingDwell) clearTimeout(pendingDwell);
-                                    dwellTimersRef.current.delete(id);
-                                    markSeen(id, "glance");
-                                }
-                            }
-                        }
+            for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
+            dwellTimersRef.current.clear();
+            entryTimesRef.current.clear();
+            glanceCountsRef.current.clear();
 
-                        if (dwellVisible) {
-                            if (!dwellTimersRef.current.get(id)) {
-                                const timer = setTimeout(() => {
-                                    dwellTimersRef.current.delete(id);
-                                    entryTimesRef.current.delete(id);
-                                    glanceCountsRef.current.delete(id);
-                                    _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
-                                    markSeen(id, "dwell");
-                                }, DWELL_MS);
-                                dwellTimersRef.current.set(id, timer);
-                            }
-                        } else {
-                            const dwell = dwellTimersRef.current.get(id);
-                            if (dwell) clearTimeout(dwell);
-                            dwellTimersRef.current.delete(id);
-                        }
-                    }
-                },
-                {
-                    threshold: [0, 0.3, 0.4],
-                    rootMargin,
+            if (desktop) {
+                _LOG(`MODE  desktop (w=${window.innerWidth})  observed=${observedElementsRef.current.size}`);
+                for (const el of observedElementsRef.current) {
+                    _attachMouseHandlers(el);
                 }
-            );
-            for (const el of observedElementsRef.current) {
-                observerRef.current.observe(el);
+            } else {
+                const vh = window.innerHeight || document.documentElement.clientHeight;
+                const marginTop = Math.round(vh * 0.08);
+                const marginBottom = Math.round(vh * 0.15);
+                const rootMargin = `-${marginTop}px 0px -${marginBottom}px 0px`;
+
+                _LOG(`MODE  mobile  vh=${vh}  rootMargin="${rootMargin}"  observed=${observedElementsRef.current.size}`);
+
+                observerRef.current = new IntersectionObserver(
+                    (entries) => {
+                        if (!visibleRef.current) return;
+                        const now = Date.now();
+                        for (const entry of entries) {
+                            const el = entry.target;
+                            const pid = el.dataset.postId;
+                            if (!pid) continue;
+                            const id = _normalizeId(pid);
+                            if (!id) {
+                                _LOG(`SKIP  pid=${String(pid).slice(0, 12)}…  invalid id`);
+                                continue;
+                            }
+                            const ratio = entry.intersectionRatio || 0;
+                            const glanceVisible = entry.isIntersecting && ratio >= 0.3;
+                            const dwellVisible = entry.isIntersecting && ratio >= 0.4;
+                            _LOG(`IO  ${id.slice(0, 12)}…  intersecting=${entry.isIntersecting}  ratio=${ratio.toFixed(3)}  glance=${glanceVisible}  dwell=${dwellVisible}  hasDwellTimer=${dwellTimersRef.current.has(id)}`);
+
+                            if (glanceVisible) {
+                                if (!entryTimesRef.current.has(id)) {
+                                    entryTimesRef.current.set(id, now);
+                                }
+                            } else {
+                                const enterTime = entryTimesRef.current.get(id);
+                                entryTimesRef.current.delete(id);
+                                if (enterTime && (now - enterTime) >= GLANCE_MS) {
+                                    const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
+                                    glanceCountsRef.current.set(id, nextCount);
+                                    _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}  visible=${now - enterTime}ms`);
+                                    if (glanceCountsRef.current.size > 5000) {
+                                        glanceCountsRef.current.clear();
+                                    }
+                                    if (nextCount >= GLANCE_COUNT) {
+                                        glanceCountsRef.current.delete(id);
+                                        const pendingDwell = dwellTimersRef.current.get(id);
+                                        if (pendingDwell) clearTimeout(pendingDwell);
+                                        dwellTimersRef.current.delete(id);
+                                        markSeen(id, "glance");
+                                    }
+                                }
+                            }
+
+                            if (dwellVisible) {
+                                if (!dwellTimersRef.current.get(id)) {
+                                    const timer = setTimeout(() => {
+                                        dwellTimersRef.current.delete(id);
+                                        entryTimesRef.current.delete(id);
+                                        glanceCountsRef.current.delete(id);
+                                        _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
+                                        markSeen(id, "dwell");
+                                    }, DWELL_MS);
+                                    dwellTimersRef.current.set(id, timer);
+                                }
+                            } else {
+                                const dwell = dwellTimersRef.current.get(id);
+                                if (dwell) clearTimeout(dwell);
+                                dwellTimersRef.current.delete(id);
+                            }
+                        }
+                    },
+                    {
+                        threshold: [0, 0.3, 0.4],
+                        rootMargin,
+                    }
+                );
+                for (const el of observedElementsRef.current) {
+                    observerRef.current.observe(el);
+                }
             }
         };
 
         let resizeTimer = null;
         const handleResize = () => {
             if (resizeTimer) clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => { resizeTimer = null; createObserver(); }, 500);
+            resizeTimer = setTimeout(() => { resizeTimer = null; setup(); }, 500);
         };
-        createObserver();
+        setup();
         window.addEventListener("resize", handleResize);
         return () => {
             if (resizeTimer) clearTimeout(resizeTimer);
@@ -354,35 +457,32 @@ export function useSeenPosts() {
                 observerRef.current.disconnect();
                 observerRef.current = null;
             }
+            _detachAllMouseHandlers();
         };
-    }, []);
+    }, [_attachMouseHandlers, _detachAllMouseHandlers]);
 
     const observePost = useCallback((el) => {
-        if (el) {
-            observedElementsRef.current.add(el);
-            if (observerRef.current) {
-                observerRef.current.observe(el);
-            }
+        if (!el) return;
+        observedElementsRef.current.add(el);
+        if (modeRef.current === "desktop") {
+            _attachMouseHandlers(el);
+        } else if (observerRef.current) {
+            observerRef.current.observe(el);
         }
-    }, []);
+    }, [_attachMouseHandlers]);
 
     const unobservePost = useCallback((el) => {
-        if (el) {
-            observedElementsRef.current.delete(el);
-            if (observerRef.current) {
-                observerRef.current.unobserve(el);
-            }
-            const pid = el.dataset?.postId;
-            const id = _normalizeId(pid);
-            if (id) {
-                const dwell = dwellTimersRef.current.get(id);
-                if (dwell) clearTimeout(dwell);
-                dwellTimersRef.current.delete(id);
-                entryTimesRef.current.delete(id);
-                glanceCountsRef.current.delete(id);
-            }
+        if (!el) return;
+        observedElementsRef.current.delete(el);
+        if (modeRef.current === "desktop") {
+            _detachMouseHandlers(el);
+        } else if (observerRef.current) {
+            observerRef.current.unobserve(el);
         }
-    }, []);
+        const pid = el.dataset?.postId;
+        const id = _normalizeId(pid);
+        if (id) _clearTimers(id);
+    }, [_detachMouseHandlers, _clearTimers]);
 
     return { observePost, unobservePost };
 }
