@@ -93,13 +93,14 @@ All six polish items from the initial pass have been addressed:
 2. ~~**Header polish.**~~ ✅ `CommentsHeaderRow` with "Comments (N)" title rendered after the root post.
 3. ~~**Comment sort controls.**~~ Removed — bluemoon doesn't expose sort controls, so mirageapp doesn't either (R4 data parity).
 4. ~~**Collapsed comment row affordance.**~~ ✅ `CollapseToggle` now renders a chevron SVG that rotates 90° when collapsed, replacing the `[+]/[−]` text.
-5. ~~**Action row styling.**~~ ✅ `ActionButton` pills shrunk to 28px (26px mobile), `feedCtrlText` rest color, 14px icons, hover lifts to `text`. Matches mobile compact action row.
+5. ~~**Action row styling.**~~ ✅ `ActionButton` pills now 32px tall (matching `VoteSection::PillRoot` exactly), `feedCtrlText` rest color, 16px icons, hover lifts to `text`. Reply / share pills line up with the vote container at every screen width.
 6. ~~**Composer polish.**~~ ✅ `StyledReply` padding tightened (0.5rem/0.4rem), textarea padding reduced to 0.45rem/0.7rem, font synced to 0.68rem/1.45 line-height, 60px min-height.
 
 **Additional polish in this iteration:**
 - `LoggedOutPromptCard` for guest users (replaced `<Navigate to="/home">` redirect).
 - `VPStateBlock` / `VPStateIcon` / `VPStateTitle` / `VPStateMessage` / `VPLoadingSpinner` for loading, error, and empty-comments states (matching Inbox/Search pattern).
 - `BlockErrorMessage`, `BlockSuccessMessage`, `BlockConfirmMessage` routed through R2 tokens (no more raw hex).
+- `CompactExpandedBody` font tightened to `0.7rem` / `0.64rem` mobile with `contentFontFamily` — proportionally smaller than `CardView::Body` since compact titles are also smaller.
 
 ---
 
