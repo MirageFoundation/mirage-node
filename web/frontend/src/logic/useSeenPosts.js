@@ -17,16 +17,6 @@ const _SB_KEY = "_seenPending";
 const _SB_CAP = 500;
 const _BUFFER_SAVE_DEBOUNCE_MS = 500;
 
-function _loadReportedSet() {
-    try {
-        const raw = sessionStorage.getItem(_SS_KEY);
-        if (raw) {
-            const arr = JSON.parse(raw);
-            if (Array.isArray(arr) && arr.length <= _SS_CAP) return new Set(arr);
-        }
-    } catch (_) { /* noop */ }
-    return new Set();
-}
 
 function _loadPendingBuffer() {
     try {
@@ -76,7 +66,8 @@ function _flushReportedSetSave() {
 }
 
 let _seenBuffer = _loadPendingBuffer();
-let _reportedSet = _loadReportedSet();
+let _reportedSet = new Set();
+try { sessionStorage.removeItem(_SS_KEY); } catch (_) { /* noop */ }
 let _saveTimer = null;
 let _bufferSaveTimer = null;
 let _drainLock = false;
