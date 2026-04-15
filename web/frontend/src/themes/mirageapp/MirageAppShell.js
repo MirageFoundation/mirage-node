@@ -45,7 +45,7 @@ const Layout = styled.div`
     margin: 0 auto;
     gap: 0;
     overflow: visible;
-    transition: grid-template-columns 0.18s ease;
+    transition: ${({ $animating }) => ($animating ? 'grid-template-columns 0.18s ease' : 'none')};
     /* Always fill at least the viewport height below the TopBar so the
        vertical divider (and the sidebar column) never get visually cut
        off on short routes like Create Post, Search, or loading states. */
@@ -216,8 +216,12 @@ export default function MirageAppShell({ children, state }) {
         return () => window.removeEventListener('mirageToggleDrawer', onToggle);
     }, []);
 
+    const [sidebarAnimating, setSidebarAnimating] = useState(false);
+
     const toggleSidebar = useCallback(() => {
+        setSidebarAnimating(true);
         setHidden(v => !v);
+        setTimeout(() => setSidebarAnimating(false), 200);
     }, []);
 
     const toggleDrawer = useCallback(() => {
@@ -227,7 +231,7 @@ export default function MirageAppShell({ children, state }) {
     return (
         <ShellRoot>
             <TopBar state={state} onToggleSidebar={toggleSidebar} onToggleDrawer={toggleDrawer} sidebarHidden={hidden} />
-            <Layout $hidden={hidden}>
+            <Layout $hidden={hidden} $animating={sidebarAnimating}>
                 <SidebarCol $hidden={hidden} aria-hidden={hidden}>
                     <Sidebar state={state} />
                 </SidebarCol>

@@ -60,26 +60,18 @@ const Section = styled.nav`
     display: flex;
     flex-direction: column;
     gap: 2px;
-    /* padding-bottom intentionally 0: the only vertical space below a */
-    /* section comes from the next section's margin-top, which keeps the */
-    /* space above and below a collapsed SectionHeader equal. */
     padding: 0.25rem 0 0;
+`;
 
-    & + & {
-        position: relative;
-        margin-top: 0.5rem;
-        padding-top: 0.5rem;
-    }
-
-    & + &::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: calc(-1 * ${SIDEBAR_PAD_LEFT});
-        right: 0;
-        height: 1px;
-        background: ${({ theme }) => theme.colors.border};
-    }
+const SectionDivider = styled.div`
+    height: 0;
+    overflow: hidden;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    border: none;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    margin-left: calc(-1 * ${SIDEBAR_PAD_LEFT});
+    flex-shrink: 0;
 `;
 
 const SectionHeader = styled.button`
@@ -419,6 +411,8 @@ function Sidebar({ state }) {
                 <SidebarItem to="/search" icon={icons.search} label="Search" pathname={pathname} />
             </Section>
 
+            <SectionDivider />
+
             <Section>
                 <SectionHeader
                     type="button"
@@ -452,6 +446,8 @@ function Sidebar({ state }) {
                     </div>
                 )}
             </Section>
+
+            <SectionDivider />
 
             <Section>
                 <SectionHeader
