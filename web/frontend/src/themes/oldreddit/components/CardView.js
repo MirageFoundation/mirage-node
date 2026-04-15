@@ -1767,17 +1767,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setThumbOriginal(thumbUrl);
 
         if (thumbUrl) {
-            // Check if it's a YouTube thumbnail - use direct URL (no proxy needed, CSS handles cropping)
             const isYoutubeThumbnail = thumbUrl.includes('img.youtube.com') || thumbUrl.includes('i.ytimg.com');
+            const hasQuery = thumbUrl.includes('?');
             if (isYoutubeThumbnail) {
                 setThumbProxy('direct');
                 setThumbSrc(thumbUrl);
                 setThumbBlurSrc(thumbUrl);
+            } else if (hasQuery) {
+                setThumbProxy('wsrv');
+                setThumbSrc(buildWsrvUrl(thumbUrl, { w: 240, h: 240 }));
+                setThumbBlurSrc(buildBlurredWsrvUrl(thumbUrl, { w: 240, h: 240, blur: 18 }));
+                console.debug('[CardView] thumbnail proxy wsrv for query URL', { thumbUrl });
             } else {
-                // Try Photon first (works with redgifs), wsrv as fallback on error
+                // NOTE: Photon was chosen over wsrv in the past (reason lost), but it behaved better.
+                // If thumbnail issues return, this proxy choice is the likely cause.
                 setThumbProxy('photon');
                 setThumbSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 }));
-                setThumbBlurSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 })); // Photon doesn't support blur
+                setThumbBlurSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 }));
             }
         } else {
             setThumbProxy('none');

@@ -76,7 +76,7 @@ not_seen ──→ exposed ──→ seen
    - Mobile: track `onResume` / `onPause` lifecycle events
 2. **Active zone**: For dwell/glance detection, only count time when the card is in the active zone of the viewport (top 8% and bottom 15% excluded — covering the middle 77% of the viewport). The margins are intentionally small so the first and second visible posts on page load both trigger reliably.
 3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
-4. **Deduplicate**: Keep an in-memory `Set<string>` of already-reported IDs. Never emit the same ID twice in a single page view. The set is **cleared on each page load** — each navigation/refresh starts a fresh tracking session. Re-sending an already-seen post to the server is fine (bumps `view_count`).
+4. **No client-side dedup**: Every glance/dwell event is sent to the server. If a user scrolls past the same post 10 times, `view_count` increments 10 times. The backend `ON CONFLICT` upsert handles accumulation.
 5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
 6. **First trigger wins**: Dwell and glance run in parallel. Whichever fires first marks the post as seen; cancel the other. For example, if the user scrolls past a card (glance fires after a single 150ms+ exposure) before the 3s dwell elapses, the dwell timer is cancelled (and vice versa).
 

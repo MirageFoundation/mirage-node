@@ -10,7 +10,6 @@ const POST_ID_RE = /^[0-9a-f]{64}$/;
 const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);
 const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
 
-const _SS_KEY = "_seenReported";
 const _SB_KEY = "_seenPending";
 const _SB_CAP = 500;
 const _BUFFER_SAVE_DEBOUNCE_MS = 500;
@@ -37,8 +36,6 @@ function _loadPendingBuffer() {
 }
 
 let _seenBuffer = _loadPendingBuffer();
-let _reportedSet = new Set();
-try { sessionStorage.removeItem(_SS_KEY); } catch (_) { /* noop */ }
 let _bufferSaveTimer = null;
 let _drainLock = false;
 let _listenerCount = 0;
@@ -134,15 +131,14 @@ function markSeen(pid, reason) {
         return;
     }
     const id = _normalizeId(pid);
-    if (!id || _reportedSet.has(id)) return;
-    _reportedSet.add(id);
+    if (!id) return;
     const finalReason = VALID_REASONS.has(reason) ? reason : "view";
     _seenBuffer.push({ id, reason: finalReason });
     if (_seenBuffer.length > _SB_CAP) {
         _seenBuffer = _seenBuffer.slice(-_SB_CAP);
     }
     _schedulePendingBufferSave();
-    _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}  persisted=${_reportedSet.size}`);
+    _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}`);
     _ensureFlushInterval();
     if (_seenBuffer.length >= MAX_BUFFER) {
         void flushSeenBeacon();
@@ -269,7 +265,7 @@ export function useSeenPosts() {
             const marginBottom = Math.round(vh * 0.15);
             const rootMargin = `-${marginTop}px 0px -${marginBottom}px 0px`;
 
-            _LOG(`OBSERVER  vh=${vh}  rootMargin="${rootMargin}"  reportedSet=${_reportedSet.size}  observed=${observedElementsRef.current.size}`);
+            _LOG(`OBSERVER  vh=${vh}  rootMargin="${rootMargin}"  observed=${observedElementsRef.current.size}`);
 
             if (observerRef.current) {
                 observerRef.current.disconnect();
@@ -287,16 +283,6 @@ export function useSeenPosts() {
                             _LOG(`SKIP  pid=${String(pid).slice(0, 12)}…  invalid id`);
                             continue;
                         }
-                        if (_reportedSet.has(id)) {
-                            _LOG(`DEDUP  ${id.slice(0, 12)}…  already in reportedSet → skip`);
-                            const dwell = dwellTimersRef.current.get(id);
-                            if (dwell) clearTimeout(dwell);
-                            dwellTimersRef.current.delete(id);
-                            entryTimesRef.current.delete(id);
-                            glanceCountsRef.current.delete(id);
-                            continue;
-                        }
-
                         const ratio = entry.intersectionRatio || 0;
                         const glanceVisible = entry.isIntersecting && ratio >= 0.3;
                         const dwellVisible = entry.isIntersecting && ratio >= 0.4;
