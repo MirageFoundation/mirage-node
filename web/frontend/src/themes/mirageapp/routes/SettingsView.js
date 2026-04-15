@@ -1,212 +1,138 @@
+import { useState, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { keyframes } from "styled-components";
 import { Navigate } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
 import { THEMES } from "../../../registry/theme";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn, OldRedditContentBleed } from "../Layout";
-import { useSettings, CheckboxInput, RadioInput } from "../../../logic/useSettings";
-const Row = styled.div`
-    display: grid;
-    grid-template-columns: ${({
-    theme
-}) => theme.layout.formRowColumns};
-    gap: ${({
-    theme
-}) => theme.layout.formRowGap};
-    align-items: ${({
-    theme
-}) => theme.layout.formRowAlign};
-    margin: ${({
-    theme
-}) => theme.layout.formRowMargin};
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
+import { useSettings, RadioInput } from "../../../logic/useSettings";
+
+const SettingsWrap = styled.div`
+    width: 90%;
+    margin: -0.75rem auto 0;
+
     @media (max-width: 1000px) {
-        grid-template-columns: 1fr;
-        gap: 0.35rem;
-        align-items: stretch;
+        width: 100%;
+        margin-top: -0.5rem;
     }
 `;
-const Label = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-weight: ${({
-    theme
-}) => theme.layout.labelWeight};
-    font-size: ${({
-    theme
-}) => theme.layout.labelSize};
+
+const HeaderRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    padding: 0.25rem 1rem 0.65rem;
+`;
+
+const HeaderTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+`;
+
+const SectionHeader = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1rem 0.35rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+`;
+
+const SectionDivider = styled.div`
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+    width: 100%;
+`;
+
+const SettingRow = styled.div`
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 1rem;
+
+    @media (max-width: 600px) {
+        flex-direction: column;
+        gap: 0.4rem;
+        padding: 0.5rem 0.85rem;
+    }
+`;
+
+const SettingLabel = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.72rem;
+    font-weight: 500;
     white-space: nowrap;
-    padding-top: ${({
-    theme
-}) => theme.layout.labelPaddingTop};
-    @media (max-width: 1000px) {
+    padding-top: 0.15rem;
+    flex-shrink: 0;
+
+    @media (max-width: 600px) {
         padding-top: 0;
-        margin-bottom: 0.1rem;
     }
 `;
-const ValueBox = styled.div`
-    background-color: ${({
-    theme
-}) => theme.layout.containerBg};
-    border: ${({
-    theme
-}) => theme.layout.containerBorder};
-    border-bottom: ${({
-    theme
-}) => theme.layout.containerBorderBottom};
-    border-radius: ${({
-    theme
-}) => theme.layout.containerRadius};
-    padding: ${({
-    theme
-}) => theme.layout.containerPadding};
-    width: 100%;
-    box-sizing: border-box;
-    overflow-x: auto;
+
+const SettingControl = styled.div`
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
 `;
-const ThemeSelect = styled.select`
-    background-color: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: ${({
-    theme
-}) => theme.layout.inputRadius};
-    padding: ${({
-    theme
-}) => theme.layout.inputPadding};
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-size: ${({
-    theme
-}) => theme.layout.inputSize};
-    width: 100%;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    
-    &:focus {
-        outline: none;
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-        box-shadow: ${({
-    theme
-}) => theme.layout.focusRing};
-    }
-`;
+
 const ExplanationText = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: ${({
-    theme
-}) => theme.layout.smallSize};
-    margin-top: 0.25rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    margin-top: 0.15rem;
     font-style: italic;
     line-height: 1.4;
 `;
-const CheckboxLabel = styled.label`
-    display: inline-grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: ${({
-    theme
-}) => theme.layout.formRowGap};
-    align-items: center;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: ${({
-    theme
-}) => theme.layout.bodySize};
-    line-height: 1.25;
-    white-space: normal;
-    max-width: 100%;
-    cursor: pointer;
-    user-select: none;
 
-    input[type="checkbox"] {
-        margin-top: 0;
-    }
 
-    &:hover input[type="checkbox"] {
-        border-color: ${({
-    theme
-}) => theme.colors.borderStrong};
-        box-shadow: ${({
-    theme
-}) => theme.layout.focusRing};
-    }
-`;
-const HelperText = styled.span`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: ${({
-    theme
-}) => theme.layout.smallSize};
-`;
+
 const SecurityBanner = styled.div`
     background-color: rgba(245, 158, 11, 0.1);
     border: 1px solid #f59e0b;
-    border-radius: ${({
-    theme
-}) => theme.layout.bannerRadius};
-    padding: ${({
-    theme
-}) => theme.layout.bannerPadding};
-    margin-bottom: ${({
-    theme
-}) => theme.layout.sectionMarginBottom};
-    font-size: ${({
-    theme
-}) => theme.layout.bannerSize};
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    margin: 0.25rem 1rem 0.35rem;
+    font-size: 0.65rem;
     line-height: 1.4;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.text};
 `;
+
 const RadioGroup = styled.div`
     display: flex;
     flex-direction: column;
-    gap: ${({
-    theme
-}) => theme.layout.formRowGap};
+    gap: 0.35rem;
 `;
+
 const RadioLabel = styled.label`
     display: inline-grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: ${({
-    theme
-}) => theme.layout.formRowGap};
+    column-gap: 0.35rem;
     align-items: flex-start;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: ${({
-    theme
-}) => theme.layout.bodySize};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.7rem;
     line-height: 1.25;
-    cursor: ${({
-    $disabled
-}) => $disabled ? 'not-allowed' : 'pointer'};
-    opacity: ${({
-    $disabled
-}) => $disabled ? 0.45 : 1};
+    cursor: ${({ $disabled }) => $disabled ? 'not-allowed' : 'pointer'};
+    opacity: ${({ $disabled }) => $disabled ? 0.45 : 1};
     user-select: none;
 `;
+
 const RadioDescription = styled.span`
     display: block;
-    font-size: ${({
-    theme
-}) => theme.layout.smallSize};
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    color: ${({ theme }) => theme.colors.subtleText};
     font-style: italic;
     margin-top: 0.1rem;
 `;
+
 const InlinePasswordRow = styled.div`
     display: flex;
     gap: 0.5rem;
@@ -214,58 +140,41 @@ const InlinePasswordRow = styled.div`
     margin-top: 0.5rem;
     flex-wrap: wrap;
 `;
+
 const PasswordInput = styled.input`
     flex: 1;
     min-width: 120px;
     max-width: 220px;
-    padding: ${({
-    theme
-}) => theme.layout.inputPadding};
-    font-size: ${({
-    theme
-}) => theme.layout.inputSize};
-    background-color: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: ${({
-    theme
-}) => theme.layout.inputRadius};
-    color: ${({
-    theme
-}) => theme.colors.text};
+    padding: 0.3rem 0.5rem;
+    font-size: 0.7rem;
+    background-color: ${({ theme }) => theme.colors.inputBackground};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
+    color: ${({ theme }) => theme.colors.text};
     box-sizing: border-box;
+    font-family: inherit;
 
     &:focus {
         outline: none;
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-        box-shadow: ${({
-    theme
-}) => theme.layout.focusRing};
+        border-color: ${({ theme }) => theme.colors.focusBlue};
     }
 `;
+
 const SmallButton = styled.button`
-    padding: ${({
-    theme
-}) => theme.layout.buttonPadding};
-    font-size: ${({
-    theme
-}) => theme.layout.buttonSize};
+    padding: 0.3rem 0.65rem;
+    font-size: 0.65rem;
     font-weight: 600;
     cursor: pointer;
     border: none;
-    border-radius: ${({
-    theme
-}) => theme.layout.buttonRadius};
-    background: #3b82f6;
+    border-radius: 6px;
+    background: ${({ theme }) => theme.colors.focusBlue};
     color: #fff;
-    transition: background 0.15s ease;
+    font-family: inherit;
+    transition: opacity 0.15s ease;
     white-space: nowrap;
 
     &:hover:not(:disabled) {
-        background: #2563eb;
+        opacity: 0.85;
     }
 
     &:disabled {
@@ -273,160 +182,65 @@ const SmallButton = styled.button`
         cursor: not-allowed;
     }
 `;
-const DangerButton = styled(SmallButton)`
-    background: #dc2626;
 
-    &:hover:not(:disabled) {
-        background: #b91c1c;
-    }
+const DangerButton = styled(SmallButton)`
+    background: ${({ theme }) => theme.colors.voteDown};
 `;
+
 const DangerInput = styled.input`
     flex: 1;
     min-width: 160px;
-    padding: ${({
-    theme
-}) => theme.layout.inputPadding};
-    font-size: ${({
-    theme
-}) => theme.layout.inputSize};
-    background-color: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: ${({
-    theme
-}) => theme.layout.inputRadius};
-    color: ${({
-    theme
-}) => theme.colors.text};
+    padding: 0.3rem 0.5rem;
+    font-size: 0.7rem;
+    background-color: ${({ theme }) => theme.colors.inputBackground};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
+    color: ${({ theme }) => theme.colors.text};
     box-sizing: border-box;
+    font-family: inherit;
 
     &:focus {
         outline: none;
-        border-color: #ef4444;
-        box-shadow: ${({
-    theme
-}) => theme.layout.focusRing};
+        border-color: ${({ theme }) => theme.colors.voteDown};
     }
 `;
+
 const DangerRow = styled.div`
     display: flex;
     gap: 0.5rem;
     align-items: center;
     flex-wrap: wrap;
 `;
+
 const DangerNotice = styled.div`
-    color: #fca5a5;
-    font-size: ${({
-    theme
-}) => theme.layout.smallSize};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
     line-height: 1.4;
-    margin-bottom: ${({
-    theme
-}) => theme.layout.sectionMarginBottom};
+    margin-bottom: 0.35rem;
 `;
+
 const SecurityError = styled.div`
-    color: #f66;
-    font-size: 0.72rem;
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.65rem;
     margin-top: 0.35rem;
 `;
+
 const SecuritySuccess = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: ${({
-    theme
-}) => theme.layout.bannerRadius};
-    padding: ${({
-    theme
-}) => theme.layout.bannerPadding};
-    margin-top: ${({
-    theme
-}) => theme.layout.sectionMarginBottom};
-    color: #22c55e;
-    font-size: ${({
-    theme
-}) => theme.layout.bannerSize};
+    background-color: ${({ theme }) => theme.colors.buttonSuccessBg};
+    border: 1px solid ${({ theme }) => theme.colors.buttonSuccessBorder};
+    border-radius: 8px;
+    padding: 0.35rem 0.65rem;
+    margin-top: 0.35rem;
+    color: ${({ theme }) => theme.colors.voteUp};
+    font-size: 0.65rem;
     display: flex;
     align-items: center;
     gap: 0.4rem;
 `;
-const SeedGrid = styled.div`
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.4rem;
-    max-width: 100%;
-    margin: 0.5rem 0;
-    padding: 0.75rem;
-    background-color: ${({
-    theme
-}) => theme.colors.panel};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 4px;
-    position: relative;
-    box-sizing: border-box;
 
-    @media (max-width: 1000px) {
-        grid-template-columns: repeat(3, 1fr);
-        padding: 0.5rem;
-        gap: 0.3rem;
-    }
-`;
-const SeedWord = styled.div`
-    background-color: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 3px;
-    padding: 0.3rem 0.2rem;
-    text-align: left;
-    font-size: 0.75rem;
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    display: flex;
-    align-items: center;
-    gap: 0.2rem;
-    white-space: nowrap;
-    word-break: normal;
-    overflow-wrap: normal;
-
-    &:before {
-        content: attr(data-index);
-        color: ${({
-    theme
-}) => theme.colors.subtleText};
-        font-size: 0.5rem;
-        min-width: 12px;
-        font-weight: bold;
-    }
-
-    @media (max-width: 400px) {
-        font-size: 0.7rem;
-        padding: 0.25rem 0.15rem;
-        gap: 0.1rem;
-        &:before {
-            font-size: 0.45rem;
-            min-width: 10px;
-        }
-    }
-`;
-const SeedWarning = styled.div`
-    color: #f59e0b;
-    font-size: 0.7rem;
-    line-height: 1.35;
-    margin-bottom: 0.5rem;
-`;
 const SettingsTabbedContainer = styled(TabbedContainer)`
     margin-top: 0;
 `;
-
 
 const SettingsShellBody = styled(ContainerBody)`
     padding: 0.35rem 0 0.75rem;
@@ -434,20 +248,395 @@ const SettingsShellBody = styled(ContainerBody)`
     border-radius: 0;
 `;
 
-/** Cancels shell horizontal padding so the rule spans the full feed width (same as Discover topics). */
-const SettingsFullBleedRule = styled.div`
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+const ClickableSettingRow = styled.button`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
     width: 100%;
-    box-sizing: border-box;
+    padding: 0.55rem 1rem;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+
+    &:hover .chevron-pill {
+        background: ${({ theme }) => theme.colors.surface3};
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0.85rem;
+    }
 `;
 
-export default function SettingsView({
-    state
-}) {
+const ClickableRowLabel = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.72rem;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+`;
+
+const ClickableRowRight = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+`;
+
+const ClickableRowValue = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.7rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+`;
+
+const ChevronPill = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 28px;
+    border-radius: 999px;
+    color: ${({ theme }) => theme.colors.subtleText};
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+`;
+
+const fadeIn = keyframes`
+    from { opacity: 0; }
+    to { opacity: 1; }
+`;
+
+const slideUp = keyframes`
+    from { transform: translateY(12px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+`;
+
+const ModalOverlay = styled.div`
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: ${({ theme }) => theme.colors.overlay};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: ${fadeIn} 0.15s ease;
+    padding: 1rem;
+`;
+
+const ModalPanel = styled.div`
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 14px;
+    width: 100%;
+    max-width: 360px;
+    max-height: 70vh;
+    overflow-y: auto;
+    animation: ${slideUp} 0.2s ease;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+`;
+
+const ModalHeader = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem 0.5rem;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const ModalTitle = styled.div`
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme.colors.text};
+`;
+
+const ModalClose = styled.button`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: none;
+    border: none;
+    color: ${({ theme }) => theme.colors.subtleText};
+    cursor: pointer;
+    padding: 0;
+    border-radius: 999px;
+    transition: color 0.12s ease, background 0.12s ease;
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.text};
+        background: ${({ theme }) => theme.colors.surface3};
+    }
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+`;
+
+const ModalOption = styled.button`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: ${({ $active, theme }) => $active ? theme.colors.sidebarItemActiveBg : 'transparent'};
+    border: none;
+    padding: 0.6rem 1rem;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.72rem;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+`;
+
+const ModalOptionCheck = styled.span`
+    color: ${({ theme }) => theme.colors.focusBlue};
+    font-size: 0.85rem;
+    font-weight: 700;
+    flex-shrink: 0;
+`;
+
+const ModalOptionSub = styled.div`
+    font-size: 0.6rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    margin-top: 0.1rem;
+`;
+
+function OptionModal({ title, options, value, onChange, onClose }) {
+    return <ModalOverlay onClick={onClose}>
+        <ModalPanel onClick={e => e.stopPropagation()}>
+            <ModalHeader>
+                <ModalTitle>{title}</ModalTitle>
+                <ModalClose onClick={onClose}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></ModalClose>
+            </ModalHeader>
+            <div>
+                {options.map(opt => <ModalOption
+                    key={opt.value}
+                    $active={opt.value === value}
+                    onClick={() => { onChange(opt.value); onClose(); }}
+                >
+                    <div>
+                        {opt.label}
+                        {opt.sub && <ModalOptionSub>{opt.sub}</ModalOptionSub>}
+                    </div>
+                    {opt.value === value && <ModalOptionCheck>✓</ModalOptionCheck>}
+                </ModalOption>)}
+            </div>
+        </ModalPanel>
+    </ModalOverlay>;
+}
+
+const checkPop = keyframes`
+    0% { transform: scale(0.8); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+`;
+
+const ToggleTrack = styled.div`
+    width: 42px;
+    height: 24px;
+    flex: 0 0 42px;
+    border-radius: 12px;
+    background: ${({ $checked, theme }) => $checked ? theme.colors.focusBlue : theme.colors.surface3};
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
+`;
+
+const ToggleKnob = styled.div`
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    position: absolute;
+    top: 2px;
+    left: ${({ $checked }) => $checked ? '20px' : '2px'};
+    transition: left 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    animation: ${({ $checked }) => $checked ? checkPop : 'none'} 0.25s ease;
+`;
+
+function Toggle({ checked, onChange, disabled }) {
+    return <ToggleTrack
+        $checked={checked}
+        role="switch"
+        aria-checked={checked}
+        tabIndex={0}
+        style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+        onClick={e => {
+            if (disabled) return;
+            onChange({ target: { checked: !checked } });
+        }}
+        onKeyDown={e => {
+            if (disabled) return;
+            if (e.key === ' ' || e.key === 'Enter') {
+                e.preventDefault();
+                onChange({ target: { checked: !checked } });
+            }
+        }}
+    >
+        <ToggleKnob $checked={checked} />
+    </ToggleTrack>;
+}
+
+const ToggleRow = styled.label`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    cursor: pointer;
+    user-select: none;
+    padding: 0.15rem 0;
+`;
+
+const ToggleLabel = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.3;
+`;
+
+const ToggleDesc = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.58rem;
+    line-height: 1.35;
+    margin-top: 0.1rem;
+    font-weight: 400;
+`;
+
+const TagsGrid = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+`;
+
+const TagPill = styled.button`
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid ${({ $active, theme }) => $active ? theme.colors.focusBlue : theme.colors.border};
+    background: ${({ $active, theme }) => $active ? 'rgba(66, 133, 244, 0.15)' : 'transparent'};
+    color: ${({ $active, theme }) => $active ? theme.colors.focusBlue : theme.colors.subtleText};
+    font-size: 0.65rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+
+    &:hover {
+        border-color: ${({ theme }) => theme.colors.focusBlue};
+        color: ${({ theme }) => theme.colors.focusBlue};
+    }
+`;
+
+
+
+const SeedPhraseCard = styled.div`
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 12px;
+    padding: 1rem;
+    margin-top: 0.25rem;
+`;
+
+const SeedWarningBanner = styled.div`
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 8px;
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.65rem;
+    font-size: 0.62rem;
+    line-height: 1.4;
+    color: #f59e0b;
+`;
+
+const SeedGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.35rem;
+    margin-bottom: 0.65rem;
+
+    @media (max-width: 600px) {
+        grid-template-columns: repeat(3, 1fr);
+    }
+`;
+
+const SeedWord = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 6px;
+    padding: 0.3rem 0.35rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.72rem;
+    color: ${({ theme }) => theme.colors.text};
+    white-space: nowrap;
+`;
+
+const SeedWordIndex = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.48rem;
+    font-weight: 700;
+    min-width: 14px;
+`;
+
+const SeedActions = styled.div`
+    display: flex;
+    gap: 0.5rem;
+`;
+
+const GhostButton = styled(SmallButton)`
+    background: transparent;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.text};
+
+    &:hover:not(:disabled) {
+        opacity: 1;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+`;
+
+const RevealButton = styled(SmallButton)`
+    padding: 0.4rem 0.85rem;
+    font-size: 0.7rem;
+    border-radius: 8px;
+`;
+
+
+
+export default function SettingsView({ state }) {
+    const [openModal, setOpenModal] = useState(null);
+
     const {
         themeId,
         themeMode,
         collapseThreshold,
+        sidebarTopicsLimit,
+        sidebarPeopleLimit,
         hideDownvotedPosts,
         setHideDownvotedPosts,
         blurSensitiveMedia,
@@ -497,14 +686,54 @@ export default function SettingsView({
         handleThemeModeChange,
         handleReferralPrecheckToggle,
         handleCollapseThresholdChange,
+        handleSidebarTopicsLimitChange,
+        handleSidebarPeopleLimitChange,
         getThemeExplanation,
         handleDeleteAccount
-    } = useSettings({
-        state
-    });
+    } = useSettings({ state });
+
+    const closeModal = useCallback(() => setOpenModal(null), []);
+
     if (!state.publicKey) {
         return <Navigate to="/login" replace />;
     }
+
+    const themeOptions = Object.values(THEMES).map(t => ({ value: t.id, label: t.label, sub: t.description }));
+    const modeOptions = [
+        { value: 'time', label: 'Time-based', sub: getThemeExplanation('time') },
+        { value: 'dark', label: 'Dark' },
+        { value: 'light', label: 'Light' },
+        { value: 'system', label: 'System', sub: getThemeExplanation('system') },
+    ];
+    const collapseOptions = [
+        { value: '-3', label: '-3' },
+        { value: '-5', label: '-5' },
+        { value: '-10', label: '-10' },
+        { value: '-25', label: '-25' },
+        { value: '-50', label: '-50' },
+        { value: '0', label: 'Never' },
+    ];
+    const limitOptions = ['5', '10', '15', '20', '50', '100'].map(v => ({ value: v, label: v }));
+
+    const currentThemeLabel = themeOptions.find(o => o.value === themeId)?.label || themeId;
+    const currentModeLabel = modeOptions.find(o => o.value === themeMode)?.label || themeMode;
+    const currentCollapseLabel = collapseOptions.find(o => o.value === (Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'))?.label || '-5';
+
+    const tags = [
+        { key: 'sensitive', label: 'Sensitive', checked: showTagSensitive, set: setShowTagSensitive, storageKey: 'show_tag_sensitive', eventKey: 'showTagSensitive' },
+        { key: 'adult', label: 'Adult', checked: showTagAdult, set: setShowTagAdult, storageKey: 'show_tag_adult', eventKey: 'showTagAdult' },
+        { key: 'violence', label: 'Violence', checked: showTagViolence, set: setShowTagViolence, storageKey: 'show_tag_violence', eventKey: 'showTagViolence' },
+        { key: 'gore', label: 'Gore', checked: showTagGore, set: setShowTagGore, storageKey: 'show_tag_gore', eventKey: 'showTagGore' },
+        { key: 'death', label: 'Death', checked: showTagDeath, set: setShowTagDeath, storageKey: 'show_tag_death', eventKey: 'showTagDeath' },
+    ];
+
+    const toggleTag = (tag) => {
+        const val = !tag.checked;
+        tag.set(val);
+        Storage.save(tag.storageKey, val);
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { [tag.eventKey]: val } }));
+    };
+
     return <ContentGrid>
         <Helmet>
             <title>Settings | Mirage</title>
@@ -513,381 +742,333 @@ export default function SettingsView({
             <CappedPageColumn>
                 <SettingsTabbedContainer>
                     <SettingsShellBody>
-                        <Row>
-                            <Label>Theme:</Label>
-                            <ValueBox>
-                                <ThemeSelect value={themeId} onChange={handleThemeIdChange}>
-                                    {Object.values(THEMES).map(t => <option key={t.id} value={t.id}>{t.label} — {t.description}</option>)}
-                                </ThemeSelect>
-                            </ValueBox>
-                        </Row>
+                        <SettingsWrap>
+                            <HeaderRow>
+                                <HeaderTitle>Settings</HeaderTitle>
+                            </HeaderRow>
+                            <SectionDivider />
 
-                        <Row>
-                            <Label>Theme mode:</Label>
-                            <ValueBox>
-                                <ThemeSelect value={themeMode} onChange={handleThemeModeChange}>
-                                    <option value="time">Time-based</option>
-                                    <option value="dark">Dark</option>
-                                    <option value="light">Light</option>
-                                    <option value="system">System</option>
-                                </ThemeSelect>
-                                <ExplanationText>{getThemeExplanation(themeMode)}</ExplanationText>
-                            </ValueBox>
-                        </Row>
+                            <SectionHeader>Appearance</SectionHeader>
 
-                        {inviteCodesRequired && <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Referral links:</Label>
-                            <ValueBox>
-                                <CheckboxLabel>
-                                    <CheckboxInput checked={referralPrecheckEnabled} disabled={referralPrecheckBusy} onChange={e => handleReferralPrecheckToggle(!!e.target.checked)} />
-                                    Enable referral links for my account
-                                </CheckboxLabel>
-                                <ExplanationText>
-                                    Lets people sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
-                                </ExplanationText>
-                                {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
-                                {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
-                            </ValueBox>
-                        </Row>}
+                            <ClickableSettingRow type="button" onClick={() => setOpenModal('theme')}>
+                                <ClickableRowLabel>Theme</ClickableRowLabel>
+                                <ClickableRowRight>
+                                    <ClickableRowValue>{currentThemeLabel}</ClickableRowValue>
+                                    <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
+                                </ClickableRowRight>
+                            </ClickableSettingRow>
 
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Show content with tags:</Label>
-                            <ValueBox>
-                                <div style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '0.5rem'
-                                }}>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={showTagSensitive} onChange={e => {
+                            <ClickableSettingRow type="button" onClick={() => setOpenModal('mode')}>
+                                <ClickableRowLabel>Mode</ClickableRowLabel>
+                                <ClickableRowRight>
+                                    <ClickableRowValue>{currentModeLabel}</ClickableRowValue>
+                                    <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
+                                </ClickableRowRight>
+                            </ClickableSettingRow>
+
+                            <SectionHeader>Content</SectionHeader>
+
+                            <SettingRow>
+                                <SettingLabel>Content tags</SettingLabel>
+                                <SettingControl>
+                                    <TagsGrid>
+                                        {tags.map(tag => <TagPill
+                                            key={tag.key}
+                                            $active={tag.checked}
+                                            onClick={() => toggleTag(tag)}
+                                            type="button"
+                                        >
+                                            {tag.label}
+                                        </TagPill>)}
+                                    </TagsGrid>
+                                </SettingControl>
+                            </SettingRow>
+
+                            <SettingRow>
+                                <SettingControl>
+                                    <ToggleRow as="div">
+                                        <div>
+                                            <ToggleLabel>Blur sensitive media</ToggleLabel>
+                                            <ToggleDesc>Blur tagged sensitive images and videos</ToggleDesc>
+                                        </div>
+                                        <Toggle checked={blurSensitiveMedia} onChange={e => {
                                             const val = !!e.target.checked;
-                                            setShowTagSensitive(val);
-                                            Storage.save('show_tag_sensitive', val);
-                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                                detail: {
-                                                    showTagSensitive: val
-                                                }
-                                            }));
+                                            setBlurSensitiveMedia(val);
+                                            Storage.save('blur_sensitive_media', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { blurSensitiveMedia: val } }));
                                         }} />
-                                        Sensitive
-                                    </CheckboxLabel>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={showTagAdult} onChange={e => {
+                                    </ToggleRow>
+                                </SettingControl>
+                            </SettingRow>
+
+                            <ClickableSettingRow type="button" onClick={() => setOpenModal('collapse')}>
+                                <ClickableRowLabel>Auto-collapse</ClickableRowLabel>
+                                <ClickableRowRight>
+                                    <ClickableRowValue>{currentCollapseLabel}</ClickableRowValue>
+                                    <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
+                                </ClickableRowRight>
+                            </ClickableSettingRow>
+
+                            <SettingRow>
+                                <SettingControl>
+                                    <ToggleRow as="div">
+                                        <div>
+                                            <ToggleLabel>Hide downvoted posts</ToggleLabel>
+                                            <ToggleDesc>Immediately remove posts you downvote from feed</ToggleDesc>
+                                        </div>
+                                        <Toggle checked={hideDownvotedPosts} onChange={e => {
                                             const val = !!e.target.checked;
-                                            setShowTagAdult(val);
-                                            Storage.save('show_tag_adult', val);
-                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                                detail: {
-                                                    showTagAdult: val
-                                                }
-                                            }));
+                                            setHideDownvotedPosts(val);
+                                            Storage.save('hide_downvoted_posts', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { hideDownvotedPosts: val } }));
                                         }} />
-                                        Adult
-                                    </CheckboxLabel>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={showTagViolence} onChange={e => {
-                                            const val = !!e.target.checked;
-                                            setShowTagViolence(val);
-                                            Storage.save('show_tag_violence', val);
-                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                                detail: {
-                                                    showTagViolence: val
-                                                }
-                                            }));
-                                        }} />
-                                        Violence
-                                    </CheckboxLabel>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={showTagGore} onChange={e => {
-                                            const val = !!e.target.checked;
-                                            setShowTagGore(val);
-                                            Storage.save('show_tag_gore', val);
-                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                                detail: {
-                                                    showTagGore: val
-                                                }
-                                            }));
-                                        }} />
-                                        Gore
-                                    </CheckboxLabel>
-                                    <CheckboxLabel>
-                                        <CheckboxInput checked={showTagDeath} onChange={e => {
-                                            const val = !!e.target.checked;
-                                            setShowTagDeath(val);
-                                            Storage.save('show_tag_death', val);
-                                            window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                                detail: {
-                                                    showTagDeath: val
-                                                }
-                                            }));
-                                        }} />
-                                        Death
-                                    </CheckboxLabel>
-                                </div>
-                            </ValueBox>
-                        </Row>
+                                    </ToggleRow>
+                                </SettingControl>
+                            </SettingRow>
 
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Blur sensitive media:</Label>
-                            <ValueBox>
-                                <CheckboxLabel>
-                                    <CheckboxInput checked={blurSensitiveMedia} onChange={e => {
-                                        const val = !!e.target.checked;
-                                        setBlurSensitiveMedia(val);
-                                        Storage.save('blur_sensitive_media', val);
-                                        window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                            detail: {
-                                                blurSensitiveMedia: val
-                                            }
-                                        }));
-                                    }} />
-                                    Blur tagged sensitive media (images/videos)
-                                </CheckboxLabel>
-                            </ValueBox>
-                        </Row>
+                            <SectionHeader>Sidebar</SectionHeader>
 
-                        <Row>
-                            <Label>Auto-collapse:</Label>
-                            <ValueBox>
-                                <div style={{
-                                    display: 'flex',
-                                    gap: '0.5rem',
-                                    alignItems: 'center'
-                                }}>
-                                    <ThemeSelect value={Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'} onChange={e => handleCollapseThresholdChange({
-                                        target: {
-                                            value: e.target.value
-                                        }
-                                    })} style={{
-                                        width: 'auto',
-                                        minWidth: '5rem'
-                                    }}>
-                                        <option value="-3">-3</option>
-                                        <option value="-5">-5</option>
-                                        <option value="-10">-10</option>
-                                        <option value="-25">-25</option>
-                                        <option value="-50">-50</option>
-                                        <option value="0">Never</option>
-                                    </ThemeSelect>
-                                    <HelperText>
-                                        Collapse comments at or below this score
-                                    </HelperText>
-                                </div>
-                            </ValueBox>
-                        </Row>
+                            <ClickableSettingRow type="button" onClick={() => setOpenModal('sidebarTopics')}>
+                                <ClickableRowLabel>Topics shown</ClickableRowLabel>
+                                <ClickableRowRight>
+                                    <ClickableRowValue>{String(sidebarTopicsLimit)}</ClickableRowValue>
+                                    <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
+                                </ClickableRowRight>
+                            </ClickableSettingRow>
 
+                            <ClickableSettingRow type="button" onClick={() => setOpenModal('sidebarPeople')}>
+                                <ClickableRowLabel>People shown</ClickableRowLabel>
+                                <ClickableRowRight>
+                                    <ClickableRowValue>{String(sidebarPeopleLimit)}</ClickableRowValue>
+                                    <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
+                                </ClickableRowRight>
+                            </ClickableSettingRow>
 
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Hide posts you downvote:</Label>
-                            <ValueBox>
-                                <CheckboxLabel>
-                                    <CheckboxInput checked={hideDownvotedPosts} onChange={e => {
-                                        const val = !!e.target.checked;
-                                        setHideDownvotedPosts(val);
-                                        Storage.save('hide_downvoted_posts', val);
-                                        window.dispatchEvent(new CustomEvent('settingsUpdated', {
-                                            detail: {
-                                                hideDownvotedPosts: val
-                                            }
-                                        }));
-                                    }} />
-                                    Immediately hide downvoted posts
-                                </CheckboxLabel>
-                            </ValueBox>
-                        </Row>
+                            {inviteCodesRequired && <>
+                                <SectionHeader>Referrals</SectionHeader>
 
-                        <OldRedditContentBleed>
-                            <SettingsFullBleedRule aria-hidden="true" />
-                        </OldRedditContentBleed>
+                                <SettingRow>
+                                    <SettingControl>
+                                        <ToggleRow as="div">
+                                            <div>
+                                                <ToggleLabel>Enable referral links</ToggleLabel>
+                                                <ToggleDesc>Lets people sign up via your personal link instead of sharing invite codes directly.</ToggleDesc>
+                                            </div>
+                                            <Toggle checked={referralPrecheckEnabled} disabled={referralPrecheckBusy} onChange={e => handleReferralPrecheckToggle(!!e.target.checked)} />
+                                        </ToggleRow>
+                                        {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
+                                        {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
+                                    </SettingControl>
+                                </SettingRow>
+                            </>}
 
-                        {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
-                            Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
-                        </SecurityBanner>}
+                            <SectionHeader>Security</SectionHeader>
 
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Seed phrase storage:</Label>
-                            <ValueBox>
-                                <RadioGroup>
-                                    <RadioLabel>
-                                        <RadioInput name="seed_mode" value="insecure" checked={seedMode === 'insecure' && secPending !== 'password'} onChange={() => handleModeSelect('insecure')} disabled={secBusy} />
-                                        <span>
-                                            Unencrypted (default)
-                                            <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-                                    {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                            {seedMode === 'insecure' && state.publicKey && <SecurityBanner>
+                                Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
+                            </SecurityBanner>}
 
-                                    <RadioLabel>
-                                        <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
-                                        <span>
-                                            Password encrypted
-                                            <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
-                                        </span>
-                                    </RadioLabel>
+                            <SettingRow>
+                                <SettingLabel>Seed storage</SettingLabel>
+                                <SettingControl>
+                                    <RadioGroup>
+                                        <RadioLabel>
+                                            <RadioInput name="seed_mode" value="insecure" checked={seedMode === 'insecure' && secPending !== 'password'} onChange={() => handleModeSelect('insecure')} disabled={secBusy} />
+                                            <span>
+                                                Unencrypted (default)
+                                                <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+                                        {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
 
-                                    {secPending === 'password' && <div style={{
-                                        paddingLeft: '1.3rem'
-                                    }}>
-                                        <InlinePasswordRow>
-                                            <PasswordInput type="password" placeholder="Password" value={secPassword} onChange={e => {
-                                                setSecPassword(e.target.value);
-                                                setSecError('');
-                                            }} disabled={secBusy} autoFocus />
-                                        </InlinePasswordRow>
-                                        <InlinePasswordRow>
-                                            <PasswordInput type="password" placeholder="Confirm password" value={secPasswordConfirm} onChange={e => {
-                                                setSecPasswordConfirm(e.target.value);
-                                                setSecError('');
-                                            }} disabled={secBusy} onKeyDown={e => {
-                                                if (e.key === 'Enter') {
-                                                    e.preventDefault();
+                                        <RadioLabel>
+                                            <RadioInput name="seed_mode" value="password" checked={seedMode === 'password' || secPending === 'password'} onChange={() => handleModeSelect('password')} disabled={secBusy} />
+                                            <span>
+                                                Password encrypted
+                                                <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+
+                                        {secPending === 'password' && <div style={{ paddingLeft: '1.3rem' }}>
+                                            <InlinePasswordRow>
+                                                <PasswordInput type="password" placeholder="Password" value={secPassword} onChange={e => {
+                                                    setSecPassword(e.target.value);
+                                                    setSecError('');
+                                                }} disabled={secBusy} autoFocus />
+                                            </InlinePasswordRow>
+                                            <InlinePasswordRow>
+                                                <PasswordInput type="password" placeholder="Confirm password" value={secPasswordConfirm} onChange={e => {
+                                                    setSecPasswordConfirm(e.target.value);
+                                                    setSecError('');
+                                                }} disabled={secBusy} onKeyDown={e => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        if (secPassword !== secPasswordConfirm) {
+                                                            setSecError('Passwords do not match.');
+                                                        } else {
+                                                            commitModeSwitch('password', secPassword);
+                                                        }
+                                                    }
+                                                }} />
+                                                <SmallButton disabled={secBusy || !secPassword.trim()} onClick={() => {
                                                     if (secPassword !== secPasswordConfirm) {
                                                         setSecError('Passwords do not match.');
                                                     } else {
                                                         commitModeSwitch('password', secPassword);
                                                     }
-                                                }
-                                            }} />
-                                            <SmallButton disabled={secBusy || !secPassword.trim()} onClick={() => {
-                                                if (secPassword !== secPasswordConfirm) {
-                                                    setSecError('Passwords do not match.');
-                                                } else {
-                                                    commitModeSwitch('password', secPassword);
-                                                }
-                                            }}>
-                                                {secBusy ? 'Encrypting...' : 'Set Password'}
-                                            </SmallButton>
-                                        </InlinePasswordRow>
-                                        {secError && <SecurityError>{secError}</SecurityError>}
-                                    </div>}
-                                    {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                                }}>
+                                                    {secBusy ? 'Encrypting...' : 'Set Password'}
+                                                </SmallButton>
+                                            </InlinePasswordRow>
+                                            {secError && <SecurityError>{secError}</SecurityError>}
+                                        </div>}
+                                        {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
 
-                                    <RadioLabel>
-                                        <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
-                                        <span>
-                                            Memory only
-                                            <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-                                    {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                        <RadioLabel>
+                                            <RadioInput name="seed_mode" value="memory" checked={seedMode === 'memory'} onChange={() => handleModeSelect('memory')} disabled={secBusy} />
+                                            <span>
+                                                Memory only
+                                                <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+                                        {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
 
-                                    <RadioLabel $disabled={!prfSupported}>
-                                        <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
-                                        <span>
-                                            Passkey (Touch ID / Face ID / Security Key)
-                                            <RadioDescription>
-                                                {prfSupported ? 'Seed encrypted with your passkey. Authenticate to unlock each session.' : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
-                                            </RadioDescription>
-                                        </span>
-                                    </RadioLabel>
-                                    {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
-                                </RadioGroup>
+                                        <RadioLabel $disabled={!prfSupported}>
+                                            <RadioInput name="seed_mode" value="passkey" checked={seedMode === 'passkey'} onChange={() => handleModeSelect('passkey')} disabled={secBusy || !prfSupported} />
+                                            <span>
+                                                Passkey (Touch ID / Face ID / Security Key)
+                                                <RadioDescription>
+                                                    {prfSupported ? 'Seed encrypted with your passkey. Authenticate to unlock each session.' : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
+                                                </RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+                                        {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    </RadioGroup>
 
-                                {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
-                            </ValueBox>
-                        </Row>
+                                    {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
+                                </SettingControl>
+                            </SettingRow>
 
-                        {state.publicKey && <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Recovery phrase:</Label>
-                            <ValueBox>
-                                {!seedRevealed ? <>
-                                    <SmallButton onClick={() => {
-                                        const s = seedVault.getSeed();
-                                        if (!s) {
-                                            setSecError('No seed phrase available. Please sign in first.');
-                                            return;
-                                        }
-                                        setSeedRevealed(true);
-                                        setSeedCopied(false);
-                                    }}>
-                                        Reveal Recovery Phrase
-                                    </SmallButton>
-                                    <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
-                                </> : <>
-                                    <SeedWarning>
-                                        Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.
-                                    </SeedWarning>
-                                    <SeedGrid>
-                                        {(seedVault.getSeed() || '').split(' ').map((word, i) => <SeedWord key={i} data-index={i + 1}>
-                                            {word}
-                                        </SeedWord>)}
-                                    </SeedGrid>
-                                    <div style={{
-                                        display: 'flex',
-                                        gap: '0.5rem',
-                                        marginTop: '0.35rem'
-                                    }}>
-                                        <SmallButton onClick={async () => {
-                                            try {
-                                                await navigator.clipboard.writeText(seedVault.getSeed() || '');
-                                                setSeedCopied(true);
-                                                setTimeout(() => setSeedCopied(false), 2000);
-                                            } catch (_) { }
-                                        }}>
-                                            {seedCopied ? 'Copied!' : 'Copy'}
-                                        </SmallButton>
-                                        <SmallButton onClick={() => {
-                                            setSeedRevealed(false);
+                            {state.publicKey && <SettingRow>
+                                <SettingLabel>Recovery phrase</SettingLabel>
+                                <SettingControl>
+                                    {!seedRevealed ? <>
+                                        <RevealButton onClick={() => {
+                                            const s = seedVault.getSeed();
+                                            if (!s) {
+                                                setSecError('No seed phrase available. Please sign in first.');
+                                                return;
+                                            }
+                                            setSeedRevealed(true);
                                             setSeedCopied(false);
-                                        }} style={{
-                                            background: 'transparent',
-                                            border: '1px solid #555',
-                                            color: '#ccc'
                                         }}>
-                                            Hide
-                                        </SmallButton>
-                                    </div>
-                                </>}
-                            </ValueBox>
-                        </Row>}
+                                            Reveal Recovery Phrase
+                                        </RevealButton>
+                                        <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
+                                    </> : <SeedPhraseCard>
+                                        <SeedWarningBanner>
+                                            <span style={{ fontSize: '0.85rem', lineHeight: 1 }}>⚠</span>
+                                            <span>Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.</span>
+                                        </SeedWarningBanner>
+                                        <SeedGrid>
+                                            {(seedVault.getSeed() || '').split(' ').map((word, i) => <SeedWord key={i}>
+                                                <SeedWordIndex>{i + 1}</SeedWordIndex>
+                                                {word}
+                                            </SeedWord>)}
+                                        </SeedGrid>
+                                        <SeedActions>
+                                            <SmallButton onClick={async () => {
+                                                try {
+                                                    await navigator.clipboard.writeText(seedVault.getSeed() || '');
+                                                    setSeedCopied(true);
+                                                    setTimeout(() => setSeedCopied(false), 2000);
+                                                } catch (_) { }
+                                            }}>
+                                                {seedCopied ? 'Copied!' : 'Copy'}
+                                            </SmallButton>
+                                            <GhostButton onClick={() => {
+                                                setSeedRevealed(false);
+                                                setSeedCopied(false);
+                                            }}>
+                                                Hide
+                                            </GhostButton>
+                                        </SeedActions>
+                                    </SeedPhraseCard>}
+                                </SettingControl>
+                            </SettingRow>}
 
-                        <OldRedditContentBleed>
-                            <SettingsFullBleedRule aria-hidden="true" />
-                        </OldRedditContentBleed>
+                            <SectionHeader>Account</SectionHeader>
 
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Delete account:</Label>
-                            <ValueBox>
-                                <DangerNotice>
-                                    This submits an account deletion request to the network. Most nodes will honor it, but some may not — full removal cannot be guaranteed.
-                                </DangerNotice>
-                                <DangerRow>
-                                    <DangerInput value={deleteConfirmText} onChange={e => {
-                                        setDeleteConfirmText(e.target.value);
-                                        if (deleteError) setDeleteError('');
-                                        if (deleteSuccess) setDeleteSuccess('');
-                                    }} onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                            e.preventDefault();
-                                            handleDeleteAccount();
-                                        }
-                                    }} placeholder="Type DELETE to confirm" disabled={deleteBusy} />
-                                    <DangerButton disabled={!deleteConfirmReady || deleteBusy} onClick={handleDeleteAccount}>
-                                        {deleteStatus || (deleteBusy ? 'Deleting...' : 'Delete account')}
-                                    </DangerButton>
-                                </DangerRow>
-                                {deleteError && <SecurityError>{deleteError}</SecurityError>}
-                                {deleteSuccess && <SecuritySuccess><span>✓</span>{deleteSuccess}</SecuritySuccess>}
-                            </ValueBox>
-                        </Row>
+                            <SettingRow>
+                                <SettingLabel>Delete account</SettingLabel>
+                                <SettingControl>
+                                    <DangerNotice>
+                                        This submits an account deletion request to the network. Most nodes will honor it, but some may not — full removal cannot be guaranteed.
+                                    </DangerNotice>
+                                    <DangerRow>
+                                        <DangerInput value={deleteConfirmText} onChange={e => {
+                                            setDeleteConfirmText(e.target.value);
+                                            if (deleteError) setDeleteError('');
+                                            if (deleteSuccess) setDeleteSuccess('');
+                                        }} onKeyDown={e => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                handleDeleteAccount();
+                                            }
+                                        }} placeholder="Type DELETE to confirm" disabled={deleteBusy} />
+                                        <DangerButton disabled={!deleteConfirmReady || deleteBusy} onClick={handleDeleteAccount}>
+                                            {deleteStatus || (deleteBusy ? 'Deleting...' : 'Delete account')}
+                                        </DangerButton>
+                                    </DangerRow>
+                                    {deleteError && <SecurityError>{deleteError}</SecurityError>}
+                                    {deleteSuccess && <SecuritySuccess><span>✓</span>{deleteSuccess}</SecuritySuccess>}
+                                </SettingControl>
+                            </SettingRow>
 
+                        </SettingsWrap>
                     </SettingsShellBody>
                 </SettingsTabbedContainer>
             </CappedPageColumn>
         </ModernPostFeed>
+
+        {openModal === 'theme' && <OptionModal
+            title="Choose Theme"
+            options={themeOptions}
+            value={themeId}
+            onChange={v => handleThemeIdChange({ target: { value: v } })}
+            onClose={closeModal}
+        />}
+
+        {openModal === 'mode' && <OptionModal
+            title="Theme Mode"
+            options={modeOptions}
+            value={themeMode}
+            onChange={v => handleThemeModeChange({ target: { value: v } })}
+            onClose={closeModal}
+        />}
+
+        {openModal === 'collapse' && <OptionModal
+            title="Auto-collapse Threshold"
+            options={collapseOptions}
+            value={Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'}
+            onChange={v => handleCollapseThresholdChange({ target: { value: v } })}
+            onClose={closeModal}
+        />}
+
+        {openModal === 'sidebarTopics' && <OptionModal
+            title="Sidebar Topics Limit"
+            options={limitOptions}
+            value={String(sidebarTopicsLimit)}
+            onChange={v => handleSidebarTopicsLimitChange({ target: { value: v } })}
+            onClose={closeModal}
+        />}
+
+        {openModal === 'sidebarPeople' && <OptionModal
+            title="Sidebar People Limit"
+            options={limitOptions}
+            value={String(sidebarPeopleLimit)}
+            onChange={v => handleSidebarPeopleLimitChange({ target: { value: v } })}
+            onClose={closeModal}
+        />}
     </ContentGrid>;
 }
