@@ -595,5 +595,10 @@ while true; do
         SECONDS_SINCE_CLEANUP=0
         find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
         find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+        # Image GC: delete unused Cloudflare Images (off by default)
+        if [ "${IMAGE_GC_ENABLED:-false}" = "true" ]; then
+            python3 "$ROOT_DIR/scripts/image_gc.py" --days 7 --limit 100 \
+                2>&1 | tee -a "$LOGS_DIR/deploy/image-gc-$(date -u +%Y-%m-%d).log" || true
+        fi
     fi
 done

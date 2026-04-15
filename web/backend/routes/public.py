@@ -393,6 +393,58 @@ def _enrich_media_meta(cur, posts: list[dict]) -> None:
             post["media_meta"] = meta_map[pid]
 
 
+_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+_IMAGE_VARIANT_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+
+
+def _collect_image_impression_ids(posts: list[dict]) -> set[str]:
+    """Return unique Cloudflare image IDs from post media URLs."""
+    from urllib.parse import urlparse
+
+    ids: set[str] = set()
+    for post in posts or []:
+        media = post.get("media") or []
+        for raw_url in media:
+            if not raw_url:
+                continue
+            parsed = urlparse(str(raw_url))
+            host = (parsed.hostname or "").lower()
+            if not host.endswith("imagedelivery.net"):
+                continue
+            parts = [p for p in parsed.path.split("/") if p]
+            if len(parts) < 3:
+                raise ValueError("invalid imagedelivery url path")
+            image_id = parts[1]
+            variant = parts[2]
+            if not _IMAGE_ID_RE.match(image_id):
+                raise ValueError("invalid imagedelivery image_id")
+            if not _IMAGE_VARIANT_RE.match(variant):
+                raise ValueError("invalid imagedelivery variant")
+            ids.add(image_id.lower())
+    return ids
+
+
+def _track_image_impressions(posts: list[dict], rid: int, context: str) -> None:
+    """Upsert view counts for images attached to returned posts."""
+    image_ids = _collect_image_impression_ids(posts)
+    if not image_ids:
+        return
+    now_ts = int(time.time())
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO image_views (image_id, view_count, last_viewed_at)
+                VALUES (%s, 1, %s)
+                ON CONFLICT (image_id) DO UPDATE SET
+                    view_count = image_views.view_count + 1,
+                    last_viewed_at = EXCLUDED.last_viewed_at
+                """,
+                [(image_id, now_ts) for image_id in sorted(image_ids)],
+            )
+    log_event(rid, "image_impressions.ok", count=len(image_ids), context=context)
+
+
 # Allowed content tags used for topic safety classification
 _TOPIC_TAGS = ("sensitive", "gore", "violence", "death", "adult")
 
@@ -4867,6 +4919,7 @@ def get_posts():
                     context=f"get_posts.feed.{feed or 'unknown'}",
                     viewer=address,
                 )
+                _track_image_impressions(resp["posts"], rid, context=f"get_posts.feed.{feed or 'unknown'}")
             conn.close()
             return jsonify(resp)
 
@@ -5180,6 +5233,7 @@ def get_posts():
                 context=f"get_posts.topic.{topic or 'all'}",
                 viewer=address,
             )
+            _track_image_impressions(result, rid, context=f"get_posts.topic.{topic or 'all'}")
 
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
@@ -5563,6 +5617,7 @@ def get_user_posts():
                 context=f"get_user_posts.{post_type or 'all'}",
                 viewer=viewer,
             )
+            _track_image_impressions(result, rid, context=f"get_user_posts.{post_type or 'all'}")
         conn.close()
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
@@ -6218,6 +6273,7 @@ def get_comments():
         _collect_posts(children, all_posts_for_overlay)
         _enrich_media_meta(cur, all_posts_for_overlay)
         _apply_agent_edits(cur, all_posts_for_overlay, address)
+        _track_image_impressions(all_posts_for_overlay, rid, context="get_comments")
 
         resp = {"root": root, "children": children}
 
@@ -7024,6 +7080,17 @@ def get_upload_url():
         if not upload_url:
             log_event(rid, "get_upload_url.err", error="missing_upload_url")
             return jsonify({"error": "no upload URL received from cloudflare"}), 500
+
+        # Register image in catalog for GC tracking
+        if upload_id:
+            upload_id_norm = upload_id.lower()
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    bcur.execute(
+                        "INSERT INTO image_catalog (image_id, created_at) VALUES (%s, %s) ON CONFLICT (image_id) DO NOTHING",
+                        (upload_id_norm, int(time.time())),
+                    )
+            log_event(rid, "image_catalog.registered", image_id=upload_id_norm)
 
         log_event(rid, "get_upload_url.ok", upload_id=upload_id)
         return jsonify({"uploadURL": upload_url, "id": upload_id, "accountHash": account_hash})

@@ -581,6 +581,35 @@ def init_backend_schema() -> None:
                 {"event_key", "recipient", "actor", "event_type", "created_at", "amount", "tx_hash"},
             )
 
+            # ── Image catalog + view tracking (Cloudflare Images GC) ─────
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS image_catalog (
+                    image_id TEXT PRIMARY KEY,
+                    created_at BIGINT NOT NULL,
+                    deleted_at BIGINT
+                )
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_image_catalog_created_at ON image_catalog(created_at)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_image_catalog_gc_candidates "
+                "ON image_catalog(created_at) WHERE deleted_at IS NULL"
+            )
+            _assert_table_schema("image_catalog", {"image_id", "created_at", "deleted_at"})
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS image_views (
+                    image_id TEXT PRIMARY KEY,
+                    view_count BIGINT NOT NULL DEFAULT 0,
+                    last_viewed_at BIGINT
+                )
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_image_views_count ON image_views(view_count)")
+            _assert_table_schema("image_views", {"image_id", "view_count", "last_viewed_at"})
+
             # ── Fix SERIAL sequences after data migration ─────────────────
             # The DB-split migration inserts rows with explicit id values but
             # doesn't advance the sequences.  Reset each SERIAL sequence to

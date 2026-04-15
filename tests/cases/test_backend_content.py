@@ -8,9 +8,11 @@ import os
 import random
 import string
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
 
+import psycopg
 import requests
 
 from tests.common import (
@@ -1141,9 +1143,9 @@ def test_seen_posts(backend: str) -> None:
     # Verify post appears in home feed for another user (before marking seen)
     found_before = False
     for _ in range(int(INDEX_TIMEOUT_SEC)):
-        code, feed = _get(f"{backend}/api/get_posts", {
-            "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr
-        })
+        code, feed = _get(
+            f"{backend}/api/get_posts", {"feed": "home", "by": "newest", "limit": 50, "address": viewer_addr}
+        )
         posts = (feed or {}).get("posts") or []
         if any(str(p.get("post_id", "")).lower() == txh for p in posts):
             found_before = True
@@ -1157,11 +1159,14 @@ def test_seen_posts(backend: str) -> None:
 
     # Mark as seen via beacon
     sig_viewer = _seen_sig(viewer, viewer_addr)
-    code_b, resp_b = _post(f"{backend}/api/seen_posts", {
-        "address": viewer_addr,
-        "posts": [{"id": txh, "reason": "open"}],
-        **sig_viewer,
-    })
+    code_b, resp_b = _post(
+        f"{backend}/api/seen_posts",
+        {
+            "address": viewer_addr,
+            "posts": [{"id": txh, "reason": "open"}],
+            **sig_viewer,
+        },
+    )
     if code_b == 200 and (resp_b or {}).get("ok"):
         _pass("seen_posts.beacon_ingest")
     else:
@@ -1170,9 +1175,15 @@ def test_seen_posts(backend: str) -> None:
 
     # Post is still visible (downranked, not filtered) and feed_debug shows novelty
     time.sleep(1)
-    code, feed3 = _get(f"{backend}/api/get_posts", {
-        "feed": "home", "by": "newest", "limit": 50, "address": viewer_addr,
-    })
+    code, feed3 = _get(
+        f"{backend}/api/get_posts",
+        {
+            "feed": "home",
+            "by": "newest",
+            "limit": 50,
+            "address": viewer_addr,
+        },
+    )
     posts3 = (feed3 or {}).get("posts") or []
     target = None
     for p in posts3:
@@ -1186,16 +1197,20 @@ def test_seen_posts(backend: str) -> None:
         if n_val < 1.0 and sc > 0:
             _pass("seen_posts.downranked_after_mark", N=n_val, seen_count=sc)
         else:
-            _fail("seen_posts.downranked_after_mark",
-                  f"expected N<1 and seen_count>0, got N={n_val} seen_count={sc}")
+            _fail("seen_posts.downranked_after_mark", f"expected N<1 and seen_count>0, got N={n_val} seen_count={sc}")
     else:
-        _pass("seen_posts.downranked_after_mark",
-              note="post not in first page (pushed down by novelty penalty)")
+        _pass("seen_posts.downranked_after_mark", note="post not in first page (pushed down by novelty penalty)")
 
     # Verify the author's own feed still shows their post
-    code_self, feed_self = _get(f"{backend}/api/get_posts", {
-        "feed": "home", "by": "newest", "limit": 50, "address": free_addr,
-    })
+    code_self, feed_self = _get(
+        f"{backend}/api/get_posts",
+        {
+            "feed": "home",
+            "by": "newest",
+            "limit": 50,
+            "address": free_addr,
+        },
+    )
     posts_self = (feed_self or {}).get("posts") or []
     own_visible = any(str(p.get("post_id", "")).lower() == txh for p in posts_self)
     if own_visible:
@@ -1205,30 +1220,41 @@ def test_seen_posts(backend: str) -> None:
 
     # Test beacon idempotency: send same ID again
     sig_viewer2 = _seen_sig(viewer, viewer_addr)
-    code_i, resp_i = _post(f"{backend}/api/seen_posts", {
-        "address": viewer_addr,
-        "posts": [{"id": txh, "reason": "dwell"}],
-        **sig_viewer2,
-    })
+    code_i, resp_i = _post(
+        f"{backend}/api/seen_posts",
+        {
+            "address": viewer_addr,
+            "posts": [{"id": txh, "reason": "dwell"}],
+            **sig_viewer2,
+        },
+    )
     if code_i == 200 and (resp_i or {}).get("ingested") == 1:
         _pass("seen_posts.beacon_idempotent")
     else:
         _fail("seen_posts.beacon_idempotent", f"code={code_i} resp={resp_i}")
 
     # Test guest feed still works (no seen data for guests)
-    code3, feed4 = _get(f"{backend}/api/get_posts", {
-        "feed": "home", "by": "newest", "limit": 50,
-    })
+    code3, feed4 = _get(
+        f"{backend}/api/get_posts",
+        {
+            "feed": "home",
+            "by": "newest",
+            "limit": 50,
+        },
+    )
     if code3 == 200:
         _pass("seen_posts.guest_feed_ok")
     else:
         _fail("seen_posts.guest_feed_ok", f"code={code3}")
 
     # Test beacon with guest address returns ok with 0 ingested
-    code4, resp4 = _post(f"{backend}/api/seen_posts", {
-        "address": "guest",
-        "posts": [{"id": txh}],
-    })
+    code4, resp4 = _post(
+        f"{backend}/api/seen_posts",
+        {
+            "address": "guest",
+            "posts": [{"id": txh}],
+        },
+    )
     if code4 == 200 and (resp4 or {}).get("ingested") == 0:
         _pass("seen_posts.guest_beacon_noop")
     else:
@@ -1236,20 +1262,29 @@ def test_seen_posts(backend: str) -> None:
 
     # Test view_count increments: send same ID again via beacon and verify it's accepted
     sig_viewer4 = _seen_sig(viewer, viewer_addr)
-    code5, resp5 = _post(f"{backend}/api/seen_posts", {
-        "address": viewer_addr,
-        "posts": [{"id": txh, "reason": "dwell"}],
-        **sig_viewer4,
-    })
+    code5, resp5 = _post(
+        f"{backend}/api/seen_posts",
+        {
+            "address": viewer_addr,
+            "posts": [{"id": txh, "reason": "dwell"}],
+            **sig_viewer4,
+        },
+    )
     if code5 == 200 and (resp5 or {}).get("ingested") == 1:
         _pass("seen_posts.view_count_increment")
     else:
         _fail("seen_posts.view_count_increment", f"code={code5} resp={resp5}")
 
     # Verify novelty in magic feed too (feed_debug includes equation with N)
-    code_m, feed_m = _get(f"{backend}/api/get_posts", {
-        "feed": "home", "by": "magic", "limit": 50, "address": viewer_addr,
-    })
+    code_m, feed_m = _get(
+        f"{backend}/api/get_posts",
+        {
+            "feed": "home",
+            "by": "magic",
+            "limit": 50,
+            "address": viewer_addr,
+        },
+    )
     posts_m = (feed_m or {}).get("posts") or []
     target_m = None
     for p in posts_m:
@@ -1262,8 +1297,72 @@ def test_seen_posts(backend: str) -> None:
         if "N" in eq and debug_m.get("seen_count", 0) > 0:
             _pass("seen_posts.magic_feed_debug", equation=eq, N=debug_m.get("N"))
         else:
-            _fail("seen_posts.magic_feed_debug",
-                  f"expected equation with N, got: {debug_m}")
+            _fail("seen_posts.magic_feed_debug", f"expected equation with N, got: {debug_m}")
     else:
-        _pass("seen_posts.magic_feed_debug",
-              note="post not in first page of magic feed (pushed down by novelty)")
+        _pass("seen_posts.magic_feed_debug", note="post not in first page of magic feed (pushed down by novelty)")
+
+
+def test_image_impressions(backend: str) -> None:
+    """Approximate image impressions tracked on get_posts responses."""
+    db_url = os.environ.get("BACKEND_DB_URL", "").strip()
+    if not db_url:
+        _fail("image_impressions.db_url_missing", "BACKEND_DB_URL not set")
+        return
+
+    sub1 = WALLETS.get("sub1")
+    if not sub1:
+        _skip("image_impressions.wallet_missing", "wallet not available")
+        return
+    sub1_addr = str(sub1.address())
+
+    image_id = str(uuid.uuid4()).upper()
+    topic = f"imgtrack{_rand_str(6)}"
+    url = f"https://imagedelivery.net/testhash/{image_id}/public"
+
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        topic,
+        "Image impressions test",
+        "body",
+        media=[url],
+        skip_pow=True,
+    )
+    if not txh:
+        _fail("image_impressions.post_created", "no tx_hash")
+        return
+    if not _wait_indexed(backend, sub1_addr, txh):
+        _fail("image_impressions.post_indexed")
+        return
+
+    def _get_view_count() -> int:
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT view_count FROM image_views WHERE image_id = %s", (image_id.lower(),))
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+
+    before = _get_view_count()
+    code, resp = _get(f"{backend}/api/get_posts", {"topic": topic, "limit": 10})
+    if code != 200:
+        _fail("image_impressions.get_posts", f"code={code}")
+        return
+    posts = (resp or {}).get("posts") or []
+    if not any(str(p.get("post_id", "")).lower() == txh for p in posts):
+        _fail("image_impressions.post_visible")
+        return
+    after = _get_view_count()
+    if after == before + 1:
+        _pass("image_impressions.increment_once")
+    else:
+        _fail("image_impressions.increment_once", f"before={before} after={after}")
+
+    code2, _ = _get(f"{backend}/api/get_posts", {"topic": topic, "limit": 10})
+    if code2 != 200:
+        _fail("image_impressions.get_posts_repeat", f"code={code2}")
+        return
+    after2 = _get_view_count()
+    if after2 == after + 1:
+        _pass("image_impressions.increment_twice")
+    else:
+        _fail("image_impressions.increment_twice", f"after={after} after2={after2}")
