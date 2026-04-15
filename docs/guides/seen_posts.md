@@ -67,7 +67,7 @@ not_seen ──→ exposed ──→ seen
 | Vote | User up/downvotes the post | `vote` |
 | Reply | User replies to the post | `reply` |
 | Dwell | ≥40% of card visible in the active viewport zone (top 8% and bottom 15% excluded) for ≥3 seconds, tab/app in foreground | `dwell` |
-| Glance | Card was ≥30% visible for ≥150ms then scrolled away | `glance` |
+| Glance | Card was ≥30% visible for ≥150ms then scrolled away, 2 exposures | `glance` |
 
 ### Rules
 
@@ -78,7 +78,7 @@ not_seen ──→ exposed ──→ seen
 3. **Pause timers on background**: If the app goes to background mid-dwell, cancel the timer. Resume fresh when the app comes back.
 4. **No client-side dedup**: Every glance/dwell event is sent to the server. If a user scrolls past the same post 10 times, `view_count` increments 10 times. The backend `ON CONFLICT` upsert handles accumulation.
 5. **Interactions are immediate**: Click/vote/reply transitions happen instantly with no visibility check needed.
-6. **First trigger wins**: Dwell and glance run in parallel. Whichever fires first marks the post as seen; cancel the other. For example, if the user scrolls past a card (glance fires after a single 150ms+ exposure) before the 3s dwell elapses, the dwell timer is cancelled (and vice versa).
+6. **One mark per viewing**: Dwell and glance run in parallel but only one fires per enter/exit cycle. If dwell fires (3s), glance state is cleared so the subsequent scroll-away doesn't double-count. If glance fires first (2 quick scroll-bys before 3s), the dwell timer is cancelled.
 
 ## Reporting Protocol
 

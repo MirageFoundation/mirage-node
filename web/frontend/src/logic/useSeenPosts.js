@@ -4,7 +4,7 @@ import { signPlainPayload } from "../utils/signPlain";
 
 const DWELL_MS = 3000;
 const GLANCE_MS = 150;
-const GLANCE_COUNT = 1;
+const GLANCE_COUNT = 2;
 const MAX_BUFFER = 100;
 const POST_ID_RE = /^[0-9a-f]{64}$/;
 const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);
@@ -316,6 +316,8 @@ export function useSeenPosts() {
                             if (!dwellTimersRef.current.get(id)) {
                                 const timer = setTimeout(() => {
                                     dwellTimersRef.current.delete(id);
+                                    entryTimesRef.current.delete(id);
+                                    glanceCountsRef.current.delete(id);
                                     _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
                                     markSeen(id, "dwell");
                                 }, DWELL_MS);
