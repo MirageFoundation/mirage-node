@@ -307,9 +307,11 @@ export function useSeenPosts() {
     useEffect(() => {
         const createObserver = () => {
             const vh = window.innerHeight || document.documentElement.clientHeight;
-            const marginTop = Math.round(vh * 0.15);
-            const marginBottom = Math.round(vh * 0.3);
+            const marginTop = Math.round(vh * 0.08);
+            const marginBottom = Math.round(vh * 0.15);
             const rootMargin = `-${marginTop}px 0px -${marginBottom}px 0px`;
+
+            _LOG(`OBSERVER  vh=${vh}  rootMargin="${rootMargin}"  reportedSet=${_reportedSet.size}  observed=${observedElementsRef.current.size}`);
 
             if (observerRef.current) {
                 observerRef.current.disconnect();
@@ -323,7 +325,11 @@ export function useSeenPosts() {
                         const pid = el.dataset.postId;
                         if (!pid) continue;
                         const id = _normalizeId(pid);
-                        if (!id || _reportedSet.has(id)) {
+                        if (!id) {
+                            _LOG(`SKIP  pid=${String(pid).slice(0, 12)}…  invalid id`);
+                            continue;
+                        }
+                        if (_reportedSet.has(id)) {
                             const dwell = dwellTimersRef.current.get(id);
                             if (dwell) clearTimeout(dwell);
                             dwellTimersRef.current.delete(id);
@@ -333,8 +339,8 @@ export function useSeenPosts() {
                         }
 
                         const ratio = entry.intersectionRatio || 0;
-                        const glanceVisible = entry.isIntersecting && ratio >= 0.4;
-                        const dwellVisible = entry.isIntersecting && ratio >= 0.5;
+                        const glanceVisible = entry.isIntersecting && ratio >= 0.3;
+                        const dwellVisible = entry.isIntersecting && ratio >= 0.4;
 
                         if (glanceVisible) {
                             if (!entryTimesRef.current.has(id)) {
@@ -377,7 +383,7 @@ export function useSeenPosts() {
                     }
                 },
                 {
-                    threshold: [0.4, 0.5],
+                    threshold: [0.3, 0.4],
                     rootMargin,
                 }
             );
