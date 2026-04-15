@@ -352,7 +352,6 @@ const generatePostGradient = (post) => {
     return gradients[index];
 };
 
-// eslint-disable-next-line no-unused-vars
 const MobileCardTitleBar = styled.div`
     position: absolute;
     left: 0;
@@ -366,6 +365,9 @@ const MobileCardTitleBar = styled.div`
     text-shadow: 0 1px 2px rgba(0,0,0,0.65);
     pointer-events: none;
     z-index: 2;
+    & a {
+        pointer-events: auto;
+    }
     &::before {
         content: '';
         position: absolute;
@@ -375,18 +377,6 @@ const MobileCardTitleBar = styled.div`
         height: 200%;
         background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.5) 50%, rgba(0,0,0,0) 100%);
         z-index: -1;
-    }
-`
-
-const MobileCardTitleBelow = styled.div`
-    display: none;
-    @media (max-width: 600px) {
-        display: block;
-        padding: 0.5rem 0.65rem;
-        font-weight: 700;
-        font-size: clamp(0.65rem, 3.2vw, 0.95rem);
-        line-height: 1.25;
-        color: ${({ theme }) => theme.colors.text};
     }
 `
 
@@ -2057,19 +2047,28 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 const displayMobileSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
                                 if (displayMobileSrc) {
                                     return (
-                                        <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
-                                            <MobileCardImg
-                                                src={displayMobileSrc}
-                                                alt=""
-                                                loading="lazy"
-                                                style={(() => {
-                                                    const s = {};
-                                                    if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
-                                                    if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
-                                                    return Object.keys(s).length ? s : undefined;
-                                                })()}
-                                            />
-                                        </Link>
+                                        <>
+                                            <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
+                                                <MobileCardImg
+                                                    src={displayMobileSrc}
+                                                    alt=""
+                                                    loading="lazy"
+                                                    style={(() => {
+                                                        const s = {};
+                                                        if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
+                                                        if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
+                                                        return Object.keys(s).length ? s : undefined;
+                                                    })()}
+                                                />
+                                            </Link>
+                                            {post && post.title ? (
+                                                <MobileCardTitleBar>
+                                                    <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ color: 'inherit', textDecoration: 'none' }}>
+                                                        {post.title}
+                                                    </Link>
+                                                </MobileCardTitleBar>
+                                            ) : null}
+                                        </>
                                     );
                                 } else {
                                     return (
@@ -2080,13 +2079,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 }
                             })()}
                         </MobileCardSquare>
-                        {thumbSrc && post && post.title ? (
-                            <MobileCardTitleBelow>
-                                <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ color: 'inherit', textDecoration: 'none' }}>
-                                    {post.title}
-                                </Link>
-                            </MobileCardTitleBelow>
-                        ) : null}
                     </MobileCardWrapper>}
                     <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>
@@ -2341,24 +2333,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </MenuContainer>
                     </MetaInfoRow>
-                    {post && post.feed_bucket && post.feed_bucket !== 'guest' && !hasMediaModeContent && (
-                        <FeedReasonLine>
-                            {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
-                            {post.feed_bucket === 'similar' && (post.feed_debug?.reason || 'Similar taste match')}
-                            {post.feed_bucket === 'liked' && (post.feed_debug?.reason || 'Liked topic/author')}
-                            {post.feed_bucket === 'discovery' && (post.feed_debug?.reason || 'Discovery')}
-                            {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
-                            {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
-                            {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
-                            {post.feed_bucket === 'fresh' && (post.feed_debug?.reason || 'Fresh pick')}
-                            {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
-                            {post.feed_debug && typeof post.feed_debug.score === 'number' && (
-                                <ScoreDisplay>
-                                    score {post.feed_debug.score}
-                                </ScoreDisplay>
-                            )}
-                        </FeedReasonLine>
-                    )}
                     {hasMediaModeContent ? (
                         <div style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
                             {title}

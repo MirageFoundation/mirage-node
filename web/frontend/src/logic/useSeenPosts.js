@@ -13,6 +13,9 @@ const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ..
 const _SS_KEY = "_seenReported";
 const _SS_CAP = 2000;
 const _SAVE_DEBOUNCE_MS = 1000;
+const _SB_KEY = "_seenPending";
+const _SB_CAP = 500;
+const _BUFFER_SAVE_DEBOUNCE_MS = 500;
 
 function _loadReportedSet() {
     try {
@@ -23,6 +26,26 @@ function _loadReportedSet() {
         }
     } catch (_) { /* noop */ }
     return new Set();
+}
+
+function _loadPendingBuffer() {
+    try {
+        const raw = sessionStorage.getItem(_SB_KEY);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return [];
+        const entries = [];
+        for (const item of arr) {
+            if (!item || typeof item !== "object") continue;
+            const id = _normalizeId(item.id);
+            const reason = VALID_REASONS.has(item.reason) ? item.reason : "view";
+            if (id) entries.push({ id, reason });
+        }
+        return entries.slice(0, _SB_CAP);
+    } catch (e) {
+        _LOG("PENDING load failed:", e.message);
+        return [];
+    }
 }
 
 function _saveReportedSetNow() {
@@ -52,15 +75,41 @@ function _flushReportedSetSave() {
     _saveReportedSetNow();
 }
 
-let _seenBuffer = [];
+let _seenBuffer = _loadPendingBuffer();
 let _reportedSet = _loadReportedSet();
 let _saveTimer = null;
+let _bufferSaveTimer = null;
 let _drainLock = false;
 let _listenerCount = 0;
 let _visibilityHandler = null;
 let _pageHideHandler = null;
 let _flushInterval = null;
 const FLUSH_INTERVAL_MS = 3_000;
+
+function _savePendingBufferNow() {
+    try {
+        const entries = _seenBuffer.slice(0, _SB_CAP);
+        sessionStorage.setItem(_SB_KEY, JSON.stringify(entries));
+    } catch (e) {
+        _LOG("PENDING save failed:", e.message);
+    }
+}
+
+function _schedulePendingBufferSave() {
+    if (_bufferSaveTimer) return;
+    _bufferSaveTimer = setTimeout(() => {
+        _bufferSaveTimer = null;
+        _savePendingBufferNow();
+    }, _BUFFER_SAVE_DEBOUNCE_MS);
+}
+
+function _flushPendingBufferSave() {
+    if (_bufferSaveTimer) {
+        clearTimeout(_bufferSaveTimer);
+        _bufferSaveTimer = null;
+    }
+    _savePendingBufferNow();
+}
 
 function _getAddress() {
     try {
@@ -113,15 +162,26 @@ function _ensureFlushInterval() {
     }, FLUSH_INTERVAL_MS);
 }
 
+if (_seenBuffer.length > 0) {
+    _ensureFlushInterval();
+}
+
 function markSeen(pid, reason) {
     const addr = _getAddress();
-    if (!addr || addr === "guest") return;
+    if (!addr || addr === "guest") {
+        _LOG("SKIP  no address, seen not queued");
+        return;
+    }
     const id = _normalizeId(pid);
     if (!id || _reportedSet.has(id)) return;
     _reportedSet.add(id);
     _scheduleReportedSetSave();
     const finalReason = VALID_REASONS.has(reason) ? reason : "view";
     _seenBuffer.push({ id, reason: finalReason });
+    if (_seenBuffer.length > _SB_CAP) {
+        _seenBuffer = _seenBuffer.slice(-_SB_CAP);
+    }
+    _schedulePendingBufferSave();
     _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}  persisted=${_reportedSet.size}`);
     _ensureFlushInterval();
     if (_seenBuffer.length >= MAX_BUFFER) {
@@ -135,13 +195,15 @@ async function _drainSeenBatch() {
     if (!addr || addr === "guest") return null;
     _drainLock = true;
     const entries = _seenBuffer.splice(0, MAX_BUFFER);
+    _schedulePendingBufferSave();
     _LOG(`DRAIN  ${entries.length} entries`);
     try {
         const sig = await signPlainPayload((ts, n) => `seen_posts:${addr}:${ts}:${n}`);
         return { address: addr, entries, sig };
-    } catch (_) {
+    } catch (e) {
         _seenBuffer = entries.concat(_seenBuffer);
-        _LOG("DRAIN  sign failed, restored to buffer");
+        _schedulePendingBufferSave();
+        _LOG("DRAIN  sign failed, restored to buffer:", e.message);
         return null;
     } finally {
         _drainLock = false;
@@ -154,6 +216,7 @@ function _restoreSeenBatch(batch) {
     const restored = batch.entries.filter((entry) => !existing.has(entry.id));
     if (restored.length) {
         _seenBuffer = restored.concat(_seenBuffer);
+        _schedulePendingBufferSave();
         _LOG(`RESTORE  ${restored.length} entries back to buffer (total=${_seenBuffer.length})`);
     }
 }
@@ -208,6 +271,7 @@ export function useSeenPosts() {
                 visibleRef.current = document.visibilityState === "visible";
                 if (!visibleRef.current) {
                     _flushReportedSetSave();
+                    _flushPendingBufferSave();
                     for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
                     dwellTimersRef.current.clear();
                     entryTimesRef.current.clear();
@@ -219,6 +283,7 @@ export function useSeenPosts() {
         if (!_pageHideHandler) {
             _pageHideHandler = () => {
                 _flushReportedSetSave();
+                _flushPendingBufferSave();
                 void flushSeenBeacon();
             };
             window.addEventListener("pagehide", _pageHideHandler);
@@ -259,29 +324,25 @@ export function useSeenPosts() {
                         if (!pid) continue;
                         const id = _normalizeId(pid);
                         if (!id || _reportedSet.has(id)) {
+                            const dwell = dwellTimersRef.current.get(id);
+                            if (dwell) clearTimeout(dwell);
                             dwellTimersRef.current.delete(id);
                             entryTimesRef.current.delete(id);
                             glanceCountsRef.current.delete(id);
                             continue;
                         }
 
-                        if (entry.isIntersecting) {
-                            entryTimesRef.current.set(id, now);
-                            if (!dwellTimersRef.current.get(id)) {
-                                const timer = setTimeout(() => {
-                                    dwellTimersRef.current.delete(id);
-                                    _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
-                                    markSeen(id, "dwell");
-                                }, DWELL_MS);
-                                dwellTimersRef.current.set(id, timer);
+                        const ratio = entry.intersectionRatio || 0;
+                        const glanceVisible = entry.isIntersecting && ratio >= 0.4;
+                        const dwellVisible = entry.isIntersecting && ratio >= 0.5;
+
+                        if (glanceVisible) {
+                            if (!entryTimesRef.current.has(id)) {
+                                entryTimesRef.current.set(id, now);
                             }
                         } else {
                             const enterTime = entryTimesRef.current.get(id);
                             entryTimesRef.current.delete(id);
-                            const dwell = dwellTimersRef.current.get(id);
-                            if (dwell) clearTimeout(dwell);
-                            dwellTimersRef.current.delete(id);
-
                             if (enterTime && (now - enterTime) >= GLANCE_MS) {
                                 const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
                                 glanceCountsRef.current.set(id, nextCount);
@@ -291,9 +352,27 @@ export function useSeenPosts() {
                                 }
                                 if (nextCount >= GLANCE_COUNT) {
                                     glanceCountsRef.current.delete(id);
+                                    const pendingDwell = dwellTimersRef.current.get(id);
+                                    if (pendingDwell) clearTimeout(pendingDwell);
+                                    dwellTimersRef.current.delete(id);
                                     markSeen(id, "glance");
                                 }
                             }
+                        }
+
+                        if (dwellVisible) {
+                            if (!dwellTimersRef.current.get(id)) {
+                                const timer = setTimeout(() => {
+                                    dwellTimersRef.current.delete(id);
+                                    _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
+                                    markSeen(id, "dwell");
+                                }, DWELL_MS);
+                                dwellTimersRef.current.set(id, timer);
+                            }
+                        } else {
+                            const dwell = dwellTimersRef.current.get(id);
+                            if (dwell) clearTimeout(dwell);
+                            dwellTimersRef.current.delete(id);
                         }
                     }
                 },
@@ -333,6 +412,15 @@ export function useSeenPosts() {
             observedElementsRef.current.delete(el);
             if (observerRef.current) {
                 observerRef.current.unobserve(el);
+            }
+            const pid = el.dataset?.postId;
+            const id = _normalizeId(pid);
+            if (id) {
+                const dwell = dwellTimersRef.current.get(id);
+                if (dwell) clearTimeout(dwell);
+                dwellTimersRef.current.delete(id);
+                entryTimesRef.current.delete(id);
+                glanceCountsRef.current.delete(id);
             }
         }
     }, []);
