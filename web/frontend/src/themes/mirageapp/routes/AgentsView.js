@@ -160,7 +160,6 @@ const OrderButton = styled.button`
     @media (max-width: 600px) {
         min-width: ${MOBILE_ACTION_HEIGHT};
         height: ${MOBILE_ACTION_HEIGHT};
-        font-size: 0.9rem;
     }
 `;
 const AgentActionButton = styled(Button)`

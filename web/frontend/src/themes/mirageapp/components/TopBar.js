@@ -72,7 +72,6 @@ const BrandLink = styled(Link)`
     &:hover { text-decoration: none; }
 
     @media (max-width: 600px) {
-        font-size: 1.02rem;
     }
 `;
 

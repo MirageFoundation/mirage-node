@@ -194,7 +194,6 @@ const HeaderTextBlock = styled.div`
     overflow-wrap: break-word;
 
     @media (max-width: 600px) {
-        font-size: 0.68rem;
     }
 `;
 
@@ -325,7 +324,6 @@ const ReplyContent = styled.div`
 
     @media (max-width: 600px) {
         margin-left: 1.55rem;
-        font-size: 0.65rem;
     }
 `;
 
@@ -337,7 +335,6 @@ const DonationAmount = styled.div`
 
     @media (max-width: 600px) {
         margin-left: 1.55rem;
-        font-size: 0.68rem;
     }
 `;
 

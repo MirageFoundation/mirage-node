@@ -411,7 +411,6 @@ const CompactThumbPlaceholder = styled.div`
         width: 68px;
         height: 68px;
         border-radius: 6px;
-        font-size: 0.95rem;
     }
 `;
 
@@ -481,7 +480,6 @@ const CompactTitle = styled(Link)`
     &:visited { color: ${({ theme }) => theme.colors.text}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.66rem;
     }
 `;
 
@@ -589,7 +587,6 @@ const CompactExpandedBody = styled.div`
     a { color: ${({ theme }) => theme.colors.link}; }
 
     @media (max-width: 1000px) {
-        font-size: 0.64rem;
     }
 `;
 

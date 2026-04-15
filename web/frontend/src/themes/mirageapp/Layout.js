@@ -65,7 +65,6 @@ export const ContainerTab = styled.div`
     @media (max-width: 1000px) {
         left: 0.5rem;
         padding: 0.2rem 0.5rem 0.1rem 0.5rem;
-        font-size: 0.7rem;
     }
 `;
 
@@ -371,7 +370,6 @@ export const ClickableTab = styled.button`
 
     @media (max-width: 1000px) {
         padding: ${({ theme }) => theme.layout.clickableTabPaddingTablet};
-        font-size: ${({ theme }) => theme.layout.tabSizeTablet};
     }
 `;
 

@@ -71,7 +71,6 @@ const ContentPreview = styled.div`
   theme
 }) => theme.colors.border};
     @media (max-width: 1000px) {
-        font-size: 0.7rem;
         line-height: 1.25;
         padding: 0.2rem;
         margin-top: 0.2rem;

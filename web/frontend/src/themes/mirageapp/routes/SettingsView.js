@@ -23,7 +23,7 @@ const HeaderRow = styled.div`
     align-items: center;
     justify-content: flex-start;
     gap: 0.75rem;
-    padding: 0.25rem 1rem 0.65rem;
+    padding: 0.5rem 1rem;
 `;
 
 const HeaderTitle = styled.div`
