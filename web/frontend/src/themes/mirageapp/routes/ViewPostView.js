@@ -660,7 +660,7 @@ const MenuItem = styled.button`
 const StyledContentArea = styled.div`
     margin: 0;
     padding: 0;
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.cardBodyText};
     font-weight: normal;
     font-size: 0.74rem;
     line-height: 1.5;

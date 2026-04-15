@@ -145,6 +145,8 @@ const mirageappDarkColors = {
      * report, delete). Hover still uses the punchier `voteDown`, so the
      * row picks up saturation when the pointer enters. */
     menuDangerText: '#FF7B70',
+
+    cardBodyText: 'rgb(187, 201, 211)',
 };
 
 const mirageappLightColors = {
@@ -279,6 +281,8 @@ const mirageappLightColors = {
      * still uses the saturated `voteDown` so the row picks up emphasis
      * when the pointer enters. */
     menuDangerText: '#FF6A5E',
+
+    cardBodyText: 'rgb(53, 61, 65)',
 };
 
 function buildLayout(colors) {

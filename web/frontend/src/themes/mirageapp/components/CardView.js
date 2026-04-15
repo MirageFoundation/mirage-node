@@ -258,7 +258,7 @@ const TitleLink = styled(Link)`
 `;
 
 const Body = styled.div`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme }) => theme.colors.cardBodyText};
     font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
     font-size: 0.74rem;
     line-height: 1.5;
