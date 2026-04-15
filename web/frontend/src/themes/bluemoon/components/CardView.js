@@ -2049,30 +2049,29 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 const displayMobileSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
                                 if (displayMobileSrc) {
                                     return (
-                                        <>
-                                            <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
-                                                <MobileCardImg
-                                                    src={displayMobileSrc}
-                                                    alt=""
-                                                    loading="lazy"
-                                                    style={(() => {
-                                                        const s = {};
-                                                        if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
-                                                        if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
-                                                        return Object.keys(s).length ? s : undefined;
-                                                    })()}
-                                                />
-                                            </Link>
-                                            );
+                                        <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
+                                            <MobileCardImg
+                                                src={displayMobileSrc}
+                                                alt=""
+                                                loading="lazy"
+                                                style={(() => {
+                                                    const s = {};
+                                                    if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
+                                                    if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
+                                                    return Object.keys(s).length ? s : undefined;
+                                                })()}
+                                            />
+                                        </Link>
+                                    );
                                 } else {
                                     return (
-                                            <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
-                                                <MobileCardFitText titleText={post && post.title ? post.title : ''} />
-                                            </Link>
-                                            );
+                                        <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
+                                            <MobileCardFitText titleText={post && post.title ? post.title : ''} />
+                                        </Link>
+                                    );
                                 }
                             })()}
-                                        </MobileCardSquare >
+                        </MobileCardSquare>
                     </MobileCardWrapper>}
                     <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>
