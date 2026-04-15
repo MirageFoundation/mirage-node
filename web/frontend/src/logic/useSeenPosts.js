@@ -213,9 +213,10 @@ async function flushSeenBeacon() {
 }
 
 const DESKTOP_MIN_WIDTH = 769;
+const DESKTOP_HOVER_QUERY = "(hover: hover) and (pointer: fine)";
 
 function _isDesktop() {
-    return window.innerWidth >= DESKTOP_MIN_WIDTH;
+    return window.innerWidth >= DESKTOP_MIN_WIDTH && window.matchMedia(DESKTOP_HOVER_QUERY).matches;
 }
 
 export function useSeenPosts() {
@@ -225,6 +226,7 @@ export function useSeenPosts() {
     const glanceCountsRef = useRef(new Map());
     const observedElementsRef = useRef(new Set());
     const mouseHandlersRef = useRef(new Map());
+    const hoverIdsRef = useRef(new Map());
     const visibleRef = useRef(true);
     const modeRef = useRef(_isDesktop() ? "desktop" : "mobile");
 
@@ -276,13 +278,17 @@ export function useSeenPosts() {
 
     // ── Desktop: mouse-based tracking ──────────────────────────────
     const _attachMouseHandlers = useCallback((el) => {
-        const pid = el.dataset?.postId;
-        const id = _normalizeId(pid);
-        if (!id) return;
         if (mouseHandlersRef.current.has(el)) return;
 
         const onEnter = () => {
             if (!visibleRef.current) return;
+            const id = _normalizeId(el.dataset?.postId);
+            if (!id) return;
+            const prevId = hoverIdsRef.current.get(el);
+            if (prevId && prevId !== id) {
+                _clearTimers(prevId);
+            }
+            hoverIdsRef.current.set(el, id);
             entryTimesRef.current.set(id, Date.now());
             if (!dwellTimersRef.current.get(id)) {
                 const timer = setTimeout(() => {
@@ -298,6 +304,9 @@ export function useSeenPosts() {
         };
 
         const onLeave = () => {
+            const id = hoverIdsRef.current.get(el) || _normalizeId(el.dataset?.postId);
+            hoverIdsRef.current.delete(el);
+            if (!id) return;
             const enterTime = entryTimesRef.current.get(id);
             entryTimesRef.current.delete(id);
             const dwell = dwellTimersRef.current.get(id);
@@ -322,7 +331,7 @@ export function useSeenPosts() {
         el.addEventListener("mouseenter", onEnter);
         el.addEventListener("mouseleave", onLeave);
         mouseHandlersRef.current.set(el, { onEnter, onLeave });
-    }, []);
+    }, [_clearTimers]);
 
     const _detachMouseHandlers = useCallback((el) => {
         const handlers = mouseHandlersRef.current.get(el);
@@ -331,7 +340,12 @@ export function useSeenPosts() {
             el.removeEventListener("mouseleave", handlers.onLeave);
             mouseHandlersRef.current.delete(el);
         }
-    }, []);
+        const hoverId = hoverIdsRef.current.get(el);
+        if (hoverId) {
+            _clearTimers(hoverId);
+        }
+        hoverIdsRef.current.delete(el);
+    }, [_clearTimers]);
 
     const _detachAllMouseHandlers = useCallback(() => {
         for (const [el, handlers] of mouseHandlersRef.current) {
@@ -339,6 +353,7 @@ export function useSeenPosts() {
             el.removeEventListener("mouseleave", handlers.onLeave);
         }
         mouseHandlersRef.current.clear();
+        hoverIdsRef.current.clear();
     }, []);
 
     // ── Mobile: IntersectionObserver-based tracking ────────────────
@@ -358,6 +373,7 @@ export function useSeenPosts() {
             dwellTimersRef.current.clear();
             entryTimesRef.current.clear();
             glanceCountsRef.current.clear();
+            hoverIdsRef.current.clear();
 
             if (desktop) {
                 _LOG(`MODE  desktop (w=${window.innerWidth})  observed=${observedElementsRef.current.size}`);

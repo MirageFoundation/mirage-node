@@ -8,7 +8,7 @@ This document defines the viewability protocol that clients (web and mobile) mus
 Client                              Server
 ┌───────────────────────┐
 │ IntersectionObserver  │           ┌───────────────────────────┐
-│ or onViewableItems    │           │ POST /api/seen_posts      │
+│ hover or onViewableItems│         │ POST /api/seen_posts      │
 │         ↓             │           │                           │
 │ State machine:        │  ──────>  │ 1. Ingest seen IDs        │
 │  not_seen → exposed   │           │ 2. Update view counts     │
@@ -59,7 +59,7 @@ not_seen ──→ exposed ──→ seen
 
 - **not_seen**: Default. Post has not entered the viewport.
 - **exposed**: Post has been in the viewport at least once but hasn't met any "seen" threshold yet. Track exposure count here.
-- **seen**: Post crossed a threshold. Emit a seen event **once** and stop tracking.
+- **seen**: Post crossed a threshold. Emit a seen event immediately (events can repeat across exposures).
 
 ### Transition Rules (not_seen → seen)
 
@@ -75,8 +75,8 @@ not_seen ──→ exposed ──→ seen
 
 The client detects the viewport width and picks the appropriate strategy:
 
-- **Desktop (≥769px wide)**: Uses `mouseenter`/`mouseleave` events on each card. Only the card under the cursor is tracked. Hovering ≥3s triggers dwell; hovering ≥150ms and moving away counts toward glance (2 hovers needed).
-- **Mobile (<769px wide)**: Uses `IntersectionObserver` with an active zone (top 8%, bottom 15% excluded). Cards ≥40% visible for ≥3s trigger dwell; cards ≥30% visible for ≥150ms then scrolled away count toward glance (2 scroll-bys needed).
+- **Desktop (≥769px wide + hover-capable)**: Uses `mouseenter`/`mouseleave` events on each card. Only the card under the cursor is tracked. Hovering ≥3s triggers dwell; hovering ≥150ms and moving away counts toward glance (2 hovers needed).
+- **Mobile (<769px wide or no hover support)**: Uses `IntersectionObserver` with an active zone (top 8%, bottom 15% excluded). Cards ≥40% visible for ≥3s trigger dwell; cards ≥30% visible for ≥150ms then scrolled away count toward glance (2 scroll-bys needed).
 
 The mode is re-evaluated on window resize (500ms debounce).
 
@@ -190,7 +190,7 @@ useEffect(() => {
 
 - The server stores full post IDs per user and keeps only the **most recent 1000** entries (deque semantics).
 - Each seen entry tracks a **view count** that increments on every subsequent report of the same post. Re-sending an already-seen ID is not a no-op — it bumps the counter and refreshes the timestamp.
-- On feed requests, the server loads the user's seen map and applies a **novelty multiplier** `N = 1 / (1 + 3 × view_count)` to downrank seen content. Seen posts are never hard-filtered.
+- On feed requests, the server loads the user's seen map and applies a **novelty multiplier** `N = 1 / (1 + 0.9 × view_count)` to downrank seen content. Seen posts are never hard-filtered.
 - The user's **own posts from the last hour** are always included in the feed. Own posts older than 1 hour are treated like any other post.
 - Guest users have no seen tracking (N = 1.0 for all posts).
 - The seen map (post ID → view count) is cached in-memory on the server (120s TTL) so repeated page loads don't hit the database.
