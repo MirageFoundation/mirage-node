@@ -1360,18 +1360,11 @@ def _get_following_feed(
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # ── Newest: chronological with seen-novelty reordering ──────────
+    # ── Newest: pure chronological ──────────
     if sort_mode == "newest":
-        if seen_posts:
-            for c in candidates:
-                vc = seen_posts.get(c["post_id"], 0)
-                c["_N"] = _novelty_factor(vc)
-                c["_seen_count"] = vc
-            candidates.sort(key=lambda c: -(c.get("timestamp", 0) * c["_N"]))
-        else:
-            for c in candidates:
-                c["_N"] = 1.0
-                c["_seen_count"] = 0
+        for c in candidates:
+            c["_N"] = 1.0
+            c["_seen_count"] = 0
 
         start = (page - 1) * limit
         end = start + limit
@@ -1500,7 +1493,9 @@ def _get_following_feed(
     if seen_penalized:
         logger.debug(
             "seen_penalty feed=following.magic viewer=%s penalized=%d/%d",
-            viewer_lower[:12], seen_penalized, len(candidates),
+            viewer_lower[:12],
+            seen_penalized,
+            len(candidates),
         )
 
     candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
@@ -1530,7 +1525,6 @@ def _get_home_feed(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     sort_mode: str = "magic",
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
@@ -1541,14 +1535,14 @@ def _get_home_feed(
 
     Sort modes:
     - magic: Magic (unified score + reasons + novelty penalty)
-    - newest: chronological with seen-novelty reordering
+    - newest: chronological (no novelty factor)
     """
     viewer_lower = viewer.strip().lower() if viewer else ""
     sort_mode = (sort_mode or "magic").strip().lower()
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    # Newest: chronological with seen-novelty reordering
+    # Newest: chronological, no novelty factor
     if sort_mode == "newest":
         return _get_home_feed_newest(
             cur,
@@ -1572,7 +1566,6 @@ def _get_home_feed(
             blocked_posts,
             blocked_users,
             allowed_tags,
-            seed=seed,
             blocked_topics=blocked_topics,
             blocked_topic_prefixes=blocked_topic_prefixes,
         )
@@ -1586,7 +1579,6 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        seed=seed,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
         seen_posts=seen_posts,
@@ -1668,17 +1660,9 @@ def _get_home_feed_newest(
     if not posts:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # Reorder by timestamp × N so seen posts drift down
-    if seen_posts:
-        for p in posts:
-            vc = seen_posts.get(p["post_id"], 0)
-            p["_N"] = _novelty_factor(vc)
-            p["_seen_count"] = vc
-        posts.sort(key=lambda p: -(p.get("timestamp", 0) * p["_N"]))
-    else:
-        for p in posts:
-            p["_N"] = 1.0
-            p["_seen_count"] = 0
+    for p in posts:
+        p["_N"] = 1.0
+        p["_seen_count"] = 0
 
     start = (page - 1) * limit
     end = start + limit
@@ -1732,7 +1716,6 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
     seen_posts: dict[str, int] | None = None,
@@ -1837,25 +1820,19 @@ def _get_home_feed_magic(
     if seen_penalized:
         logger.debug(
             "seen_penalty feed=home.magic viewer=%s penalized=%d/%d",
-            viewer_lower[:12], seen_penalized, len(scored_posts),
+            viewer_lower[:12],
+            seen_penalized,
+            len(scored_posts),
         )
 
     # 7. Sort by score descending
     scored_posts.sort(key=lambda p: -p["_score"])
 
-    # 8. Interleave fresh/random picks with ranked posts, then paginate
-    interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
-    interleaved_posts = _prioritize_viewer_own_posts_in_interleaved(
-        interleaved_posts,
-        scored_posts,
-        viewer_lower,
-        now_ts,
-        max_pin=min(15, max(limit, 5)),
-    )
+    # 8. Paginate
     start = (page - 1) * limit
     end = start + limit
-    page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
-    has_more = len(interleaved_posts) > end
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
 
     # Clean up internal fields
     for post in page_posts:
@@ -1863,170 +1840,11 @@ def _get_home_feed_magic(
 
     return {
         "posts": page_posts,
-        "total": len(interleaved_posts),
+        "total": len(scored_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
     }
-
-
-def _prioritize_viewer_own_posts_in_interleaved(
-    interleaved: list[dict],
-    scored_posts: list[dict],
-    viewer_lower: str,
-    now_ts: int,
-    max_pin: int = 15,
-) -> list[dict]:
-    """Interleave recent own posts into home magic without clustering.
-
-    Pattern: own -> fresh(random) -> ranked(score) -> fresh -> ranked -> ...
-    Only posts created within the last 24 hours are inserted; older own posts keep normal order.
-    This reorder only affects posts already present in ``interleaved``.
-    """
-    if not viewer_lower or viewer_lower == "guest" or not interleaved:
-        return interleaved
-    own_sorted = [
-        p for p in scored_posts if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower
-    ]
-    own_sorted.sort(key=lambda p: -int(p.get("timestamp") or 0))
-    min_ts = int(now_ts) - 86400
-    own_sorted = [p for p in own_sorted if int(p.get("timestamp") or 0) >= min_ts]
-    if not own_sorted:
-        return interleaved
-    pin_ids = [p["post_id"] for p in own_sorted[:max_pin]]
-    pin_set = set(pin_ids)
-    id_in_interleaved = {p["post_id"]: p for p in interleaved}
-    own_posts = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
-    if not own_posts:
-        return interleaved
-
-    rest = [p for p in interleaved if p["post_id"] not in pin_set]
-    fresh_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") == "fresh"]
-    ranked_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") != "fresh"]
-
-    out: list[dict] = []
-    consumed: set[str] = set()
-    f_idx = 0
-    r_idx = 0
-    for own in own_posts:
-        out.append(own)
-        if f_idx < len(fresh_queue):
-            picked = fresh_queue[f_idx]
-            f_idx += 1
-            consumed.add(picked["post_id"])
-            out.append(picked)
-        if r_idx < len(ranked_queue):
-            picked = ranked_queue[r_idx]
-            r_idx += 1
-            consumed.add(picked["post_id"])
-            out.append(picked)
-
-    if consumed:
-        rest = [p for p in rest if p["post_id"] not in consumed]
-    out.extend(rest)
-
-    logger.debug(
-        "home_magic.own_interleave viewer=%s own=%d consumed=%d interleaved=%d max_age_h=24",
-        viewer_lower[:12],
-        len(own_posts),
-        len(consumed),
-        len(interleaved),
-    )
-    return out
-
-
-def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -> list[dict]:
-    """
-    Alternate fresh/random and ranked posts 1:1.
-
-    Each fresh slot draws from a 1-hour band:
-    - fresh from hour 0–1, then ranked #1
-    - fresh from hour 1–2, then ranked #2
-    - fresh from hour 2–3, then ranked #3
-    - ... up to hour 168 (7 days)
-
-    If a band is empty, fall back to the next ranked post.
-    """
-    import random
-
-    if not scored_posts:
-        return []
-
-    ranked_posts = list(scored_posts)
-    ranked_idx = 0
-    fresh_pool: dict[str, dict] = {str(p.get("post_id") or ""): p for p in scored_posts if p.get("post_id")}
-    used: set[str] = set()
-    interleaved: list[dict] = []
-    max_band_start = 168
-
-    def _next_ranked() -> dict | None:
-        nonlocal ranked_idx
-        while ranked_idx < len(ranked_posts):
-            post = ranked_posts[ranked_idx]
-            ranked_idx += 1
-            pid = str(post.get("post_id") or "")
-            if not pid or pid in used:
-                continue
-            used.add(pid)
-            fresh_pool.pop(pid, None)
-            debug = post.setdefault("feed_debug", {})
-            debug["interleave"] = "ranked"
-            return post
-        return None
-
-    while len(interleaved) < len(scored_posts):
-        slot = len(interleaved)
-        is_fresh_slot = (slot % 2) == 0
-
-        if is_fresh_slot:
-            k = slot // 2
-            band_start = k
-            band_end = k + 1
-
-            if band_start >= max_band_start:
-                ranked_post = _next_ranked()
-                if ranked_post is None:
-                    break
-                interleaved.append(ranked_post)
-                continue
-
-            eligible = []
-            for post in fresh_pool.values():
-                pid = str(post.get("post_id") or "")
-                if not pid or pid in used:
-                    continue
-                age_hours = max(0.0, (now_ts - int(post.get("timestamp", 0) or 0)) / 3600.0)
-                if float(band_start) <= age_hours < float(band_end):
-                    eligible.append(post)
-
-            if eligible:
-                rng = random.Random(int(seed) + int(k))
-                picked = eligible[rng.randrange(len(eligible))]
-                pid = str(picked.get("post_id") or "")
-                if pid:
-                    used.add(pid)
-                    fresh_pool.pop(pid, None)
-                debug = picked.setdefault("feed_debug", {})
-                debug["interleave"] = "fresh"
-                debug["fresh_band"] = f"{band_start}h-{band_end}h"
-                debug["bucket"] = "fresh"
-                debug["reason"] = "Discover"
-                picked["feed_bucket"] = "fresh"
-                interleaved.append(picked)
-                continue
-
-            fallback = _next_ranked()
-            if fallback is None:
-                break
-            interleaved.append(fallback)
-            continue
-
-        ranked_post = _next_ranked()
-        if ranked_post is None:
-            break
-        interleaved.append(ranked_post)
-
-    return interleaved
 
 
 _SEEN_K = 3.0
@@ -2729,7 +2547,6 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
@@ -2798,19 +2615,18 @@ def _get_guest_feed_magic(
         scored_posts.append(post)
 
     scored_posts.sort(key=lambda p: -float(p.get("_score", 0.0)))
-    interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
 
     start = (page - 1) * limit
     end = start + limit
-    page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
-    has_more = len(interleaved_posts) > end
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
 
     for p in page_posts:
         p.pop("_score", None)
 
     return {
         "posts": page_posts,
-        "total": len(interleaved_posts),
+        "total": len(scored_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
@@ -5021,7 +4837,6 @@ def get_posts():
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
-                    seed=int(time.time() // 60),
                     sort_mode=sort_mode,
                     blocked_topics=blocked_topics_exact,
                     blocked_topic_prefixes=blocked_topic_prefixes,
@@ -5321,17 +5136,10 @@ def get_posts():
             for p in result:
                 p.pop("_score", None)
         else:
-            # newest: chronological with seen-novelty reordering
-            if persisted_seen:
-                for c in candidates:
-                    vc = persisted_seen.get(c["post_id"], 0)
-                    c["_N"] = _novelty_factor(vc)
-                    c["_seen_count"] = vc
-                candidates.sort(key=lambda c: -(c.get("timestamp", 0) * c["_N"]))
-            else:
-                for c in candidates:
-                    c["_N"] = 1.0
-                    c["_seen_count"] = 0
+            # newest: pure chronological
+            for c in candidates:
+                c["_N"] = 1.0
+                c["_seen_count"] = 0
 
             start = (page - 1) * limit
             end = start + limit

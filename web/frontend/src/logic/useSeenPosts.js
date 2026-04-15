@@ -11,8 +11,6 @@ const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view
 const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
 
 const _SS_KEY = "_seenReported";
-const _SS_CAP = 2000;
-const _SAVE_DEBOUNCE_MS = 1000;
 const _SB_KEY = "_seenPending";
 const _SB_CAP = 500;
 const _BUFFER_SAVE_DEBOUNCE_MS = 500;
@@ -38,37 +36,9 @@ function _loadPendingBuffer() {
     }
 }
 
-function _saveReportedSetNow() {
-    try {
-        if (_reportedSet.size > _SS_CAP) {
-            _reportedSet.clear();
-            sessionStorage.removeItem(_SS_KEY);
-            return;
-        }
-        sessionStorage.setItem(_SS_KEY, JSON.stringify([..._reportedSet]));
-    } catch (_) { /* noop */ }
-}
-
-function _scheduleReportedSetSave() {
-    if (_saveTimer) return;
-    _saveTimer = setTimeout(() => {
-        _saveTimer = null;
-        _saveReportedSetNow();
-    }, _SAVE_DEBOUNCE_MS);
-}
-
-function _flushReportedSetSave() {
-    if (_saveTimer) {
-        clearTimeout(_saveTimer);
-        _saveTimer = null;
-    }
-    _saveReportedSetNow();
-}
-
 let _seenBuffer = _loadPendingBuffer();
 let _reportedSet = new Set();
 try { sessionStorage.removeItem(_SS_KEY); } catch (_) { /* noop */ }
-let _saveTimer = null;
 let _bufferSaveTimer = null;
 let _drainLock = false;
 let _listenerCount = 0;
@@ -166,7 +136,6 @@ function markSeen(pid, reason) {
     const id = _normalizeId(pid);
     if (!id || _reportedSet.has(id)) return;
     _reportedSet.add(id);
-    _scheduleReportedSetSave();
     const finalReason = VALID_REASONS.has(reason) ? reason : "view";
     _seenBuffer.push({ id, reason: finalReason });
     if (_seenBuffer.length > _SB_CAP) {
@@ -261,7 +230,6 @@ export function useSeenPosts() {
             _visibilityHandler = () => {
                 visibleRef.current = document.visibilityState === "visible";
                 if (!visibleRef.current) {
-                    _flushReportedSetSave();
                     _flushPendingBufferSave();
                     for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
                     dwellTimersRef.current.clear();
@@ -273,7 +241,6 @@ export function useSeenPosts() {
         }
         if (!_pageHideHandler) {
             _pageHideHandler = () => {
-                _flushReportedSetSave();
                 _flushPendingBufferSave();
                 void flushSeenBeacon();
             };

@@ -38,9 +38,8 @@ N = 1 / (1 + 3 × view_count)
 | 2          | 0.143  | 1.71                                |
 | 3          | 0.100  | 1.20                                |
 
-- **Magic feeds**: final score = `(S + V + U + P + A) × R × N`
-- **Newest feeds**: posts are reordered by `timestamp × N`, so seen posts drift down while still appearing
-- **All feed modes** (home, following, topic, all) apply the novelty factor
+- **Magic feeds** (home, following, topic, all): final score = `(S + V + U + P + A) × R × N`
+- **Newest feeds**: ordered strictly by timestamp; `N` is always `1.0`
 - Seen posts **can still appear** even when unseen posts exist — they just rank lower
 - The `feed_debug` object in each post includes `N` and `seen_count` for transparency
 

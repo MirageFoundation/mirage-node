@@ -352,31 +352,15 @@ const generatePostGradient = (post) => {
     return gradients[index];
 };
 
-const MobileCardTitleBar = styled.div`
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 0.5rem 0.65rem;
-    color: #fff;
-    font-weight: 700;
-    font-size: clamp(0.60rem, 3.2vw, 1.0rem);
-    line-height: 1.15;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.65);
-    pointer-events: none;
-    z-index: 2;
-    & a {
-        pointer-events: auto;
-    }
-    &::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        height: 200%;
-        background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.5) 50%, rgba(0,0,0,0) 100%);
-        z-index: -1;
+const MobileCardTitleBelow = styled.div`
+    display: none;
+    @media (max-width: 600px) {
+        display: block;
+        padding: 0.5rem 0.65rem;
+        font-weight: 700;
+        font-size: clamp(0.65rem, 3.2vw, 0.95rem);
+        line-height: 1.25;
+        color: ${({ theme }) => theme.colors.text};
     }
 `
 
@@ -2072,6 +2056,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 }
                             })()}
                         </MobileCardSquare>
+                        {thumbSrc && post && post.title ? (
+                            <MobileCardTitleBelow>
+                                <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ color: 'inherit', textDecoration: 'none' }}>
+                                    {post.title}
+                                </Link>
+                            </MobileCardTitleBelow>
+                        ) : null}
                     </MobileCardWrapper>}
                     <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>

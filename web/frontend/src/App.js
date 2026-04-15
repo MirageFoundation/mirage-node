@@ -112,6 +112,13 @@ function RouteTracker({ children }) {
     const isInitialMountRef = React.useRef(true);
 
     React.useEffect(() => {
+        const navEntry = performance.getEntriesByType('navigation')[0];
+        if (navEntry && navEntry.type === 'reload') {
+            window.scrollTo(0, 0);
+        }
+    }, []);
+
+    React.useEffect(() => {
         try { Storage.touchLastSeen(); } catch (_) { }
     }, [location.pathname]);
 
