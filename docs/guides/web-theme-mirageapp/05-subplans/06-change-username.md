@@ -1,4 +1,4 @@
-# Sub-Plan 05.5 — Change Username
+# Sub-Plan 05.6 — Change Username
 
 **Route:** `/change_username`
 **File:** `web/frontend/src/themes/mirageapp/routes/ChangeUsernameView.js`
@@ -9,7 +9,7 @@
 
 ## Goal
 
-Rewrite `mirageapp`'s `ChangeUsernameView` as a focused, panel-styled form that reuses the auth-slice `AuthPageShell` primitives and matches the onboarding redesign.
+Rewrite `mirageapp`'s `ChangeUsernameView` with a Settings-style header, centered title/description text, auth-slice panel primitives for the form body, and composer-matched input styling.
 
 ---
 
@@ -17,8 +17,11 @@ Rewrite `mirageapp`'s `ChangeUsernameView` as a focused, panel-styled form that 
 
 - **Mobile:** `app/(auth)/username.tsx`
 - **Web (structure):** `web/frontend/src/themes/oldreddit/routes/ChangeUsernameView.js`
-- **Auth shell (reuse):** `themes/mirageapp/components/AuthPageShell.js` (from commit `ceef3d7`)
-- **Data hook (do not modify):** `useChangeUsername` (verify exact path)
+- **Web (canonical data):** `web/frontend/src/themes/bluemoon/routes/ChangeUsernameView.js`
+- **Auth primitives (reuse):** `themes/mirageapp/components/AuthPageShell.js`
+- **Settings header pattern:** `themes/mirageapp/routes/SettingsView.js` (`HeaderRow` + `HeaderTitle` + divider)
+- **Composer input style:** `themes/mirageapp/routes/ViewPostView.js` (`StyledReply` textarea overrides)
+- **Data hook (not modified):** `useChangeUsername` in `logic/useChangeUsername`
 
 ---
 
@@ -26,7 +29,13 @@ Rewrite `mirageapp`'s `ChangeUsernameView` as a focused, panel-styled form that 
 
 ### In scope
 - Rewrite `themes/mirageapp/routes/ChangeUsernameView.js`.
-- Reuse `AuthPageShell` and header primitives (`Header`, `BrandMark`, `Eyebrow`, `AuthTitle`) from the auth slice.
+- Settings-style header (`HeaderRow` / `HeaderTitle` / divider) with title "Edit Username".
+- Centered title + description text below the header.
+- Auth-slice primitives (`AuthPanel`, `AuthStack`, `AuthLabel`, `AuthHelperText`, `AuthErrorMessage`, `AuthButtonRow`) for form layout.
+- Composer-matched input (`bg` background, `10px` radius, `borderStrong` hover/focus, `0.12s` transitions).
+- Gradient `PrimaryButton` matching login/signup CTA.
+- Amber `WarningPanel` for free-tier upgrade prompt.
+- Themed success state with `voteUp` color + monospace handle.
 
 ### Out of scope
 - `useChangeUsername` or any username-validation / submit logic.
@@ -34,42 +43,30 @@ Rewrite `mirageapp`'s `ChangeUsernameView` as a focused, panel-styled form that 
 
 ---
 
-## Requirements
+## What shipped
 
-- **Centered card** on desktop, **full-bleed** on mobile (reuse auth shell pattern).
-- Panel container with mobile tokens.
-- Clear **current username** display + **new username** input.
-- Validation feedback (too short, taken, invalid chars) styled consistently with auth slice.
-- Submit button uses theme's `Button` primary variant.
-- Cancel / back action returns to previous screen.
-- Preserve existing behavior — do not touch `useChangeUsername`.
-- Dark + light modes both work.
-- No `themes/oldreddit/*` imports inside the new file.
-
----
-
-## Suggested implementation steps
-
-1. Read `themes/oldreddit/routes/ChangeUsernameView.js` for hook wiring + current UI.
-2. Read `themes/mirageapp/routes/LoginView.js` or `CreateAccountView.js` for `AuthPageShell` usage pattern.
-3. Read mobile `app/(auth)/username.tsx` for tone + layout cues.
-4. Copy auth-slice structure into `themes/mirageapp/routes/ChangeUsernameView.js`.
-5. Wrap in `AuthPageShell` with appropriate header/eyebrow.
-6. Wire input + validation states.
-7. Verify submit flow unchanged.
-8. Build + manual smoke test.
+- **Header:** Settings-style `HeaderRow` with "Edit Username" title + `border` divider.
+- **Content:** Centered `PageWrapper` (max-width 28 rem) with title "Change your username" and description "This is how people will find you on Mirage."
+- **Input:** Composer-style `InputRow` — `bg` background, `10px` radius, `borderStrong` on hover/focus, `0.12s` transition. Inline `Anon-` prefix for free-tier users.
+- **Labels left-aligned:** "New username" label and "Letters, numbers, and hyphens only." helper text are left-aligned within the centered panel.
+- **Error state:** `AuthErrorMessage` for submit errors.
+- **Submit:** Gradient `PrimaryButton` with status text (Checking / Preparing / Submitting / Verifying).
+- **Success:** Themed panel with `voteUp` check icon, monospace handle display, redirect subtext.
+- **Warning:** Amber-tinted `WarningPanel` with upgrade link for free-tier users.
+- **No oldreddit/bluemoon imports.**
+- **Build passes:** `CI=true npm run build` clean.
 
 ---
 
 ## Verification checklist
 
-- [ ] `/change_username` renders and behaves like the current theme.
-- [ ] Uses `AuthPageShell` from the auth slice.
-- [ ] Validation + error states styled.
-- [ ] Dark + light modes verified.
-- [ ] Desktop + mobile layouts verified.
-- [ ] No `themes/oldreddit/*` imports.
-- [ ] Build passes:
+- [x] `/change_username` renders with Settings-style header.
+- [x] Auth-slice primitives used for form layout.
+- [x] Input matches composer textarea style.
+- [x] Validation + error states styled.
+- [x] Dark + light modes work (tokens only, no hard-coded colors outside R2 pairs).
+- [x] No `themes/oldreddit/*` or `themes/bluemoon/*` imports.
+- [x] Build passes:
 
 ```bash
 cd web/frontend
@@ -80,4 +77,4 @@ CI=true npm run build
 
 ## PR description template
 
-> Rewrites `mirageapp`'s `ChangeUsernameView` to reuse the auth slice's `AuthPageShell` primitives, giving the username change flow visual parity with login/signup. Visual only — `useChangeUsername` unchanged.
+> Rewrites `mirageapp`'s `ChangeUsernameView` with a Settings-style header ("Edit Username"), centered title/description, auth-slice panel primitives, and composer-matched input styling. Visual only — `useChangeUsername` unchanged.
