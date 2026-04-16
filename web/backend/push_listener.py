@@ -36,8 +36,10 @@ TRENDING_POLL_INTERVAL_SECONDS = 60
 TRENDING_UNIQUE_COMMENTERS_THRESHOLD = 10
 TRENDING_POST_MAX_AGE_SECONDS = 24 * 3600
 TRENDING_TIME_MATCH_TOLERANCE_MINUTES = 1
+# Per-user escalating cooldown for trending pushes. The minute-of-day match
+# means the earliest possible re-fire is ~24h after last_seen anyway, so the
+# floor here starts at 24h (anything shorter would be unreachable in practice).
 TRENDING_LEVEL_WAITS = [
-    8 * 3600,
     24 * 3600,
     3 * 86400,
     7 * 86400,
