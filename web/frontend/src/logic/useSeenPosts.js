@@ -8,7 +8,8 @@ const GLANCE_COUNT = 2;
 const MAX_BUFFER = 100;
 const POST_ID_RE = /^[0-9a-f]{64}$/;
 const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);
-const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
+// const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
+const _LOG = () => { };
 
 const _SB_KEY = "_seenPending";
 const _SB_CAP = 500;
