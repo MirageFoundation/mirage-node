@@ -1702,11 +1702,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
     }
 
-    const [thumbSrc, setThumbSrc] = useState(null);
-    const [thumbBlurSrc, setThumbBlurSrc] = useState(null);
-    const [thumbOriginal, setThumbOriginal] = useState(null); // Original URL for fallback
-    const [thumbProxy, setThumbProxy] = useState('photon'); // 'photon' | 'wsrv' | 'none'
-
     // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
     // Remove after March 2026 when all old posts have been migrated or expired.
     const extractFirstUrl = (text) => {
@@ -1758,6 +1753,38 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             return u.includes('img.youtube.com') || u.includes('i.ytimg.com');
         } catch (_) { return false; }
     })();
+
+    // Compute the initial thumb state synchronously so the first render already has the
+    // correct <img src>. Without this, first render would render a placeholder, the effect
+    // below would then swap in the real thumb, and the browser would abort the in-flight
+    // placeholder fetch with NS_BINDING_ABORTED.
+    const computeInitialThumbState = () => {
+        const provided = post && typeof post.thumbnail === 'string' && post.thumbnail.trim() ? post.thumbnail.trim() : '';
+        const thumbUrl = provided || (isDirectImage ? firstLinkInContent : null);
+        if (!thumbUrl) return { src: null, blurSrc: null, original: null, proxy: 'none' };
+        const isYoutubeThumbnail = thumbUrl.includes('img.youtube.com') || thumbUrl.includes('i.ytimg.com');
+        if (isYoutubeThumbnail) {
+            return { src: thumbUrl, blurSrc: thumbUrl, original: thumbUrl, proxy: 'direct' };
+        }
+        if (thumbUrl.includes('?')) {
+            return {
+                src: buildWsrvUrl(thumbUrl, { w: 240, h: 240 }),
+                blurSrc: buildBlurredWsrvUrl(thumbUrl, { w: 240, h: 240, blur: 18 }),
+                original: thumbUrl,
+                proxy: 'wsrv',
+            };
+        }
+        return {
+            src: buildPhotonUrl(thumbUrl, { w: 240, h: 240 }),
+            blurSrc: buildPhotonUrl(thumbUrl, { w: 240, h: 240 }),
+            original: thumbUrl,
+            proxy: 'photon',
+        };
+    };
+    const [thumbSrc, setThumbSrc] = useState(() => computeInitialThumbState().src);
+    const [thumbBlurSrc, setThumbBlurSrc] = useState(() => computeInitialThumbState().blurSrc);
+    const [thumbOriginal, setThumbOriginal] = useState(() => computeInitialThumbState().original);
+    const [thumbProxy, setThumbProxy] = useState(() => computeInitialThumbState().proxy);
 
     useEffect(() => {
         // Use thumbnail from database (indexed by backend), or fall back to direct image URL

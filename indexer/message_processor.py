@@ -1972,21 +1972,39 @@ class MessageProcessor:
 
     @staticmethod
     def _fetch_html(url: str) -> str | None:
+        # Impersonate a real Chrome browser navigating from a Google search result.
+        # Bare User-Agent is enough for most sites, but publisher sites behind Akamai/Cloudflare
+        # bot-fight (Telegraph, WSJ, etc.) also check Accept-Language, Referer, and sec-fetch-* /
+        # sec-ch-ua client hints. These extra headers bypass the easier WAFs; the hard ones
+        # (Akamai JA3 fingerprinting) will still 403.
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate",
+            "Referer": "https://www.google.com/",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-User": "?1",
+            "Sec-Fetch-Dest": "document",
+            "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+        }
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-            resp = requests.get(url, headers=headers, timeout=5)
-            if resp.status_code != 200:
-                return None
-            ct = resp.headers.get("content-type", "")
-            if "text/html" not in ct and "application/xhtml+xml" not in ct:
-                return None
-            text = resp.text
-            return text[:1_500_000]
-        except Exception:
+            resp = requests.get(url, headers=headers, timeout=5, allow_redirects=True)
+        except Exception as e:
+            logger.debug("[thumb] fetch_html request failed url=%s err=%s", url, e)
             return None
+        if resp.status_code != 200:
+            logger.debug("[thumb] fetch_html non-200 status=%d url=%s", resp.status_code, url)
+            return None
+        ct = resp.headers.get("content-type", "")
+        if "text/html" not in ct and "application/xhtml+xml" not in ct:
+            logger.debug("[thumb] fetch_html non-html content-type=%s url=%s", ct, url)
+            return None
+        return resp.text[:1_500_000]
 
     @staticmethod
     def _probe_dimensions(url: str, max_bytes: int = 2_000_000) -> tuple[int, int] | None:
