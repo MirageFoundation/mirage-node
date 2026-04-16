@@ -471,8 +471,10 @@ def _send_push_to_user(
         if ticket_id:
             _store_receipt(ticket_id, token)
             ok_count += 1
+    if ok_count == 0:
+        logger.debug("[Push] No successful tickets for %s", owner[:16])
     logger.info("[Push] Sent %d/%d to %s: %s", ok_count, len(messages), owner[:16], title)
-    return True
+    return ok_count > 0
 
 
 def _fire_and_forget(fn, *args):
@@ -1010,48 +1012,55 @@ def _do_donation_push(
 
 
 def send_push_for_trending(
-    post_owner: str,
+    recipient_owner: str,
     title_preview: str,
     tx_hash: str,
 ) -> bool:
-    """Fire push for a trending post. Called from push_listener when trending criteria are met."""
+    """Fire push for a trending post to a recipient."""
     if not PUSH_NOTIFICATIONS_ENABLED:
-        logger.debug("[Push] Disabled, skipping trending push for %s", post_owner[:16])
+        logger.debug("[Push] Disabled, skipping trending push for %s", recipient_owner[:16])
         return False
-    tokens = _get_tokens_for_owner(post_owner)
+    tokens = _get_tokens_for_owner(recipient_owner)
     if not tokens:
-        logger.debug("[Push] No tokens for trending owner=%s", post_owner[:16])
+        logger.debug("[Push] No tokens for trending recipient=%s", recipient_owner[:16])
         return False
-    if not _try_throttle_send(post_owner):
-        logger.debug("[Push] Throttled, skipping trending owner=%s", post_owner[:16])
+    if not _try_throttle_send(recipient_owner):
+        logger.debug("[Push] Throttled, skipping trending recipient=%s", recipient_owner[:16])
         return False
     logger.info(
-        "[Push] Firing trending push: owner=%s tx=%s",
-        post_owner[:16],
+        "[Push] Firing trending push: recipient=%s tx=%s",
+        recipient_owner[:16],
         tx_hash[:16],
     )
-    _fire_and_forget(_do_trending_push, post_owner, title_preview, tx_hash, tokens)
-    _maybe_flush_pending_summaries()
-    return True
+    sent = _do_trending_push(recipient_owner, title_preview, tx_hash, tokens)
+    if sent:
+        _maybe_flush_pending_summaries()
+        return True
+    logger.debug("[Push] Trending delivery failed recipient=%s tx=%s", recipient_owner[:16], tx_hash[:16])
+    return False
 
 
 def _do_trending_push(
-    post_owner: str,
+    recipient_owner: str,
     title_preview: str,
     tx_hash: str,
     tokens: list[tuple[str, str]],
-) -> None:
-    owner_lc = post_owner.lower()
-    display_title = _truncate(title_preview, 80) if title_preview else "your post"
-    title = "Your post is trending!"
-    body = f"There's a lively discussion on '{display_title}'"
+) -> bool:
+    owner_lc = recipient_owner.lower()
+    title = "Trending on Mirage"
+    if title_preview:
+        display_title = _truncate(title_preview, 80)
+        body = f"Lively discussion on '{display_title}'"
+    else:
+        body = "Lively discussion on a post you're missing"
     data = {
         "type": "trending",
         "postId": tx_hash.lower(),
         "rootPostId": tx_hash.lower(),
     }
-    _send_push_to_user(owner_lc, title, body, data, tokens=tokens, skip_throttle=True)
+    sent = _send_push_to_user(owner_lc, title, body, data, tokens=tokens, skip_throttle=True)
     _check_old_receipts()
+    return sent
 
 
 def clear_push_throttle(owner: str) -> None:

@@ -651,6 +651,7 @@ def _poll_trending() -> int:
             WHERE p.deleted = FALSE
               AND p.created_at > %s
               AND p.comment_count >= %s
+              AND COALESCE(p.target, '') = ''
             GROUP BY p.txhash, p.owner, p.title, p.created_at
             HAVING COUNT(DISTINCT LOWER(c.owner)) >= %s
             ORDER BY (COUNT(DISTINCT LOWER(c.owner)) / (1 + ((%s - p.created_at) / 3600.0))) DESC
@@ -694,9 +695,11 @@ def _poll_trending() -> int:
                       SELECT 1 FROM push_tokens pt WHERE LOWER(pt.owner) = LOWER(u.owner)
                   )
                   AND (
-                      ABS(((u.last_seen_at / 60) % 1440) - %s) <= %s
-                      OR ABS(((u.last_seen_at / 60) % 1440) - %s) >= 1440 - %s
+                      ABS(((u.last_seen_at / 60) %% 1440) - %s) <= %s
+                      OR ABS(((u.last_seen_at / 60) %% 1440) - %s) >= 1440 - %s
                   )
+                ORDER BY u.last_seen_at ASC
+                LIMIT %s
                 """,
                 (
                     txhash_lc,
@@ -706,6 +709,7 @@ def _poll_trending() -> int:
                     tolerance,
                     minute_of_day_now,
                     tolerance,
+                    PUSH_LISTENER_BATCH_SIZE,
                 ),
             )
             rows = bcur.fetchall()
@@ -717,11 +721,11 @@ def _poll_trending() -> int:
                 last_seen_ts = int(last_seen or 0)
                 level = int(level or 0)
                 last_sent = int(last_sent or 0)
-                if level >= TRENDING_STOPPED_LEVEL:
-                    continue
 
                 came_back = last_sent > 0 and last_seen_ts > last_sent
                 effective_level = 0 if came_back else level
+                if effective_level >= TRENDING_STOPPED_LEVEL:
+                    continue
                 required_wait = TRENDING_LEVEL_WAITS[effective_level]
                 if now_ts - last_seen_ts < required_wait:
                     continue
