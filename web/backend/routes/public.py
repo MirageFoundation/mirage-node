@@ -6594,7 +6594,7 @@ def get_inbox():
             FROM inbox_events
             WHERE LOWER(recipient) = %s
               AND LOWER(actor) != %s
-              AND event_type IN ('follow', 'donation', 'subscription_gift')
+              AND event_type IN ('follow', 'donation', 'subscription_gift', 'trending')
             ORDER BY created_at DESC
             LIMIT %s
             """,
@@ -6604,6 +6604,48 @@ def get_inbox():
         logger.info(
             f"[get_inbox] Backend events query: {(time.time() - t_backend)*1000:.1f}ms, rows={len(backend_rows)}"
         )
+
+        trending_posts: dict[str, dict] = {}
+        missing_event_keys: list[str] = []
+        if backend_rows:
+            trending_tx_hashes = sorted(
+                {str(row[5] or "").strip().lower() for row in backend_rows if (row[2] or "") == "trending" and row[5]}
+            )
+            if trending_tx_hashes:
+                placeholders = ",".join(["%s"] * len(trending_tx_hashes))
+                cur.execute(
+                    f"""
+                    SELECT LOWER(txhash), COALESCE(title, ''), COALESCE(content, ''), LOWER(owner),
+                           COALESCE(topic, '')
+                    FROM posts WHERE LOWER(txhash) IN ({placeholders}) AND deleted = FALSE
+                    """,
+                    trending_tx_hashes,
+                )
+                for prow in cur.fetchall():
+                    trending_posts[prow[0]] = {
+                        "title": prow[1] or "",
+                        "content": prow[2] or "",
+                        "owner": prow[3] or "",
+                        "topic": prow[4] or "",
+                    }
+                for row in backend_rows:
+                    if (row[2] or "") != "trending":
+                        continue
+                    tx_hash_lc = str(row[5] or "").strip().lower()
+                    if tx_hash_lc not in trending_posts:
+                        missing_event_keys.append(str(row[0] or "").lower())
+            if missing_event_keys:
+                placeholders = ",".join(["%s"] * len(missing_event_keys))
+                bcur.execute(
+                    f"DELETE FROM inbox_events WHERE event_key IN ({placeholders})",
+                    missing_event_keys,
+                )
+                missing_set = set(missing_event_keys)
+                backend_rows = [row for row in backend_rows if (row[0] or "").lower() not in missing_set]
+                logger.debug(
+                    "[get_inbox] Dropped stale trending events count=%d",
+                    len(missing_event_keys),
+                )
 
         # Get total count via a separate lightweight query
         count_query = f"""
@@ -6639,7 +6681,7 @@ def get_inbox():
             SELECT COUNT(*) FROM inbox_events
             WHERE LOWER(recipient) = %s
               AND LOWER(actor) != %s
-              AND event_type IN ('follow', 'donation', 'subscription_gift')
+              AND event_type IN ('follow', 'donation', 'subscription_gift', 'trending')
             """,
             (viewer_lower, viewer_lower),
         )
@@ -6697,24 +6739,43 @@ def get_inbox():
             event_type = row[2] or ""
             item_timestamp = int(row[3]) if row[3] is not None else 0
             amount = int(row[4]) if row[4] is not None else None
+            tx_hash_lc = (row[5] or "").lower()
             profile = backend_profiles.get(actor_owner, {})
+
+            context_id = ""
+            context_content = ""
+            context_title = ""
+            context_owner = viewer_lower
+            root_post_id = ""
+            item_topic = ""
+            if event_type == "trending":
+                post = trending_posts.get(tx_hash_lc)
+                if not post:
+                    continue
+                context_id = tx_hash_lc
+                context_title = post["title"]
+                context_content = post["content"]
+                context_owner = post["owner"]
+                root_post_id = tx_hash_lc
+                item_topic = post["topic"]
+
             items.append(
                 {
                     "item_id": event_key,
                     "actor_owner": actor_owner,
                     "item_timestamp": item_timestamp,
                     "item_content": "",
-                    "context_id": "",
-                    "context_content": "",
-                    "context_title": "",
+                    "context_id": context_id,
+                    "context_content": context_content,
+                    "context_title": context_title,
                     "context_target": "",
-                    "context_owner": viewer_lower,
+                    "context_owner": context_owner,
                     "actor_username": profile.get("username", ""),
-                    "root_post_id": "",
+                    "root_post_id": root_post_id,
                     "actor_level": profile.get("level", 0),
                     "item_award_type": "",
                     "item_type": event_type,
-                    "item_topic": "",
+                    "item_topic": item_topic,
                     "actor_created_at": profile.get("created_at", 0),
                     "amount": amount,
                 }

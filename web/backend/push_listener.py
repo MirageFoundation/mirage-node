@@ -9,7 +9,7 @@ import time
 from db import connect_backend_db, connect_db
 from logging_utils import logger
 from settings import TRENDING_PUSH_ENABLED, require_bool_env
-from shared.inbox import donation_event_key, record_inbox_event
+from shared.inbox import donation_event_key, record_inbox_event, trending_event_key
 from shared.push import (
     send_push_for_award,
     send_push_for_donation,
@@ -675,6 +675,7 @@ def _poll_trending() -> int:
     min_inactive = TRENDING_LEVEL_WAITS[0]
     tolerance = TRENDING_TIME_MATCH_TOLERANCE_MINUTES
     title_str = str(title or "").strip()
+    from routes.public import _invalidate_inbox_cache
 
     with connect_backend_db() as bconn:
         with bconn.cursor() as bcur:
@@ -714,56 +715,109 @@ def _poll_trending() -> int:
             )
             rows = bcur.fetchall()
 
+            blocked_recipients: set[str] = set()
+            owners = [str(row[0] or "").strip().lower() for row in rows if row[0]]
+            if owners:
+                with connect_db(timeout=3.0, busy_timeout_ms=5000) as iconn:
+                    with iconn.cursor() as icur:
+                        placeholders = ",".join(["%s"] * len(owners))
+                        icur.execute(
+                            f"""
+                            SELECT LOWER(owner) FROM blocked_users
+                            WHERE LOWER(target) = %s
+                              AND LOWER(owner) IN ({placeholders})
+                            """,
+                            [author_lc] + owners,
+                        )
+                        blocked_recipients = {row[0] for row in icur.fetchall()}
+            if blocked_recipients:
+                logger().debug(
+                    "push.listener.trending.blocked author=%s count=%d",
+                    author_lc[:16],
+                    len(blocked_recipients),
+                )
+
             for owner, last_seen, level, last_sent in rows:
                 owner_lc = str(owner or "").strip().lower()
                 if not owner_lc or owner_lc == "guest":
                     continue
-                last_seen_ts = int(last_seen or 0)
-                level = int(level or 0)
-                last_sent = int(last_sent or 0)
-
-                came_back = last_sent > 0 and last_seen_ts > last_sent
-                effective_level = 0 if came_back else level
-                if effective_level >= TRENDING_STOPPED_LEVEL:
+                if owner_lc in blocked_recipients:
+                    logger().debug(
+                        "push.listener.trending.skip_blocked owner=%s author=%s",
+                        owner_lc[:16],
+                        author_lc[:16],
+                    )
                     continue
-                required_wait = TRENDING_LEVEL_WAITS[effective_level]
-                if now_ts - last_seen_ts < required_wait:
-                    continue
-                if last_sent > 0 and now_ts - last_sent < required_wait:
-                    continue
+                try:
+                    last_seen_ts = int(last_seen or 0)
+                    level = int(level or 0)
+                    last_sent = int(last_sent or 0)
 
-                if came_back or last_sent == 0:
-                    new_level = 0
-                else:
-                    new_level = min(level + 1, TRENDING_STOPPED_LEVEL)
+                    came_back = last_sent > 0 and last_seen_ts > last_sent
+                    effective_level = 0 if came_back else level
+                    if effective_level >= TRENDING_STOPPED_LEVEL:
+                        continue
+                    required_wait = TRENDING_LEVEL_WAITS[effective_level]
+                    if now_ts - last_seen_ts < required_wait:
+                        continue
+                    if last_sent > 0 and now_ts - last_sent < required_wait:
+                        continue
 
-                sent = send_push_for_trending(owner_lc, title_str, txhash_lc)
-                if not sent:
-                    continue
+                    if came_back or last_sent == 0:
+                        new_level = 0
+                    else:
+                        new_level = min(level + 1, TRENDING_STOPPED_LEVEL)
 
-                bcur.execute(
-                    """INSERT INTO user_inbox_state (owner) VALUES (%s)
-                       ON CONFLICT (owner) DO NOTHING""",
-                    (owner_lc,),
-                )
-                bcur.execute(
-                    "UPDATE user_inbox_state SET trending_level = %s, trending_last_sent_at = %s WHERE owner = %s",
-                    (new_level, now_ts, owner_lc),
-                )
-                processed += 1
-                logger().info(
-                    "push.listener.trending.sent owner=%s tx=%s author=%s "
-                    "level=%d->%d came_back=%s last_seen_ago=%ds last_sent_ago=%ds title=%r",
-                    owner_lc[:16],
-                    txhash_lc[:16],
-                    author_lc[:16],
-                    level,
-                    new_level,
-                    came_back,
-                    now_ts - last_seen_ts,
-                    (now_ts - last_sent) if last_sent > 0 else -1,
-                    title_str[:60],
-                )
+                    sent = send_push_for_trending(owner_lc, title_str, txhash_lc)
+                    if not sent:
+                        continue
+
+                    with bconn.transaction():
+                        bcur.execute(
+                            """INSERT INTO user_inbox_state (owner) VALUES (%s)
+                               ON CONFLICT (owner) DO NOTHING""",
+                            (owner_lc,),
+                        )
+                        bcur.execute(
+                            "UPDATE user_inbox_state SET trending_level = %s, trending_last_sent_at = %s WHERE owner = %s",
+                            (new_level, now_ts, owner_lc),
+                        )
+                        bcur.execute(
+                            """
+                            INSERT INTO inbox_events (event_key, recipient, actor, event_type, created_at, amount, tx_hash)
+                            VALUES (%s, %s, %s, 'trending', %s, NULL, %s)
+                            ON CONFLICT (event_key) DO NOTHING
+                            """,
+                            (
+                                trending_event_key(owner_lc, txhash_lc),
+                                owner_lc,
+                                author_lc,
+                                now_ts,
+                                txhash_lc,
+                            ),
+                        )
+
+                    _invalidate_inbox_cache(owner_lc)
+                    processed += 1
+                    logger().info(
+                        "push.listener.trending.sent owner=%s tx=%s author=%s "
+                        "level=%d->%d came_back=%s last_seen_ago=%ds last_sent_ago=%ds title=%r",
+                        owner_lc[:16],
+                        txhash_lc[:16],
+                        author_lc[:16],
+                        level,
+                        new_level,
+                        came_back,
+                        now_ts - last_seen_ts,
+                        (now_ts - last_sent) if last_sent > 0 else -1,
+                        title_str[:60],
+                    )
+                except Exception:
+                    logger().exception(
+                        "push.listener.trending.error owner=%s tx=%s",
+                        owner_lc[:16],
+                        txhash_lc[:16],
+                    )
 
     logger().debug("push.listener.trending processed=%d tx=%s", processed, txhash_lc[:16])
     return processed

@@ -130,6 +130,14 @@ def subscription_gift_event_key(gifter: str, recipient: str, tx_hash: str) -> st
     return f"subscription_gift:{gifter_lc}:{recipient_lc}:{tx_lc}"
 
 
+def trending_event_key(recipient: str, tx_hash: str) -> str:
+    recipient_lc = str(recipient or "").strip().lower()
+    tx_lc = str(tx_hash or "").strip().lower()
+    if not recipient_lc or not tx_lc:
+        raise RuntimeError("trending_event_key requires recipient and tx_hash")
+    return f"trending:{recipient_lc}:{tx_lc}"
+
+
 def record_inbox_event(
     event_key: str,
     recipient: str,
