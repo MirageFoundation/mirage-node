@@ -51,11 +51,6 @@ TRENDING_LEVEL_WAITS = [
 TRENDING_STOPPED_LEVEL = len(TRENDING_LEVEL_WAITS)
 _last_trending_poll_ts = 0.0
 
-# LOG-ONLY MODE: while True, the trending poller logs what it WOULD do but does
-# not actually send pushes or advance per-user cooldown state. Flip to False to
-# go live. Gated additionally by the TRENDING_PUSH_ENABLED env var.
-TRENDING_PUSH_DRY_RUN = True
-
 
 def _acquire_listener_lock() -> bool:
     global _listener_lock_fp
@@ -736,23 +731,6 @@ def _poll_trending() -> int:
                 else:
                     new_level = min(level + 1, TRENDING_STOPPED_LEVEL)
 
-                if TRENDING_PUSH_DRY_RUN:
-                    logger().info(
-                        "push.listener.trending.dry_run owner=%s tx=%s author=%s "
-                        "level=%d->%d came_back=%s last_seen_ago=%ds last_sent_ago=%ds title=%r",
-                        owner_lc[:16],
-                        txhash_lc[:16],
-                        author_lc[:16],
-                        level,
-                        new_level,
-                        came_back,
-                        now_ts - last_seen_ts,
-                        (now_ts - last_sent) if last_sent > 0 else -1,
-                        title_str[:60],
-                    )
-                    processed += 1
-                    continue
-
                 sent = send_push_for_trending(owner_lc, title_str, txhash_lc)
                 if not sent:
                     continue
@@ -767,23 +745,21 @@ def _poll_trending() -> int:
                     (new_level, now_ts, owner_lc),
                 )
                 processed += 1
-                logger().debug(
-                    "push.listener.trending.sent owner=%s tx=%s level=%d->%d",
+                logger().info(
+                    "push.listener.trending.sent owner=%s tx=%s author=%s "
+                    "level=%d->%d came_back=%s last_seen_ago=%ds last_sent_ago=%ds title=%r",
                     owner_lc[:16],
                     txhash_lc[:16],
+                    author_lc[:16],
                     level,
                     new_level,
+                    came_back,
+                    now_ts - last_seen_ts,
+                    (now_ts - last_sent) if last_sent > 0 else -1,
+                    title_str[:60],
                 )
 
-    if TRENDING_PUSH_DRY_RUN:
-        logger().info(
-            "push.listener.trending.dry_run.summary candidates=%d tx=%s author=%s",
-            processed,
-            txhash_lc[:16],
-            author_lc[:16],
-        )
-    else:
-        logger().debug("push.listener.trending processed=%d tx=%s", processed, txhash_lc[:16])
+    logger().debug("push.listener.trending processed=%d tx=%s", processed, txhash_lc[:16])
     return processed
 
 
