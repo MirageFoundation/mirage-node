@@ -8,7 +8,7 @@ import time
 
 from db import connect_backend_db, connect_db
 from logging_utils import logger
-from settings import require_bool_env
+from settings import TRENDING_PUSH_ENABLED, require_bool_env
 from shared.inbox import donation_event_key, record_inbox_event
 from shared.push import (
     send_push_for_award,
@@ -17,6 +17,7 @@ from shared.push import (
     send_push_for_mentions,
     send_push_for_reply,
     send_push_for_subscription_gift,
+    send_push_for_trending,
     _extract_mentions,
 )
 from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
@@ -30,6 +31,30 @@ PUSH_EVENT_SEEN_CLEANUP_INTERVAL = 60 * 60
 PUSH_EVENT_SEEN_CLEANUP_BATCH = 5000
 _last_seen_cleanup_ts = 0.0
 _listener_lock_fp = None
+
+TRENDING_POLL_INTERVAL_SECONDS = 60
+TRENDING_UNIQUE_COMMENTERS_THRESHOLD = 10
+TRENDING_POST_MAX_AGE_SECONDS = 24 * 3600
+TRENDING_TIME_MATCH_TOLERANCE_MINUTES = 1
+TRENDING_LEVEL_WAITS = [
+    8 * 3600,
+    24 * 3600,
+    3 * 86400,
+    7 * 86400,
+    14 * 86400,
+    21 * 86400,
+    42 * 86400,
+    63 * 86400,
+    126 * 86400,
+    252 * 86400,
+]
+TRENDING_STOPPED_LEVEL = len(TRENDING_LEVEL_WAITS)
+_last_trending_poll_ts = 0.0
+
+# LOG-ONLY MODE: while True, the trending poller logs what it WOULD do but does
+# not actually send pushes or advance per-user cooldown state. Flip to False to
+# go live. Gated additionally by the TRENDING_PUSH_ENABLED env var.
+TRENDING_PUSH_DRY_RUN = True
 
 
 def _acquire_listener_lock() -> bool:
@@ -71,11 +96,16 @@ def _run_listener() -> None:
 
 
 def _poll_once() -> int:
+    global _last_trending_poll_ts
     total = 0
     total += _poll_posts()
     total += _poll_awards()
     total += _poll_send_tokens()
     total += _poll_inbox_events()
+    now = time.time()
+    if TRENDING_PUSH_ENABLED and now - _last_trending_poll_ts >= TRENDING_POLL_INTERVAL_SECONDS:
+        total += _poll_trending()
+        _last_trending_poll_ts = now
     _maybe_cleanup_seen()
     logger().debug("push.listener.poll total=%d", total)
     return total
@@ -599,6 +629,161 @@ def _poll_inbox_events() -> int:
 
     _update_cursor("inbox_events", last_ts, last_id)
     logger().debug("push.listener.inbox_events processed=%d last_ts=%d", processed, last_ts)
+    return processed
+
+
+def _poll_trending() -> int:
+    """Detect trending posts and push-notify inactive users at last-active time."""
+    now_ts = int(time.time())
+    cutoff_ts = now_ts - TRENDING_POST_MAX_AGE_SECONDS
+    threshold = TRENDING_UNIQUE_COMMENTERS_THRESHOLD
+
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT p.txhash, p.owner, COALESCE(p.title, ''),
+                   p.created_at,
+                   COUNT(DISTINCT LOWER(c.owner)) AS unique_commenters
+            FROM posts p
+            JOIN posts c
+              ON LOWER(c.root_post_id) = LOWER(p.txhash)
+             AND c.target != ''
+             AND LOWER(c.owner) != LOWER(p.owner)
+             AND c.deleted = FALSE
+            WHERE p.deleted = FALSE
+              AND p.created_at > %s
+              AND p.comment_count >= %s
+            GROUP BY p.txhash, p.owner, p.title, p.created_at
+            HAVING COUNT(DISTINCT LOWER(c.owner)) >= %s
+            ORDER BY (unique_commenters / (1 + ((%s - p.created_at) / 3600.0))) DESC
+            LIMIT 1
+            """,
+            (cutoff_ts, threshold, threshold, now_ts),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return 0
+
+    txhash, author, title, _created_at, _unique_commenters = row
+    txhash_lc = str(txhash or "").strip().lower()
+    author_lc = str(author or "").strip().lower()
+    if not txhash_lc or not author_lc:
+        return 0
+
+    processed = 0
+    minute_of_day_now = (now_ts // 60) % 1440
+    min_inactive = TRENDING_LEVEL_WAITS[0]
+    tolerance = TRENDING_TIME_MATCH_TOLERANCE_MINUTES
+    title_str = str(title or "").strip()
+
+    with connect_backend_db() as bconn:
+        with bconn.cursor() as bcur:
+            bcur.execute(
+                """
+                SELECT u.owner,
+                       u.last_seen_at,
+                       COALESCE(s.trending_level, 0) AS trending_level,
+                       COALESCE(s.trending_last_sent_at, 0) AS trending_last_sent_at
+                FROM user_last_seen u
+                LEFT JOIN user_inbox_state s ON s.owner = u.owner
+                LEFT JOIN user_seen_posts sp
+                  ON sp.owner = u.owner AND sp.post_id = %s
+                WHERE u.owner != %s
+                  AND sp.owner IS NULL
+                  AND u.last_seen_at <= %s
+                  AND EXISTS (
+                      SELECT 1 FROM push_tokens pt WHERE LOWER(pt.owner) = LOWER(u.owner)
+                  )
+                  AND (
+                      ABS(((u.last_seen_at / 60) % 1440) - %s) <= %s
+                      OR ABS(((u.last_seen_at / 60) % 1440) - %s) >= 1440 - %s
+                  )
+                """,
+                (
+                    txhash_lc,
+                    author_lc,
+                    now_ts - min_inactive,
+                    minute_of_day_now,
+                    tolerance,
+                    minute_of_day_now,
+                    tolerance,
+                ),
+            )
+            rows = bcur.fetchall()
+
+            for owner, last_seen, level, last_sent in rows:
+                owner_lc = str(owner or "").strip().lower()
+                if not owner_lc or owner_lc == "guest":
+                    continue
+                last_seen_ts = int(last_seen or 0)
+                level = int(level or 0)
+                last_sent = int(last_sent or 0)
+                if level >= TRENDING_STOPPED_LEVEL:
+                    continue
+
+                came_back = last_sent > 0 and last_seen_ts > last_sent
+                effective_level = 0 if came_back else level
+                required_wait = TRENDING_LEVEL_WAITS[effective_level]
+                if now_ts - last_seen_ts < required_wait:
+                    continue
+                if last_sent > 0 and now_ts - last_sent < required_wait:
+                    continue
+
+                if came_back or last_sent == 0:
+                    new_level = 0
+                else:
+                    new_level = min(level + 1, TRENDING_STOPPED_LEVEL)
+
+                if TRENDING_PUSH_DRY_RUN:
+                    logger().info(
+                        "push.listener.trending.dry_run owner=%s tx=%s author=%s "
+                        "level=%d->%d came_back=%s last_seen_ago=%ds last_sent_ago=%ds title=%r",
+                        owner_lc[:16],
+                        txhash_lc[:16],
+                        author_lc[:16],
+                        level,
+                        new_level,
+                        came_back,
+                        now_ts - last_seen_ts,
+                        (now_ts - last_sent) if last_sent > 0 else -1,
+                        title_str[:60],
+                    )
+                    processed += 1
+                    continue
+
+                sent = send_push_for_trending(owner_lc, title_str, txhash_lc)
+                if not sent:
+                    continue
+
+                bcur.execute(
+                    """INSERT INTO user_inbox_state (owner) VALUES (%s)
+                       ON CONFLICT (owner) DO NOTHING""",
+                    (owner_lc,),
+                )
+                bcur.execute(
+                    "UPDATE user_inbox_state SET trending_level = %s, trending_last_sent_at = %s WHERE owner = %s",
+                    (new_level, now_ts, owner_lc),
+                )
+                processed += 1
+                logger().debug(
+                    "push.listener.trending.sent owner=%s tx=%s level=%d->%d",
+                    owner_lc[:16],
+                    txhash_lc[:16],
+                    level,
+                    new_level,
+                )
+
+    if TRENDING_PUSH_DRY_RUN:
+        logger().info(
+            "push.listener.trending.dry_run.summary candidates=%d tx=%s author=%s",
+            processed,
+            txhash_lc[:16],
+            author_lc[:16],
+        )
+    else:
+        logger().debug("push.listener.trending processed=%d tx=%s", processed, txhash_lc[:16])
     return processed
 
 

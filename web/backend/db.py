@@ -551,6 +551,12 @@ def init_backend_schema() -> None:
                 )
             """
             )
+            cur.execute("ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_level SMALLINT NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_last_sent_at BIGINT NOT NULL DEFAULT 0")
+            _assert_table_schema(
+                "user_inbox_state",
+                {"owner", "inbox_last_viewed_at", "trending_level", "trending_last_sent_at"},
+            )
 
             # ── Inbox events (follow + donation notifications) ───────────
             cur.execute(
