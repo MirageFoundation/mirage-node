@@ -794,54 +794,61 @@ const StyledReply = styled.div`
     }
 
     /* --- Preview toggle (custom checkmark) ----------------------------
-     * Replaces the native checkbox with a small rounded square that
-     * lifts to focusBlue when checked, with a unicode checkmark inside.
+     * Matches the CreatePostView preview pill exactly: rounded ghost pill
+     * with a small square checkbox. Checked state fills rgb(68,109,228)
+     * and centers a white checkmark via translate(-50%, -55%) so the
+     * rotated glyph lands visually in the middle of the box.
      */
     [data-mirageapp-editor] label {
         background: transparent !important;
+        background-color: transparent !important;
         border: 1px solid ${({ theme }) => theme.colors.border} !important;
-        border-radius: 6px !important;
-        padding: 0.2rem 0.45rem !important;
-        font-size: 0.6rem !important;
+        border-radius: 9999px !important;
+        padding: 0 0.55rem !important;
+        font-size: 0.62rem !important;
         font-weight: 500 !important;
-        color: ${({ theme }) => theme.colors.feedCtrlText} !important;
+        color: ${({ theme }) => theme.colors.subtleText} !important;
         gap: 0.35rem !important;
-        height: 24px !important;
-        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease !important;
+        height: 1.5rem !important;
+        transition: color 0.12s ease, border-color 0.12s ease !important;
     }
     [data-mirageapp-editor] label:hover {
-        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
+        background: transparent !important;
+        background-color: transparent !important;
         color: ${({ theme }) => theme.colors.text} !important;
         border-color: ${({ theme }) => theme.colors.borderStrong} !important;
     }
     [data-mirageapp-editor] label input[type='checkbox'] {
         appearance: none !important;
         -webkit-appearance: none !important;
-        width: 12px !important;
-        height: 12px !important;
-        border-radius: 3px !important;
+        width: 0.9rem !important;
+        height: 0.9rem !important;
+        border-radius: 4px !important;
         border: 1px solid ${({ theme }) => theme.colors.borderStrong} !important;
         background: transparent !important;
+        background-color: transparent !important;
         cursor: pointer !important;
         position: relative !important;
         margin: 0 !important;
         flex-shrink: 0 !important;
-        transition: background 0.12s ease, border-color 0.12s ease !important;
+        transition: border-color 0.12s ease !important;
     }
     [data-mirageapp-editor] label input[type='checkbox']:checked {
-        background: ${({ theme }) => theme.colors.focusBlue} !important;
-        border-color: ${({ theme }) => theme.colors.focusBlue} !important;
+        background: rgb(68, 109, 228) !important;
+        background-color: rgb(68, 109, 228) !important;
+        border-color: rgb(68, 109, 228) !important;
     }
     [data-mirageapp-editor] label input[type='checkbox']:checked::after {
         content: '' !important;
         position: absolute !important;
-        left: 3px !important;
-        top: 0px !important;
+        left: 50% !important;
+        top: 46% !important;
         width: 4px !important;
         height: 8px !important;
-        border: solid #fff !important;
-        border-width: 0 1.5px 1.5px 0 !important;
-        transform: rotate(45deg) !important;
+        border: solid #ffffff !important;
+        border-width: 0 2px 2px 0 !important;
+        transform: translate(-50%, -55%) rotate(45deg) !important;
+        background: transparent !important;
     }
 
     /* --- Preview pane --------------------------------------------------

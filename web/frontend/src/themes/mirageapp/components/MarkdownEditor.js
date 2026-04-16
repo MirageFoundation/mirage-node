@@ -1,5 +1,13 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import styled from "styled-components";
+import {
+    LuLink,
+    LuQuote,
+    LuCode,
+    LuList,
+    LuListOrdered,
+    LuEyeOff,
+} from "react-icons/lu";
 import { getUploadUrl, downscaleImage } from "../../../utils/ImageUpload";
 import Api from "../../../utils/api";
 
@@ -122,75 +130,15 @@ async function uploadImageWithCancel(file, onProgress, xhrRef) {
     }
 }
 
-// Small inline SVG icons to avoid font/pseudo-element inconsistencies
-const IconWrap = ({ title, children }) => (
-    <svg
-        role="img"
-        aria-label={title}
-        width="1em"
-        height="1em"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ display: "block" }}
-    >
-        {children}
-    </svg>
-);
-
-const LinkIcon = () => (
-    <IconWrap title="Link">
-        <path d="M10 13a5 5 0 0 1 0-7l1.5-1.5a5 5 0 0 1 7 7L17 12" />
-        <path d="M14 11a5 5 0 0 1 0 7L12.5 19.5a5 5 0 0 1-7-7L7 12" />
-    </IconWrap>
-);
-
-const QuoteIcon = () => (
-    <IconWrap title="Quote">
-        <path d="M9 7H5v6h4V7z" />
-        <path d="M19 7h-4v6h4V7z" />
-    </IconWrap>
-);
-
-const CodeIcon = () => (
-    <IconWrap title="Code">
-        <polyline points="8 6 3 12 8 18" />
-        <polyline points="16 6 21 12 16 18" />
-    </IconWrap>
-);
-
-const UlIcon = () => (
-    <IconWrap title="Bulleted list">
-        <circle cx="5" cy="6" r="1.5" />
-        <circle cx="5" cy="12" r="1.5" />
-        <circle cx="5" cy="18" r="1.5" />
-        <line x1="9" y1="6" x2="21" y2="6" />
-        <line x1="9" y1="12" x2="21" y2="12" />
-        <line x1="9" y1="18" x2="21" y2="18" />
-    </IconWrap>
-);
-
-const OlIcon = () => (
-    <IconWrap title="Numbered list">
-        <path d="M4 6h2" />
-        <path d="M4 12h2" />
-        <path d="M4 18h2" />
-        <line x1="9" y1="6" x2="21" y2="6" />
-        <line x1="9" y1="12" x2="21" y2="12" />
-        <line x1="9" y1="18" x2="21" y2="18" />
-    </IconWrap>
-);
-
-const SpoilerIcon = () => (
-    <IconWrap title="Spoiler">
-        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-        <circle cx="12" cy="12" r="3" />
-        <line x1="1" y1="1" x2="23" y2="23" />
-    </IconWrap>
-);
+/* Toolbar icons — use Lucide (react-icons/lu) for a cleaner, modern look.
+ * They're 1em by default so sizing still flows from the Toolbar's
+ * `$iconFontSize` (see Toolbar styled-component). */
+const LinkIcon = () => <LuLink className="md-icon" aria-hidden="true" />;
+const QuoteIcon = () => <LuQuote className="md-icon" aria-hidden="true" />;
+const CodeIcon = () => <LuCode className="md-icon" aria-hidden="true" />;
+const UlIcon = () => <LuList className="md-icon" aria-hidden="true" />;
+const OlIcon = () => <LuListOrdered className="md-icon" aria-hidden="true" />;
+const SpoilerIcon = () => <LuEyeOff className="md-icon" aria-hidden="true" />;
 
 const EditorContainer = styled.div`
 	display: flex;
