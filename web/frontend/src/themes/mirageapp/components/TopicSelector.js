@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import styled from "styled-components";
+import { HiChevronDown } from "react-icons/hi2";
 import Storage from '../../../utils/Storage';
 import { getAllowedTags, getAllowedTagsParam } from '../../../utils/ContentTags';
 import Api from '../../../utils/api';
@@ -10,36 +11,46 @@ const Container = styled.div`
     width: 100%;
 `;
 
+/*
+ * mirageapp `TopicSelector` — neutral pill trigger.
+ *
+ * Design follows R5 (neutral input focus), R6 (HiChevronDown) and R7
+ * (0.75rem / 500 input typography). Trigger height matches the search
+ * input that replaces it on click (2.1rem) so the layout doesn't jump.
+ */
+const CONTROL_HEIGHT = '2.1rem';
+
 const SelectorButton = styled.button`
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: space-between;
-    width: 100%;
-    padding: ${({ theme }) => theme.layout.inputPadding};
+    gap: 0.4rem;
+    height: ${CONTROL_HEIGHT};
+    padding: 0 0.85rem;
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: ${({ theme }) => theme.layout.inputRadius};
-    background-color: ${({ theme }) => theme.colors.panelAlt};
+    border-radius: 9999px;
+    background-color: transparent;
     color: ${({ theme }) => theme.colors.text};
-    font-size: ${({ theme }) => theme.layout.inputSize};
-    font-weight: 400;
+    font-size: 0.75rem;
+    font-weight: 500;
     font-family: inherit;
-    line-height: 1.25;
+    line-height: 1.2;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
     text-align: left;
     box-sizing: border-box;
-    appearance: none;
     margin: 0;
-    vertical-align: middle;
+    max-width: 100%;
 
     &:hover:not(:disabled) {
-        border-color: ${({ theme }) => theme.colors.subtleText};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        background-color: ${({ theme }) => theme.colors.hoverBg};
     }
-    
+
     &:focus {
         outline: none;
         border-color: ${({ theme }) => theme.colors.borderStrong};
-        box-shadow: ${({ theme }) => theme.layout.focusRing};
+        box-shadow: none;
     }
 
     &:disabled {
@@ -51,7 +62,7 @@ const SelectorButton = styled.button`
 const ButtonContent = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: 0.3rem;
     min-width: 0;
     overflow: hidden;
 `;
@@ -61,6 +72,7 @@ const TopicIcon = styled.span`
     font-size: inherit;
     line-height: inherit;
     flex-shrink: 0;
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const TopicName = styled.span`
@@ -75,12 +87,18 @@ const Placeholder = styled.span`
     font-size: inherit;
     line-height: inherit;
     color: ${({ theme }) => theme.colors.subtleText};
+    font-weight: 500;
 `;
 
-const ChevronIcon = styled.span`
-    font-size: ${({ theme }) => theme.layout.tinySize};
+const ChevronWrap = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    color: ${({ theme }) => theme.colors.subtleText};
     flex-shrink: 0;
-    margin-left: 0.5rem;
+    transition: transform 0.15s ease;
+    transform: rotate(${({ $expanded }) => ($expanded ? "180deg" : "0deg")});
 `;
 
 const SearchInputWrapper = styled.div`
@@ -88,86 +106,124 @@ const SearchInputWrapper = styled.div`
     width: 100%;
 `;
 
+/* Search input that replaces the trigger — same height, same padding so
+ * clicking the pill doesn't shift the layout. R5 focus. R7 typography. */
 const SearchInput = styled.input`
     width: 100%;
-    padding: ${({ theme }) => theme.layout.inputPadding};
-    border: 1px solid #667eea;
-    border-radius: ${({ theme }) => theme.layout.inputRadius};
-    background-color: ${({ theme }) => theme.colors.panelAlt};
+    height: ${CONTROL_HEIGHT};
+    padding: 0 0.85rem;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 9999px;
+    background-color: ${({ theme }) => theme.colors.bg};
     color: ${({ theme }) => theme.colors.text};
-    font-size: ${({ theme }) => theme.layout.inputSize};
-    font-weight: 400;
+    font-size: 0.75rem;
+    font-weight: 500;
     font-family: inherit;
-    line-height: 1.25;
+    line-height: 1.2;
     outline: none;
     box-sizing: border-box;
-    box-shadow: ${({ theme }) => theme.layout.focusRing};
+    box-shadow: none;
+    transition: border-color 0.15s ease;
 
     &::placeholder {
         color: ${({ theme }) => theme.colors.subtleText};
+        font-weight: 500;
+    }
+
+    &:hover:not(:disabled) {
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+    }
+
+    &:focus {
+        outline: none;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        box-shadow: none;
     }
 `;
 
+/* Dropdown sheet — styled after `SearchDropdown`.
+ * Canvas: `menuBg`. Rows: `sidebarItemText` at rest → `menuSelectedBg`
+ * tile + `menuItemHoverText` on hover/highlight. */
 const Dropdown = styled.div`
     position: absolute;
-    top: calc(100% + 4px);
+    top: calc(100% + 6px);
     left: 0;
     right: 0;
-    background-color: ${({ theme }) => theme.colors.panel};
+    background-color: ${({ theme }) => theme.colors.menuBg};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: ${({ theme }) => theme.layout.inputRadius};
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
     z-index: 1000;
-    max-height: 280px;
+    max-height: min(60vh, 420px);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    padding: 0.25rem 0;
 `;
 
 const ResultsContainer = styled.div`
     overflow-y: auto;
     flex: 1;
+    scrollbar-width: thin;
+    scrollbar-color: ${({ theme }) => theme.colors.scrollbar} transparent;
+
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-thumb {
+        background: ${({ theme }) => theme.colors.scrollbar};
+        border-radius: 4px;
+    }
 `;
 
 const SectionHeader = styled.div`
-    padding: ${({ theme }) => theme.layout.inputPadding};
-    font-size: ${({ theme }) => theme.layout.smallSize};
-    font-weight: 600;
-    color: ${({ theme }) => theme.colors.subtleText};
+    padding: 0.45rem 0.9rem 0.2rem;
+    font-size: 0.55rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme.colors.menuHeaderText};
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    background-color: ${({ theme }) => theme.colors.panelAlt};
-    position: sticky;
-    top: 0;
+    background-color: transparent;
 `;
 
 const TopicItem = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.2rem;
-    padding: ${({ theme }) => theme.layout.inputPadding};
+    gap: 0.6rem;
+    padding: 0.45rem 0.9rem;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    color: ${({ theme }) => theme.colors.sidebarItemText};
     background-color: ${({ $highlighted, theme }) =>
-        $highlighted ? (theme.colors.accent) : 'transparent'};
+        $highlighted ? theme.colors.menuSelectedBg : 'transparent'};
 
     &:hover {
-        background-color: ${({ theme }) => theme.colors.accent};
+        background-color: ${({ theme }) => theme.colors.menuSelectedBg};
+        color: ${({ theme }) => theme.colors.menuItemHoverText};
     }
 `;
 
 const TopicItemIcon = styled.span`
-    font-size: ${({ theme }) => theme.layout.inputSize};
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    font-size: 0.8rem;
     color: ${({ theme }) => theme.colors.subtleText};
+
+    ${TopicItem}:hover & {
+        color: ${({ theme }) => theme.colors.menuItemHoverText};
+    }
 `;
 
 const TopicItemName = styled.span`
-    font-size: ${({ theme }) => theme.layout.inputSize};
-    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: inherit;
 `;
 
 const TopicItemMeta = styled.span`
-    font-size: ${({ theme }) => theme.layout.smallSize};
+    font-size: 0.62rem;
     color: ${({ theme }) => theme.colors.subtleText};
     margin-left: auto;
 `;
@@ -180,37 +236,56 @@ const TopicMetaGroup = styled.div`
 `;
 
 const FlagBadge = styled.span`
-    padding: 2px 6px;
+    padding: 1px 5px;
     border-radius: 6px;
-    background-color: rgba(255, 99, 71, 0.12);
-    color: #ff7b6b;
-    font-size: 0.68rem;
+    background-color: ${({ theme }) => theme.colors.voteDownBg};
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.55rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
 `;
 
-const CreateNewItem = styled(TopicItem)`
+/* Wraps the "Create New" section (header + create row) so we can draw the
+ * divider ABOVE the section header rather than on the row itself. */
+const CreateNewSection = styled.div`
     border-top: 1px solid ${({ theme }) => theme.colors.border};
-    background-color: ${({ $highlighted }) =>
-        $highlighted ? 'rgba(102, 126, 234, 0.15)' : 'rgba(102, 126, 234, 0.05)'};
-    
+    margin-top: 0.25rem;
+    padding-top: 0.25rem;
+`;
+
+const CreateNewItem = styled(TopicItem)`
+    color: ${({ theme }) => theme.colors.followBtnBg};
+
     &:hover {
-        background-color: rgba(102, 126, 234, 0.2);
+        background-color: ${({ theme }) => theme.colors.menuSelectedBg};
+        color: ${({ theme }) => theme.colors.followBtnBg};
     }
 `;
 
+const CreateNewIcon = styled.span`
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.followBtnBg};
+`;
+
 const CreateNewLabel = styled.span`
-    font-size: ${({ theme }) => theme.layout.inputSize};
-    color: #667eea;
-    font-weight: 500;
+    font-size: 0.75rem;
+    color: inherit;
+    font-weight: 600;
 `;
 
 const EmptyState = styled.div`
-    padding: ${({ theme }) => theme.layout.inputPadding};
+    padding: 0.65rem 0.9rem;
     text-align: center;
     color: ${({ theme }) => theme.colors.subtleText};
-    font-size: ${({ theme }) => theme.layout.inputSize};
+    font-size: 0.7rem;
 `;
 
 const CACHE_TTL_MS = 60 * 1000; // short-term cache for topics
@@ -515,9 +590,12 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
         }, 0);
     }, []);
 
-    const handleSelect = (topic, focusNext = false) => {
+    const handleSelect = (topic, focusNext = false, isNew = false) => {
         const sanitized = sanitize(topic);
-        onChange({ target: { value: sanitized }, meta: getTopicMeta(topic) });
+        onChange({
+            target: { value: sanitized },
+            meta: { ...getTopicMeta(topic), isNew: !!isNew },
+        });
         setIsOpen(false);
         setSearchValue('');
         setHighlightedIndex(-1);
@@ -545,7 +623,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
             e.preventDefault();
             // Close dropdown and move focus to next input (title)
             if (sanitizedSearch && sanitizedSearch.length >= effectiveMinLength) {
-                handleSelect(sanitizedSearch, true);
+                handleSelect(sanitizedSearch, true, isNewTopic);
             } else {
                 setIsOpen(false);
                 setSearchValue('');
@@ -564,9 +642,10 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
         } else if (e.key === 'Enter') {
             e.preventDefault();
             if (highlightedIndex >= 0 && highlightedIndex < allItems.length) {
-                handleSelect(allItems[highlightedIndex].topic, true);
+                const pick = allItems[highlightedIndex];
+                handleSelect(pick.topic, true, pick.type === 'create');
             } else if (sanitizedSearch) {
-                handleSelect(sanitizedSearch, true);
+                handleSelect(sanitizedSearch, true, isNewTopic);
             }
         }
     };
@@ -611,14 +690,16 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                             <Placeholder>Select a topic</Placeholder>
                         )}
                     </ButtonContent>
-                    <ChevronIcon>▼</ChevronIcon>
+                    <ChevronWrap aria-hidden="true" $expanded={false}>
+                        <HiChevronDown />
+                    </ChevronWrap>
                 </SelectorButton>
             ) : (
                 <SearchInputWrapper>
                     <SearchInput
                         ref={searchInputRef}
                         type="text"
-                        placeholder="Search or create"
+                        placeholder="Search topics or create one"
                         value={searchValue}
                         onChange={(e) => {
                             setSearchValue(e.target.value);
@@ -704,10 +785,8 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                     )}
 
                                     {isNewTopic && (
-                                        <>
-                                            {(filteredFollowed.length > 0 || filteredAll.length > 0) && (
-                                                <SectionHeader>Create New</SectionHeader>
-                                            )}
+                                        <CreateNewSection>
+                                            <SectionHeader>Create New</SectionHeader>
                                             {(() => {
                                                 itemIndex++;
                                                 const idx = itemIndex;
@@ -715,14 +794,14 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                                     <CreateNewItem
                                                         data-item-index={idx}
                                                         $highlighted={highlightedIndex === idx}
-                                                        onClick={() => handleSelect(sanitizedSearch)}
+                                                        onClick={() => handleSelect(sanitizedSearch, false, true)}
                                                     >
-                                                        <TopicItemIcon>+</TopicItemIcon>
+                                                        <CreateNewIcon>+</CreateNewIcon>
                                                         <CreateNewLabel>Create #{sanitizedSearch}</CreateNewLabel>
                                                     </CreateNewItem>
                                                 );
                                             })()}
-                                        </>
+                                        </CreateNewSection>
                                     )}
 
                                     {!isLoading && filteredFollowed.length === 0 && filteredAll.length === 0 && !isNewTopic && (

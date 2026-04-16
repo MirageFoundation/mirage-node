@@ -2,7 +2,7 @@
 
 **Route:** `/create_post`
 **File:** `web/frontend/src/themes/mirageapp/routes/CreatePostView.js`
-**Status:** ⏳ Not started
+**Status:** ✅ Done
 **Parent:** [`../05-inbox-search-settings-auth.md`](../05-inbox-search-settings-auth.md)
 
 ---
