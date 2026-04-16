@@ -14,6 +14,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/usr/local/go/bin:$PATH
 ENV PIP_ROOT_USER_ACTION=ignore
 
+# Make apt resilient to transient mirror sync issues (size/hash mismatches).
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -81,6 +86,11 @@ ENV TERM=xterm-256color
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
+
+# Make apt resilient to transient mirror sync issues (size/hash mismatches).
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
