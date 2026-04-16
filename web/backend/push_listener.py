@@ -651,7 +651,7 @@ def _poll_trending() -> int:
               AND p.comment_count >= %s
             GROUP BY p.txhash, p.owner, p.title, p.created_at
             HAVING COUNT(DISTINCT LOWER(c.owner)) >= %s
-            ORDER BY (unique_commenters / (1 + ((%s - p.created_at) / 3600.0))) DESC
+            ORDER BY (COUNT(DISTINCT LOWER(c.owner)) / (1 + ((%s - p.created_at) / 3600.0))) DESC
             LIMIT 1
             """,
             (cutoff_ts, threshold, threshold, now_ts),
