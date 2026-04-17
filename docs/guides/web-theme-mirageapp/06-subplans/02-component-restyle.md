@@ -1,7 +1,26 @@
 # Sub-Plan 06.2 — Component Restyle Pass
 
-**Status:** ⏳ Not started — **highest-priority sub-plan**
+**Status:** 🟡 In progress — **highest-priority sub-plan**
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
+
+---
+
+## Ship plan (split into 3 slices)
+
+This sub-plan was too large to ship in one PR (~4.5k LOC). Split into three slices:
+
+| Slice | Components | Status |
+|---|---|---|
+| A — Globals (required + Button) | Button, Toast, Tooltip, UnlockPrompt | ✅ Done |
+| B — Content rendering | MarkdownRenderer, InlineMedia, MediaGallery, QuestHeroCard | ⏳ Not started |
+| C — Composer / feed controls | FilterBar, MediaAttachmentLayout, MarkdownEditor | ⏳ Not started |
+
+### Slice A notes
+
+- **Button** — variants rebuilt on R2 tokens: primary uses `followBtnBg`/`followBtnBgHover`, primaryDanger uses `voteDown`/`voteDownHover`, ghost uses `hoverBg`, subtle uses `accent`. All hard-coded `#667eea`/`#764ba2`/`#dc2626`/`#22c55e`/`#10b981`/`#f59e0b` removed. Focus-visible = neutral `borderStrong` (R5). Sizes tightened to R7 (xs `0.65rem` / sm `0.72rem` / md `0.78rem` / lg `0.85rem` / pill `0.75rem`). Radii normalized (6–8px / 999px for pill). Removed `translateY(-1px)` lift and `box-shadow` glows. `warning` variant now maps to danger tokens (most call-sites are destructive confirms). Public API unchanged (same props, same variant names — `primary` / `primaryDanger` / `secondary` / `danger` / `success` / `warning` / `ghost` / `subtle` / `link`).
+- **Toast** — typography to `0.75rem/500` (R7), radius `8px`, alert variant uses `buttonDangerBg` + `voteDown` text + `buttonDangerBorder` (drops raw `#b91c1c` / `#fecaca`). Animation + spinner logic unchanged.
+- **Tooltip** — surface moves to `menuBg` (R2 popover token), typography to `0.65rem/500` (R7), radius `6px`, theme-aware shadow (light = subtle, dark = stronger). Auto-positioning logic unchanged.
+- **UnlockPrompt** — overlay uses `overlay` token (was raw rgba). Input follows R5 focus style (sits on `bg`, neutral `borderStrong`). Button uses `followBtnBg`/`followBtnBgHover` (was raw `#3b82f6`). Error text uses `voteDown` token. Lock glyph swapped from entity to `HiLockClosed` (R6 friendly). Page heading at `1.1rem/700`, subtitle `0.78rem/500` (R7). Behavior (seedVault.unlock, passkey fallback, handleKeyDown) unchanged.
 
 ---
 
