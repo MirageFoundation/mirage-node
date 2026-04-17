@@ -2,7 +2,7 @@
 
 **Route:** `/sign_out`
 **File:** `web/frontend/src/themes/mirageapp/routes/SignOutView.js`
-**Status:** ⏳ Not started
+**Status:** ✅ Done
 **Parent:** [`../05-inbox-search-settings-auth.md`](../05-inbox-search-settings-auth.md)
 
 ---

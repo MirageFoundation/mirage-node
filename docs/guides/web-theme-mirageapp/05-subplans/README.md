@@ -17,7 +17,7 @@ Plan 05 is too broad to ship in one PR. This folder splits it into focused, one-
 | 4 | Settings | `/settings` | ✅ Done | [`04-settings.md`](./04-settings.md) |
 | 5 | Create Post | `/create_post` | ✅ Done | [`05-create-post.md`](./05-create-post.md) |
 | 6 | Change Username | `/change_username` | ✅ Done | [`06-change-username.md`](./06-change-username.md) |
-| 7 | Sign Out | `/sign_out` | ⏳ **Next — closes Plan 05** | [`07-sign-out.md`](./07-sign-out.md) |
+| 7 | Sign Out | `/sign_out` | ✅ Done — closes Plan 05 | [`07-sign-out.md`](./07-sign-out.md) |
 
 Each sub-plan is one PR. Order is **recommended**, not strictly required — any can be reordered if priorities shift. Post Details was pulled forward after Search because the search results + home feed both navigate into `/p/:postId`, so polishing it unlocks a consistent end-to-end feed experience.
 
