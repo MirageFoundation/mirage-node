@@ -1,103 +1,114 @@
-# Plan 06 — Remaining Routes, Polish, QA
+# Plan 06 — Remaining Routes, Components, Polish, QA
 
-**Goal:** Finish every remaining theme route, perform a polish pass across the whole `mirageapp` theme, and verify it is ready to be the default.
+**Goal:** Finish every route and every component that still renders in `oldreddit` style, perform a polish pass across the whole `mirageapp` theme, and verify it is ready to be the default.
 
 **Depends on:** Plans 01–05.
 **Unblocks:** making `mirageapp` the default theme (optional — can happen later).
+
+**Status:** ⏳ Not started. Split into sub-plans under [`06-subplans/`](./06-subplans/README.md).
+
+---
+
+## Why this plan expanded (2026-04-18 audit)
+
+A full diff of `themes/mirageapp/**` vs `themes/oldreddit/**` revealed that a large set of routes and components were **copied from `oldreddit` with only `MobileHeader` mounted** and never actually restyled. They still use oldreddit tokens, spacing, and typography — which means every one of these screens currently violates R1, R2, R5, and R7 from [`RULES.md`](./RULES.md).
+
+Per-route current state (from the audit):
+
+| Route | File | Diff vs oldreddit | State |
+|---|---|---|---|
+| Profile | `routes/ProfileView.js` | 5 lines | **oldreddit clone** (was Plan 04 leftover) |
+| Discover | `routes/DiscoverView.js` | 2 lines | oldreddit clone |
+| Agents | `routes/AgentsView.js` | 3 lines | oldreddit clone |
+| Follows | `routes/FollowsView.js` | 2 lines | oldreddit clone |
+| Blocks | `routes/BlocksView.js` | 2 lines | oldreddit clone |
+| Reports | `routes/ReportsView.js` | 6 lines | oldreddit clone |
+| Network | `routes/NetworkView.js` | 2 lines | oldreddit clone |
+| Stats | `routes/StatsView.js` | 3 lines | oldreddit clone |
+| Subscription | `routes/SubscriptionView.js` | 2 lines | oldreddit clone |
+| Referrals | `routes/ReferralsView.js` | 2 lines | oldreddit clone |
+| Bridge | `routes/BridgeView.js` | 2 lines | oldreddit clone (logic complex) |
+| NotFound | `routes/NotFoundView.js` | 2 lines | oldreddit clone |
+
+Per-component current state:
+
+| Component | File | Diff vs oldreddit | State |
+|---|---|---|---|
+| Button | `components/Button.js` | 0 | **100% identical** |
+| Toast | `components/Toast.js` | 0 | 100% identical (required theme component) |
+| Tooltip | `components/Tooltip.js` | 0 | 100% identical (required theme component) |
+| InlineMedia | `components/InlineMedia.js` | 0 | 100% identical |
+| MediaGallery | `components/MediaGallery.js` | 0 | 100% identical |
+| UnlockPrompt | `components/UnlockPrompt.js` | 4 lines | near-identical |
+| MarkdownRenderer | `components/MarkdownRenderer.js` | 1 line | near-identical |
+| QuestHeroCard | `components/QuestHeroCard.js` | 1 line | near-identical |
+| MobileBottomNav | `components/MobileBottomNav.js` | 10 lines | near-identical (deferred from Plan 02) |
+| FilterBar | `components/FilterBar.js` | 31 lines | partial — finish pass needed |
+| MediaAttachmentLayout | `components/MediaAttachmentLayout.js` | 33 lines | partial — finish pass needed |
+| MarkdownEditor | `components/MarkdownEditor.js` | 90 lines | partial — finish pass needed |
+
+`Button`, `Toast`, and `Tooltip` are especially important: they are registered as REQUIRED theme components, so their oldreddit styling leaks into every mirageapp route (including ones that look "done").
 
 ---
 
 ## Scope
 
-### In scope — remaining routes
-Inside `web/frontend/src/themes/mirageapp/routes/`, rewrite:
-- `FollowsView.js`
-- `BlocksView.js`
-- `ReportsView.js`
-- `SubscriptionView.js`
-- `NetworkView.js`
-- `ReferralsView.js`
-- `BridgeView.js`
-- `StatsView.js`
-- `AgentsView.js`
-- `NotFoundView.js`
-- `DiscoverView.js` (topics)
+See the sub-plan index: [`06-subplans/README.md`](./06-subplans/README.md). Summary:
 
-### In scope — polish
-- Spacing consistency pass across all routes.
-- Typography pass (sizes, weights, line-heights).
-- Hover/focus/active state pass.
-- Dark/light verification on every page.
-- Responsive verification at desktop, tablet, and mobile widths.
-- Scrollbar, selection, and focus ring styling.
-- Icon alignment and sizing consistency.
-
-### In scope — QA
-- Smoke test every route by clicking through navigation.
-- Theme toggle (dark ↔ light) on every route.
-- Switch between `mirageapp`, `onyx`, `bluemoon`, `oldreddit` without breaking.
-- Mobile-only: verify MobileHeader + MobileBottomNav interactions.
-- Verify the build passes in CI mode.
+1. **Profile** — `ProfileView` + header/tabs (Plan 04 leftover)
+2. **Component restyle pass** — Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer, QuestHeroCard + finish passes on FilterBar / MarkdownEditor / MediaAttachmentLayout
+3. **Social routes** — Follows, Blocks, Reports
+4. **Network + Stats**
+5. **Subscription + Referrals**
+6. **Bridge**
+7. **Agents + Discover + NotFound**
+8. **MobileBottomNav** (deferred from Plan 02)
+9. **Polish + QA** (spacing, typography, state, responsive, accessibility, optional default-theme switch)
 
 ### Out of scope
+
 - New features.
-- Data layer changes.
+- Data layer changes (no modifications to hooks in `logic/` or shared utils).
 
 ---
 
-## Per-route notes
+## Global rules for every sub-plan
 
-### Follows / Blocks / Reports
-- Use list rows with the same density as the inbox from Plan 05.
-- Each row: avatar, username/identifier, timestamp, action button.
-- Empty states styled consistently with other empty states.
+> 📐 Read [`RULES.md`](./RULES.md) before touching any file. R1–R7 are mandatory.
 
-### Subscription
-- Panel-based layout: plan/tier summary, benefits, billing/upgrade action.
-- Align colors with mobile subscription screen.
+- Every sub-plan must apply the R2 color tokens, R3 dividers, R5 input focus style, R6 chevron, and R7 font scale.
+- No `themes/oldreddit/*` or `themes/bluemoon/*` imports inside `themes/mirageapp/*`.
+- Data parity with `bluemoon` (R4) — nothing bluemoon shows may be dropped.
+- Visual reference from `mirage-mobile-app` (R4) — spacing, icons, typography.
+- Dark + light must both be verified manually in the browser.
+- Build must pass:
 
-### Network
-- Node info as stacked info panels.
-- Status indicators use `success` / `warning` / `danger` tokens from Plan 01.
-
-### Referrals
-- Reference: `mirage-mobile-app/src/pages/invite-and-earn-screen.tsx` and `referrals-screen.tsx`.
-- Share link block + stats block + history list.
-
-### Bridge
-- The bridge route is complex. Keep the existing logic; restyle containers only.
-- Reuse the theme’s `Button`, input, and panel styling.
-
-### Stats
-- Panel-based layout with data rows and charts.
-- Restyle chart containers; don’t rewrite chart logic.
-
-### Agents
-- List of agents with follow/subscribe affordances styled like other list rows.
-
-### NotFound / Discover
-- Simple centered layout on desktop.
-- Consistent with the empty-state styling used elsewhere.
+```bash
+cd web/frontend
+CI=true npm run build
+```
 
 ---
 
-## Polish pass checklist
+## Polish pass (sub-plan 09) checklist
 
-Do a focused sweep across the whole theme:
+Applied as a single sweep once all routes + components are restyled.
 
 ### Spacing
 - [ ] No ad-hoc pixel values inside components. Everything comes from `Layout.js` / token helpers.
 - [ ] Page top padding respects the Plan 02 sticky TopBar.
 - [ ] Page bottom padding respects the mobile bottom nav.
 
-### Typography
-- [ ] Consistent heading scale across routes.
+### Typography (R7)
+- [ ] Consistent heading scale across routes (`1.1rem/700` page heading).
 - [ ] Body text uses the same base size everywhere.
+- [ ] All inputs at `0.75rem/500`.
+- [ ] No `>1.1rem` body text, no `font-weight: 800`.
 - [ ] Mono font only where intentional (code, hashes, etc.).
 
 ### Interaction states
 - [ ] Hover: subtle color shift only.
-- [ ] Focus: visible ring via `focusBorder` token.
+- [ ] Focus: R5 style (neutral `borderStrong`, no blue ring) on every input.
 - [ ] Active: consistent across nav + buttons.
 - [ ] Disabled: consistent via `accentDisabled` + reduced opacity.
 
@@ -117,36 +128,27 @@ Do a focused sweep across the whole theme:
 
 ---
 
-## QA checklist
+## QA checklist (sub-plan 09)
 
 - [ ] Click through every nav item in TopBar + Sidebar + MobileBottomNav.
 - [ ] Perform a vote, comment, follow, and block while on `mirageapp`.
 - [ ] Create and delete a test post.
 - [ ] Switch to each other theme (`bluemoon`, `onyx`, `oldreddit`) and back.
 - [ ] Toggle dark/light at least 3 different routes.
-- [ ] Run the build with:
-
-```bash
-cd web/frontend
-CI=true npm run build
-```
-
-- [ ] Run existing frontend smoke tests / manual smoke where applicable.
+- [ ] Run the build with `CI=true npm run build`.
 - [ ] Confirm no errors thrown from the theme registry at startup.
 
 ---
 
 ## Risks & mitigations
 
-- **Regression in other themes** → do a side-by-side test; shared logic must not be touched.
-- **Polish pass scope creep** → limit Plan 06 to styling/QA; any new behavior becomes a follow-up.
-- **Default theme switch risk** → do **not** make `mirageapp` the default in this PR. That is an operational decision to be made later once users have had a chance to opt in.
+- **Regression in other themes** → do side-by-side testing; shared logic must not be touched.
+- **Polish pass scope creep** → limit sub-plan 09 to styling/QA; any new behavior becomes a follow-up.
+- **Default theme switch risk** → do **not** flip `mirageapp` to index 0 in `THEME_MANIFESTS` until sub-plan 09 is merged and validated.
 
 ---
 
-## Optional follow-up (separate PR)
-
-Once Plan 06 lands and is validated:
+## Optional follow-up (separate PR after sub-plan 09)
 
 - Move `mirageappManifest` to index 0 in `THEME_MANIFESTS` to make it the default.
 - Add a legacy-id mapping if needed.
@@ -154,6 +156,6 @@ Once Plan 06 lands and is validated:
 
 ---
 
-## PR description template
+## PR description template (per sub-plan)
 
-> Finishes the remaining `mirageapp` routes, performs a spacing/typography/state/responsive polish pass, and completes QA. Theme is now feature-complete but not yet the default.
+> [Sub-plan NN / short title] — restyles `<routes|components>` in `mirageapp` to use R1–R7 tokens and mobile-app visuals. Visual only. Closes sub-plan NN of Plan 06.
