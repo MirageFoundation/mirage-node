@@ -43,7 +43,7 @@ Whenever desktop structure and mobile visuals conflict:
 | 02 | Shell, top nav, sidebar, mobile nav | ✅ Done (MobileBottomNav full restyle deferred → Plan 06) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
 | 03 | Feed, card view, vote / action row | ✅ Done (manual cross-theme browser regression still recommended) | [`03-feed-and-card.md`](./03-feed-and-card.md) |
 | 04 | Post detail + profile | 🟡 Partial — post-detail shipped as sub-plan 05.3; **profile still pending** (moved to Plan 06) | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
-| 05 | Inbox, search, settings, auth flows | 🟡 In progress — only Sign Out remaining | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
+| 05 | Inbox, search, settings, auth flows | ✅ Done | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
 | 06 | Remaining routes, components, polish, QA | ⏳ Not started — **significantly expanded** after audit (see below) | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
 Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plans depend on earlier ones landing first.
@@ -60,7 +60,9 @@ Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plan
 4. [Settings](./05-subplans/04-settings.md) — ✅ Done
 5. [Create Post](./05-subplans/05-create-post.md) — ✅ Done
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
-7. [Sign Out](./05-subplans/07-sign-out.md) — **next (closes Plan 05)**
+7. [Sign Out](./05-subplans/07-sign-out.md) — ✅ Done (closes Plan 05)
+
+**Next focus:** Plan 06 — start with [`06-subplans/02-component-restyle.md`](./06-subplans/02-component-restyle.md) (fixes Button/Toast/Tooltip that leak into every route), then [`06-subplans/01-profile.md`](./06-subplans/01-profile.md).
 
 Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3 since feed → post is a primary entry path after Search. The **profile slice is still pending** and has been moved into Plan 06 as sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 
