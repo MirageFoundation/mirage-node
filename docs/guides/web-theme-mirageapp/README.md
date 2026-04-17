@@ -40,13 +40,13 @@ Whenever desktop structure and mobile visuals conflict:
 | Plan | Scope | Status | Doc |
 |---|---|---|---|
 | 01 | Theme skeleton, tokens, registration | ✅ Done | [`01-skeleton-and-tokens.md`](./01-skeleton-and-tokens.md) |
-| 02 | Shell, top nav, sidebar, mobile nav | ✅ Done (MobileBottomNav full restyle deferred) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
+| 02 | Shell, top nav, sidebar, mobile nav | ✅ Done (MobileBottomNav full restyle deferred → Plan 06) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
 | 03 | Feed, card view, vote / action row | ✅ Done (manual cross-theme browser regression still recommended) | [`03-feed-and-card.md`](./03-feed-and-card.md) |
-| 04 | Post detail + profile | ⏳ Not started | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
-| 05 | Inbox, search, settings, auth flows | 🟡 In progress — auth slice (`/login`, `/signup`, `/welcome`) ✅ done | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
-| 06 | Remaining routes, polish, QA | ⏳ Not started | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
+| 04 | Post detail + profile | 🟡 Partial — post-detail shipped as sub-plan 05.3; **profile still pending** (moved to Plan 06) | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
+| 05 | Inbox, search, settings, auth flows | 🟡 In progress — only Sign Out remaining | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
+| 06 | Remaining routes, components, polish, QA | ⏳ Not started — **significantly expanded** after audit (see below) | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
-Each plan is designed to be one PR. Later plans depend on earlier ones landing first.
+Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plans depend on earlier ones landing first.
 
 ### Current focus
 
@@ -60,9 +60,46 @@ Each plan is designed to be one PR. Later plans depend on earlier ones landing f
 4. [Settings](./05-subplans/04-settings.md) — ✅ Done
 5. [Create Post](./05-subplans/05-create-post.md) — ✅ Done
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
-7. [Sign Out](./05-subplans/07-sign-out.md) — **next**
+7. [Sign Out](./05-subplans/07-sign-out.md) — **next (closes Plan 05)**
 
-Plan 04 (post detail + profile) was originally deferred, but the post-detail slice from it is being folded into Plan 05 as sub-plan 03 since feed → post is now a primary entry path after Search shipped. Profile polish remains deferred. Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
+Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3 since feed → post is a primary entry path after Search. The **profile slice is still pending** and has been moved into Plan 06 as sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
+
+---
+
+### ⚠️ 2026-04-18 audit — pending work that wasn't in the original plan
+
+A full diff of `themes/mirageapp/**` vs `themes/oldreddit/**` revealed that a large number of routes and components are still **byte-identical or near-identical copies of `oldreddit`** (only the `MobileHeader` import + mount was added). They were never restyled with mirageapp tokens/typography. The [`06-subplans/`](./06-subplans/README.md) folder captures the full follow-up work. Summary:
+
+**Routes still rendering in oldreddit style** (need full mirageapp restyle):
+
+- `ProfileView.js` (Plan 04 profile slice) — 5-line diff vs oldreddit
+- `DiscoverView.js`, `AgentsView.js`
+- `FollowsView.js`, `BlocksView.js`, `ReportsView.js`
+- `NetworkView.js`, `StatsView.js`
+- `SubscriptionView.js`, `ReferralsView.js`
+- `BridgeView.js`, `NotFoundView.js`
+
+**Components still identical (or ≤10-line diff) to oldreddit** — not yet ported to mirageapp tokens/typography (R1/R2/R5/R7):
+
+- `Button.js` (100% identical)
+- `Toast.js`, `Tooltip.js` (100% identical — but registered as REQUIRED theme components, so their visual language leaks into every theme route)
+- `InlineMedia.js`, `MediaGallery.js` (100% identical)
+- `UnlockPrompt.js` (4-line diff)
+- `MarkdownRenderer.js`, `QuestHeroCard.js` (1-line diff each)
+- `MobileBottomNav.js` (10-line diff — full restyle deferred from Plan 02)
+- `FilterBar.js`, `MediaAttachmentLayout.js`, `MarkdownEditor.js` (partial restyle, finish pass needed)
+
+**New Plan 06 sub-plans** (each a PR):
+
+1. [`01-profile.md`](./06-subplans/01-profile.md) — `ProfileView` + profile header/tabs (was Plan 04 leftover)
+2. [`02-component-restyle.md`](./06-subplans/02-component-restyle.md) — Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer, QuestHeroCard + finish passes on FilterBar / MarkdownEditor / MediaAttachmentLayout
+3. [`03-social-routes.md`](./06-subplans/03-social-routes.md) — Follows, Blocks, Reports (list-row pattern)
+4. [`04-network-stats.md`](./06-subplans/04-network-stats.md) — Network + Stats (info-panel + chart container)
+5. [`05-subscription-referrals.md`](./06-subplans/05-subscription-referrals.md) — Subscription + Referrals
+6. [`06-bridge.md`](./06-subplans/06-bridge.md) — Bridge (restyle containers only, keep logic)
+7. [`07-agents-discover-notfound.md`](./06-subplans/07-agents-discover-notfound.md) — Agents, Discover (topics), NotFound
+8. [`08-mobile-bottom-nav.md`](./06-subplans/08-mobile-bottom-nav.md) — MobileBottomNav full restyle (deferred from Plan 02)
+9. [`09-polish-and-qa.md`](./06-subplans/09-polish-and-qa.md) — spacing / typography / state / responsive / accessibility polish + QA + optional default-theme switch
 
 ---
 
