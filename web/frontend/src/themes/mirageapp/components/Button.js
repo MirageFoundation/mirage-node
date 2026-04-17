@@ -2,6 +2,24 @@ import React from 'react';
 import styled, { css, keyframes } from 'styled-components';
 import { Link } from 'react-router-dom';
 
+/**
+ * mirageapp Button — R1–R7 compliant.
+ *
+ * Variants:
+ *   primary       — filled brand pill (`followBtnBg`)
+ *   primaryDanger — filled danger pill (`voteDown` / danger tokens)
+ *   secondary     — outlined panel pill
+ *   danger        — tinted danger pill (`buttonDanger*`)
+ *   success       — tinted success pill (`buttonSuccess*`)
+ *   warning       — tinted warning pill (uses danger tokens — warning is visually danger-ish)
+ *   ghost         — transparent pill → `hoverBg` on hover (default for Cancel / neutral)
+ *   subtle        — subtle tinted pill (Following-style, uses `accent` + `border`)
+ *   link          — inline text link
+ *
+ * Sizes: xs / sm / md / lg / pill. All use R7 typography (0.65–0.9rem, weight 500/600).
+ * Focus: R5 — neutral `borderStrong`, no blue ring.
+ */
+
 const spin = keyframes`
     to { transform: rotate(360deg); }
 `;
@@ -71,27 +89,27 @@ const baseStyles = css`
     font-weight: 600;
     text-decoration: none;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     white-space: nowrap;
-    border: none;
+    border: 1px solid transparent;
     font-family: inherit;
-    
+    box-shadow: none;
+
     &:focus {
         outline: none;
     }
-    
+
     &:focus-visible {
-        outline: 2px solid #667eea;
-        outline-offset: 2px;
-        box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.25);
+        outline: none;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        box-shadow: none;
     }
-    
+
     &:disabled {
-        opacity: 0.5;
+        opacity: 0.55;
         cursor: not-allowed;
-        transform: none !important;
     }
-    
+
     ${({ $minWidth }) => $minWidth && css`
         min-width: ${MIN_WIDTH_PRESETS[$minWidth] || $minWidth};
     `}
@@ -101,33 +119,33 @@ const getSizeStyles = (size) => {
     switch (size) {
         case 'xs':
             return css`
-        padding: 0.25rem 0.5rem;
-        font-size: 0.65rem;
-        border-radius: 4px;
+                padding: 0.22rem 0.55rem;
+                font-size: 0.65rem;
+                border-radius: 6px;
             `;
         case 'sm':
             return css`
-        padding: 0.4rem 0.75rem;
-        font-size: 0.75rem;
-        border-radius: 6px;
+                padding: 0.38rem 0.75rem;
+                font-size: 0.72rem;
+                border-radius: 6px;
             `;
         case 'lg':
             return css`
-        padding: 0.6rem 1.5rem;
-        font-size: 0.95rem;
-        border-radius: 10px;
+                padding: 0.55rem 1.3rem;
+                font-size: 0.85rem;
+                border-radius: 8px;
             `;
         case 'pill':
             return css`
-        padding: 0.55rem 0.85rem;
-        font-size: 0.85rem;
-        border-radius: 18px;
+                padding: 0.5rem 0.9rem;
+                font-size: 0.75rem;
+                border-radius: 999px;
             `;
         case 'md':
         default:
             return css`
-                padding: 0.5rem 1rem;
-                font-size: 0.85rem;
+                padding: 0.48rem 0.95rem;
+                font-size: 0.78rem;
                 border-radius: 8px;
             `;
     }
@@ -140,121 +158,100 @@ const getVariantStyles = (variant, theme) => {
                 background: ${theme.colors.panel};
                 color: ${theme.colors.text};
                 border: 1px solid ${theme.colors.border};
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
-        
-        &:hover:not(:disabled) {
+
+                &:hover:not(:disabled) {
                     background: ${theme.colors.accent};
-            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
-        }
+                    border-color: ${theme.colors.borderStrong};
+                }
             `;
         case 'danger':
             return css`
-                background: ${({ theme }) => theme.colors.buttonDangerBg};
-        color: #dc2626;
-                border: 1px solid ${({ theme }) => theme.colors.buttonDangerBorder};
-        
-        &:hover:not(:disabled) {
-                    background: ${({ theme }) => theme.colors.buttonDangerHoverBg};
-        }
+                background: ${theme.colors.buttonDangerBg};
+                color: ${theme.colors.voteDown};
+                border: 1px solid ${theme.colors.buttonDangerBorder};
+
+                &:hover:not(:disabled) {
+                    background: ${theme.colors.buttonDangerHoverBg};
+                }
             `;
         case 'success':
             return css`
-                background: ${({ theme }) => theme.colors.buttonSuccessBg};
-        color: #22c55e;
-                border: 1px solid ${({ theme }) => theme.colors.buttonSuccessBorder};
-        
-        &:hover:not(:disabled) {
-                    background: ${({ theme }) => theme.colors.buttonSuccessHoverBg};
-        }
+                background: ${theme.colors.buttonSuccessBg};
+                color: ${theme.colors.voteUp};
+                border: 1px solid ${theme.colors.buttonSuccessBorder};
+
+                &:hover:not(:disabled) {
+                    background: ${theme.colors.buttonSuccessHoverBg};
+                }
             `;
         case 'warning':
+            /* No dedicated warning token pair in R2; use danger tokens since most "warning" usages
+               are confirm-destructive actions (Block user, Delete post, Suspend, Report). */
             return css`
-        background: #f59e0b;
-        color: #000;
-        border: none;
-        
-        &:hover:not(:disabled) {
-            background: #d97706;
-        }
+                background: ${theme.colors.buttonDangerBg};
+                color: ${theme.colors.voteDown};
+                border: 1px solid ${theme.colors.buttonDangerBorder};
+
+                &:hover:not(:disabled) {
+                    background: ${theme.colors.buttonDangerHoverBg};
+                }
             `;
         case 'ghost':
             return css`
-        background: transparent;
-                color: ${theme.colors.subtleText};
+                background: transparent;
+                color: ${theme.colors.text};
                 border: 1px solid ${theme.colors.border};
-        
-        &:hover:not(:disabled) {
-                    background: ${theme.colors.panelAlt};
-                    color: ${theme.colors.text};
-                    border-color: ${theme.colors.text};
-                    transform: translateY(-1px);
+
+                &:hover:not(:disabled) {
+                    background: ${theme.colors.hoverBg};
+                    border-color: ${theme.colors.borderStrong};
                 }
-                
-                &:active:not(:disabled) {
-                    transform: translateY(0);
-        }
             `;
         case 'subtle':
             return css`
-                background: rgba(102, 126, 234, 0.15);
+                background: ${theme.colors.accent};
                 color: ${theme.colors.text};
-                border: 1px solid rgba(102, 126, 234, 0.3);
-                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
-                
+                border: 1px solid ${theme.colors.border};
+
                 &:hover:not(:disabled) {
-                    background: rgba(102, 126, 234, 0.25);
-                    border-color: rgba(102, 126, 234, 0.5);
-                    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.25);
-                    transform: translateY(-1px);
-                }
-                
-                &:active:not(:disabled) {
-                    transform: translateY(0);
+                    background: ${theme.colors.accentHover};
+                    border-color: ${theme.colors.borderStrong};
                 }
             `;
         case 'link':
             return css`
-        background: transparent;
+                background: transparent;
                 color: ${theme.colors.link};
-        border: none;
-        padding: 0;
-        box-shadow: none;
-        
-        &:hover:not(:disabled) {
-            text-decoration: underline;
-        }
+                border: none;
+                padding: 0;
+                font-weight: 500;
+
+                &:hover:not(:disabled) {
+                    color: ${theme.colors.linkHover};
+                    text-decoration: underline;
+                }
             `;
         case 'primaryDanger':
             return css`
-                background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-                color: #FFFFFF;
-                border: 1px solid transparent;
-                box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
-                
+                background: ${theme.colors.voteDown};
+                color: #ffffff;
+                border: 1px solid ${theme.colors.voteDown};
+
                 &:hover:not(:disabled) {
-                    box-shadow: 0 6px 16px rgba(220, 38, 38, 0.45);
-                    transform: translateY(-1px);
-                }
-                
-                &:active:not(:disabled) {
-                    transform: translateY(0);
+                    background: ${theme.colors.voteDownHover};
+                    border-color: ${theme.colors.voteDownHover};
                 }
             `;
         case 'primary':
         default:
             return css`
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: #FFFFFF;
-                border: 1px solid transparent;
-                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-                
+                background: ${theme.colors.followBtnBg};
+                color: #ffffff;
+                border: 1px solid ${theme.colors.followBtnBg};
+
                 &:hover:not(:disabled) {
-                    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.45);
-                    transform: translateY(-1px);
-                }
-                
-                &:active:not(:disabled) {
-                    transform: translateY(0);
+                    background: ${theme.colors.followBtnBgHover};
+                    border-color: ${theme.colors.followBtnBgHover};
                 }
             `;
     }
@@ -267,49 +264,52 @@ const getMobileSizeStyles = (size, variant) => {
     switch (size) {
         case 'xs':
             return css`
-        padding: 0.2rem 0.45rem;
-        font-size: 0.6rem;
-        border-radius: 4px;
+                padding: 0.18rem 0.5rem;
+                font-size: 0.6rem;
+                border-radius: 6px;
             `;
         case 'sm':
             return css`
-        padding: 0.35rem 0.6rem;
-        font-size: 0.7rem;
-        border-radius: 6px;
+                padding: 0.34rem 0.6rem;
+                font-size: 0.7rem;
+                border-radius: 6px;
             `;
         case 'lg':
             return css`
-        padding: 0.5rem 1.2rem;
-        font-size: 0.9rem;
-        border-radius: 10px;
+                padding: 0.48rem 1.1rem;
+                font-size: 0.8rem;
+                border-radius: 8px;
             `;
         case 'pill':
             return css`
-        padding: 0.45rem 0.75rem;
-        font-size: 0.8rem;
-        border-radius: 16px;
+                padding: 0.42rem 0.75rem;
+                font-size: 0.72rem;
+                border-radius: 999px;
             `;
         case 'md':
         default:
             return css`
-                padding: 0.4rem 0.85rem;
-                font-size: 0.8rem;
+                padding: 0.42rem 0.85rem;
+                font-size: 0.75rem;
                 border-radius: 8px;
             `;
     }
 };
+
+const copiedStyles = css`
+    background: ${({ theme }) => theme.colors.buttonSuccessBg} !important;
+    color: ${({ theme }) => theme.colors.voteUp} !important;
+    border-color: ${({ theme }) => theme.colors.buttonSuccessBorder} !important;
+`;
 
 const StyledButton = styled.button`
     ${baseStyles}
     ${({ $size }) => getSizeStyles($size)}
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
-    ${({ $copied }) => $copied && css`
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-        color: #FFFFFF !important;
-    `}
+    ${({ $copied }) => $copied && copiedStyles}
     ${flatModeOverride}
-    
+
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
         ${({ $mobileFullWidth }) => $mobileFullWidth && css`
@@ -325,7 +325,7 @@ const StyledLink = styled(Link)`
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
     ${flatModeOverride}
-    
+
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
         ${({ $mobileFullWidth }) => $mobileFullWidth && css`
@@ -341,7 +341,7 @@ const StyledAnchor = styled.a`
     ${({ $variant, theme }) => getVariantStyles($variant, theme)}
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
     ${flatModeOverride}
-    
+
     @media (max-width: 600px) {
         ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
         ${({ $mobileFullWidth }) => $mobileFullWidth && css`

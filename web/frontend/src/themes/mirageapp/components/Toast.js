@@ -35,17 +35,14 @@ const ToastContainer = styled.div`
 
 const ToastItem = styled.div`
     background: ${({ theme, $alert }) =>
-        $alert ? theme.colors.panelAlt : theme.colors.panel};
-    color: ${({ theme, $alert }) => {
-        if (!$alert) return theme.colors.text;
-        return theme.name === 'light' ? '#b91c1c' : '#fecaca';
-    }};
+        $alert ? theme.colors.buttonDangerBg : theme.colors.panel};
+    color: ${({ theme, $alert }) => ($alert ? theme.colors.voteDown : theme.colors.text)};
     border: 1px solid ${({ theme, $alert }) =>
         $alert ? theme.colors.buttonDangerBorder : theme.colors.border};
-    border-radius: ${({ theme }) => theme.layout.inputRadius};
-    padding: 0.45rem 0.75rem;
-    font-size: ${({ theme }) => theme.layout.bodySize};
-    font-weight: 700;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
     font-family: ${({ theme }) => theme.layout.fontFamily};
     box-shadow: none;
     pointer-events: auto;

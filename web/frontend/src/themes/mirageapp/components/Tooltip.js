@@ -24,19 +24,22 @@ export const tooltipStyles = () => css`
         bottom: 100%;
         left: 0;
         margin-bottom: 0.3rem;
-        background: ${({ theme }) => theme.colors.panel};
+        background: ${({ theme }) => theme.colors.menuBg};
         border: 1px solid ${({ theme }) => theme.colors.border};
         color: ${({ theme }) => theme.colors.text};
-        padding: 0.5rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: normal;
+        padding: 0.45rem 0.65rem;
+        border-radius: 6px;
+        font-size: 0.65rem;
+        font-weight: 500;
         white-space: pre-wrap;
         width: max-content;
         max-width: 260px;
         z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-        line-height: 1.4;
+        box-shadow: ${({ theme }) =>
+            theme.name === 'light'
+                ? '0 6px 16px rgba(15, 23, 42, 0.08)'
+                : '0 8px 20px rgba(0, 0, 0, 0.32)'};
+        line-height: 1.45;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.15s ease;
