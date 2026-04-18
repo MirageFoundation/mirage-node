@@ -393,6 +393,9 @@ const CompactThumbLink = styled(Link)`
     }
 `;
 
+// Letter is hard-pinned to white in BOTH themes so it always reads cleanly on
+// the indigo->purple brand gradient. `sidebarItemActiveText` flips to black in
+// light mode, which disappears against the gradient — the previous behavior.
 const CompactThumbPlaceholder = styled.div`
     grid-row: 1 / span 3;
     display: flex;
@@ -402,7 +405,7 @@ const CompactThumbPlaceholder = styled.div`
     height: 84px;
     border-radius: 8px;
     background: ${({ theme }) => theme.colors.gradient};
-    color: ${({ theme }) => theme.colors.sidebarItemActiveText};
+    color: #ffffff;
     font-size: 1.1rem;
     font-weight: 700;
     flex-shrink: 0;
@@ -749,7 +752,13 @@ function CompactRow({ post, state, updatePost }) {
     if (ts > 1e12) ts = Math.floor(ts / 1000);
 
     const commentCount = Number(post.comments) || 0;
-    const placeholderChar = (topic.trim()[0] || '#').toUpperCase();
+    // Placeholder letter = first character of the post author's username.
+    // Falls back to the author's wallet address, then '#' if neither is set,
+    // so anonymous / username-less rows still render a stable placeholder.
+    const placeholderSeed = (typeof post.username === 'string' && post.username.trim())
+        ? post.username.trim()
+        : (authorAddress || '');
+    const placeholderChar = (placeholderSeed[0] || '#').toUpperCase();
     const feedBucket = typeof post.feed_bucket === 'string' ? post.feed_bucket : '';
     const feedBucketLabel = feedBucket && feedBucket !== 'guest'
         ? (FEED_BUCKET_LABELS[feedBucket] || '')
