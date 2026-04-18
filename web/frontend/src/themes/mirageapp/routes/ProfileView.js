@@ -77,7 +77,11 @@ const BioTextarea = styled.textarea`
     &:focus { outline: none; border-color: ${({ theme }) => theme.colors.borderStrong}; box-shadow: none; }
 `;
 
-/** Compact pill button used inside the bio editor (Cancel / Save). Full-radius + reduced height. */
+/** Compact pill button used inside the bio editor (Cancel / Save). Full-radius
+ *  + reduced height. Save variant matches `CreatePostView::PostBtn` exactly —
+ *  `followBtnBg` filled pill with `followBtnBgHover` on hover, white text, and
+ *  a matching border so the pill keeps its outline in both light and dark
+ *  modes. Ghost (Cancel) stays transparent with a neutral border. */
 const BioPillButton = styled.button`
     appearance: none;
     display: inline-flex;
@@ -86,21 +90,21 @@ const BioPillButton = styled.button`
     height: 26px;
     padding: 0 14px;
     border-radius: 9999px;
-    border: ${({ $variant, theme }) => ($variant === 'ghost' ? `1px solid ${theme.colors.border}` : 'none')};
+    border: 1px solid ${({ $variant, theme }) => ($variant === 'ghost' ? theme.colors.border : theme.colors.followBtnBg)};
     background: ${({ $variant, theme }) => ($variant === 'ghost' ? 'transparent' : theme.colors.followBtnBg)};
-    color: ${({ $variant, theme }) => ($variant === 'ghost' ? theme.colors.text : theme.colors.buttonText)};
+    color: ${({ $variant, theme }) => ($variant === 'ghost' ? theme.colors.text : '#ffffff')};
     font-family: inherit;
     font-size: 0.7rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
 
     &:hover:not(:disabled) {
         background: ${({ $variant, theme }) => ($variant === 'ghost' ? theme.colors.hoverBg : theme.colors.followBtnBgHover)};
-        border-color: ${({ $variant, theme }) => ($variant === 'ghost' ? theme.colors.borderStrong : 'transparent')};
+        border-color: ${({ $variant, theme }) => ($variant === 'ghost' ? theme.colors.borderStrong : theme.colors.followBtnBgHover)};
     }
 
-    &:disabled { cursor: not-allowed; opacity: 0.5; }
+    &:disabled { cursor: not-allowed; opacity: 0.55; }
     &:focus { outline: none; }
     &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
 `;
@@ -385,17 +389,16 @@ const AsideCard = styled.div`
     flex-direction: column;
 `;
 
-/** Top header banner — strong blue that holds through most of the banner and
- *  fades into the card's `panel` bg near the bottom. Mirrors the panda-screenshot
- *  look: saturated blue occupying ~75%, soft transition to dark. */
+/** Top header banner — uses the app's main Mirage gradient (`gradientStart`
+ *  → `gradientEnd`, the indigo→purple ramp shared with quests / new-posts /
+ *  feed-type). Same in both light and dark modes so the banner reads as the
+ *  brand surface on either canvas. */
 const Banner = styled.div`
     position: relative;
     height: 96px;
-    background: linear-gradient(180deg,
-        ${({ theme }) => theme.colors.focusBlue} 0%,
-        ${({ theme }) => theme.colors.focusBlue} 55%,
-        ${({ theme }) => theme.colors.followBtnBg} 78%,
-        ${({ theme }) => theme.colors.panel} 100%);
+    background: linear-gradient(135deg,
+        ${({ theme }) => theme.colors.gradientStart} 0%,
+        ${({ theme }) => theme.colors.gradientEnd} 100%);
 `;
 
 const AsideInner = styled.div`

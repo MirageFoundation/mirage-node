@@ -420,7 +420,36 @@ export function useProfile({
                 params.allowed_tags = getAllowedTagsParam();
                 const res = await Api.get('get_user_posts', params);
                 if (cancelled) return;
-                const incoming = Array.isArray(res?.posts) ? res.posts : [];
+                const raw = Array.isArray(res?.posts) ? res.posts : [];
+                // Comments don't carry a `title` (parent post owns it) and the
+                // backend explicitly forbids a `topic` on comments. The shared
+                // FeedRow renderer drops any row missing either field, so we
+                // synthesize both here when rendering the Comments tab — title
+                // from the body's first line, topic from the parent post id —
+                // so users actually see their replies. Submissions untouched.
+                const incoming = (effectivePostsFilter === 'comments')
+                    ? raw.map(p => {
+                        if (!p) return p;
+                        const next = { ...p };
+                        const hasTitle = typeof next.title === 'string' && next.title.trim() !== '';
+                        if (!hasTitle) {
+                            const body = typeof next.content === 'string' ? next.content : '';
+                            const firstLine = body.split(/\r?\n/).find(l => l.trim() !== '') || '';
+                            const snippet = firstLine.trim().slice(0, 80);
+                            next.title = snippet ? (snippet + (firstLine.trim().length > 80 ? '…' : '')) : '(reply)';
+                        }
+                        const hasTopic = typeof next.topic === 'string' && next.topic.trim() !== '';
+                        if (!hasTopic) {
+                            // Use parent post id (short prefix) as a placeholder so
+                            // the renderer accepts the row. The card surfaces this
+                            // as `#<short>` which links back to the parent thread.
+                            const root = (typeof next.root_post_id === 'string' && next.root_post_id) ? next.root_post_id : (next.target || '');
+                            const shortRoot = root ? String(root).slice(0, 8) : 'reply';
+                            next.topic = `comment-${shortRoot}`;
+                        }
+                        return next;
+                    })
+                    : raw;
                 const hasMore = !!res?.has_more;
                 setRecentHasMore(hasMore);
                 setRecentPosts(prev => {
