@@ -36,11 +36,10 @@ const Label = styled.div`
     color: ${({ theme }) => theme.colors.text};
     font-weight: 500;
     font-size: 0.72rem;
+    line-height: 1.3;
     white-space: nowrap;
-    padding-top: 0.15rem;
     flex-shrink: 0;
     @media (max-width: 1000px) {
-        padding-top: 0;
         margin-bottom: 0.1rem;
     }
 `;
@@ -48,13 +47,12 @@ const HoverableLabel = styled.div`
     color: ${({ theme }) => theme.colors.text};
     font-weight: 500;
     font-size: 0.72rem;
+    line-height: 1.3;
     white-space: nowrap;
-    padding-top: 0.15rem;
     flex-shrink: 0;
     ${tooltipStyles()}
 
     @media (max-width: 1000px) {
-        padding-top: 0;
         margin-bottom: 0.1rem;
     }
 `;
@@ -264,7 +262,7 @@ const ProfileFieldRow = styled.div`
     display: grid;
     grid-template-columns: ${({ theme }) => theme.layout.formRowColumns};
     gap: ${({ theme }) => theme.layout.formRowGap};
-    align-items: start;
+    align-items: center;
     padding: 0.55rem 1rem;
     box-sizing: border-box;
     width: 100%;
@@ -281,7 +279,7 @@ const ProfileFieldRow = styled.div`
 const ProfileFieldValue = styled.div`
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.5rem;
     min-width: 0;
     flex-wrap: nowrap;
@@ -339,12 +337,34 @@ const ProfileIdentity = styled.div`
     padding: 0.75rem 1rem 0.6rem;
 `;
 
-/** DiceBear identicon avatar (seeded). Falls back to a `$color`-tinted circle if the image fails to load. */
+/** Wraps avatar + name so they hug the left while the action button(s) on the
+ *  right of `ProfileIdentity` get pushed to the far edge. */
+const ProfileIdentityMain = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    min-width: 0;
+    flex: 1 1 auto;
+`;
+
+/** Right-side actions slot in the profile header (Follow button on other users' profiles). */
+const ProfileIdentityActions = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+`;
+
+// DiceBear identicon avatar (seeded). DiceBear's identicon variant returns a
+// transparent background, so the styled bg shows through the pattern's
+// negative space. We hard-pin the bg to the dark-mode surface3 value
+// (#232830) in BOTH modes so the avatar circle looks identical in light
+// and dark — matches the dark-mode chip you approved.
 const Avatar = styled.img`
     width: ${({ $size }) => $size || 64}px;
     height: ${({ $size }) => $size || 64}px;
     border-radius: 50%;
-    background: ${({ $color, theme }) => $color || theme.colors.panelAlt};
+    background: #232830;
     object-fit: cover;
     flex-shrink: 0;
     display: block;
@@ -492,6 +512,121 @@ const AsideShareBtn = styled.button`
     &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
 
     svg { width: 14px; height: 14px; fill: currentColor; }
+`;
+
+/** Gift Sub button in the aside actions row — same 32px height + visual
+ *  language as `AsideShareBtn` so it sits flush next to Share. */
+const AsideGiftSubBtn = styled.button`
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 9999px;
+    border: none;
+    background: ${({ theme }) => theme.colors.actionIconBg};
+    color: ${({ theme }) => theme.colors.text};
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease;
+
+    &:hover:not(:disabled) { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
+    &:disabled { cursor: not-allowed; opacity: 0.55; }
+    &:focus { outline: none; }
+    &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
+
+    svg { width: 14px; height: 14px; fill: currentColor; }
+`;
+
+/** Compact Follow button used in the aside identity card and the main profile
+ *  header. Solid `followBtnBg` pill in idle / Following states; flips to a
+ *  danger outline on hover when already following (so the click target reads
+ *  as "Unfollow"). 32px tall — matches `AsideShareBtn` / `AsideGiftSubBtn`
+ *  so the three action pills sit on the same baseline. */
+const CompactFollowBtn = styled.button`
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 9999px;
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+    border: 1px solid ${({ $danger, $active, theme }) => ($danger
+        ? theme.colors.voteDown
+        : $active
+            ? theme.colors.border
+            : theme.colors.followBtnBg)};
+    background: ${({ $danger, $active, theme }) => ($danger
+        ? 'transparent'
+        : $active
+            ? 'transparent'
+            : theme.colors.followBtnBg)};
+    color: ${({ $danger, $active, theme }) => ($danger
+        ? theme.colors.voteDown
+        : $active
+            ? theme.colors.text
+            : '#ffffff')};
+
+    &:hover:not(:disabled) {
+        background: ${({ $danger, $active, theme }) => ($danger
+            ? theme.colors.buttonDangerBg
+            : $active
+                ? theme.colors.hoverBg
+                : theme.colors.followBtnBgHover)};
+        border-color: ${({ $danger, $active, theme }) => ($danger
+            ? theme.colors.voteDown
+            : $active
+                ? theme.colors.borderStrong
+                : theme.colors.followBtnBgHover)};
+    }
+
+    &:disabled { cursor: not-allowed; opacity: 0.55; }
+    &:focus { outline: none; }
+    &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
+`;
+
+/** Compact "Gift Mirage" pill used inline on the Balance row.
+ *  Filled brand-blue pill with a small gift icon + label, sized to hug the
+ *  label (no forced min-width). Matches the `AsideGiftSubBtn` / `CompactFollowBtn`
+ *  32px height so it's visually consistent across Profile surfaces. */
+const GiftMirageBtn = styled.button`
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 9999px;
+    border: 1px solid ${({ theme }) => theme.colors.followBtnBg};
+    background: ${({ theme }) => theme.colors.followBtnBg};
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+
+    &:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.followBtnBgHover};
+        border-color: ${({ theme }) => theme.colors.followBtnBgHover};
+    }
+    &:disabled { cursor: not-allowed; opacity: 0.55; }
+    &:focus { outline: none; }
+    &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
+
+    svg { width: 14px; height: 14px; }
 `;
 
 const AsideStatsGrid = styled.div`
@@ -915,11 +1050,28 @@ export default function ProfileView({
                         <ProfileGrid>
                             <ProfileMainColumn>
                                 <ProfileIdentity>
-                                    <Avatar $size={64} $color={getTierColor(userLevel)} src={dicebearAvatarUrl(profileUsername || profileAddress || routeIdentity, 64)} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
-                                    <IdentityBlock>
-                                        <DisplayName title={profileUsername}>{usernameDisplay}</DisplayName>
-                                        <Handle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</Handle>
-                                    </IdentityBlock>
+                                    <ProfileIdentityMain>
+                                        <Avatar $size={64} src={dicebearAvatarUrl(profileAddress || profileUsername || routeIdentity, 64)} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
+                                        <IdentityBlock>
+                                            <DisplayName title={profileUsername}>{usernameDisplay}</DisplayName>
+                                            <Handle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</Handle>
+                                        </IdentityBlock>
+                                    </ProfileIdentityMain>
+                                    {!isOwnProfile && address && (
+                                        <ProfileIdentityActions>
+                                            <CompactFollowBtn
+                                                type="button"
+                                                $active={isFollowingProfile && !((isFollowingProfile && followHover) || isUnfollowAction)}
+                                                $danger={(isFollowingProfile && followHover) || isUnfollowAction}
+                                                onMouseEnter={() => setFollowHover(true)}
+                                                onMouseLeave={() => setFollowHover(false)}
+                                                disabled={isFollowInProgress}
+                                                onClick={handleFollowToggle}
+                                            >
+                                                {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
+                                            </CompactFollowBtn>
+                                        </ProfileIdentityActions>
+                                    )}
                                 </ProfileIdentity>
                                 <TabsRow role="tablist" aria-label="Profile sections">
                                 {VALID_TABS.map(tab => <TabButton key={tab} type="button" role="tab" aria-selected={activeTab === tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
@@ -935,9 +1087,6 @@ export default function ProfileView({
                                     {canEditProfile && <IconActionButton type="button" onClick={() => navigate('/change_username')} title="Change username" aria-label="Change username">
                                         <HiPencilSquare aria-hidden="true" />
                                     </IconActionButton>}
-                                    {!isOwnProfile && address && <Button variant={(isFollowingProfile && followHover) || isUnfollowAction ? 'primaryDanger' : isFollowingProfile ? 'subtle' : 'primary'} size="sm" minWidth="follow" onMouseEnter={() => setFollowHover(true)} onMouseLeave={() => setFollowHover(false)} disabled={isFollowInProgress} loading={isFollowInProgress} onClick={handleFollowToggle} mobileFullWidth>
-                                        {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
-                                    </Button>}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             <ProfileFieldRow>
@@ -957,9 +1106,7 @@ export default function ProfileView({
                                 <Label>Tier:</Label>
                                 <ProfileFieldValue>
                                     <span style={{ display: 'flex', alignItems: 'center' }}>
-                                        <Mono style={{
-                                            color: getTierColor(userLevel)
-                                        }}>
+                                        <Mono style={userLevel > 0 ? { color: getTierColor(userLevel) } : undefined}>
                                             {getTierName(userLevel)}
                                         </Mono>
                                         {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
@@ -970,9 +1117,6 @@ export default function ProfileView({
                                             ({formatSubscriptionExpiry(subscriptionExpiry)})
                                         </span>}
                                     </span>
-                                    {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="follow" mobileFullWidth onClick={handleGiftSub} disabled={subFeePending}>
-                                        {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
-                                    </Button>}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             {confirmGiftSub && <ProfileFieldRow>
@@ -1042,9 +1186,11 @@ export default function ProfileView({
                                 </HoverableLabel>
                                 <ProfileFieldValue>
                                     <Mono>{balanceDisplay}</Mono>
-                                    {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" minWidth="follow" mobileFullWidth onClick={handleDonate} disabled={donatePending}>
-                                        {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
-                                    </Button>}
+                                    {!isOwnProfile && profileAddress && hasValidAccount && (
+                                        <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
+                                            <HiGift aria-hidden="true" /> {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
+                                        </GiftMirageBtn>
+                                    )}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             {confirmDonate && <ProfileFieldRow>
@@ -1357,7 +1503,7 @@ export default function ProfileView({
                                     <AsideInner>
                                         <AsideIdentityRow>
                                             <AsideAvatarWrap>
-                                                <Avatar $size={60} $color={getTierColor(userLevel)} src={dicebearAvatarUrl(profileUsername || profileAddress || routeIdentity, 60)} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
+                                                <Avatar $size={60} src={dicebearAvatarUrl(profileAddress || profileUsername || routeIdentity, 60)} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                             </AsideAvatarWrap>
                                             <AsideNameBlock>
                                                 <AsideName title={profileUsername}>{usernameDisplay}</AsideName>
@@ -1371,17 +1517,28 @@ export default function ProfileView({
                                             }} title="Copy profile link">
                                                 <HiShare aria-hidden="true" /> Share
                                             </AsideShareBtn>
-                                            {!isOwnProfile && address && <Button variant={(isFollowingProfile && followHover) || isUnfollowAction ? 'primaryDanger' : isFollowingProfile ? 'subtle' : 'primary'} size="sm" onMouseEnter={() => setFollowHover(true)} onMouseLeave={() => setFollowHover(false)} disabled={isFollowInProgress} loading={isFollowInProgress} onClick={handleFollowToggle}>
-                                                {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
-                                            </Button>}
-                                            {!isOwnProfile && profileAddress && hasValidAccount && <Button size="sm" variant="subtle" onClick={handleGiftSub} disabled={subFeePending}>
-                                                <HiGift aria-hidden="true" style={{ marginRight: '0.3rem' }} />
-                                                {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
-                                            </Button>}
+                                            {!isOwnProfile && profileAddress && hasValidAccount && (
+                                                <AsideGiftSubBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Sub">
+                                                    <HiGift aria-hidden="true" /> {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
+                                                </AsideGiftSubBtn>
+                                            )}
+                                            {!isOwnProfile && address && (
+                                                <CompactFollowBtn
+                                                    type="button"
+                                                    $active={isFollowingProfile && !((isFollowingProfile && followHover) || isUnfollowAction)}
+                                                    $danger={(isFollowingProfile && followHover) || isUnfollowAction}
+                                                    onMouseEnter={() => setFollowHover(true)}
+                                                    onMouseLeave={() => setFollowHover(false)}
+                                                    disabled={isFollowInProgress}
+                                                    onClick={handleFollowToggle}
+                                                >
+                                                    {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
+                                                </CompactFollowBtn>
+                                            )}
                                         </AsideActions>
                                         <AsideStatsGrid>
                                             <AsideStat>
-                                                <AsideStatValue $color={getTierColor(userLevel)}>{getTierName(userLevel)}</AsideStatValue>
+                                                <AsideStatValue $color={userLevel > 0 ? getTierColor(userLevel) : undefined}>{getTierName(userLevel)}</AsideStatValue>
                                                 <AsideStatLabel>Tier</AsideStatLabel>
                                             </AsideStat>
                                             <AsideStat>

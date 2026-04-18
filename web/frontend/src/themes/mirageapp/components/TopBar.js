@@ -349,13 +349,17 @@ const AvatarGlow = styled.img`
     }
 `;
 
+// Hard-pinned to the dark-mode chip color (#232830) in BOTH modes so the
+// top-bar avatar matches the profile-page avatar exactly. DiceBear's
+// identicon variant is transparent, so this fills the pattern's negative
+// space identically in light and dark themes.
 const AvatarImg = styled.img`
     position: relative;
     z-index: 1;
     width: 32px;
     height: 32px;
     border-radius: 9999px;
-    background: ${({ theme }) => theme.colors.panelAlt};
+    background: #232830;
     display: block;
     flex-shrink: 0;
     object-fit: cover;
@@ -868,7 +872,9 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
 
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
-    const avatarSeed = username || publicKey || 'default';
+    // Seed policy mirrors mirage-mobile-app's own-profile surface
+    // (`profile-screen.tsx`): wallet address first, username as fallback.
+    const avatarSeed = publicKey || username || 'default';
     const avatarSrc = dicebearAvatarUrl(avatarSeed, 32);
 
     const [inboxCount, setInboxCount] = useState(() => {
