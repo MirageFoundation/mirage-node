@@ -8,11 +8,16 @@ import { useProfile } from "../../../logic/useProfile";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 
-/** Compact MIRAGE balance for the right-aside stats grid (e.g. `1.2K MIRAGE`). */
+/** Compact MIRAGE balance for the right-aside stats grid + main profile rows
+ *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
+ *  (`k`/`m`/`b`) by default; we uppercase the suffix here so it matches the
+ *  rest of mirageapp's UPPERCASE MIRAGE label. */
 const compactMirageLabel = (raw) => {
     if (raw === null || raw === undefined) return '—';
     const compact = formatMirageCompact(raw);
-    return compact ? `${compact} MIRAGE` : '—';
+    if (!compact) return '—';
+    const uppercased = compact.replace(/([kmb])(\b|$)/gi, (_, s) => s.toUpperCase());
+    return `${uppercased} MIRAGE`;
 };
 
 /** Mirrors mirage-mobile-app's `formatAccountAge` (min / hr / d / mo / yr). */
@@ -257,21 +262,35 @@ const ProfilePostsTabGutter = styled.div`
     padding: 0 1rem;
 `;
 
-/** No per-row divider. Padding matches `SettingsView::SettingRow` (0.55rem 1rem). */
+/** No per-row divider. Padding matches `SettingsView::SettingRow` (0.55rem 1rem).
+ *  Label column is a FIXED width (110px) so every row's value starts at the
+ *  same x coordinate — Username / Address / Tier / Balance / Registered /
+ *  Reserve / Biography all line up vertically. The value column takes the
+ *  remaining row width via `minmax(0, 1fr)` so long Mono strings (wallet
+ *  address, balance, etc.) can shrink/ellipsize without clipping.
+ *
+ *  Default `gap: 1.5rem` gives a comfortable breathing room on wide desktop.
+ *  As the main column narrows (right-aside still visible but shrinking the
+ *  main column into intermediate widths where Mono values start to clip), the
+ *  `@media (max-width: 1100px)` rule tightens the gap to claw back horizontal
+ *  space for the value. A second step at mobile (<1000px) tightens padding.
+ *  Row stays a single line in BOTH desktop and mobile (no stack). */
 const ProfileFieldRow = styled.div`
     display: grid;
-    grid-template-columns: ${({ theme }) => theme.layout.formRowColumns};
-    gap: ${({ theme }) => theme.layout.formRowGap};
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 1.5rem;
     align-items: center;
     padding: 0.55rem 1rem;
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
 
+    @media (max-width: 1100px) {
+        gap: 0.5rem;
+    }
+
     @media (max-width: 1000px) {
-        grid-template-columns: 1fr;
-        gap: 0.35rem;
-        align-items: stretch;
+        gap: 0.5rem;
         padding: 0.5rem 0.85rem;
     }
 `;
@@ -284,10 +303,6 @@ const ProfileFieldValue = styled.div`
     min-width: 0;
     flex-wrap: nowrap;
     overflow: hidden;
-
-    @media (max-width: 1000px) {
-        flex-wrap: wrap;
-    }
 `;
 
 const ProfileFieldValuePlain = styled.div`
@@ -329,12 +344,19 @@ const ProfileAside = styled.aside`
     }
 `;
 
-/** Main-column header: avatar + large display name + `u/handle`. Replaces the old "Profile" text. */
+/** Main-column header: avatar + large display name + `u/handle`. Replaces
+ *  the old "Profile" text. Hidden on narrow screens (<1000px) where the
+ *  right-aside identity card re-orders above the main column and already
+ *  shows the same avatar / name / follow button — no need to repeat. */
 const ProfileIdentity = styled.div`
     display: flex;
     align-items: center;
     gap: 0.85rem;
     padding: 0.75rem 1rem 0.6rem;
+
+    @media (max-width: 1000px) {
+        display: none;
+    }
 `;
 
 /** Wraps avatar + name so they hug the left while the action button(s) on the
@@ -1185,7 +1207,7 @@ export default function ProfileView({
                                     Balance:
                                 </HoverableLabel>
                                 <ProfileFieldValue>
-                                    <Mono>{balanceDisplay}</Mono>
+                                    <Mono title={balanceDisplay}>{compactMirageLabel(balance)}</Mono>
                                     {!isOwnProfile && profileAddress && hasValidAccount && (
                                         <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
                                             <HiGift aria-hidden="true" /> {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
@@ -1275,7 +1297,7 @@ export default function ProfileView({
                                     Reserve:
                                 </HoverableLabel>
                                 <ProfileFieldValuePlain>
-                                    <Mono>{reserveDisplay}</Mono>
+                                    <Mono title={reserveDisplay}>{compactMirageLabel(reserveFunds)}</Mono>
                                 </ProfileFieldValuePlain>
                             </ProfileFieldRow>
                             <ProfileFieldRow>
