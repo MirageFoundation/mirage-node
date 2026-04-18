@@ -2,7 +2,7 @@
 
 **Routes:** `/follows`, `/blocks`, `/reports`
 **Files:** `themes/mirageapp/routes/{FollowsView,BlocksView,ReportsView}.js`
-**Status:** ⏳ Not started
+**Status:** ✅ Done
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---

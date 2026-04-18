@@ -5,6 +5,7 @@ import Button from "../components/Button.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useProfile } from "../../../logic/useProfile";
+import { useBlocks } from "../../../logic/useBlocks";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 
@@ -507,6 +508,17 @@ const AsideActions = styled.div`
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
+`;
+
+/** Wrapper that only renders its children on screens where the main-column
+ *  `ProfileIdentity` header is hidden (≤1000px). Keeps the Unblock pill
+ *  from double-appearing on wide layouts — it belongs next to the Follow
+ *  button in the aside only when the header isn't there to host it. */
+const AsideOnlyWhenHeaderHidden = styled.span`
+    display: none;
+    @media (max-width: 1000px) {
+        display: inline-flex;
+    }
 `;
 
 /** Share button — same visual language as `CardView::ActionPill` (filled `actionIconBg` pill, 32px tall). */
@@ -1031,6 +1043,30 @@ export default function ProfileView({
     } = useProfile({
         state
     });
+    /**
+     * Unblock affordance — wired to the same `useBlocks` hook BlocksView
+     * uses, so any state mutation in this view is reflected in
+     * `/blocks` (and vice versa) once the tx settles. Only an Unblock
+     * button is exposed here; "Block" remains a header-menu action.
+     */
+    const {
+        blockedUsers,
+        isUserPending: isBlockUserPending,
+        formatUserStatus: formatBlockUserStatus,
+        handleUnblockUser
+    } = useBlocks({ state });
+    const profileAddrLower = String(profileAddress || '').trim().toLowerCase();
+    const isProfileBlocked = !!profileAddrLower && blockedUsers.some(
+        u => String(u || '').trim().toLowerCase() === profileAddrLower
+    );
+    const isUnblockPending = isProfileBlocked && isBlockUserPending(profileAddrLower);
+    const unblockStatus = isProfileBlocked ? formatBlockUserStatus(profileAddrLower) : '';
+    const handleUnblockProfile = e => {
+        if (!profileAddrLower) return;
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        handleUnblockUser(e, profileAddrLower);
+    };
     // Show loading/error states for username resolution
     if (isResolvingUsername || usernameResolutionError) {
         return <ContentGrid>
@@ -1081,6 +1117,25 @@ export default function ProfileView({
                                     </ProfileIdentityMain>
                                     {!isOwnProfile && address && (
                                         <ProfileIdentityActions>
+                                            {isProfileBlocked && (
+                                                /* Matches the `Button variant="danger"` Unblock
+                                                 * used everywhere else (BlocksView rows,
+                                                 * BlockedPost/BlockedTopic state). Inline
+                                                 * `borderRadius` keeps the pill fully rounded
+                                                 * so it lines up with the adjacent Follow pill. */
+                                                <Button
+                                                    type="button"
+                                                    variant="danger"
+                                                    size="sm"
+                                                    minWidth="5.5rem"
+                                                    disabled={isUnblockPending}
+                                                    loading={isUnblockPending}
+                                                    onClick={handleUnblockProfile}
+                                                    style={{ height: '32px', borderRadius: '9999px', paddingTop: 0, paddingBottom: 0 }}
+                                                >
+                                                    {isUnblockPending ? unblockStatus || 'Processing' : 'Unblock'}
+                                                </Button>
+                                            )}
                                             <CompactFollowBtn
                                                 type="button"
                                                 $active={isFollowingProfile && !((isFollowingProfile && followHover) || isUnfollowAction)}
@@ -1556,6 +1611,22 @@ export default function ProfileView({
                                                 >
                                                     {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
                                                 </CompactFollowBtn>
+                                            )}
+                                            {!isOwnProfile && address && isProfileBlocked && (
+                                                <AsideOnlyWhenHeaderHidden>
+                                                    <Button
+                                                        type="button"
+                                                        variant="danger"
+                                                        size="sm"
+                                                        minWidth="5.5rem"
+                                                        disabled={isUnblockPending}
+                                                        loading={isUnblockPending}
+                                                        onClick={handleUnblockProfile}
+                                                        style={{ height: '32px', borderRadius: '9999px', paddingTop: 0, paddingBottom: 0 }}
+                                                    >
+                                                        {isUnblockPending ? unblockStatus || 'Processing' : 'Unblock'}
+                                                    </Button>
+                                                </AsideOnlyWhenHeaderHidden>
                                             )}
                                         </AsideActions>
                                         <AsideStatsGrid>

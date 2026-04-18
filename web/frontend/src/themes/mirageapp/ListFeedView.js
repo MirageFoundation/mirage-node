@@ -6,6 +6,7 @@ import { HiChevronDown } from "react-icons/hi2";
 import CardView from "./components/CardView";
 import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
+import { MoreMenuChip, BlockChip } from "./components/PostMenu";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
@@ -418,17 +419,42 @@ const CompactThumbPlaceholder = styled.div`
 `;
 
 /* Header row mirrors CardView's HeaderMeta exactly so the two view modes
- * share a single metadata style. Font sizes + weights are copied 1:1. */
+ * share a single metadata style. Font sizes + weights are copied 1:1.
+ *
+ * We wrap the header meta in a flex row that also hosts the 3-dot
+ * overflow menu on the right, so the menu sits in the top-right corner
+ * of every compact card (matches the user's request to move it out of
+ * the footer). `min-width: 0` keeps the meta column shrinkable. */
+const CompactTopRow = styled.div`
+    grid-column: 2 / 3;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 0;
+`;
+
 const CompactHeader = styled.div`
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 0.2rem 0.3rem;
     min-width: 0;
+    flex: 1 1 auto;
     font-size: 0.62rem;
     font-weight: 400;
     color: ${({ theme }) => theme.colors.feedCtrlText};
     line-height: 1.2;
+`;
+
+/* Right side of the top row: hosts the 3-dot overflow menu. Flex-shrink 0
+ * keeps the button intact even when the header meta line wraps. */
+const CompactTopActions = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    margin-top: -2px; /* align ellipsis with the first line of header text */
 `;
 
 const CompactTopicLink = styled(Link)`
@@ -524,7 +550,9 @@ const CompactTextAction = styled.button`
 `;
 
 /* Expand / collapse chip — same filled surface as the vote pill so the
- * two controls visually balance the footer row. */
+ * two controls visually balance the footer row. `line-height: 0` +
+ * `display: block` on the svg forces optical centering inside the 32px
+ * pill (without it the chevron sat a couple pixels above center). */
 const CompactExpandChip = styled.button`
     appearance: none;
     display: inline-flex;
@@ -538,11 +566,13 @@ const CompactExpandChip = styled.button`
     background: ${({ theme }) => theme.colors.actionIconBg};
     color: ${({ theme }) => theme.colors.text};
     cursor: pointer;
+    line-height: 0;
     transition: background 0.12s ease;
 
     &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
 
     svg {
+        display: block;
         width: 16px;
         height: 16px;
     }
@@ -779,27 +809,33 @@ function CompactRow({ post, state, updatePost }) {
                 <CompactThumbPlaceholder aria-hidden="true">{placeholderChar}</CompactThumbPlaceholder>
             )}
 
-            <CompactHeader>
-                <CompactTopicLink to={`/t/${encodeURIComponent(topic)}`} onClick={stop}>
-                    #{topic}
-                </CompactTopicLink>
-                <CompactHeaderDot>·</CompactHeaderDot>
-                <CompactUserLink
-                    to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
-                    onClick={stop}
-                    $tierColor={authorColor}
-                >
-                    @{displayAuthor}
-                </CompactUserLink>
-                <CompactHeaderDot>·</CompactHeaderDot>
-                <CompactTime>{formatAge(ts)}</CompactTime>
-                {feedBucketLabel && (
-                    <>
-                        <CompactHeaderDot>·</CompactHeaderDot>
-                        <CompactFeedReasonInline>{feedBucketLabel}</CompactFeedReasonInline>
-                    </>
-                )}
-            </CompactHeader>
+            <CompactTopRow>
+                <CompactHeader>
+                    <CompactTopicLink to={`/t/${encodeURIComponent(topic)}`} onClick={stop}>
+                        #{topic}
+                    </CompactTopicLink>
+                    <CompactHeaderDot>·</CompactHeaderDot>
+                    <CompactUserLink
+                        to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
+                        onClick={stop}
+                        $tierColor={authorColor}
+                    >
+                        @{displayAuthor}
+                    </CompactUserLink>
+                    <CompactHeaderDot>·</CompactHeaderDot>
+                    <CompactTime>{formatAge(ts)}</CompactTime>
+                    {feedBucketLabel && (
+                        <>
+                            <CompactHeaderDot>·</CompactHeaderDot>
+                            <CompactFeedReasonInline>{feedBucketLabel}</CompactFeedReasonInline>
+                        </>
+                    )}
+                </CompactHeader>
+                {/* 3-dot overflow — same dropdown as CardView's MoreButton. */}
+                <CompactTopActions>
+                    <MoreMenuChip post={post} state={state} updatePost={updatePost} align="right" />
+                </CompactTopActions>
+            </CompactTopRow>
 
             <CompactTitle to={linkTarget} onClick={stop}>
                 {post.title}
@@ -815,6 +851,8 @@ function CompactRow({ post, state, updatePost }) {
                 </CompactTextAction>
                 {shareCopied && <CompactShareNote>link copied</CompactShareNote>}
                 <CompactSpacer />
+                {/* Block/report chip — identical to CardView's action-row block chip. */}
+                <BlockChip post={post} state={state} updatePost={updatePost} align="right" />
                 {canExpand && (
                     <CompactExpandChip
                         type="button"

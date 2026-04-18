@@ -27,6 +27,7 @@ import {
     saveViewMode,
 } from "../ListFeedView";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
+import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { useSearchResults } from "../../../logic/useSearchResults";
 
 /**
@@ -230,6 +231,17 @@ const RowIcon = styled.span`
         width: 18px;
         height: 18px;
     }
+`;
+
+/** Dicebear avatar used for user result rows. Same 28x28 footprint as
+ *  `RowIcon` so the user list aligns with the topic list. */
+const RowAvatar = styled.img`
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #232830;
+    object-fit: cover;
 `;
 
 const RowMain = styled.div`
@@ -710,9 +722,11 @@ export default function SearchResultsView({ state }) {
                                 user.username || user.address
                             )}`}
                         >
-                            <RowIcon>
-                                <HiOutlineUser />
-                            </RowIcon>
+                            <RowAvatar
+                                src={dicebearAvatarUrl(user.username || user.address, 56)}
+                                alt=""
+                                loading="lazy"
+                            />
                             <RowMain>
                                 <RowPrimary>
                                     <TierName
