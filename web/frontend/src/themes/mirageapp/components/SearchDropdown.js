@@ -6,10 +6,10 @@ import {
     HiOutlineXMark,
     HiOutlineHashtag,
     HiOutlineFire,
-    HiOutlineUser,
     HiOutlineMagnifyingGlass,
 } from "react-icons/hi2";
 import { getAuthorColor } from "../../../utils/tierColors";
+import { dicebearAvatarUrl } from "../../../utils/avatar";
 
 /**
  * Dropdown sheet rendered below the TopBar search input. Mirrors the
@@ -146,6 +146,20 @@ const RowIcon = styled.span`
     ${RowButton}:hover &, ${RowLink}:hover & {
         color: ${({ theme }) => theme.colors.menuItemHoverText};
     }
+`;
+
+/**
+ * Dicebear avatar used for search-result user rows. Same 22x22 footprint
+ * as `RowIcon` so columns remain aligned with the topic/post rows. The
+ * transparent identicon sits over `surface3` (matches profile avatar).
+ */
+const RowAvatar = styled.img`
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #232830;
+    object-fit: cover;
 `;
 
 /**
@@ -505,9 +519,11 @@ export default function SearchDropdown({
                                         onResultNavigate && onResultNavigate()
                                     }
                                 >
-                                    <RowIcon>
-                                        <HiOutlineUser />
-                                    </RowIcon>
+                                    <RowAvatar
+                                        src={dicebearAvatarUrl(user.username || user.address, 44)}
+                                        alt=""
+                                        loading="lazy"
+                                    />
                                     <RowMain>
                                         <RowPrimary>
                                             <TierUsername $tierColor={tierColor}>

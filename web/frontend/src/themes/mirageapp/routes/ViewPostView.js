@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
@@ -19,6 +19,9 @@ import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
 import { normalizeTag } from "../../../utils/ContentTags";
+import ConfirmDialog from "../components/ConfirmDialog.js";
+import { useBlocks } from "../../../logic/useBlocks";
+import { HiNoSymbol } from "react-icons/hi2";
 /**
  * Post Details — root post container.
  *
@@ -1145,6 +1148,54 @@ const VPLoadingSpinner = styled.div`
     }
 `;
 
+/**
+ * Blocked-post state — visual twin of `MainView`'s `BlockedTopicState`.
+ * Shown when the viewer navigates to `/p/<id>` for a post they have
+ * blocked. Sits on the main feed canvas (`theme.colors.bg`) with no
+ * divider so it reads as part of the feed column, not a separate panel.
+ * Unblock uses the same red `Button variant="danger"` style the rest of
+ * the Blocks surface uses (06.3 polish round 5).
+ */
+const BlockedPostState = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem 1.25rem;
+    text-align: center;
+    background: ${({ theme }) => theme.colors.bg};
+    box-sizing: border-box;
+`;
+const BlockedPostIcon = styled.div`
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.voteDown};
+
+    svg { width: 26px; height: 26px; }
+`;
+const BlockedPostTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.95rem;
+    font-weight: 700;
+`;
+const BlockedPostMessage = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.78rem;
+    line-height: 1.5;
+    max-width: 26rem;
+`;
+const BlockedPostActions = styled.div`
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+`;
+
 const MetaRow = styled.div`
     display: flex;
     align-items: center;
@@ -1299,24 +1350,8 @@ const ConfirmButtons = styled.div`
     width: 100%;
     justify-content: flex-end;
 `;
-const ReportInput = styled.input`
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    padding: 0.5rem;
-    font-size: 0.8rem;
-    color: ${({
-    theme
-}) => theme.colors.text};
-    background-color: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
-    border-radius: 4px;
-`;
+// `ReportInput` removed (06.3) — replaced by the `ConfirmDialog`
+// textarea at the route root.
 
 // Returns absolute local timestamp: YYYY-MM-DD HH:MM:SS
 
@@ -1476,6 +1511,45 @@ function ViewPostView({
         updatePost
     });
 
+    /**
+     * Blocked-post affordance (06.3 polish round 5) — wired to the same
+     * `useBlocks` hook BlocksView uses, so unblocking from this page
+     * instantly updates `/blocks` and vice versa. Renders a dedicated
+     * `BlockedPostState` panel (replacing the post content + comments)
+     * when the current post_id is in the viewer's blocked list.
+     */
+    const {
+        blockedPosts,
+        isPostPending: isBlockPostPending,
+        formatPostStatus: formatBlockPostStatus,
+        handleUnblockPost
+    } = useBlocks({ state });
+    const blockedPostIdLower = postId ? String(postId).trim().toLowerCase() : '';
+    const isPostBlocked = !!blockedPostIdLower && blockedPosts.some(
+        p => String(p || '').trim().toLowerCase() === blockedPostIdLower
+    );
+    const isUnblockPostPending = isPostBlocked && isBlockPostPending(blockedPostIdLower);
+    const unblockPostStatus = isPostBlocked ? formatBlockPostStatus(blockedPostIdLower) : '';
+    /* After the user unblocks the post inline we need to re-fetch the
+     * content because the initial load (made while the post was still
+     * blocked) either failed server-side or was short-circuited. We use
+     * a nonce counter that's included in the fetch effect's deps so
+     * bumping it re-triggers the effect; we also reset loading/error so
+     * the spinner shows during the refetch instead of the stale error
+     * state. (06.3 polish round 6.) */
+    const [refetchNonce, setRefetchNonce] = useState(0);
+    const handleUnblockBlockedPost = e => {
+        if (!blockedPostIdLower) return;
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        handleUnblockPost(e, blockedPostIdLower);
+        // Reset loading/error and bump the nonce so the comments effect
+        // re-fetches the post now that it's no longer blocked.
+        try { setLoading(true); } catch (_) { /* noop */ }
+        try { setError(null); } catch (_) { /* noop */ }
+        setRefetchNonce(n => n + 1);
+    };
+
     const commentsRequestRef = useRef(0);
     const commentsAutoOpenTimersRef = useRef(new Set());
     useEffect(() => {
@@ -1577,10 +1651,57 @@ function ViewPostView({
             autoOpenTimeouts.clear();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [postId]);
+    }, [postId, refetchNonce]);
 
     // When in focused view, fetch the focused comment's children separately
     // This ensures we get 6 levels of children from the focused comment, not limited by its depth from root
+
+    // Blocked-post short circuit — when the viewer has blocked this
+    // post, render only the `BlockedPostState` panel (no content, no
+    // comments). Mirrors the blocked-topic / blocked-user experience.
+    // The viewer can unblock inline; once the tx settles the hook flips
+    // `isPostBlocked` back to false and the full post loads normally.
+    if (isPostBlocked) {
+        return <ContentGrid>
+            <div>
+                <ModernPostFeed>
+                    <BackButton onClick={goBackToFeed}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                        Back
+                    </BackButton>
+                    <BlockedPostState role="region" aria-label="Blocked post">
+                        <BlockedPostIcon aria-hidden="true">
+                            <HiNoSymbol />
+                        </BlockedPostIcon>
+                        <BlockedPostTitle>This post is blocked</BlockedPostTitle>
+                        <BlockedPostMessage>
+                            You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page.
+                        </BlockedPostMessage>
+                        <BlockedPostActions>
+                            {/* Standalone state panel — use `size="md"` (not
+                                `sm` like BlocksView rows) so the CTA has the
+                                same visual height as the primary buttons
+                                used elsewhere in the app. No radius override;
+                                Button's default `md` radius applies. */}
+                            <Button
+                                variant="danger"
+                                size="md"
+                                minWidth="5.5rem"
+                                disabled={isUnblockPostPending}
+                                loading={isUnblockPostPending}
+                                onClick={handleUnblockBlockedPost}
+                            >
+                                {isUnblockPostPending ? unblockPostStatus || 'Processing' : 'Unblock post'}
+                            </Button>
+                        </BlockedPostActions>
+                    </BlockedPostState>
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>;
+    }
 
     if (loading || error || depthError) {
         return <ContentGrid>
@@ -1742,79 +1863,12 @@ function ViewPostView({
         }
     };
     const displayConfirmation = post => {
-        // Show confirmation for this specific post
-        if (confirmBlockPost === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>🚫 Block this post?</span>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmBlockPostAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockPost}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
-        if (confirmBlockUser?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>🚫 Block {post.username || 'this user'}?</span>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmBlockUserAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
-        if (confirmBlockTopic?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>🚫 Block #{confirmBlockTopic.topic}?</span>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmBlockTopicAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockTopic}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
+        // Block / report confirmations moved to a root-level `ConfirmDialog`
+        // modal (06.3 polish). The inline banners for the other flows
+        // (delete, suspend, donate, gift sub, award) still render below.
+        if (confirmBlockPost === post.post_id) return null;
+        if (confirmBlockUser?.postId === post.post_id) return null;
+        if (confirmBlockTopic?.postId === post.post_id) return null;
         if (confirmDeletePost === post.post_id) {
             const isComment = post.target && post.target !== '';
             return <BlockConfirmMessage>
@@ -1919,20 +1973,8 @@ function ViewPostView({
                 {suspendSuccess[post.post_id]}
             </div>;
         }
-        if (confirmReportPost === post.post_id) {
-            return <BlockConfirmMessage>
-                <span>🚨 Report this post? Provide a short reason.</span>
-                <ReportInput type="text" value={reportReason} onChange={e => setReportReason(e.target.value)} placeholder="Short reason (max 140 chars)" maxLength={140} />
-                <ConfirmButtons style={{
-                    width: 'auto'
-                }}>
-                    <Button variant="warning" size="sm" onClick={confirmReportAction} disabled={isReporting}>
-                        Report
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={cancelReport}>Cancel</Button>
-                </ConfirmButtons>
-            </BlockConfirmMessage>;
-        }
+        // Report popup moved to a root-level `ConfirmDialog` (06.3 polish).
+        if (confirmReportPost === post.post_id) return null;
         if (confirmDonate?.postId === post.post_id) {
             return <BlockConfirmMessage>
                 <div style={{
@@ -3206,6 +3248,75 @@ function ViewPostView({
                 </ModernPostFeed>
             </MainContentWrapper>
             {renderMobileReplyOverlay()}
+            {/**
+              * Destructive-action dialogs (block post/user/topic + report).
+              * Rendered at the route root so a single `ConfirmDialog` owns
+              * the modal UI for the whole page. The existing state machine
+              * in `useViewPost` (`confirmBlockPost`, `confirmBlockUser`,
+              * `confirmBlockTopic`, `confirmReportPost`) drives visibility;
+              * the on-click handlers still live inside the hook.
+              *
+              * Username lookup uses `state.posts[postId]?.username` so the
+              * dialog title shows the friendly handle when available.
+              */}
+            {(() => {
+                const blockUserPostId = confirmBlockUser?.postId;
+                const blockUserPost = blockUserPostId ? state.posts?.[blockUserPostId] : null;
+                const blockUserLabel = blockUserPost?.username
+                    ? `@${blockUserPost.username}`
+                    : (confirmBlockUser?.userId ? `${String(confirmBlockUser.userId).slice(0, 10)}…` : 'this user');
+                return <>
+                    <ConfirmDialog
+                        open={!!confirmBlockPost}
+                        title="Block this post?"
+                        message="This post will be hidden from every feed you see. The author won't be notified."
+                        confirmLabel="Block post"
+                        confirmVariant="danger"
+                        pending={isBlocking}
+                        onConfirm={confirmBlockPostAction}
+                        onCancel={cancelBlockPost}
+                    />
+                    <ConfirmDialog
+                        open={!!confirmBlockUser}
+                        title={`Block ${blockUserLabel}?`}
+                        message="Posts and replies from this user will be hidden from your feeds, comments, and inbox. You can unblock them later from Settings → Blocks or their profile."
+                        confirmLabel="Block user"
+                        confirmVariant="danger"
+                        pending={isBlocking}
+                        onConfirm={confirmBlockUserAction}
+                        onCancel={cancelBlockUser}
+                    />
+                    <ConfirmDialog
+                        open={!!confirmBlockTopic}
+                        title={`Block #${confirmBlockTopic?.topic || 'topic'}?`}
+                        message="Posts tagged with this topic will stop appearing in your Home and discovery feeds."
+                        confirmLabel="Block topic"
+                        confirmVariant="danger"
+                        pending={isBlocking}
+                        onConfirm={confirmBlockTopicAction}
+                        onCancel={cancelBlockTopic}
+                    />
+                    <ConfirmDialog
+                        open={!!confirmReportPost}
+                        title="🚨 Report this post? Provide a short reason."
+                        message="Reports are reviewed by moderators. Be clear and specific — reports without context are usually dismissed."
+                        confirmLabel="Report"
+                        confirmVariant="warning"
+                        pending={isReporting}
+                        requireReason
+                        reasonPlaceholder="short reason"
+                        reasonMaxLength={200}
+                        wide
+                        reasonInitial={reportReason}
+                        onConfirm={(trimmed) => {
+                            setReportReason(trimmed);
+                            // Defer so the hook sees the updated reason.
+                            setTimeout(() => { try { confirmReportAction(); } catch (_) { /* noop */ } }, 0);
+                        }}
+                        onCancel={cancelReport}
+                    />
+                </>;
+            })()}
         </ContentGrid>;
     } else {
         return <ContentGrid>

@@ -1,10 +1,12 @@
 import { Helmet } from "react-helmet-async";
+import { HiNoSymbol } from "react-icons/hi2";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
+import * as tx from "../../../utils/tx";
 import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
 import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
@@ -876,6 +878,58 @@ const LoadingText = styled.div`
     font-weight: 500;
 `;
 
+/**
+ * Blocked-topic empty state — shown when the viewer navigates to `/t/<topic>`
+ * where the topic is in their blocked list. Mirrors the `StateBlock`
+ * pattern used across BlocksView / Follows / Reports so the visual
+ * language stays consistent (circle icon + title + message + action).
+ */
+const BlockedTopicState = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem 1.25rem;
+    text-align: center;
+    /* Sits on the main feed canvas (theme.colors.bg) with no divider so
+     * the empty state reads as part of the feed column, not a separate
+     * panel (06.3 polish round 4). */
+    background: ${({ theme }) => theme.colors.bg};
+    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
+    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    box-sizing: border-box;
+`;
+const BlockedTopicIcon = styled.div`
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.voteDown};
+
+    svg { width: 26px; height: 26px; }
+`;
+const BlockedTopicTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.95rem;
+    font-weight: 700;
+`;
+const BlockedTopicMessage = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.78rem;
+    line-height: 1.5;
+    max-width: 26rem;
+`;
+const BlockedTopicActions = styled.div`
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+`;
+
 // TopicsBar removed (unused)
 
 const InlineLink = styled(Link)`
@@ -1134,6 +1188,13 @@ const MainView = ({
         const isCurrentTopic = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
         const isTopicFollowing = isCurrentTopic && (followedTopicsSet.has(routeTopicLower) || isSubscribed(viewerAddress || 'guest', urlTopic));
         const isTopicInProgress = isCurrentTopic && isTopicPending(routeTopicLower);
+        /**
+         * When the viewer navigates to `/t/<topic>` for a topic they've
+         * blocked, hide the feed and show a dedicated `BlockedTopicState`
+         * panel with an Unblock CTA. Keeps the visual language of the
+         * BlocksView state blocks (circle icon + title + message).
+         */
+        const isUrlTopicBlocked = !!(isLoggedIn && isCurrentTopic && typeof isTopicBlockedLocal === 'function' && isTopicBlockedLocal(routeTopicLower));
 
         // Determine what content to show
         let showEmptyHome = false;
@@ -1228,7 +1289,7 @@ const MainView = ({
                 <MainFeedPanel>
                     <ModernPostFeed>
 
-                        {isLoggedIn && isCurrentTopic && showHero && <TopicHeroCard>
+                        {isLoggedIn && isCurrentTopic && showHero && !isUrlTopicBlocked && <TopicHeroCard>
                             <TopicHeroHeader>
                                 <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
                                 <HomeFeedModeInline>
@@ -1400,17 +1461,43 @@ const MainView = ({
                             </HomeFeedInfoDescription>
                         </HomeFeedInfoCard>}
 
+                        {/* Blocked topic state — takes precedence over loading/empty states */}
+                        {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked topic">
+                            <BlockedTopicIcon aria-hidden="true">
+                                <HiNoSymbol />
+                            </BlockedTopicIcon>
+                            <BlockedTopicTitle>#{urlTopic} is blocked</BlockedTopicTitle>
+                            <BlockedTopicMessage>
+                                Posts tagged with this topic are hidden from your feeds. Unblock to see them again — you can always re-block it later from any post header or the Blocks page.
+                            </BlockedTopicMessage>
+                            <BlockedTopicActions>
+                                {/* Standalone state panel — use `size="md"`
+                                    so the CTA height matches primary buttons
+                                    elsewhere (larger than BlocksView rows). */}
+                                <Button
+                                    variant="danger"
+                                    size="md"
+                                    minWidth="5.5rem"
+                                    onClick={async () => {
+                                        try { await tx.unblockTopic(routeTopicLower); } catch (_) { /* noop */ }
+                                    }}
+                                >
+                                    Unblock #{urlTopic}
+                                </Button>
+                            </BlockedTopicActions>
+                        </BlockedTopicState>}
+
                         {/* Loading state - only show to logged-in users */}
-                        {isLoggedIn && showLoadingPosts && <LoadingCard $size={cardSize}>
+                        {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && <LoadingCard $size={cardSize}>
                             <LoadingSpinner />
                             <LoadingText>Loading posts...</LoadingText>
                         </LoadingCard>}
 
                         {/* Empty home feed - only show to logged-in users */}
-                        {isLoggedIn && showEmptyHome && <EmptyHomeMessage />}
+                        {isLoggedIn && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
 
                         {/* No posts available - only show to logged-in users */}
-                        {isLoggedIn && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                        {isLoggedIn && !isUrlTopicBlocked && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                             <LoadingText>{noPostsMessage}</LoadingText>
                         </LoadingCard>}
 
@@ -1439,7 +1526,7 @@ const MainView = ({
                         />}
 
                         {/* Posts grid - only show to logged-in users */}
-                        {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                        {isLoggedIn && !isUrlTopicBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
                             const family = getThemeFamily(state?.themeId);
                             const FeedComponent = family.Feed;
                             const visiblePosts = orderedPosts.filter(p => {

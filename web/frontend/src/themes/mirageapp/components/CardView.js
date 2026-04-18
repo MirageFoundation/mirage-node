@@ -26,6 +26,7 @@ import Storage from "../../../utils/Storage";
 
 import InlineMedia from "./InlineMedia";
 import MarkdownRenderer from "./MarkdownRenderer";
+import ConfirmDialog from "./ConfirmDialog";
 
 /**
  * CardView — Mirage-app inspired post card.
@@ -826,38 +827,69 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
     }, [closeAllMenus, isLoggedIn, topic, followingTopic, viewerAddress]);
 
-    const handleBlockUser = useCallback(async () => {
+    /**
+     * Confirmation dialogs (06.3 polish round).
+     *
+     * Replaces the previous inline `tx.*` + `window.prompt()` handlers with
+     * a single `activeDialog` state machine. The menu triggers set the
+     * dialog mode; the actual tx fires from the dialog's `onConfirm`.
+     * This lets us share one `ConfirmDialog` across 4 destructive actions
+     * (block user/post/topic + report) and guarantees the Cancel button
+     * works uniformly (resetting `activeDialog` to `null`).
+     */
+    const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_topic' | 'report' | null
+    const [dialogPending, setDialogPending] = useState(false);
+
+    const openDialog = useCallback((mode) => {
         closeAllMenus();
-        if (!isLoggedIn || !authorAddress) return;
+        if (!isLoggedIn) return;
+        setDialogPending(false);
+        setActiveDialog(mode);
+    }, [closeAllMenus, isLoggedIn]);
+
+    const closeDialog = useCallback(() => {
+        setActiveDialog(null);
+        setDialogPending(false);
+    }, []);
+
+    const handleBlockUser = useCallback(() => openDialog('block_user'), [openDialog]);
+    const handleBlockPost = useCallback(() => openDialog('block_post'), [openDialog]);
+    const handleBlockTopic = useCallback(() => openDialog('block_topic'), [openDialog]);
+    const handleReport = useCallback(() => openDialog('report'), [openDialog]);
+
+    const confirmBlockUser = useCallback(async () => {
+        if (!authorAddress) { closeDialog(); return; }
+        setDialogPending(true);
         try { await tx.blockUser(authorAddress, true); } catch (_) { /* noop */ }
         if (typeof updatePost === 'function' && postId) {
             try { updatePost(postId, { blocked: true }); } catch (_) { /* noop */ }
         }
-    }, [closeAllMenus, isLoggedIn, authorAddress, updatePost, postId]);
+        closeDialog();
+    }, [authorAddress, postId, updatePost, closeDialog]);
 
-    const handleBlockPost = useCallback(async () => {
-        closeAllMenus();
-        if (!isLoggedIn) return;
+    const confirmBlockPost = useCallback(async () => {
+        setDialogPending(true);
         try { await tx.blockPost(postId, true); } catch (_) { /* noop */ }
         if (typeof updatePost === 'function') {
             try { updatePost(postId, { hidden_client: true }); } catch (_) { /* noop */ }
         }
-    }, [closeAllMenus, isLoggedIn, postId, updatePost]);
+        closeDialog();
+    }, [postId, updatePost, closeDialog]);
 
-    const handleBlockTopic = useCallback(async () => {
-        closeAllMenus();
-        if (!isLoggedIn || !topic) return;
+    const confirmBlockTopic = useCallback(async () => {
+        if (!topic) { closeDialog(); return; }
+        setDialogPending(true);
         try { await tx.blockTopic(topic); } catch (_) { /* noop */ }
-    }, [closeAllMenus, isLoggedIn, topic]);
+        closeDialog();
+    }, [topic, closeDialog]);
 
-    const handleReport = useCallback(async () => {
-        closeAllMenus();
-        if (!isLoggedIn) return;
-        const reason = typeof window !== 'undefined'
-            ? window.prompt('Report reason (optional)') || ''
-            : '';
-        try { await tx.reportPost(postId, reason); } catch (_) { /* noop */ }
-    }, [closeAllMenus, isLoggedIn, postId]);
+    const confirmReport = useCallback(async (reason) => {
+        const trimmed = String(reason || '').trim();
+        if (!trimmed) return; // ConfirmDialog also guards this via requireReason
+        setDialogPending(true);
+        try { await tx.reportPost(postId, trimmed); } catch (_) { /* noop */ }
+        closeDialog();
+    }, [postId, closeDialog]);
 
     const handleEdit = useCallback(() => {
         closeAllMenus();
@@ -1133,6 +1165,57 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             )}
 
             {footer}
+            {/**
+              * Destructive-action dialogs (block post/user/topic + report).
+              * Rendered unconditionally so the `open` prop owns mount/unmount
+              * via `ConfirmDialog`'s internal null-return + fade animation.
+              * All four share the same `dialogPending` flag so the Processing
+              * state is consistent regardless of which action is active.
+              */}
+            <ConfirmDialog
+                open={activeDialog === 'block_user'}
+                title={`Block @${authorDisplay}?`}
+                message="Posts and replies from this user will be hidden from your feeds, comments, and inbox. You can unblock them later from Settings → Blocks or their profile."
+                confirmLabel="Block user"
+                confirmVariant="danger"
+                pending={dialogPending}
+                onConfirm={confirmBlockUser}
+                onCancel={closeDialog}
+            />
+            <ConfirmDialog
+                open={activeDialog === 'block_post'}
+                title="Block this post?"
+                message="This post will be hidden from every feed you see. The author won't be notified."
+                confirmLabel="Block post"
+                confirmVariant="danger"
+                pending={dialogPending}
+                onConfirm={confirmBlockPost}
+                onCancel={closeDialog}
+            />
+            <ConfirmDialog
+                open={activeDialog === 'block_topic'}
+                title={`Block #${topic || 'topic'}?`}
+                message="Posts tagged with this topic will stop appearing in your Home and discovery feeds."
+                confirmLabel="Block topic"
+                confirmVariant="danger"
+                pending={dialogPending}
+                onConfirm={confirmBlockTopic}
+                onCancel={closeDialog}
+            />
+            <ConfirmDialog
+                open={activeDialog === 'report'}
+                title="🚨 Report this post? Provide a short reason."
+                message="Reports are reviewed by moderators. Be clear and specific — reports without context are usually dismissed."
+                confirmLabel="Report"
+                confirmVariant="warning"
+                pending={dialogPending}
+                requireReason
+                reasonPlaceholder="short reason"
+                reasonMaxLength={200}
+                wide
+                onConfirm={confirmReport}
+                onCancel={closeDialog}
+            />
         </Card>
     );
 }
