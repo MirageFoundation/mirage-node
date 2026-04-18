@@ -6,6 +6,7 @@ import { THEME_MANIFESTS } from '../../manifests';
 import { normalizeThemeId } from '../../../registry/theme';
 import SearchDropdown from './SearchDropdown.js';
 import { useSearchDropdown } from '../../../logic/useSearchDropdown';
+import { dicebearAvatarUrl } from '../../../utils/avatar';
 
 /**
  * Reddit-style TopBar for the mirageapp theme.
@@ -853,15 +854,9 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
 
 const formatBadgeCount = (n) => n > 99 ? '99+' : String(n);
 
-/**
- * DiceBear identicon URL matching the mobile app's `Avatar` atom defaults.
- * Seeded by username when available, otherwise by public key.
- */
-function dicebearUrl(seed, pxSize) {
-    const safeSeed = encodeURIComponent(seed || 'default');
-    const size = Math.max(32, Math.round(pxSize * 2));
-    return `https://api.dicebear.com/9.x/identicon/png?seed=${safeSeed}&size=${size}`;
-}
+// dicebear URL helper lives in `utils/avatar.js` so every surface (TopBar,
+// ProfileView, comment author rows, …) renders the same identicon for the
+// same user.
 
 function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     const location = useLocation();
@@ -874,7 +869,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const avatarSeed = username || publicKey || 'default';
-    const avatarSrc = dicebearUrl(avatarSeed, 32);
+    const avatarSrc = dicebearAvatarUrl(avatarSeed, 32);
 
     const [inboxCount, setInboxCount] = useState(() => {
         try {

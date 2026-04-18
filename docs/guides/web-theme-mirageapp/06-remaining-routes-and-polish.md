@@ -34,20 +34,13 @@ Per-component current state:
 
 | Component | File | Diff vs oldreddit | State |
 |---|---|---|---|
-| Button | `components/Button.js` | 0 | **100% identical** |
-| Toast | `components/Toast.js` | 0 | 100% identical (required theme component) |
-| Tooltip | `components/Tooltip.js` | 0 | 100% identical (required theme component) |
-| InlineMedia | `components/InlineMedia.js` | 0 | 100% identical |
-| MediaGallery | `components/MediaGallery.js` | 0 | 100% identical |
-| UnlockPrompt | `components/UnlockPrompt.js` | 4 lines | near-identical |
-| MarkdownRenderer | `components/MarkdownRenderer.js` | 1 line | near-identical |
-| QuestHeroCard | `components/QuestHeroCard.js` | 1 line | near-identical |
-| MobileBottomNav | `components/MobileBottomNav.js` | 10 lines | near-identical (deferred from Plan 02) |
-| FilterBar | `components/FilterBar.js` | 31 lines | partial — finish pass needed |
-| MediaAttachmentLayout | `components/MediaAttachmentLayout.js` | 33 lines | partial — finish pass needed |
-| MarkdownEditor | `components/MarkdownEditor.js` | 90 lines | partial — finish pass needed |
+| Button | `components/Button.js` | restyled in 06.2 | used everywhere |
+| Toast | `components/Toast.js` | restyled in 06.2 | required theme component |
+| Tooltip | `components/Tooltip.js` | restyled in 06.2 | required theme component |
+| UnlockPrompt | `components/UnlockPrompt.js` | restyled in 06.2 | required theme component |
+| MobileBottomNav | `components/MobileBottomNav.js` | 10 lines | near-identical (deferred from Plan 02, tracked in sub-plan 08) |
 
-`Button`, `Toast`, and `Tooltip` are especially important: they are registered as REQUIRED theme components, so their oldreddit styling leaks into every mirageapp route (including ones that look "done").
+> `InlineMedia`, `MediaGallery`, `MarkdownRenderer`, `QuestHeroCard`, `FilterBar`, `MediaAttachmentLayout`, and `MarkdownEditor` are intentionally left as-is and are **not** part of Plan 06's restyle scope.
 
 ---
 
@@ -56,7 +49,7 @@ Per-component current state:
 See the sub-plan index: [`06-subplans/README.md`](./06-subplans/README.md). Summary:
 
 1. **Profile** — `ProfileView` + header/tabs (Plan 04 leftover)
-2. **Component restyle pass** — Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer, QuestHeroCard + finish passes on FilterBar / MarkdownEditor / MediaAttachmentLayout
+2. **Component restyle pass** — Button, Toast, Tooltip, UnlockPrompt (globals only) — ✅ Done
 3. **Social routes** — Follows, Blocks, Reports
 4. **Network + Stats**
 5. **Subscription + Referrals**

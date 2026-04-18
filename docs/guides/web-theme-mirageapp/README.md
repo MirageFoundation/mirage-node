@@ -42,7 +42,7 @@ Whenever desktop structure and mobile visuals conflict:
 | 01 | Theme skeleton, tokens, registration | ✅ Done | [`01-skeleton-and-tokens.md`](./01-skeleton-and-tokens.md) |
 | 02 | Shell, top nav, sidebar, mobile nav | ✅ Done (MobileBottomNav full restyle deferred → Plan 06) | [`02-shell-nav-sidebar.md`](./02-shell-nav-sidebar.md) |
 | 03 | Feed, card view, vote / action row | ✅ Done (manual cross-theme browser regression still recommended) | [`03-feed-and-card.md`](./03-feed-and-card.md) |
-| 04 | Post detail + profile | 🟡 Partial — post-detail shipped as sub-plan 05.3; **profile still pending** (moved to Plan 06) | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
+| 04 | Post detail + profile | ✅ Done — post-detail shipped as sub-plan 05.3; profile closed by sub-plan 06.1 (tokenization pass) | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
 | 05 | Inbox, search, settings, auth flows | ✅ Done | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
 | 06 | Remaining routes, components, polish, QA | ⏳ Not started — **significantly expanded** after audit (see below) | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
@@ -62,9 +62,9 @@ Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plan
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
 7. [Sign Out](./05-subplans/07-sign-out.md) — ✅ Done (closes Plan 05)
 
-**Next focus:** Plan 06 — start with [`06-subplans/02-component-restyle.md`](./06-subplans/02-component-restyle.md) (fixes Button/Toast/Tooltip that leak into every route), then [`06-subplans/01-profile.md`](./06-subplans/01-profile.md).
+**Next focus:** Plan 06 — sub-plans 06.1 (Profile tokenization) and 06.2 (globals component restyle) are ✅ done. Next up is [`06-subplans/03-social-routes.md`](./06-subplans/03-social-routes.md).
 
-Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3 since feed → post is a primary entry path after Search. The **profile slice is still pending** and has been moved into Plan 06 as sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
+Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3, and the profile slice closed via a tokenization-only pass in sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md) (full header/tabs rewrite dropped by design decision). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 
 ---
 
@@ -74,7 +74,6 @@ A full diff of `themes/mirageapp/**` vs `themes/oldreddit/**` revealed that a la
 
 **Routes still rendering in oldreddit style** (need full mirageapp restyle):
 
-- `ProfileView.js` (Plan 04 profile slice) — 5-line diff vs oldreddit
 - `DiscoverView.js`, `AgentsView.js`
 - `FollowsView.js`, `BlocksView.js`, `ReportsView.js`
 - `NetworkView.js`, `StatsView.js`
@@ -83,13 +82,11 @@ A full diff of `themes/mirageapp/**` vs `themes/oldreddit/**` revealed that a la
 
 **Components still identical (or ≤10-line diff) to oldreddit** — not yet ported to mirageapp tokens/typography (R1/R2/R5/R7):
 
-- `Button.js` (100% identical)
-- `Toast.js`, `Tooltip.js` (100% identical — but registered as REQUIRED theme components, so their visual language leaks into every theme route)
-- `InlineMedia.js`, `MediaGallery.js` (100% identical)
-- `UnlockPrompt.js` (4-line diff)
-- `MarkdownRenderer.js`, `QuestHeroCard.js` (1-line diff each)
-- `MobileBottomNav.js` (10-line diff — full restyle deferred from Plan 02)
-- `FilterBar.js`, `MediaAttachmentLayout.js`, `MarkdownEditor.js` (partial restyle, finish pass needed)
+- `MobileBottomNav.js` (10-line diff — full restyle deferred from Plan 02, tracked in sub-plan 08)
+
+> `Button.js`, `Toast.js`, `Tooltip.js`, `UnlockPrompt.js` were ported in sub-plan 06.2 Slice A.
+>
+> `InlineMedia.js`, `MediaGallery.js`, `MarkdownRenderer.js`, `QuestHeroCard.js`, `FilterBar.js`, `MediaAttachmentLayout.js`, and `MarkdownEditor.js` are intentionally left as-is and are **not** part of Plan 06's restyle scope.
 
 **New Plan 06 sub-plans** (each a PR):
 
