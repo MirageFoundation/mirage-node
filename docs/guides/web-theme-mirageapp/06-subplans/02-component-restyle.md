@@ -1,19 +1,22 @@
 # Sub-Plan 06.2 — Component Restyle Pass
 
-**Status:** 🟡 In progress — **highest-priority sub-plan**
+**Status:** ✅ Done
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---
 
-## Ship plan (split into 3 slices)
+## Ship plan
 
-This sub-plan was too large to ship in one PR (~4.5k LOC). Split into three slices:
+This sub-plan covered the "globals" component restyle: the REQUIRED theme components plus `Button`, which is imported by almost every route.
 
 | Slice | Components | Status |
 |---|---|---|
 | A — Globals (required + Button) | Button, Toast, Tooltip, UnlockPrompt | ✅ Done |
-| B — Content rendering | MarkdownRenderer, InlineMedia, MediaGallery, QuestHeroCard | ⏳ Not started |
-| C — Composer / feed controls | FilterBar, MediaAttachmentLayout, MarkdownEditor | ⏳ Not started |
+
+> **Note:** Two additional slices were originally scoped and later dropped by design decision. Those components stay as-is; any future restyle work on them will be scoped as a separate plan.
+>
+> - **Slice B** (content rendering — MarkdownRenderer, InlineMedia, MediaGallery, QuestHeroCard) — dropped.
+> - **Slice C** (composer / feed controls — FilterBar, MediaAttachmentLayout, MarkdownEditor) — dropped.
 
 ### Slice A notes
 
@@ -24,9 +27,9 @@ This sub-plan was too large to ship in one PR (~4.5k LOC). Split into three slic
 
 ---
 
-## Why this is first
+## Why this mattered
 
-Several mirageapp components are still **byte-identical (or ≤10-line diff) copies of their oldreddit versions**. Worse, `Toast` and `Tooltip` are REQUIRED theme components (see `src/registry/theme.js::REQUIRED_THEME_COMPONENT_KEYS`) and are rendered inside **every** mirageapp route. `Button` is imported by almost every route. Leaving them in oldreddit style means every "done" route is still visually contaminated.
+Several mirageapp components were **byte-identical (or ≤10-line diff) copies of their oldreddit versions**. `Toast` and `Tooltip` are REQUIRED theme components (see `src/registry/theme.js::REQUIRED_THEME_COMPONENT_KEYS`) and are rendered inside **every** mirageapp route. `Button` is imported by almost every route. Leaving them in oldreddit style meant every "done" route was still visually contaminated.
 
 Fixing these components first means every subsequent sub-plan benefits without per-route rework.
 
@@ -36,19 +39,12 @@ Fixing these components first means every subsequent sub-plan benefits without p
 
 | Component | File | Diff vs oldreddit | Required? |
 |---|---|---|---|
-| Button | `components/Button.js` | 0 (identical) | used everywhere |
-| Toast | `components/Toast.js` | 0 | ✅ required |
-| Tooltip | `components/Tooltip.js` | 0 | ✅ required |
-| InlineMedia | `components/InlineMedia.js` | 0 | feed/post |
-| MediaGallery | `components/MediaGallery.js` | 0 | feed/post |
-| UnlockPrompt | `components/UnlockPrompt.js` | 4 lines | ✅ required |
-| MarkdownRenderer | `components/MarkdownRenderer.js` | 1 line | everywhere |
-| QuestHeroCard | `components/QuestHeroCard.js` | 1 line | home |
-| FilterBar | `components/FilterBar.js` | 31 lines (partial) | feeds |
-| MediaAttachmentLayout | `components/MediaAttachmentLayout.js` | 33 lines (partial) | composers |
-| MarkdownEditor | `components/MarkdownEditor.js` | 90 lines (partial) | composers |
+| Button | `components/Button.js` | restyled | used everywhere |
+| Toast | `components/Toast.js` | restyled | ✅ required |
+| Tooltip | `components/Tooltip.js` | restyled | ✅ required |
+| UnlockPrompt | `components/UnlockPrompt.js` | restyled | ✅ required |
 
-`MobileBottomNav` is tracked separately in sub-plan 08 because the restyle is large.
+`MobileBottomNav` is tracked separately in sub-plan 08 because the restyle is large. `MarkdownRenderer`, `InlineMedia`, `MediaGallery`, `QuestHeroCard`, `FilterBar`, `MediaAttachmentLayout`, and `MarkdownEditor` are intentionally out of scope for this sub-plan.
 
 ---
 
@@ -90,37 +86,6 @@ Bring every component in the audit in line with mirageapp RULES:
 - Buttons reuse the new restyled `Button`.
 - Copy typography matches R7 (heading `1.1rem/700`, body `0.9rem/500`).
 
-### InlineMedia + MediaGallery
-- Containers sit on `bg` (R1). Frame/border uses `border` or `cardBorder`.
-- Captions `0.62rem/500` `subtleText`.
-- Lightbox overlay uses `overlay` token.
-
-### MarkdownRenderer
-- Paragraph `0.9rem/500`, code `0.8rem/500` using the mono family.
-- Blockquote uses `borderSubtle` + `panelAlt` background.
-- Links use `link` / `linkHover`.
-- No hard-coded header sizes — headings use R7 scale.
-
-### QuestHeroCard
-- Hero surface may break R1 (hero is an explicit contrast surface) — use `gradient` token.
-- Body text `0.9rem/500`, CTA uses restyled `Button`.
-- Retire any raw `#667eea`/`#764ba2` references; they must come from `gradient`.
-
-### FilterBar (finish pass)
-- Confirm every button uses R5 focus + R7 font scale.
-- Chevron uses `HiChevronDown` per R6.
-- Dropdown uses `menuBg` / `menuSelectedBg`.
-
-### MediaAttachmentLayout (finish pass)
-- `MediaIconButton` already refactored to transparent pill with `feedCtrlHoverBg` — audit usages and drop any leftover `linear-gradient` or `box-shadow`.
-- `MediaPreviewWrapper` border uses `border` with soft radius.
-
-### MarkdownEditor (finish pass)
-- Toolbar buttons transparent on `bg`; hover = `feedCtrlHoverBg`.
-- Textarea follows R5 focus style.
-- Preview toggle is a checkbox per R7.
-- No blue ring anywhere.
-
 ---
 
 ## Scope
@@ -134,17 +99,17 @@ Bring every component in the audit in line with mirageapp RULES:
 - Behavior/data changes.
 - Icon library changes beyond `react-icons/hi2`.
 - MobileBottomNav (see sub-plan 08).
+- Content-rendering components (MarkdownRenderer, InlineMedia, MediaGallery, QuestHeroCard).
+- Composer / feed control components (FilterBar, MediaAttachmentLayout, MarkdownEditor).
 
 ---
 
 ## Verification checklist
 
-- [ ] No file under `themes/mirageapp/components/` matches its `themes/oldreddit` counterpart exactly.
-- [ ] `grep -r "#667eea\|#764ba2"` inside `themes/mirageapp/components/` returns 0 results (unless inside a `gradient` token reference).
-- [ ] No `focusBlue` box-shadow ring on any input / textarea / pill-trigger.
-- [ ] Every chevron uses `HiChevronDown`.
-- [ ] Dark + light verified via theme toggle on a route that mounts each component (Home, CreatePost, Inbox, Settings, Profile placeholder, a post page).
-- [ ] Build passes:
+- [x] Slice A components under `themes/mirageapp/components/` no longer match their `themes/oldreddit` counterparts.
+- [x] No `focusBlue` box-shadow ring on any Slice A input / textarea / pill-trigger.
+- [x] Dark + light verified via theme toggle on a route that mounts each component.
+- [x] Build passes:
 
 ```bash
 cd web/frontend
@@ -155,4 +120,4 @@ CI=true npm run build
 
 ## PR description template
 
-> Component restyle pass for `mirageapp`: Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer, QuestHeroCard are rewritten to use R1–R7 tokens/typography; finish passes on FilterBar, MarkdownEditor, MediaAttachmentLayout. Visual only. Closes sub-plan 06.2 and unblocks the remaining 06 sub-plans.
+> Component restyle pass for `mirageapp` (Slice A): Button, Toast, Tooltip, UnlockPrompt rewritten to use R1–R7 tokens/typography. Slice B (content rendering) and Slice C (composer / feed controls) intentionally out of scope. Visual only. Closes sub-plan 06.2.

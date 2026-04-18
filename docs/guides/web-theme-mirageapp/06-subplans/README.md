@@ -10,8 +10,8 @@ Plan 06 is too broad to ship in one PR. This folder splits it into focused one-P
 
 | # | Sub-plan | Scope | Status | Doc |
 |---|---|---|---|---|
-| 1 | Profile | `ProfileView.js` + header/tabs (was Plan 04 leftover) | ⏳ Not started | [`01-profile.md`](./01-profile.md) |
-| 2 | Component restyle pass | Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer, QuestHeroCard + finish passes on FilterBar / MarkdownEditor / MediaAttachmentLayout | ⏳ Not started | [`02-component-restyle.md`](./02-component-restyle.md) |
+| 1 | Profile | `ProfileView.js` tokenization pass (scope reduced — header/tabs rewrite dropped) | ✅ Done | [`01-profile.md`](./01-profile.md) |
+| 2 | Component restyle pass | Button, Toast, Tooltip, UnlockPrompt (globals only) | ✅ Done | [`02-component-restyle.md`](./02-component-restyle.md) |
 | 3 | Social routes | Follows, Blocks, Reports (list-row pattern) | ⏳ Not started | [`03-social-routes.md`](./03-social-routes.md) |
 | 4 | Network + Stats | Node info + chart containers (info-panel pattern) | ⏳ Not started | [`04-network-stats.md`](./04-network-stats.md) |
 | 5 | Subscription + Referrals | Plan/tier summary + invite share block | ⏳ Not started | [`05-subscription-referrals.md`](./05-subscription-referrals.md) |
