@@ -1530,24 +1530,74 @@ function ViewPostView({
     );
     const isUnblockPostPending = isPostBlocked && isBlockPostPending(blockedPostIdLower);
     const unblockPostStatus = isPostBlocked ? formatBlockPostStatus(blockedPostIdLower) : '';
-    /* After the user unblocks the post inline we need to re-fetch the
-     * content because the initial load (made while the post was still
-     * blocked) either failed server-side or was short-circuited. We use
-     * a nonce counter that's included in the fetch effect's deps so
-     * bumping it re-triggers the effect; we also reset loading/error so
-     * the spinner shows during the refetch instead of the stale error
-     * state. (06.3 polish round 6.) */
-    const [refetchNonce, setRefetchNonce] = useState(0);
-    const handleUnblockBlockedPost = e => {
+    /* Unblock-then-reveal — poll-and-hydrate approach (06.3 polish
+     * round 7 final).
+     *
+     * Server-side `get_comments` filters the comment tree against the
+     * viewer's blocked list and returns 404 when the target post is
+     * blocked. That means the initial mount's fetch 404s, leaving
+     * `error` set and `root` empty in the hook state.
+     *
+     * When the user clicks Unblock, `useBlocks` optimistically removes
+     * the post id from `blockedPosts` as soon as the tx resolves — but
+     * the chain-side commit takes longer, so an immediate refetch still
+     * returns 404. A hard `window.location.reload()` races the same
+     * way: the fresh mount hydrates `blockedPosts` from the server,
+     * which may still show the post as blocked, so we flip right back
+     * into the block panel.
+     *
+     * The robust fix is to keep the block panel showing (gated on a
+     * local `unblockInFlight` flag) while we poll `get_comments` with
+     * backoff until it returns a root. When it does, we commit
+     * `root` + `children` into the hook state, clear `error`/`loading`,
+     * then drop `unblockInFlight` so the panel gives way to the real
+     * post content — no reload, no error flash. */
+    const [unblockInFlight, setUnblockInFlight] = useState(false);
+    const unblockAbortRef = useRef(false);
+    useEffect(() => () => { unblockAbortRef.current = true; }, []);
+    const handleUnblockBlockedPost = async e => {
         if (!blockedPostIdLower) return;
         if (e && typeof e.preventDefault === 'function') e.preventDefault();
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-        handleUnblockPost(e, blockedPostIdLower);
-        // Reset loading/error and bump the nonce so the comments effect
-        // re-fetches the post now that it's no longer blocked.
-        try { setLoading(true); } catch (_) { /* noop */ }
+        setUnblockInFlight(true);
         try { setError(null); } catch (_) { /* noop */ }
-        setRefetchNonce(n => n + 1);
+        try {
+            await handleUnblockPost(e, blockedPostIdLower);
+        } catch (_) { /* handleUnblockPost already alerts on error */ }
+        // Poll `get_comments` until the server returns the post (chain
+        // commit can lag the tx resolve by 0.5–2s). Backoff: 400ms,
+        // 700ms, 1000ms, 1500ms, 2000ms × 3 — ~10s total.
+        const delays = [400, 700, 1000, 1500, 2000, 2000, 2000];
+        const viewerAddress = Storage.load('publicKey', '');
+        let delivered = false;
+        for (let i = 0; i < delays.length; i++) {
+            if (unblockAbortRef.current) return;
+            await new Promise(r => setTimeout(r, delays[i]));
+            if (unblockAbortRef.current) return;
+            try {
+                const data = await Api.get('get_comments', {
+                    post_id: blockedPostIdLower,
+                    address: viewerAddress,
+                });
+                if (data && data.root && data.root.post_id) {
+                    if (unblockAbortRef.current) return;
+                    try { setRoot(data.root); } catch (_) { /* noop */ }
+                    try { setChildren(data.children || []); } catch (_) { /* noop */ }
+                    try { setError(null); } catch (_) { /* noop */ }
+                    try { setLoading(false); } catch (_) { /* noop */ }
+                    delivered = true;
+                    break;
+                }
+            } catch (_) { /* 404s while tx commits — retry */ }
+        }
+        if (!delivered) {
+            // Final fallback: reload the page so the fresh mount gets a
+            // clean state. By this point ~10s have passed so the unblock
+            // has almost certainly committed.
+            try { window.location.reload(); } catch (_) { /* noop */ }
+            return;
+        }
+        setUnblockInFlight(false);
     };
 
     const commentsRequestRef = useRef(0);
@@ -1651,17 +1701,18 @@ function ViewPostView({
             autoOpenTimeouts.clear();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [postId, refetchNonce]);
+    }, [postId]);
 
     // When in focused view, fetch the focused comment's children separately
     // This ensures we get 6 levels of children from the focused comment, not limited by its depth from root
 
     // Blocked-post short circuit — when the viewer has blocked this
     // post, render only the `BlockedPostState` panel (no content, no
-    // comments). Mirrors the blocked-topic / blocked-user experience.
-    // The viewer can unblock inline; once the tx settles the hook flips
-    // `isPostBlocked` back to false and the full post loads normally.
-    if (isPostBlocked) {
+    // comments). Also held open while `unblockInFlight` is true so we
+    // don't flash the "Couldn't load post" error state during the poll
+    // window between tx-resolve and the server returning the post.
+    if (isPostBlocked || unblockInFlight) {
+        const unblockBusy = unblockInFlight || isUnblockPostPending;
         return <ContentGrid>
             <div>
                 <ModernPostFeed>
@@ -1676,9 +1727,13 @@ function ViewPostView({
                         <BlockedPostIcon aria-hidden="true">
                             <HiNoSymbol />
                         </BlockedPostIcon>
-                        <BlockedPostTitle>This post is blocked</BlockedPostTitle>
+                        <BlockedPostTitle>
+                            {unblockInFlight ? 'Unblocking post…' : 'This post is blocked'}
+                        </BlockedPostTitle>
                         <BlockedPostMessage>
-                            You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page.
+                            {unblockInFlight
+                                ? 'Waiting for the unblock to commit on-chain. The post content will appear here shortly — hang tight.'
+                                : "You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page."}
                         </BlockedPostMessage>
                         <BlockedPostActions>
                             {/* Standalone state panel — use `size="md"` (not
@@ -1690,11 +1745,11 @@ function ViewPostView({
                                 variant="danger"
                                 size="md"
                                 minWidth="5.5rem"
-                                disabled={isUnblockPostPending}
-                                loading={isUnblockPostPending}
+                                disabled={unblockBusy}
+                                loading={unblockBusy}
                                 onClick={handleUnblockBlockedPost}
                             >
-                                {isUnblockPostPending ? unblockPostStatus || 'Processing' : 'Unblock post'}
+                                {unblockBusy ? (unblockPostStatus || 'Processing') : 'Unblock post'}
                             </Button>
                         </BlockedPostActions>
                     </BlockedPostState>
