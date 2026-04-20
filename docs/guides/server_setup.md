@@ -4,6 +4,15 @@ This is the OS-level baseline every Mirage validator host must meet **before** r
 
 Skip nothing. Each step here addresses a real incident or a real near-miss in production.
 
+> **Short version:** copy `deploy/harden_server.sh` to the host and run it. The script is idempotent, implements every step below, and **does everything by default** — writes every config, swaps docker.io for the official docker-ce + compose plugin, and reboots if a kernel update is pending. Opt out of specific side effects with `--no-migrate-docker`, `--no-restart-docker`, or `--no-reboot`.
+>
+> ```bash
+> scp deploy/harden_server.sh root@<host>:/root/
+> ssh root@<host> 'bash /root/harden_server.sh --weekly-hour=NN'
+> ```
+>
+> Stagger `--weekly-hour` across the fleet (val4=04, val3=05, val2=06, val1=07) so no two validators ever restart in the same minute. Soak at least 15 minutes between hosts and verify the cluster is 4/4 signing before moving to the next.
+
 > Companion docs: [`deploy.md`](deploy.md) for the node software, [`apphash-divergence-4015233.md`](../apphash-divergence-4015233.md) for the incident that motivated swap + memory hardening.
 
 ---
@@ -67,10 +76,10 @@ You should see one entry under `swapon --show` and `Swap: 2.0Gi` in `free -h`. I
 
 ## 3. SSH — key only, no passwords
 
-Ubuntu 24.04 droplets ship with a **contradictory** sshd config: `/etc/ssh/sshd_config` says `PasswordAuthentication no`, `/etc/ssh/sshd_config.d/50-cloud-init.conf` overrides to `yes`, and `/etc/ssh/sshd_config.d/60-cloudimg-settings.conf` overrides back to `no`. The last file alphabetically wins, but this is fragile. Drop a definitive override file:
+Ubuntu 24.04 DigitalOcean droplets ship with two overlapping sshd drop-ins: `/etc/ssh/sshd_config.d/50-cloud-init.conf` (cloud-init, sets `PasswordAuthentication yes`) and `/etc/ssh/sshd_config.d/60-cloudimg-settings.conf` (the image, sets it back to `no`). **For `sshd_config` directives the FIRST value wins**, not the last — so 50-cloud-init.conf actually wins and password auth ends up enabled on fresh droplets. Our override therefore has to sort *before* 50-cloud-init.conf, not after:
 
 ```bash
-cat > /etc/ssh/sshd_config.d/99-mirage-hardening.conf <<'EOF'
+cat > /etc/ssh/sshd_config.d/00-mirage-hardening.conf <<'EOF'
 PermitRootLogin prohibit-password
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -91,7 +100,9 @@ sshd -T | grep -Ei 'permitroot|passwordauth|pubkey|kbdinteract|challengeresp'
 systemctl reload ssh
 ```
 
-**Before disconnecting**, in a *second* terminal, confirm you can still SSH in with your key. Lock yourself out and the only fix is the cloud provider's recovery console.
+**Before disconnecting**, in a *second* terminal, confirm you can still SSH in with your key. Lock yourself out over SSH and the fix is DigitalOcean's web console (see note below).
+
+> **DigitalOcean web console is unaffected by `PasswordAuthentication no`.** The "Launch Droplet Console" button in the DO panel opens a hypervisor-level serial/VNC login that goes through PAM / `/bin/login` with the local `/etc/shadow` root password — sshd is not in the path. Disabling password SSH does not lose you the emergency recovery console. If you ever need it, set the root password via Access → Reset root password in the DO panel and log in at the serial console.
 
 Authorized keys live in `/root/.ssh/authorized_keys`. Add team keys here, one per line. Remove keys when people leave.
 
@@ -274,7 +285,7 @@ systemctl enable --now mirage-weekly-restart.timer
 systemctl list-timers mirage-weekly-restart.timer
 ```
 
-The restart staggers across the cluster (different `OnCalendar` per host, or rely on `RandomizedDelaySec`) so consensus is never at risk of losing too many validators at once.
+**Stagger the `OnCalendar` hour across the cluster** — do not rely on `RandomizedDelaySec` alone. Current fleet assignment: val4=04, val3=05, val2=06, val1=07 (all UTC). `harden_server.sh --weekly-hour=NN` writes the right value per host.
 
 ### Disk monitoring
 
@@ -325,3 +336,20 @@ done
 ```
 
 Anything that doesn't match the verification checklist gets brought into compliance one node at a time, leaving at least 3 of 4 validators online during the work to keep consensus.
+
+### Rolling the fleet with harden_server.sh
+
+```bash
+# On your workstation — one host at a time, soak 15m between each.
+for host_hour in "139.59.9.96:04" "146.190.108.140:05" "64.23.136.132:06" "159.203.114.27:07"; do
+  host=${host_hour%:*}; hour=${host_hour##*:}
+  scp deploy/harden_server.sh "root@$host:/root/"
+  ssh "root@$host" "bash /root/harden_server.sh --weekly-hour=$hour"
+  # After each host, wait for it to come back (if it rebooted) and verify it
+  # is signing again before moving on:
+  #   curl -sf http://$host:26657/status | jq .result.sync_info
+  #   curl -sf http://$host:26657/block?height=... | jq .result.block.last_commit.signatures
+done
+```
+
+On an existing host with a running mirage container, the default run involves three outage events stacked into a single maintenance window: docker engine migration (~1–3 min), possible docker restart to pick up daemon.json (~15–30 s; skipped if the engine was just reinstalled), and host reboot if a kernel update is pending (~60 s). The cluster must be 4/4 healthy before starting each host. Use `--no-migrate-docker` or `--no-reboot` if the window can't afford one of those right now.
