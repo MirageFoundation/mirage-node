@@ -62,7 +62,7 @@ Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plan
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
 7. [Sign Out](./05-subplans/07-sign-out.md) — ✅ Done (closes Plan 05)
 
-**Next focus:** Plan 06 — sub-plans 06.1 (Profile tokenization), 06.2 (globals component restyle), and 06.3 (Follows / Blocks / Reports) are ✅ done. Next up is [`06-subplans/04-network-stats.md`](./06-subplans/04-network-stats.md).
+**Next focus:** Plan 06 — sub-plans 06.1 (Profile tokenization), 06.2 (globals component restyle), 06.3 (Follows / Blocks / Reports), and 06.4 (Network + Stats) are ✅ done. Next up is [`06-subplans/05-subscription-referrals.md`](./06-subplans/05-subscription-referrals.md).
 
 Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3, and the profile slice closed via a tokenization-only pass in sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md) (full header/tabs rewrite dropped by design decision). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 
@@ -75,11 +75,10 @@ A full diff of `themes/mirageapp/**` vs `themes/oldreddit/**` revealed that a la
 **Routes still rendering in oldreddit style** (need full mirageapp restyle):
 
 - `DiscoverView.js`, `AgentsView.js`
-- `NetworkView.js`, `StatsView.js`
 - `SubscriptionView.js`, `ReferralsView.js`
 - `BridgeView.js`, `NotFoundView.js`
 
-> `FollowsView.js`, `BlocksView.js`, `ReportsView.js` were restyled in sub-plan 06.3.
+> `FollowsView.js`, `BlocksView.js`, `ReportsView.js` were restyled in sub-plan 06.3. `NetworkView.js`, `StatsView.js` were restyled in sub-plan 06.4.
 
 **Components still identical (or ≤10-line diff) to oldreddit** — not yet ported to mirageapp tokens/typography (R1/R2/R5/R7):
 
