@@ -2,7 +2,7 @@ import React from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useStats, TIER_NAMES, TIER_COLORS } from "../../../logic/useStats";
@@ -36,6 +36,16 @@ const StatsWrap = styled.div`
         width: 100%;
         margin-top: -0.5rem;
     }
+`;
+
+const StatsTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
+`;
+
+const StatsShellBody = styled(ContainerBody)`
+    padding: 0.35rem 0 0.75rem;
+    border: none;
+    border-radius: 0;
 `;
 
 const HeaderRow = styled.div`
@@ -706,9 +716,10 @@ export default function StatsView() {
                 <title>Stats | Mirage</title>
             </Helmet>
             <ModernPostFeed>
-                <TabbedContainer>
-                    <ContainerBody $fullWidth>
-                        <StatsWrap>
+                <CappedPageColumn>
+                    <StatsTabbedContainer>
+                        <StatsShellBody>
+                            <StatsWrap>
                             <HeaderRow>
                                 <HeaderTitle>Stats</HeaderTitle>
                             </HeaderRow>
@@ -729,9 +740,10 @@ export default function StatsView() {
                                 <TabIndicator $count={TABS.length} $index={activeTabIndex} aria-hidden="true" />
                             </TabsRow>
                             {body}
-                        </StatsWrap>
-                    </ContainerBody>
-                </TabbedContainer>
+                            </StatsWrap>
+                        </StatsShellBody>
+                    </StatsTabbedContainer>
+                </CappedPageColumn>
             </ModernPostFeed>
         </ContentGrid>
     );
