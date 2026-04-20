@@ -1,7 +1,7 @@
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiClipboardDocument, HiCheck } from "react-icons/hi2";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
 
@@ -33,6 +33,16 @@ const NetworkWrap = styled.div`
         width: 100%;
         margin-top: -0.5rem;
     }
+`;
+
+const NetworkTabbedContainer = styled(TabbedContainer)`
+    margin-top: 0;
+`;
+
+const NetworkShellBody = styled(ContainerBody)`
+    padding: 0.35rem 0 0.75rem;
+    border: none;
+    border-radius: 0;
 `;
 
 const HeaderRow = styled.div`
@@ -903,9 +913,10 @@ export default function NetworkView({ state }) {
                 <title>Network | Mirage</title>
             </Helmet>
             <ModernPostFeed>
-                <TabbedContainer>
-                    <ContainerBody $fullWidth>
-                        <NetworkWrap>
+                <CappedPageColumn>
+                    <NetworkTabbedContainer>
+                        <NetworkShellBody>
+                            <NetworkWrap>
                             <HeaderRow>
                                 <HeaderTitle>Network</HeaderTitle>
                             </HeaderRow>
@@ -1062,9 +1073,10 @@ export default function NetworkView({ state }) {
                                     </ChartRow>
                                 </>
                             )}
-                        </NetworkWrap>
-                    </ContainerBody>
-                </TabbedContainer>
+                            </NetworkWrap>
+                        </NetworkShellBody>
+                    </NetworkTabbedContainer>
+                </CappedPageColumn>
             </ModernPostFeed>
         </ContentGrid>
     );
