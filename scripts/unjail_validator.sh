@@ -15,7 +15,7 @@ set -euo pipefail
 #  - Prints post-state (jailed flag, status)
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
-BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
+BIN="${BIN:-$ROOT_DIR/blockchain/bin/miraged}"
 NODE_HOME="${HOME:-/root}/.mirage/node"
 
 # Safety check: prevent doubling .mirage/node
@@ -430,9 +430,13 @@ say ""
 
 # Submit with explicit sequence and account_number (use sync mode, then poll)
 say "Submitting unjail (sync mode, sequence=$SIGN_SEQ, account_number=$ACCNUM)..."
-# Generate unsigned tx, sign with explicit sequence, then broadcast
+# Generate unsigned tx, sign with explicit sequence, then broadcast.
+# Keep stderr separate (miraged emits "core/types: registered msg interfaces" on stderr
+# at startup, which contaminates the JSON output file if merged via 2>&1).
 UNSIGNED="/tmp/unjail-unsigned-$$.json"
 SIGNED="/tmp/unjail-signed-$$.json"
+GEN_ERR="/tmp/unjail-gen-err-$$.log"
+SIGN_ERR="/tmp/unjail-sign-err-$$.log"
 $BIN tx slashing unjail \
   --from validator \
   --home "$NODE_HOME" \
@@ -441,7 +445,8 @@ $BIN tx slashing unjail \
   --generate-only \
   --gas 200000 \
   --fees 1000000000umirage \
-  -o json > "$UNSIGNED" 2>&1 || { say "Failed to generate unsigned tx"; cat "$UNSIGNED" 2>/dev/null || true; rm -f "$UNSIGNED"; exit 1; }
+  -o json > "$UNSIGNED" 2>"$GEN_ERR" || { say "Failed to generate unsigned tx"; cat "$GEN_ERR" 2>/dev/null || true; rm -f "$UNSIGNED" "$GEN_ERR"; exit 1; }
+rm -f "$GEN_ERR"
 
 $BIN tx sign "$UNSIGNED" \
   --from validator \
@@ -451,12 +456,13 @@ $BIN tx sign "$UNSIGNED" \
   --sequence "$SIGN_SEQ" \
   --account-number "$ACCNUM" \
   --chain-id "$CHAIN_ID" \
-  -o json > "$SIGNED" 2>&1 || { say "Failed to sign tx"; rm -f "$UNSIGNED" "$SIGNED"; exit 1; }
+  -o json > "$SIGNED" 2>"$SIGN_ERR" || { say "Failed to sign tx"; cat "$SIGN_ERR" 2>/dev/null || true; rm -f "$UNSIGNED" "$SIGNED" "$SIGN_ERR"; exit 1; }
+rm -f "$SIGN_ERR"
 
 RESP="$(timeout 30 $BIN tx broadcast "$SIGNED" \
   --node "$RPC" \
   --broadcast-mode sync \
-  -o json 2>&1 || echo "TIMEOUT")"
+  -o json 2>/dev/null || echo "TIMEOUT")"
 rm -f "$UNSIGNED" "$SIGNED"
 
 # Parse response (handle both direct response and wrapped tx_response)
@@ -526,9 +532,12 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
   fi
   ACCNUM2="$($BIN q auth account "$ACCOUNT_ADDR" --node "$RPC" -o json 2>/dev/null | jq -r '.account.value.account_number // .account.base_account.account_number // .account.account_number // .account_number // "0"')"
   say "Retry with sequence=$EXPECTED_SEQ account_number=$ACCNUM2"
-  # Generate unsigned tx, sign with explicit sequence, then broadcast
+  # Generate unsigned tx, sign with explicit sequence, then broadcast.
+  # Keep stderr separate (see above).
   UNSIGNED="/tmp/unjail-unsigned-retry-$$.json"
   SIGNED="/tmp/unjail-signed-retry-$$.json"
+  GEN_ERR="/tmp/unjail-gen-err-retry-$$.log"
+  SIGN_ERR="/tmp/unjail-sign-err-retry-$$.log"
   $BIN tx slashing unjail \
     --from validator \
     --home "$NODE_HOME" \
@@ -537,8 +546,9 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
     --generate-only \
     --gas 200000 \
     --fees 1000000000umirage \
-    -o json > "$UNSIGNED" 2>&1 || { say "Failed to generate unsigned tx (retry)"; cat "$UNSIGNED" 2>/dev/null || true; rm -f "$UNSIGNED"; exit 1; }
-  
+    -o json > "$UNSIGNED" 2>"$GEN_ERR" || { say "Failed to generate unsigned tx (retry)"; cat "$GEN_ERR" 2>/dev/null || true; rm -f "$UNSIGNED" "$GEN_ERR"; exit 1; }
+  rm -f "$GEN_ERR"
+
   $BIN tx sign "$UNSIGNED" \
     --from validator \
     --home "$NODE_HOME" \
@@ -547,12 +557,13 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
     --sequence "$EXPECTED_SEQ" \
     --account-number "$ACCNUM2" \
     --chain-id "$CHAIN_ID" \
-    -o json > "$SIGNED" 2>&1 || { say "Failed to sign tx"; rm -f "$UNSIGNED" "$SIGNED"; exit 1; }
-  
+    -o json > "$SIGNED" 2>"$SIGN_ERR" || { say "Failed to sign tx"; cat "$SIGN_ERR" 2>/dev/null || true; rm -f "$UNSIGNED" "$SIGNED" "$SIGN_ERR"; exit 1; }
+  rm -f "$SIGN_ERR"
+
   RESP="$(timeout 30 $BIN tx broadcast "$SIGNED" \
     --node "$RPC" \
     --broadcast-mode sync \
-    -o json 2>&1 || echo "TIMEOUT")"
+    -o json 2>/dev/null || echo "TIMEOUT")"
   rm -f "$UNSIGNED" "$SIGNED"
   # Parse retry response
   if [ "$RESP" = "TIMEOUT" ]; then
