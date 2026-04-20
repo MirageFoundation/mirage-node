@@ -2,7 +2,7 @@
 
 **Routes:** `/subscription`, `/referrals`
 **Files:** `themes/mirageapp/routes/{SubscriptionView,ReferralsView}.js`
-**Status:** 🟡 In progress — Subscription ✅ done; Referrals ⏳ pending.
+**Status:** ✅ Done — Subscription ✅ and Referrals ✅ both shipped.
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---
@@ -11,7 +11,7 @@
 
 **Subscription** ✅ rewritten against mirageapp R1–R7 tokens: `SubscriptionPageShell` (ContentGrid → ModernPostFeed → CappedPageColumn → TabbedContainer → wrap), 1.1rem/700 page heading matching `SettingsView`, uppercase `SectionHeader` groups (Active plan / Available plans), `ActivePlanCard` on `cardAlt` with tier-colored name + `StatusBadge` (success/danger tokens) wired to `handleCancelAutoRenew` + Balance/Reserve tiles, stacked `TierCard`s on `cardAlt` with tier-colored border when active, `TierFeatureItem` dot list, `DetailsToggle` using `HiChevronDown` (R6), inline `TierDetailsPanel` with `borderSubtle` + left-border accent. Subscribe CTA now uses mirageapp `Button` `primary`/`ghost` variants (no raw linear-gradient). State blocks (loading / tier-config-failed) standardised. Zero raw hex/rgba in JSX — TIER_COLORS stays as shared tier visual language per sub-plan 06.1 / StatsView.
 
-**Referrals** ⏳ still near-identical to `themes/oldreddit/routes/ReferralsView.js` (2-line diff). To be done as the second PR of 06.5.
+**Referrals** ✅ section-list rewrite against R1–R7 tokens: `ReferralsPageShell` (ContentGrid → ModernPostFeed → CappedPageColumn → TabbedContainer → wrap) mirroring `SubscriptionPageShell`, 1.1rem/700 page heading with optional monospace address aside (when viewing another user's referrals), uppercase `SectionHeader` groups (Your share link / Week / Overview / Weekly activity / Referrals). Share link box on `bg` with monospace `ShareUrl` input (borderless, select-on-click) + `Button` ghost variant that swaps between `HiClipboardDocument` / `HiCheck` on copy. Week controls: ghost pill `WeekNavButton`s with `HiChevronLeft` / `HiChevronRight`, native `select` restyled as a pill with `HiChevronDown` overlay (R5 neutral focus, R6 chevron), week-range + UTC-note meta row. Stats row: three tiles (Total referred / Active this week / Inactive) on `bg` with monospace 1.1rem/700 values. Weekly-activity chart re-wrapped in a `ChartCard`; all SVG colors routed through `useTheme()` (stroke → `link`, area → `buttonSuccessBg`, axes → `border` / `subtleText` — no hard-coded `#667eea` / `#444`). Referral list ported to the shared sub-plan 03 `Row` pattern: DiceBear avatar + `IdentityTitle` Link + monospace meta (`N actions · N posts · N comments`) + `StatusBadge` (success tokens for active, neutral `accent` for inactive), cmd/ctrl-click opens user route in new tab. Empty / loading / error / not-signed-in all rendered through the shared `StateBlock` pattern with `HiUsers` / `HiExclamationTriangle` icons. Pagination uses `Button` ghost `Load more`. Zero raw hex/rgba in JSX; `OldRedditContentBleed` + `layout.containerBg/Radius/Padding` removed from imports.
 
 ---
 
