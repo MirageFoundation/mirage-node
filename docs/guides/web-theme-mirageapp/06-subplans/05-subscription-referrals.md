@@ -2,14 +2,16 @@
 
 **Routes:** `/subscription`, `/referrals`
 **Files:** `themes/mirageapp/routes/{SubscriptionView,ReferralsView}.js`
-**Status:** ⏳ Not started
+**Status:** 🟡 In progress — Subscription ✅ done; Referrals ⏳ pending.
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---
 
 ## Current state
 
-Both near-identical to `themes/oldreddit/routes/*` (2-line diffs). Oldreddit tokens.
+**Subscription** ✅ rewritten against mirageapp R1–R7 tokens: `SubscriptionPageShell` (ContentGrid → ModernPostFeed → CappedPageColumn → TabbedContainer → wrap), 1.1rem/700 page heading matching `SettingsView`, uppercase `SectionHeader` groups (Active plan / Available plans), `ActivePlanCard` on `cardAlt` with tier-colored name + `StatusBadge` (success/danger tokens) wired to `handleCancelAutoRenew` + Balance/Reserve tiles, stacked `TierCard`s on `cardAlt` with tier-colored border when active, `TierFeatureItem` dot list, `DetailsToggle` using `HiChevronDown` (R6), inline `TierDetailsPanel` with `borderSubtle` + left-border accent. Subscribe CTA now uses mirageapp `Button` `primary`/`ghost` variants (no raw linear-gradient). State blocks (loading / tier-config-failed) standardised. Zero raw hex/rgba in JSX — TIER_COLORS stays as shared tier visual language per sub-plan 06.1 / StatsView.
+
+**Referrals** ⏳ still near-identical to `themes/oldreddit/routes/ReferralsView.js` (2-line diff). To be done as the second PR of 06.5.
 
 ---
 
