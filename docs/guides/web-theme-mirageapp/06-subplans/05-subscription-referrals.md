@@ -11,7 +11,7 @@
 
 **Subscription** ✅ rewritten against mirageapp R1–R7 tokens: `SubscriptionPageShell` (ContentGrid → ModernPostFeed → CappedPageColumn → TabbedContainer → wrap), 1.1rem/700 page heading matching `SettingsView`, uppercase `SectionHeader` groups (Active plan / Available plans), `ActivePlanCard` on `cardAlt` with tier-colored name + `StatusBadge` (success/danger tokens) wired to `handleCancelAutoRenew` + Balance/Reserve tiles, stacked `TierCard`s on `cardAlt` with tier-colored border when active, `TierFeatureItem` dot list, `DetailsToggle` using `HiChevronDown` (R6), inline `TierDetailsPanel` with `borderSubtle` + left-border accent. Subscribe CTA now uses mirageapp `Button` `primary`/`ghost` variants (no raw linear-gradient). State blocks (loading / tier-config-failed) standardised. Zero raw hex/rgba in JSX — TIER_COLORS stays as shared tier visual language per sub-plan 06.1 / StatsView.
 
-**Referrals** ✅ section-list rewrite against R1–R7 tokens: `ReferralsPageShell` (ContentGrid → ModernPostFeed → CappedPageColumn → TabbedContainer → wrap) mirroring `SubscriptionPageShell`, 1.1rem/700 page heading with optional monospace address aside (when viewing another user's referrals), uppercase `SectionHeader` groups (Your share link / Week / Overview / Weekly activity / Referrals). Share link box on `bg` with monospace `ShareUrl` input (borderless, select-on-click) + `Button` ghost variant that swaps between `HiClipboardDocument` / `HiCheck` on copy. Week controls: ghost pill `WeekNavButton`s with `HiChevronLeft` / `HiChevronRight`, native `select` restyled as a pill with `HiChevronDown` overlay (R5 neutral focus, R6 chevron), week-range + UTC-note meta row. Stats row: three tiles (Total referred / Active this week / Inactive) on `bg` with monospace 1.1rem/700 values. Weekly-activity chart re-wrapped in a `ChartCard`; all SVG colors routed through `useTheme()` (stroke → `link`, area → `buttonSuccessBg`, axes → `border` / `subtleText` — no hard-coded `#667eea` / `#444`). Referral list ported to the shared sub-plan 03 `Row` pattern: DiceBear avatar + `IdentityTitle` Link + monospace meta (`N actions · N posts · N comments`) + `StatusBadge` (success tokens for active, neutral `accent` for inactive), cmd/ctrl-click opens user route in new tab. Empty / loading / error / not-signed-in all rendered through the shared `StateBlock` pattern with `HiUsers` / `HiExclamationTriangle` icons. Pagination uses `Button` ghost `Load more`. Zero raw hex/rgba in JSX; `OldRedditContentBleed` + `layout.containerBg/Radius/Padding` removed from imports.
+**Referrals** ✅ polished section-list rewrite against R1–R7 tokens: `ReferralsPageShell` mirroring `SubscriptionPageShell`, 1.1rem/700 page heading with optional monospace address aside. Hero share card with brand-colored left border (`gradientStart`), eyebrow label, title + subtitle text stack, and integrated share-link pill with icon-only `CopyIconButton` (green success state on copy). Segmented week pill (`Prev | week | Next`) with custom `WeekMenuButton` + `WeekMenuPopover` dropdown (themed `menuBg`, `menuSelectedBg`, `menuItemHoverText`, `scrollbar`, 12px radius, 32px shadow — matching SearchDropdown row feel); option text format `${value} (${range})` identical to bluemoon. Stats row: three tiles with icon chips (`HiUserGroup`/`HiBolt`/`HiClock`), tinted borders for brand/success, large 1.5rem monospace values, and an active-rate gradient progress bar inside the "Active this week" tile. Weekly-activity chart in `ChartCard` with smooth Catmull-Rom curve, gradient area fill (`link` → transparent), dashed grid lines, data-point circles, and narrowed 440px viewBox. Referral list: 40px avatar with `voteUp` ring + corner active-dot for active users, rank chip (trophy icons for top 3), normal-weight username text (400), tabular monospace meta, reduced `StatusBadge` size. Empty/loading/error/not-signed-in via shared `StateBlock` pattern. Build clean; zero raw hex/rgba; `OldRedditContentBleed` removed.
 
 ---
 
@@ -52,10 +52,10 @@ Align both routes with the mobile tier / invite screens.
 
 ## Verification checklist
 
-- [ ] Data parity with bluemoon.
-- [ ] Copy button actually copies (preserve behavior).
-- [ ] Dark + light verified.
-- [ ] Build passes.
+- [x] Data parity with bluemoon.
+- [x] Copy button works (icon-only button, green success state).
+- [x] Dark + light verified.
+- [x] Build passes.
 
 ---
 
