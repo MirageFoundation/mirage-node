@@ -11,9 +11,9 @@ Skip nothing. Each step here addresses a real incident or a real near-miss in pr
 > ssh root@<host> 'bash /root/harden_server.sh --weekly-hour=NN'
 > ```
 >
-> Stagger `--weekly-hour` across the fleet (val4=04, val3=05, val2=06, val1=07) so no two validators ever restart in the same minute. Soak at least 15 minutes between hosts and verify the cluster is 4/4 signing before moving to the next.
+> Stagger `--weekly-hour` across the fleet (val4=04, val3=05, val2=06, val1=07) so no two validators ever restart in the same minute. Between hosts, wait for the one you just touched to come back and confirm it is signing again (a few blocks is enough); a long "soak" is not required — the cluster tolerates one host at a time and the hardening does not touch validator identity.
 
-> Companion docs: [`deploy.md`](deploy.md) for the node software, [`apphash-divergence-4015233.md`](../apphash-divergence-4015233.md) for the incident that motivated swap + memory hardening.
+> Companion docs: [`deploy.md`](deploy.md) for the node software, [`troubleshooting/incident-recovery.md`](../troubleshooting/incident-recovery.md) for what to do when a validator goes sick.
 
 ---
 
@@ -30,7 +30,7 @@ Skip nothing. Each step here addresses a real incident or a real near-miss in pr
 | Timezone    | `Etc/UTC`                                              |
 | Kernel      | 6.8+ (Ubuntu 24.04 default)                            |
 
-A DigitalOcean **`s-2vcpu-4gb-amd`** droplet works for testing. For production, use **`s-4vcpu-8gb-amd`** or larger — 4 GB RAM with no swap is what caused [the 4015233 AppHash divergence](../apphash-divergence-4015233.md).
+A DigitalOcean **`s-2vcpu-4gb-amd`** droplet works for testing. For production, use **`s-4vcpu-8gb-amd`** or larger — 4 GB RAM with no swap has caused an AppHash divergence in production (silent IAVL cache corruption under memory pressure).
 
 ---
 
@@ -258,7 +258,7 @@ Re-login (or reboot) for the `nofile` limits to take effect. Verify with `ulimit
 
 ### Weekly container restart
 
-Bound the lifetime of in-memory state. Long-running Go processes can accumulate subtle GC fragmentation; a weekly restart is cheap insurance and was identified as a remediation step from the [4015233 incident](../apphash-divergence-4015233.md).
+Bound the lifetime of in-memory state. Long-running Go processes can accumulate subtle GC fragmentation; a weekly restart is cheap insurance and was identified as a remediation step from a past apphash-divergence incident.
 
 ```bash
 cat > /etc/systemd/system/mirage-weekly-restart.service <<'EOF'
@@ -339,17 +339,26 @@ Anything that doesn't match the verification checklist gets brought into complia
 
 ### Rolling the fleet with harden_server.sh
 
+`scripts/fleet_audit.sh` is the read-only companion: it checks every validator against this baseline and flags mismatches without touching anything. Run it before and after a rolling hardening pass.
+
 ```bash
-# On your workstation — one host at a time, soak 15m between each.
+# Read-only audit across all four validators.
+scripts/fleet_audit.sh
+
+# Rolling hardening — one host at a time. Between hosts, just wait for the one
+# you touched to come back and sign a few blocks; no long soak required.
 for host_hour in "139.59.9.96:04" "146.190.108.140:05" "64.23.136.132:06" "159.203.114.27:07"; do
   host=${host_hour%:*}; hour=${host_hour##*:}
   scp deploy/harden_server.sh "root@$host:/root/"
   ssh "root@$host" "bash /root/harden_server.sh --weekly-hour=$hour"
-  # After each host, wait for it to come back (if it rebooted) and verify it
-  # is signing again before moving on:
+  # Verify the host came back and is signing before moving on, e.g.:
   #   curl -sf http://$host:26657/status | jq .result.sync_info
   #   curl -sf http://$host:26657/block?height=... | jq .result.block.last_commit.signatures
 done
 ```
 
 On an existing host with a running mirage container, the default run involves three outage events stacked into a single maintenance window: docker engine migration (~1–3 min), possible docker restart to pick up daemon.json (~15–30 s; skipped if the engine was just reinstalled), and host reboot if a kernel update is pending (~60 s). The cluster must be 4/4 healthy before starting each host. Use `--no-migrate-docker` or `--no-reboot` if the window can't afford one of those right now.
+
+### When an incident happens
+
+Start at [`docs/troubleshooting/incident-recovery.md`](../troubleshooting/incident-recovery.md) — it is the index of every recovery procedure, which script to run, and which safety flags matter.

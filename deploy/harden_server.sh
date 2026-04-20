@@ -31,8 +31,9 @@
 #   --dry-run              Print what would be done and exit.
 #   -h, --help             This message.
 #
-# Typical rollout across a 4-validator cluster (one host at a time,
-# soak 15 minutes between each, verify the cluster is 4/4 signing):
+# Typical rollout across a 4-validator cluster (one host at a time, wait
+# for each to come back and confirm it is signing before moving on; no
+# long soak required — hardening does not touch validator identity):
 #   harden_server.sh --weekly-hour=04   # on val4
 #   harden_server.sh --weekly-hour=05   # on val3
 #   harden_server.sh --weekly-hour=06   # on val2

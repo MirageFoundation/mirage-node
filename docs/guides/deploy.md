@@ -4,8 +4,8 @@ Run your own Mirage validator node in minutes.
 
 ## Requirements
 
-- A Linux server (Ubuntu 22.04+ recommended)
-- Docker installed on the server
+- A Linux server (**Ubuntu 24.04 LTS** — see [`server_setup.md`](server_setup.md) for the mandatory OS baseline)
+- Docker installed on the server (the baseline installs it)
 - A domain name pointing to your server (for HTTPS)
 - A funded wallet with at least **15 MIRAGE** (25 recommended)
 
@@ -14,10 +14,21 @@ Run your own Mirage validator node in minutes.
 Minimum recommended:
 
 - 2 vCPUs
-- 4 GB RAM
+- 4 GB RAM + **2 GB swap** (the swap is mandatory; a validator that OOMs without swap can silently corrupt its IAVL cache and produce a wrong apphash)
 - 25 GB disk
 
-A DigitalOcean droplet at ~$24/month works great.
+A DigitalOcean droplet at ~$24/month works, but 8 GB RAM is strongly recommended for production.
+
+## Step 0: Bring the host to baseline
+
+Before `deploy.sh`, the host must satisfy the OS baseline in [`server_setup.md`](server_setup.md) (SSH key-only, UFW, fail2ban, swap, docker-ce, ulimits, weekly restart timer). The shortest path is:
+
+```bash
+scp deploy/harden_server.sh root@your-server:/root/
+ssh root@your-server 'bash /root/harden_server.sh'
+```
+
+The script is idempotent; re-running it on an already-hardened host is a no-op.
 
 ## Step 1: Get a funded mnemonic
 

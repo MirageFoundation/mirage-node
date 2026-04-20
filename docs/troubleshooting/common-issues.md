@@ -2,6 +2,8 @@
 
 This guide covers frequent issues encountered after deploying Mirage. It is safe to share publicly and avoids hard-coded IPs, SSH shortcuts, and server-specific runbooks.
 
+> Operators of the Mirage-Foundation fleet: for validator-level incidents (apphash divergence, jailed validator, consensus key mismatch) start at the [incident recovery runbook](incident-recovery.md) instead. That page is the canonical index of procedures.
+
 ### Variables used below
 
 ```bash

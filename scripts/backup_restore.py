@@ -339,7 +339,7 @@ RECOVERY OPTIONS:
      pubkey afterwards — the old operator entry cannot be rebound
      to a new consensus key.
 
-See docs/apphash-divergence-4015233.md for a worked example.
+See docs/troubleshooting/incident-recovery.md §6 for a worked example.
 ========================================================================
 """
     print(msg, file=sys.stderr)
