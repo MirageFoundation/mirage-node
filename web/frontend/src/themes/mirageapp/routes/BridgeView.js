@@ -477,7 +477,7 @@ const PreviewValue = styled.span`
     ${({
     $highlight
 }) => $highlight && css`
-        color: #48bb78;
+        color: ${({ theme }) => theme.colors.voteUp};
         font-weight: 700;
     `}
 `;
@@ -570,12 +570,14 @@ const StatusBanner = styled.div`
 }) => theme.layout.sectionMarginBottom};
     background: ${({
     $success,
-    $error
-}) => $success ? 'rgba(72, 187, 120, 0.1)' : $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
+    $error,
+    theme
+}) => $success ? theme.colors.buttonSuccessBg : $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
     border: 1px solid ${({
     $success,
-    $error
-}) => $success ? 'rgba(72, 187, 120, 0.3)' : $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
+    $error,
+    theme
+}) => $success ? theme.colors.buttonSuccessBorder : $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
     border-radius: ${({
     theme
 }) => theme.layout.containerRadius};
@@ -584,8 +586,9 @@ const StatusBanner = styled.div`
 }) => theme.layout.monoSize};
     color: ${({
     $success,
-    $error
-}) => $success ? '#48bb78' : $error ? '#ef4444' : '#667eea'};
+    $error,
+    theme
+}) => $success ? theme.colors.voteUp : $error ? '#ef4444' : '#667eea'};
     font-weight: 500;
     animation: ${fadeIn} 0.3s ease-out;
 `;
@@ -637,7 +640,7 @@ const StepDot = styled.span`
     $state,
     theme
 }) => {
-        if ($state === 'complete') return '#48bb78';
+        if ($state === 'complete') return theme.colors.voteUp;
         if ($state === 'active') return '#667eea';
         if ($state === 'error') return '#ef4444';
         return theme.colors.border;
@@ -890,7 +893,7 @@ const BalanceComparisonValue = styled.span`
     theme,
     $highlight,
     $dim
-}) => $highlight ? '#48bb78' : $dim ? theme.colors.subtleText : theme.colors.text};
+}) => $highlight ? theme.colors.voteUp : $dim ? theme.colors.subtleText : theme.colors.text};
 `;
 
 // Derived address display

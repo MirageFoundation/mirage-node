@@ -58,8 +58,8 @@ const SuccessPill = styled.span`
   gap: 0.3rem;
   padding: 0.22rem 0.5rem;
   border-radius: 999px;
-  background: rgba(16, 185, 129, 0.18);
-  color: #10b981;
+  background: ${({ theme }) => theme.colors.buttonSuccessBg};
+  color: ${({ theme }) => theme.colors.voteUp};
   font-size: 0.6rem;
   font-weight: 600;
 

@@ -163,7 +163,7 @@ const SuccessIcon = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(22, 163, 74, 0.14);
+  background: ${({ theme }) => theme.colors.buttonSuccessBg};
   color: ${({ theme }) => theme.colors.voteUp};
   font-size: 1.1rem;
   line-height: 1;
