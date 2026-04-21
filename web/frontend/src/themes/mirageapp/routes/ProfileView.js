@@ -1,3 +1,4 @@
+import React, { useCallback, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiChevronRight, HiShare, HiGift, HiPencilSquare, HiClipboardDocument, HiCheck } from "react-icons/hi2";
@@ -9,6 +10,10 @@ import { useProfile } from "../../../logic/useProfile";
 import { useBlocks } from "../../../logic/useBlocks";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
+import { FeedViewToggle, loadViewMode, saveViewMode } from "../ListFeedView.js";
+import { getAuthorColor } from "../../../utils/tierColors";
+import { Link } from "react-router-dom";
+import MarkdownRenderer from "../components/MarkdownRenderer";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -742,6 +747,17 @@ const TabsRow = styled.div`
     flex-wrap: wrap;
 `;
 
+/** Right-side slot in `TabsRow` — hosts the feed view toggle on the
+ *  Submissions tab (mirrors the home-feed toolbar). Pushed to the right
+ *  edge with `margin-left: auto` so it stays out of the way even when
+ *  the tab buttons wrap on narrow screens. */
+const TabsRowRight = styled.div`
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+`;
+
 /** Pill tab — ghost when inactive (transparent), filled on hover + active. Mirrors the `comment`/`share` pills' hover behaviour. */
 const TabButton = styled.button`
     appearance: none;
@@ -780,7 +796,7 @@ const ProfileShellBody = styled(ContainerBody)`
 
 /** Breathing room between the tabs row and the first content block. */
 const TabContent = styled.div`
-    padding-top: 0.4rem;
+    padding-top: ${({ $flush }) => ($flush ? '0' : '0.4rem')};
 `;
 
 /** Section header — primary `text` color (was `subtleText`). No inline rule. */
@@ -903,6 +919,201 @@ const IconActionButton = styled.button`
 
 // (no footer actions here; sign out moved to header menu)
 
+/* -------------------------------------------------------------------------- */
+/* Comments-tab row                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Simplified list row used for the Comments tab (and only the Comments
+ *  tab). Per the user's profile-comments spec the row is:
+ *
+ *   ┌────┬───────────────────────────────────────────┐
+ *   │    │ #topic · @user · time                      │  ← row 1 (header)
+ *   │ AV │ title / first-line snippet                 │  ← row 2 (title)
+ *   └────┴───────────────────────────────────────────┘
+ *
+ * The full CardView / CompactRow footer (vote / comment / share pill row)
+ * is intentionally dropped here — comments are read-first navigation
+ * shortcuts, not action targets. The avatar is half the CompactRow
+ * thumbnail size (84 → 42 desktop, 68 → 34 mobile) to match the
+ * lighter density of a comment row vs. a post card. */
+const CommentRoot = styled.article`
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.5rem 1rem 0.4rem;
+    margin: 4px 0;
+    background: ${({ theme }) => theme.colors.bg};
+    border: 1px solid transparent;
+    border-radius: 8px;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+
+    &:hover { background: ${({ theme }) => theme.colors.hoverBg}; }
+
+    @media (max-width: 600px) {
+        padding: 0.45rem 0.85rem 0.35rem;
+        border-radius: 6px;
+    }
+`;
+
+/* Row slot owns the between-row divider so it sits OUTSIDE the card
+ * (matches the Submissions tab's `RowSlot` pattern). The card's 4px
+ * vertical margin creates breathing room between the hover background
+ * and the divider, so hover never visually touches the separator. */
+const CommentRowSlot = styled.div`
+    position: relative;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+    &:last-child {
+        border-bottom: none;
+    }
+`;
+
+const CommentHeader = styled.div`
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.3rem;
+    min-width: 0;
+    font-size: 0.62rem;
+    font-weight: 400;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    line-height: 1.2;
+`;
+
+const CommentTopicLink = styled(Link)`
+    font-weight: 500;
+    font-size: 0.62rem;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    text-decoration: none;
+    &:hover { color: ${({ theme }) => theme.colors.text}; text-decoration: none; }
+`;
+
+const CommentUserLink = styled(Link)`
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.feedCtrlText};
+    font-weight: 500;
+    font-size: 0.62rem;
+    text-decoration: none;
+    &:hover { color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text}; }
+`;
+
+const CommentDot = styled.span`
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+`;
+
+const CommentTime = styled.span`
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.62rem;
+    font-weight: 400;
+`;
+
+const CommentBody = styled.div`
+    display: block;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    margin-top: 0.05rem;
+
+    /* Tighten default markdown spacing so a reply reads as a compact
+     * block, not a full article. Matches the density of the CompactRow
+     * expanded body used on home feed. */
+    & > *:first-child { margin-top: 0; }
+    & > *:last-child { margin-bottom: 0; }
+    p { margin: 0.25rem 0; }
+    pre { margin: 0.35rem 0; }
+    ul, ol { margin: 0.25rem 0; padding-left: 1.2rem; }
+`;
+
+function formatCommentAge(ts) {
+    if (!Number.isFinite(ts) || ts <= 0) return '';
+    const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+    if (diff < 60) return `${diff}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
+    if (diff < 2592000) return `${Math.floor(diff / 604800)}w`;
+    if (diff < 31536000) return `${Math.floor(diff / 2592000)}mo`;
+    return `${Math.floor(diff / 31536000)}y`;
+}
+
+/** Single comment row. Click anywhere on the row to open the parent
+ *  thread (so the user can see the reply in context). Shows the full
+ *  reply body with no truncation and no avatar — the header (topic /
+ *  user / time) sits above the raw content. */
+function ProfileCommentRow({ post }) {
+    if (!post || !post.post_id) return null;
+    if (post.deleted || post.hidden_client) return null;
+
+    const authorAddress = post.user_id || post.author || '';
+    const displayAuthor = (() => {
+        if (typeof post.username === 'string' && post.username.trim()) return post.username.trim();
+        if (typeof authorAddress === 'string' && authorAddress.length > 0) {
+            return `${authorAddress.slice(0, 8)}…`;
+        }
+        return 'anonymous';
+    })();
+    const authorColor = getAuthorColor(post.author_level, post.author_is_new);
+
+    let ts = Number(post.timestamp);
+    if (!Number.isFinite(ts)) ts = Math.floor(Date.now() / 1000);
+    if (ts > 1e12) ts = Math.floor(ts / 1000);
+
+    // Topic resolution: prefer the row's own `topic`, then `root_topic`
+    // (parent post's topic). `useProfile.js` synthesizes a `comment-<short>`
+    // placeholder when neither is present — we surface that too so every
+    // comment row has a topic chip, and the chip links back to the parent
+    // thread via the usual `/t/<topic>` route.
+    const rawTopic = typeof post.topic === 'string' ? post.topic.trim() : '';
+    const rootTopic = typeof post.root_topic === 'string' ? post.root_topic.trim() : '';
+    const displayTopic = rawTopic || rootTopic;
+    const hasRealTopic = !!displayTopic;
+    const postId = String(post.post_id);
+    const linkTarget = `/p/${postId}`;
+
+    // Show the full reply body. useProfile.js synthesizes a truncated
+    // `title` (first 80 chars + ellipsis) for the FeedRow renderer — we
+    // bypass it entirely and read `content` directly so nothing is cut.
+    const fullBody = (typeof post.content === 'string' && post.content.trim())
+        ? post.content
+        : (typeof post.title === 'string' ? post.title : '(reply)');
+
+    return (
+        <CommentRowSlot>
+            <CommentRoot as={Link} to={linkTarget} role="link" tabIndex={0} style={{ textDecoration: 'none' }}>
+            <CommentHeader>
+                {hasRealTopic && (
+                    <>
+                        <CommentTopicLink to={`/t/${encodeURIComponent(displayTopic)}`} onClick={e => e.stopPropagation()}>
+                            #{displayTopic}
+                        </CommentTopicLink>
+                        <CommentDot>·</CommentDot>
+                    </>
+                )}
+                <CommentUserLink
+                    to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
+                    onClick={e => e.stopPropagation()}
+                    $tierColor={authorColor}
+                >
+                    @{displayAuthor}
+                </CommentUserLink>
+                <CommentDot>·</CommentDot>
+                <CommentTime>{formatCommentAge(ts)}</CommentTime>
+            </CommentHeader>
+            <CommentBody onClick={e => e.stopPropagation()}>
+                <MarkdownRenderer text={fullBody} />
+            </CommentBody>
+            </CommentRoot>
+        </CommentRowSlot>
+    );
+}
+
 //
 
 export default function ProfileView({
@@ -911,6 +1122,19 @@ export default function ProfileView({
     const { caps } = useTheme();
     const profileHideFilterSelect = caps.profileHideFilterSelect;
     const profilePostsFullWidth = caps.profilePostsFullWidth;
+    /**
+     * Submissions-tab feed view toggle. The home feed owns the same
+     * `loadViewMode()` / `saveViewMode()` pair in localStorage, so the
+     * two surfaces stay in sync by default. The `key={profileFeedView}`
+     * on `FeedComponent` forces `ListFeedView` to remount when the user
+     * flips the toggle — `ListFeedView` reads `loadViewMode()` only on
+     * mount, so a remount is the cleanest way to pick up the change.
+     */
+    const [profileFeedView, setProfileFeedView] = useState(() => loadViewMode());
+    const handleProfileFeedViewChange = useCallback((next) => {
+        setProfileFeedView(next);
+        saveViewMode(next);
+    }, []);
     const {
         navigate,
         theme,
@@ -1132,8 +1356,16 @@ export default function ProfileView({
                                 {VALID_TABS.map(tab => <TabButton key={tab} type="button" role="tab" aria-selected={activeTab === tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
                                     {tab.charAt(0).toUpperCase() + tab.slice(1)}
                                 </TabButton>)}
+                                {activeTab === 'submissions' && (
+                                    <TabsRowRight>
+                                        <FeedViewToggle
+                                            viewMode={profileFeedView}
+                                            onChange={handleProfileFeedViewChange}
+                                        />
+                                    </TabsRowRight>
+                                )}
                             </TabsRow>
-                            <TabContent>
+                            <TabContent $flush={isPostsTab}>
                         {activeTab === 'profile' && <>
                             <ProfileFieldRow>
                                 <Label>Username:</Label>
@@ -1407,7 +1639,7 @@ export default function ProfileView({
                             </ProfileFieldRow>
                         </>}
 
-                        {isPostsTab && profileUsesListFeed && <>
+                        {activeTab === 'submissions' && profileUsesListFeed && <>
                             {isLoadingRecentPosts && recentPosts.length === 0 && (
                                 <FeedCardSkeletonList count={4} />
                             )}
@@ -1415,9 +1647,38 @@ export default function ProfileView({
                                 color: theme.colors.voteDown
                             }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
                             {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
-                            {recentPosts.length > 0 && <FeedComponent posts={recentPosts} state={state} showSortTabs={false} bleedShell={false} />}
+                            {recentPosts.length > 0 && (
+                                <FeedComponent
+                                    key={profileFeedView}
+                                    posts={recentPosts}
+                                    state={state}
+                                    showSortTabs={false}
+                                    bleedShell={false}
+                                />
+                            )}
                             {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
                                 <FeedCardSkeleton />
+                            )}
+                            <div ref={recentBottomSentinelRef} style={{
+                                width: '100%',
+                                height: '20px',
+                                minHeight: '20px'
+                            }} />
+                        </>}
+
+                        {activeTab === 'comments' && profileUsesListFeed && <>
+                            {isLoadingRecentPosts && recentPosts.length === 0 && (
+                                <ListRowSkeletonList count={6} hasAvatar={false} showMeta={true} />
+                            )}
+                            {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
+                                color: theme.colors.voteDown
+                            }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
+                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No comments yet.</SubtleMono></ProfilePostsTabGutter>}
+                            {recentPosts.length > 0 && recentPosts.map(post => (
+                                <ProfileCommentRow key={post.post_id} post={post} />
+                            ))}
+                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                <ListRowSkeleton hasAvatar={false} showMeta={false} />
                             )}
                             <div ref={recentBottomSentinelRef} style={{
                                 width: '100%',

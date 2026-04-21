@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
 import { InfoPanelSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
+import ShowMoreButton from "../components/ShowMoreButton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useStats, TIER_NAMES, TIER_COLORS } from "../../../logic/useStats";
 
@@ -457,24 +458,6 @@ const ClaimedTag = styled.div`
     text-transform: uppercase;
     letter-spacing: 0.04em;
     margin-top: 0.15rem;
-`;
-
-const LoadMoreBtn = styled.button`
-    padding: 0.55rem;
-    background: transparent;
-    border: 1px dashed ${({ theme }) => theme.colors.border};
-    border-radius: 6px;
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-family: inherit;
-    font-size: 0.72rem;
-    font-weight: 500;
-    cursor: ${({ disabled }) => (disabled ? 'wait' : 'pointer')};
-    transition: border-color 0.15s ease, color 0.15s ease;
-
-    &:hover:not(:disabled) {
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-        color: ${({ theme }) => theme.colors.text};
-    }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -1284,12 +1267,12 @@ export default function StatsView() {
                                 </RewardRow>
                             ))}
                             {payoutsHasMore && (
-                                <LoadMoreBtn
+                                <ShowMoreButton
                                     onClick={() => fetchRewardHistory(payouts.length, true)}
-                                    disabled={payoutsLoading}
+                                    loading={payoutsLoading}
                                 >
-                                    {payoutsLoading ? 'Loading…' : 'Load more'}
-                                </LoadMoreBtn>
+                                    Show more
+                                </ShowMoreButton>
                             )}
                         </>
                     ) : payoutsLoading ? (

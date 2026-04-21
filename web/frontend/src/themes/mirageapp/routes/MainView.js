@@ -4,6 +4,7 @@ import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
+import ShowMoreButton from "../components/ShowMoreButton.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
@@ -794,26 +795,6 @@ const MainFeedPanel = styled.div`
     background: ${({ theme }) => theme.colors.bg};
 `;
 
-const LoadMoreButton = styled.button`
-    display: block;
-    width: 100%;
-    padding: 0.75rem 0;
-    margin-top: 0.25rem;
-    border: none;
-    background: transparent;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.85rem;
-    cursor: pointer;
-    text-align: center;
-    &:hover {
-        color: ${({
-    theme
-}) => theme.colors.text};
-    }
-`;
-
 /**
  * LoadingCard — flat list row, same surface as ListFeedView (no inset card / no body bg gaps)
  */
@@ -1532,9 +1513,9 @@ const MainView = ({
                             width: '100%',
                             minHeight: '1px'
                         }}>
-                            {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && <LoadMoreButton type="button" onClick={loadMore}>
-                                Load more
-                            </LoadMoreButton>}
+                            {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && (
+                                <ShowMoreButton onClick={loadMore}>Show more</ShowMoreButton>
+                            )}
                         </div>}
                     </ModernPostFeed>
                 </MainFeedPanel>
