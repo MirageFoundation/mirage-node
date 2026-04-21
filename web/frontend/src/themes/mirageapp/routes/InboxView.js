@@ -17,6 +17,8 @@ import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { formatMirage } from "../../../utils/formatters";
 import { useInbox, formatAwardLabel } from "../../../logic/useInbox";
 import { formatTimeAgo } from "../../../logic/useAgents";
+import InlineMedia from "../components/InlineMedia";
+import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
 
 /**
  * InboxView — `mirageapp` Plan 05 sub-plan 01.
@@ -326,13 +328,45 @@ const ReplyContent = styled.div`
     @media (max-width: 600px) {
         margin-left: 1.55rem;
     }
+
+    /* Stack plain-text fragments and inline media vertically so a GIF
+     * or image embedded in a reply renders as its own block instead of
+     * fighting with the surrounding prose on a single flex line. */
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+`;
+
+/* Wraps an `InlineMedia` block inside an inbox row so images / GIFs /
+ * videos stay capped to the reply column width with a soft rounded
+ * border — matches the look of media blocks inside feed cards. */
+const InboxMediaWrap = styled.div`
+    max-width: 320px;
+    max-height: 240px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.surface2};
+    display: block;
+
+    img, video {
+        max-width: 100%;
+        max-height: 240px;
+        display: block;
+    }
 `;
 
 const DonationAmount = styled.div`
     margin-left: 1.65rem;
+    /* Match the regular ReplyContent body metrics (size / weight /
+     * line-height) so donation rows do not read as visually heavier
+     * than every other inbox message. Color stays on the shared
+     * voteUp green token (#16A34A) used for positive-amount
+     * indicators across the app (vote pills, success banners, quest
+     * claim state). */
     color: ${({ theme }) => theme.colors.voteUp};
-    font-size: 0.7rem;
-    font-weight: 700;
+    font-size: 0.68rem;
+    line-height: 1.5;
 
     @media (max-width: 600px) {
         margin-left: 1.55rem;
@@ -423,6 +457,57 @@ function truncateParent(content) {
     const single = String(content).replace(/\s+/g, ' ').trim();
     if (single.length <= PARENT_PREVIEW_MAX) return single;
     return single.slice(0, PARENT_PREVIEW_MAX).trimEnd() + '…';
+}
+
+/* Pull every http(s) URL out of a content string. Returns a list of
+ * `{ type, url, start, end }` tokens for URLs that look like image or
+ * video media, along with the raw indices so we can splice them out of
+ * the text when rendering. Non-media URLs are ignored here and left in
+ * the text (rendered as plain text / clickable link by the caller). */
+function extractInboxMediaTokens(content) {
+    if (!content) return [];
+    const out = [];
+    const re = /https?:\/\/[^\s<>"')]+/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const url = m[0].replace(/[.,;:!?)]+$/, '');
+        const start = m.index;
+        const end = start + url.length;
+        if (isLikelyImageUrl(url)) out.push({ type: 'image', url, start, end });
+        else if (isLikelyVideoUrl(url)) out.push({ type: 'video', url, start, end });
+    }
+    return out;
+}
+
+/* Render inbox reply / parent body text with inline image/GIF/video
+ * previews instead of a raw link. Bare media URLs (gif, jpg, mp4,
+ * cloudflarestream, imagedelivery, youtube, redgifs, …) become an
+ * InlineMedia block; non-media text stays on its own line. Multiple
+ * media URLs in a single message render as multiple thumbnails stacked
+ * vertically — matching how the feed card view renders them. */
+function renderInboxBody(content) {
+    if (!content || typeof content !== 'string') return null;
+    const tokens = extractInboxMediaTokens(content);
+    if (tokens.length === 0) return content;
+    const parts = [];
+    let cursor = 0;
+    tokens.forEach((tok, idx) => {
+        if (tok.start > cursor) {
+            const text = content.slice(cursor, tok.start).trim();
+            if (text) parts.push(<span key={`t-${idx}`}>{text}</span>);
+        }
+        parts.push(
+            <InboxMediaWrap key={`m-${idx}`} onClick={e => e.stopPropagation()}>
+                <InlineMedia url={tok.url} />
+            </InboxMediaWrap>
+        );
+        cursor = tok.end;
+    });
+    if (cursor < content.length) {
+        const tail = content.slice(cursor).trim();
+        if (tail) parts.push(<span key="t-tail">{tail}</span>);
+    }
+    return parts;
 }
 
 export default function InboxView({ state }) {
@@ -584,11 +669,11 @@ export default function InboxView({ state }) {
                             <>
                                 {reply.parent_content && (
                                     <ReplyContent>
-                                        <ParentPreview>{reply.parent_content}</ParentPreview>
+                                        <ParentPreview>{renderInboxBody(reply.parent_content)}</ParentPreview>
                                     </ReplyContent>
                                 )}
                                 {reply.reply_content && (
-                                    <QuoteBlock>{truncateWords(reply.reply_content, 50)}</QuoteBlock>
+                                    <QuoteBlock>{renderInboxBody(truncateWords(reply.reply_content, 50))}</QuoteBlock>
                                 )}
                             </>
                         );
@@ -599,7 +684,7 @@ export default function InboxView({ state }) {
                             </DonationAmount>
                         );
                     } else if (reply.reply_content && !isSpecialEvent) {
-                        bodyNode = <ReplyContent>{reply.reply_content}</ReplyContent>;
+                        bodyNode = <ReplyContent>{renderInboxBody(reply.reply_content)}</ReplyContent>;
                     }
                     const hasBody = Boolean(bodyNode);
 
