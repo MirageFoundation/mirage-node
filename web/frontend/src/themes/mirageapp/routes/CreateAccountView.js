@@ -64,14 +64,14 @@ const FeatureIcon = styled.div`
   justify-content: center;
   font-size: 0.85rem;
   line-height: 1;
-  background: ${({ $tone }) =>
+  background: ${({ $tone, theme }) =>
     $tone === "purple"
       ? "rgba(102, 126, 234, 0.18)"
       : $tone === "green"
-        ? "rgba(16, 185, 129, 0.18)"
+        ? theme.colors.buttonSuccessBg
         : "rgba(245, 158, 11, 0.18)"};
-  color: ${({ $tone }) =>
-    $tone === "purple" ? "#667eea" : $tone === "green" ? "#10b981" : "#f59e0b"};
+  color: ${({ $tone, theme }) =>
+    $tone === "purple" ? "#667eea" : $tone === "green" ? theme.colors.voteUp : "#f59e0b"};
 `;
 
 const FeatureBody = styled.div`
@@ -132,8 +132,8 @@ const PreviewBadge = styled.span`
   gap: 0.25rem;
   padding: 0.22rem 0.45rem;
   border-radius: 999px;
-  background: rgba(16, 185, 129, 0.16);
-  color: #10b981;
+  background: ${({ theme }) => theme.colors.buttonSuccessBg};
+  color: ${({ theme }) => theme.colors.voteUp};
   font-size: 0.6rem;
   font-weight: 600;
 

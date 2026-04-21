@@ -33,7 +33,7 @@ const WordCount = styled.span`
   border-radius: 999px;
   background: ${({ theme, $isValid }) =>
     $isValid
-      ? (theme.name === 'dark' ? 'rgba(52, 199, 89, 0.12)' : 'rgba(52, 199, 89, 0.1)')
+      ? theme.colors.buttonSuccessBg
       : (theme.name === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)')};
   color: ${({ theme, $isValid }) =>
     $isValid ? theme.colors.voteUp : theme.colors.subtleText};
@@ -43,7 +43,7 @@ const WordCount = styled.span`
   letter-spacing: 0.01em;
   border: 1px solid ${({ theme, $isValid }) =>
     $isValid
-      ? (theme.name === 'dark' ? 'rgba(52, 199, 89, 0.2)' : 'rgba(52, 199, 89, 0.18)')
+      ? theme.colors.buttonSuccessBorder
       : theme.colors.border};
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 `;

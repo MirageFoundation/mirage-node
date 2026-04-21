@@ -2004,15 +2004,15 @@ function ViewPostView({
         }
         if (suspendSuccess[post.post_id]) {
             return <div style={{
-                background: 'rgba(34, 197, 94, 0.1)',
-                border: '1px solid #22c55e',
+                background: 'rgba(22, 163, 74, 0.18)',
+                border: '1px solid #16A34A',
                 borderRadius: '3px',
                 padding: '0.75rem 1rem',
                 margin: '0.5rem 0',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                color: '#16a34a',
+                color: '#16A34A',
                 fontSize: '0.8rem'
             }}>
                 <span>✓</span>
