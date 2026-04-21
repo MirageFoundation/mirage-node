@@ -334,19 +334,27 @@ const ActionIconChip = styled.button`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
+    gap: 0.3rem;
+    width: ${({ $success }) => ($success ? 'auto' : '32px')};
     height: 32px;
-    padding: 0;
+    padding: ${({ $success }) => ($success ? '0 12px' : '0')};
     border-radius: 9999px;
     border: none;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme, $danger }) => ($danger ? theme.colors.voteDown : theme.colors.text)};
+    background: ${({ theme, $success }) =>
+        $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconBg};
+    color: ${({ theme, $danger, $success }) =>
+        $success ? theme.colors.voteUp : $danger ? theme.colors.voteDown : theme.colors.text};
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1;
     cursor: pointer;
     text-decoration: none;
     /* No transform — icon must not shift on hover / press. */
-    transition: background 0.12s ease;
+    transition: background 0.12s ease, color 0.12s ease, padding 0.12s ease, width 0.12s ease;
 
-    &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
+    &:hover { background: ${({ theme, $success }) =>
+        $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconHoverBg}; }
 
     svg {
         width: 15px;
@@ -481,21 +489,10 @@ const BlockIcon = (p) => (
     </svg>
 );
 
-/* Share success toast rendered below the action row when the share link is
- * copied, mirroring bluemoon's `ShareSuccessMessage`. */
-const ShareSuccessMessage = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: 6px;
-    padding: 0.55rem 0.85rem;
-    margin-top: 0.4rem;
-    color: #22c55e;
-    font-size: 0.75rem;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-`;
+/* Share success feedback is now inline on the share button itself
+ * ($success state on ActionIconChip swaps icon → check + "Link copied"
+ * label). The old bottom toast was removed to match the profile-card
+ * share pattern. */
 
 /* Feed-bucket → inline label map, mirroring bluemoon/CardView. */
 const FEED_BUCKET_LABELS = {
@@ -1150,19 +1147,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 <ActionIconChip
                     type="button"
                     onClick={handleShare}
-                    title={shareCopied ? 'Copied!' : 'Share'}
-                    aria-label="Share post"
+                    title={shareCopied ? 'Link copied!' : 'Share'}
+                    aria-label={shareCopied ? 'Link copied' : 'Share post'}
+                    aria-live="polite"
+                    $success={shareCopied}
                 >
-                    <ShareIcon />
+                    {shareCopied ? (
+                        <>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9.55 17.54l-4.24-4.24 1.41-1.41 2.83 2.83 7.07-7.07 1.41 1.41z" fill="currentColor" />
+                            </svg>
+                            <span>Link copied</span>
+                        </>
+                    ) : (
+                        <ShareIcon />
+                    )}
                 </ActionIconChip>
             </ActionRow>
-
-            {shareCopied && (
-                <ShareSuccessMessage onClick={stop} data-no-card-click>
-                    <span>✓</span>
-                    link copied to clipboard
-                </ShareSuccessMessage>
-            )}
 
             {footer}
             {/**
