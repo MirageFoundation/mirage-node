@@ -32,7 +32,7 @@ Backup storage:
 What gets backed up:
     - ~/.mirage/node/data/       - Full blockchain data and state
     - ~/.mirage/node/config/     - Node configuration, genesis, validator keys (priv_validator_key.json)
-    - ~/.mirage/node/keyring-*   - Keyring (validator account key)
+    - ~/.mirage/node/keyring-*   - Keyring (validator + any other named keys, e.g. rewards_pool)
     - ~/.mirage/postgres/        - PostgreSQL data directory
     - ~/.mirage/env/             - Environment files
     - ~/.mirage/orchestrator/    - Orchestrator files (Solana keypair)
@@ -47,8 +47,11 @@ Restore modes:
 
     --migrate:
         Use when restoring a DIFFERENT server using another server's backup data.
-        The backup's identity files (priv_validator_key.json, keyring) are deleted
-        and new ones are derived from your mnemonic.
+        The backup's identity files (priv_validator_key.json, node_key.json) are
+        deleted and new ones are derived from your mnemonic. Inside the keyring,
+        only the `validator` account key is replaced from the mnemonic; every
+        other key (e.g. `rewards_pool`) is preserved from the backup so the
+        target node keeps its full signing capability.
         You'll still need to manually set up the orchestrator afterward.
         Must use --file to specify which server's backup to use.
 
@@ -218,9 +221,7 @@ def validate_mnemonic(mnemonic: str) -> None:
         sys.exit(1)
 
 
-def verify_derived_consensus_key_matches_onchain(
-    conn: str, target_host: str, allow_change: bool
-) -> None:
+def verify_derived_consensus_key_matches_onchain(conn: str, target_host: str, allow_change: bool) -> None:
     """After --migrate, verify the derived consensus key matches the target validator's
     on-chain consensus pubkey. Abort loudly on mismatch unless allow_change is True.
 
@@ -244,8 +245,8 @@ def verify_derived_consensus_key_matches_onchain(
         sys.exit(1)
 
     valoper = run(
-        f"ssh {conn} \"docker exec mirage {miraged_path} keys show validator --bech val -a "
-        f"--home /root/.mirage/node --keyring-backend test 2>/dev/null\"",
+        f'ssh {conn} "docker exec mirage {miraged_path} keys show validator --bech val -a '
+        f'--home /root/.mirage/node --keyring-backend test 2>/dev/null"',
         capture=True,
     ).strip()
     if not valoper.startswith("miragevaloper"):
@@ -255,15 +256,15 @@ def verify_derived_consensus_key_matches_onchain(
         )
         sys.exit(1)
 
-    peers_line = run(
-        f"ssh {conn} 'grep ^PERSISTENT_PEERS= /root/.mirage/env/node.env | cut -d= -f2-'",
-        capture=True,
-    ).strip().strip('"')
-    peer_ips = [
-        p.split("@", 1)[1].split(":", 1)[0]
-        for p in peers_line.split(",")
-        if "@" in p
-    ]
+    peers_line = (
+        run(
+            f"ssh {conn} 'grep ^PERSISTENT_PEERS= /root/.mirage/env/node.env | cut -d= -f2-'",
+            capture=True,
+        )
+        .strip()
+        .strip('"')
+    )
+    peer_ips = [p.split("@", 1)[1].split(":", 1)[0] for p in peers_line.split(",") if "@" in p]
     peer_ips = [ip for ip in peer_ips if ip and ip != target_host]
     if not peer_ips:
         print(
@@ -290,8 +291,7 @@ def verify_derived_consensus_key_matches_onchain(
 
     if onchain_pub is None:
         print(
-            f"ERROR: could not query on-chain validator record for {valoper} via any peer "
-            f"({', '.join(peer_ips)})",
+            f"ERROR: could not query on-chain validator record for {valoper} via any peer " f"({', '.join(peer_ips)})",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -727,11 +727,19 @@ def restore(
             # -------------------------------------------------------------------------
             # Step 7: Delete identity files for --migrate (cross-server restore)
             # node_key.json = P2P identity, priv_validator_key.json = validator identity
+            #
+            # NOTE on the keyring: we deliberately do NOT wipe /root/.mirage/node/
+            # keyring-* here. Historically this step did a wholesale `rm -rf`, which
+            # silently destroyed every non-validator key in the backup (e.g. the
+            # `rewards_pool` key used by the quest payout path). Instead we leave
+            # the keyring intact and, once the temporary container is up, issue a
+            # targeted `miraged keys delete validator` followed by `keys add
+            # validator --recover` — which replaces just the validator entry from
+            # the mnemonic while preserving every other named key.
             # -------------------------------------------------------------------------
             status("Deleting identity files from backup (--migrate mode)...")
             run(f"ssh {conn} 'rm -f /root/.mirage/node/config/node_key.json'")
             run(f"ssh {conn} 'rm -f /root/.mirage/node/config/priv_validator_key.json'")
-            run(f"ssh {conn} 'rm -rf /root/.mirage/node/keyring-*'")
 
             # Remove target host from persistent_peers (backup may have it as a peer)
             status("Removing self from persistent_peers...")
@@ -892,6 +900,35 @@ echo "PostgreSQL restore complete"
         ).strip()
         status(f"Using miraged at: {miraged_path}")
 
+        # Enumerate what's in the backup keyring BEFORE we touch it, so the operator
+        # has a record of every key that will survive --migrate (validator will be
+        # replaced, everything else is preserved byte-for-byte on disk).
+        status("Inspecting keys carried over from the backup keyring...")
+        pre_list = run(
+            f"ssh {conn} 'docker exec mirage {miraged_path} keys list "
+            f"--home /root/.mirage/node --keyring-backend test --output json 2>/dev/null || echo []'",
+            capture=True,
+        ).strip()
+        try:
+            pre_keys = [k.get("name", "") for k in json.loads(pre_list) if isinstance(k, dict)]
+        except Exception:
+            pre_keys = []
+        preserved = sorted(n for n in pre_keys if n and n != "validator")
+        if preserved:
+            status(f"  Preserving {len(preserved)} non-validator key(s) from backup: {', '.join(preserved)}")
+        else:
+            status("  No non-validator keys found in backup keyring (nothing extra to preserve)")
+
+        # Remove the backup's validator entry (if any) so `keys add --recover`
+        # can import a fresh mnemonic-derived validator without prompting for
+        # overwrite. Tolerate absence: a backup taken before `validator` was
+        # ever added would legitimately have no entry to delete.
+        status("Removing backup's validator entry from keyring (preserves all other keys)...")
+        run(
+            f'ssh {conn} "docker exec mirage {miraged_path} keys delete validator --yes '
+            f'--home /root/.mirage/node --keyring-backend test >/dev/null 2>&1 || true"'
+        )
+
         status("Importing validator account key from mnemonic...")
         subprocess.run(
             f"ssh {conn} 'docker exec -i mirage {miraged_path} keys add validator --recover --home /root/.mirage/node --keyring-backend test'",
@@ -902,6 +939,34 @@ echo "PostgreSQL restore complete"
         )
         # Clear mnemonic from memory
         mnemonic = None
+
+        # Post-condition: every preserved name should still be present, plus the
+        # freshly-imported `validator`. If anything is missing, surface it loudly
+        # — it means the keyring-preservation path is broken and the operator
+        # needs to re-add the key manually before that service breaks.
+        post_list = run(
+            f"ssh {conn} 'docker exec mirage {miraged_path} keys list "
+            f"--home /root/.mirage/node --keyring-backend test --output json 2>/dev/null || echo []'",
+            capture=True,
+        ).strip()
+        try:
+            post_keys = {k.get("name", "") for k in json.loads(post_list) if isinstance(k, dict)}
+        except Exception:
+            post_keys = set()
+        missing = [n for n in preserved if n not in post_keys]
+        if missing:
+            print(
+                f"WARNING: expected preserved keys missing after --migrate: {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            print(
+                "         The target node may fail any operation that depends on these keys\n"
+                "         (e.g. quest reward payouts if `rewards_pool` is missing). Re-add them\n"
+                "         manually before relying on the affected service.",
+                file=sys.stderr,
+            )
+        elif preserved:
+            status(f"  Verified all {len(preserved)} non-validator key(s) survived --migrate")
 
         # Safety guard: verify the consensus key derived from the mnemonic actually
         # matches the target operator's on-chain consensus pubkey. Prevents silently
