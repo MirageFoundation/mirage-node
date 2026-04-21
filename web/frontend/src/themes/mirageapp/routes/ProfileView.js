@@ -510,17 +510,17 @@ const AsideShareBtn = styled.button`
     padding: 0 12px;
     border-radius: 9999px;
     border: none;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme }) => theme.colors.text};
+    background: ${({ theme, $success }) => ($success ? theme.colors.buttonSuccessBg : theme.colors.actionIconBg)};
+    color: ${({ theme, $success }) => ($success ? theme.colors.voteUp : theme.colors.text)};
     font-family: inherit;
     font-size: 0.62rem;
     font-weight: 500;
     line-height: 1;
     cursor: pointer;
     text-decoration: none;
-    transition: background 0.12s ease;
+    transition: background 0.12s ease, color 0.12s ease;
 
-    &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
+    &:hover { background: ${({ theme, $success }) => ($success ? theme.colors.buttonSuccessBg : theme.colors.actionIconHoverBg)}; }
     &:focus { outline: none; }
     &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
 
@@ -1134,6 +1134,44 @@ export default function ProfileView({
     const handleProfileFeedViewChange = useCallback((next) => {
         setProfileFeedView(next);
         saveViewMode(next);
+    }, []);
+    /**
+     * Share-button copy-to-clipboard feedback. Tries `navigator.clipboard`
+     * first (async, requires a secure context) and falls back to a hidden
+     * `<textarea> + document.execCommand('copy')` for http contexts /
+     * older browsers. Flips the label to "Link copied" for 1.8s so the
+     * user gets visible confirmation the click worked.
+     */
+    const [profileShareCopied, setProfileShareCopied] = useState(false);
+    const handleProfileShare = useCallback(async () => {
+        const url = (typeof window !== 'undefined' && window.location && window.location.href)
+            ? window.location.href
+            : '';
+        if (!url) return;
+        let ok = false;
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(url);
+                ok = true;
+            }
+        } catch (_) { /* fall through to legacy path */ }
+        if (!ok && typeof document !== 'undefined') {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = url;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                ok = document.execCommand('copy');
+                document.body.removeChild(ta);
+            } catch (_) { ok = false; }
+        }
+        if (ok) {
+            setProfileShareCopied(true);
+            setTimeout(() => setProfileShareCopied(false), 1800);
+        }
     }, []);
     const {
         navigate,
@@ -1818,10 +1856,15 @@ export default function ProfileView({
                                         </AsideIdentityRow>
                                         {biography && <AsideBio>{biography}</AsideBio>}
                                         <AsideActions>
-                                            <AsideShareBtn type="button" onClick={() => {
-                                                try { navigator.clipboard.writeText(window.location.href); } catch (_) { /* noop */ }
-                                            }} title="Copy profile link">
-                                                <HiShare aria-hidden="true" /> Share
+                                            <AsideShareBtn
+                                                type="button"
+                                                onClick={handleProfileShare}
+                                                title={profileShareCopied ? 'Link copied!' : 'Copy profile link'}
+                                                aria-live="polite"
+                                                $success={profileShareCopied}
+                                            >
+                                                {profileShareCopied ? <HiCheck aria-hidden="true" /> : <HiShare aria-hidden="true" />}
+                                                {profileShareCopied ? 'Link copied' : 'Share'}
                                             </AsideShareBtn>
                                             {!isOwnProfile && profileAddress && hasValidAccount && (
                                                 <AsideGiftSubBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Sub">
