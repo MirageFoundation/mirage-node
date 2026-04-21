@@ -1,173 +1,360 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
+import {
+    HiHashtag,
+    HiMagnifyingGlass,
+    HiXMark,
+} from "react-icons/hi2";
 import Button from "../components/Button.js";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody, CappedPageColumn, OldRedditContentBleed } from "../Layout";
+import {
+    ContentGrid,
+    ModernPostFeed,
+    TabbedContainer,
+    ContainerBody,
+} from "../Layout";
 import { useDiscover, tagColors } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
 
-const TopicsListShell = styled.div`
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
-    background: ${({ theme }) => theme.colors.panel};
+/**
+ * DiscoverView — `mirageapp` Plan 06 sub-plan 07.
+ *
+ * Rules (`docs/guides/web-theme-mirageapp/RULES.md`):
+ *  - R1 search + list sit on `theme.colors.bg`.
+ *  - R2 every color routed through a token (topic tag badge still uses
+ *    `tagColors` from the shared `useDiscover` util which already pairs
+ *    bg/border/text — left unchanged per R4 "do not hard-code tag
+ *    icon / color").
+ *  - R3 no row dividers (matches AgentsView decision).
+ *  - R4 data parity with `themes/bluemoon/routes/DiscoverView.js`;
+ *    visual language from `mirage-mobile-app/src/pages/topics-list-screen.tsx`
+ *    (search pill on top, topic rows with `#topic`, post/comment meta,
+ *    Follow action on the right).
+ *  - R5 search input focuses on `borderStrong` with no blue ring.
+ *  - R7 page heading 1.1rem/700, section label 0.6rem/700 uppercase,
+ *    row title 0.75rem/500, meta 0.62rem/500 subtle.
+ */
 
-    & > *:last-child {
-        border-bottom: none;
+const DiscoverWrap = styled.div`
+    width: 100%;
+    max-width: 720px;
+    margin: -0.75rem 0 0;
+
+    @media (max-width: 1000px) {
+        margin-top: -0.5rem;
+    }
+
+    @media (min-width: 1001px) {
+        [data-sidebar-hidden='true'] & {
+            width: 80%;
+            max-width: none;
+        }
     }
 `;
 
-/** Search row — padded like topic rows; rule below is a sibling `OldRedditContentBleed` so it spans shell width. */
-const TopicsSearchStrip = styled.div`
-    background: ${({ theme }) => theme.colors.panel};
-    margin-top: ${({ theme }) => theme.layout.tabbedMarginTop};
+const HeaderRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    padding: 0.25rem 1rem 0.5rem;
 `;
 
-/** Full-width divider under search (bleed cancels shell horizontal padding; search + list stay in `CappedPageColumn`). */
-const TopicsSearchFullBleedRule = styled.div`
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    width: 100%;
-    box-sizing: border-box;
+const HeaderTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
 `;
 
-/** No extra horizontal inset — shell `Container` already matches the top bar; avoids double padding vs. MIRAGE. */
-const TopicsSearchInner = styled.div`
+const SearchRow = styled.div`
+    padding: 0 1rem 0.6rem;
+`;
+
+const SearchField = styled.label`
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     width: 100%;
-    box-sizing: border-box;
-    padding: 0.4rem 0;
-`;
-
-const SearchInputWedged = styled.input`
-    width: 100%;
-    padding: 0.25rem 0.5rem;
-    margin: 0;
-    background-color: ${({ theme }) => theme.colors.panelAlt};
+    height: 2.1rem;
+    padding: 0 0.6rem;
+    background: ${({ theme }) => theme.colors.bg};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: ${({ theme }) => theme.layout.inputRadius};
-    color: ${({ theme }) => theme.colors.text};
-    font-size: ${({ theme }) => theme.layout.inputSize};
-    font-family: inherit;
-    box-sizing: border-box;
-    &:focus {
-        outline: none;
-        border-color: ${({ theme }) => theme.colors.link};
-    }
-`;
-
-const DiscoverContainerBody = styled(ContainerBody)`
-    padding: 0;
-`;
-
-const DiscoverTabbedContainer = styled(TabbedContainer)`
-    margin-top: 0;
-`;
-
-const ItemRow = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.4rem 0;
-    font-size: ${({
-    theme
-}) => theme.layout.smallSize};
-    gap: 0.4rem;
-    transition: background-color 0.12s ease;
+    border-radius: 9999px;
+    transition: border-color 0.15s ease;
 
     &:hover {
-        background: ${({ theme }) => theme.colors.accentHover};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
     }
 
-    @media (max-width: 700px) {
-        flex-direction: column;
-        align-items: flex-start;
+    &:focus-within {
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+    }
+
+    svg.search-icon {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        color: ${({ theme }) => theme.colors.subtleText};
     }
 `;
-const ItemLeft = styled.div`
+
+const SearchInput = styled.input`
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: ${({ theme }) => theme.colors.text};
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 500;
+
+    &::placeholder {
+        color: ${({ theme }) => theme.colors.subtleText};
+    }
+
+    /* Hide the browser's native type="search" clear button — we render our own. */
+    &::-webkit-search-cancel-button,
+    &::-webkit-search-decoration,
+    &::-webkit-search-results-button,
+    &::-webkit-search-results-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+        display: none;
+    }
+`;
+
+const ClearButton = styled.button`
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    border: none;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.subtleText};
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+        color: ${({ theme }) => theme.colors.text};
+    }
+`;
+
+const SectionHeader = styled.div`
     display: flex;
-    flex-direction: row;
-    align-items: baseline;
-    gap: 0.3rem;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1rem 0.35rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+`;
+
+const CountBadge = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    background: ${({ theme }) => theme.colors.surface2};
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    letter-spacing: 0;
+    text-transform: none;
+    line-height: 1.4;
+`;
+
+const List = styled.div`
+    display: flex;
+    flex-direction: column;
+`;
+
+const Row = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.65rem 1rem;
+    background: transparent;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.6rem 0.85rem;
+    }
+`;
+
+const RowIconWrap = styled.span`
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface2};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    svg {
+        width: 15px;
+        height: 15px;
+    }
+`;
+
+const RowMain = styled.div`
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+`;
+
+const TopicLine = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
     flex-wrap: wrap;
 `;
-const ItemRight = styled.div`
-    display: flex;
-    margin-left: auto;
 
-    @media (max-width: 700px) {
-        width: 100%;
+const TopicLink = styled(Link)`
+    color: ${({ theme }) => theme.colors.text};
+    text-decoration: none;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 
-        button {
-            width: 100%;
-        }
+    &:hover {
+        color: ${({ theme }) => theme.colors.link};
     }
 `;
-const Subtle = styled.span`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-weight: bold;
-    font-size: 0.6rem;
-`;
-const ItemLink = styled(Link)`
-    color: ${({
-    theme
-}) => theme.colors.link};
-    text-decoration: none;
-    font-weight: bold;
-    &:hover { color: ${({
-    theme
-}) => theme.colors.linkHover}; }
-`;
-const CountText = styled.span`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-weight: normal;
-    font-size: 0.65rem;
-`;
-const TopicsStatusRow = styled.div`
-    padding: 0.65rem 0;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.7rem;
-`;
 
-const MoreTopicsHint = styled.div`
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.7rem;
-    font-style: italic;
-    text-align: center;
-    padding: 0.5rem 0;
-    border-top: ${({ $showTopDivider, theme }) =>
-        $showTopDivider === false ? 'none' : `1px solid ${theme.colors.border}`};
-`;
 const TagBadge = styled.span`
     display: inline-flex;
     align-items: center;
     padding: 0.05rem 0.35rem;
     border-radius: 999px;
-    background: ${({
-    $tag
-}) => tagColors[$tag]?.bg || tagColors.default.bg};
-    color: ${({
-    $tag
-}) => tagColors[$tag]?.text || tagColors.default.text};
+    background: ${({ $tag }) => tagColors[$tag]?.bg || tagColors.default.bg};
+    color: ${({ $tag }) => tagColors[$tag]?.text || tagColors.default.text};
     font-size: 0.55rem;
     font-weight: 700;
     text-transform: lowercase;
-    border: 1px solid ${({
-    $tag
-}) => tagColors[$tag]?.border || tagColors.default.border};
-    margin-left: 0.3rem;
+    border: 1px solid ${({ $tag }) => tagColors[$tag]?.border || tagColors.default.border};
 `;
-export default function DiscoverView({
-    state
-}) {
+
+const RowMeta = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+`;
+
+const RowActions = styled.div`
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+`;
+
+/* ----- Empty / loading / error states ----- */
+
+const StateBlock = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 2.5rem 1.25rem;
+    text-align: center;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+
+const StateIcon = styled.div`
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+
+    svg {
+        width: 22px;
+        height: 22px;
+        color: ${({ $tone, theme }) =>
+            $tone === 'danger' ? theme.colors.voteDown : theme.colors.subtleText};
+    }
+`;
+
+const StateTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.9rem;
+    font-weight: 700;
+`;
+
+const StateMessage = styled.div`
+    font-size: 0.75rem;
+    line-height: 1.5;
+    max-width: 24rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+
+const LoadingSpinner = styled.div`
+    width: 26px;
+    height: 26px;
+    border: 3px solid ${({ theme }) => theme.colors.border};
+    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+`;
+
+const FootHint = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-align: center;
+    padding: 0.85rem 1rem 0.25rem;
+`;
+
+function formatCountMeta(t) {
+    const posts = Number(t.post_count || 0);
+    const comments = Number(t.comment_count || 0);
+    return `${posts.toLocaleString()} post${posts === 1 ? '' : 's'} · ${comments.toLocaleString()} comment${comments === 1 ? '' : 's'}`;
+}
+
+function getToggleLabel({ isFollowing, hovering, pending, status }) {
+    if (pending) return status || (isFollowing ? 'Unfollowing…' : 'Following…');
+    if (isFollowing) return hovering ? 'Unfollow' : 'Following';
+    return 'Follow';
+}
+
+export default function DiscoverView({ state }) {
     const {
         filteredTopics,
         smallTopicsCount,
@@ -181,90 +368,171 @@ export default function DiscoverView({
         isTopicPending,
         formatTopicStatus,
         isSubscribedTopic,
-        handleSubscribeToggle
-    } = useDiscover({
-        state
-    });
-    return <ContentGrid>
-        <Helmet>
-            <title>Topics | Mirage</title>
-        </Helmet>
-        <ModernPostFeed>
-            <CappedPageColumn>
-                <TopicsSearchStrip>
-                    <TopicsSearchInner>
-                        <SearchInputWedged type="text" placeholder="Search topics..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} aria-label="Search topics" />
-                    </TopicsSearchInner>
-                </TopicsSearchStrip>
-            </CappedPageColumn>
-            <OldRedditContentBleed>
-                <TopicsSearchFullBleedRule aria-hidden="true" />
-            </OldRedditContentBleed>
-            <CappedPageColumn>
-                <DiscoverTabbedContainer>
-                    <ContainerTab>Discover</ContainerTab>
-                    <DiscoverContainerBody>
-                        <TopicsListShell>
-                            {loading ? <TopicsStatusRow>Loading topics...</TopicsStatusRow> : filteredTopics.length === 0 && searchResults.length === 0 && !isSearching ? <TopicsStatusRow>
-                                {searchTerm.trim() ? 'No topics match your search' : 'No topics found'}
-                            </TopicsStatusRow> : <>
-                                {filteredTopics.map(t => {
-                                    const topicLower = t.topic.toLowerCase();
-                                    const isFollowing = isSubscribedTopic(t.topic);
-                                    const isInProgress = isTopicPending(topicLower);
-                                    return <ItemRow key={`topic-${t.topic}`}>
-                                        <ItemLeft>
-                                            <Subtle>#</Subtle>
-                                            <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
-                                            {t.dominant_tag && <TagBadge $tag={normalizeTag(t.dominant_tag)}>{normalizeTag(t.dominant_tag)}</TagBadge>}
-                                            <CountText>
-                                                ({t.post_count || 0} posts, {t.comment_count || 0} comments)
-                                            </CountText>
-                                        </ItemLeft>
-                                        <ItemRight>
-                                            <Button variant={isFollowing && hoverTopic === topicLower ? 'primaryDanger' : isFollowing ? 'subtle' : 'primary'} size="sm" minWidth="follow" disabled={isInProgress} loading={isInProgress} onMouseEnter={() => setHoverTopic(topicLower)} onMouseLeave={() => setHoverTopic(null)} onClick={() => handleSubscribeToggle(t.topic)}>
-                                                {isInProgress ? formatTopicStatus(topicLower) : isFollowing ? hoverTopic === topicLower ? 'Unfollow' : 'Following' : 'Follow'}
-                                            </Button>
-                                        </ItemRight>
-                                    </ItemRow>;
-                                })}
-                                {searchResults.length > 0 && <>
-                                    <MoreTopicsHint $showTopDivider={filteredTopics.length > 0} style={{
-                                        fontStyle: 'normal',
-                                        fontWeight: 600
-                                    }}>
-                                        Topics with fewer than 10 posts
-                                    </MoreTopicsHint>
-                                    {searchResults.map(t => {
-                                        const topicLower = t.topic.toLowerCase();
-                                        const isFollowing = isSubscribedTopic(t.topic);
-                                        const isInProgress = isTopicPending(topicLower);
-                                        return <ItemRow key={`search-${t.topic}`}>
-                                            <ItemLeft>
-                                                <Subtle>#</Subtle>
-                                                <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
-                                                {t.dominant_tag && <TagBadge $tag={normalizeTag(t.dominant_tag)}>{normalizeTag(t.dominant_tag)}</TagBadge>}
-                                                <CountText>
-                                                    ({t.post_count || 0} posts, {t.comment_count || 0} comments)
-                                                </CountText>
-                                            </ItemLeft>
-                                            <ItemRight>
-                                                <Button variant={isFollowing && hoverTopic === topicLower ? 'primaryDanger' : isFollowing ? 'subtle' : 'primary'} size="sm" minWidth="follow" disabled={isInProgress} loading={isInProgress} onMouseEnter={() => setHoverTopic(topicLower)} onMouseLeave={() => setHoverTopic(null)} onClick={() => handleSubscribeToggle(t.topic)}>
-                                                    {isInProgress ? formatTopicStatus(topicLower) : isFollowing ? hoverTopic === topicLower ? 'Unfollow' : 'Following' : 'Follow'}
-                                                </Button>
-                                            </ItemRight>
-                                        </ItemRow>;
-                                    })}
-                                </>}
-                                {isSearching && <TopicsStatusRow>Searching for more topics...</TopicsStatusRow>}
-                                {!searchTerm.trim() && smallTopicsCount > 0 && <MoreTopicsHint>
-                                    and {smallTopicsCount} more topic{smallTopicsCount !== 1 ? 's' : ''} with fewer than 10 posts
-                                </MoreTopicsHint>}
-                            </>}
-                        </TopicsListShell>
-                    </DiscoverContainerBody>
-                </DiscoverTabbedContainer>
-            </CappedPageColumn>
-        </ModernPostFeed>
-    </ContentGrid>;
+        handleSubscribeToggle,
+    } = useDiscover({ state });
+
+    const renderShell = (body) => (
+        <ContentGrid>
+            <Helmet>
+                <title>Topics | Mirage</title>
+            </Helmet>
+            <div>
+                <ModernPostFeed>
+                    <TabbedContainer>
+                        <ContainerBody $fullWidth>
+                            <DiscoverWrap>{body}</DiscoverWrap>
+                        </ContainerBody>
+                    </TabbedContainer>
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>
+    );
+
+    const hasQuery = Boolean(searchTerm.trim());
+    const showSmallHint = !hasQuery && smallTopicsCount > 0;
+
+    const headerBlock = (
+        <>
+            <HeaderRow>
+                <HeaderTitle>Topics</HeaderTitle>
+            </HeaderRow>
+            <SearchRow>
+                <SearchField>
+                    <HiMagnifyingGlass className="search-icon" aria-hidden="true" />
+                    <SearchInput
+                        type="search"
+                        placeholder="Search topics"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        aria-label="Search topics"
+                    />
+                    {hasQuery && (
+                        <ClearButton
+                            type="button"
+                            onClick={() => setSearchTerm('')}
+                            aria-label="Clear search"
+                        >
+                            <HiXMark />
+                        </ClearButton>
+                    )}
+                </SearchField>
+            </SearchRow>
+        </>
+    );
+
+    if (loading) {
+        return renderShell(
+            <>
+                {headerBlock}
+                <StateBlock role="status" aria-live="polite">
+                    <LoadingSpinner />
+                    <StateTitle>Loading topics…</StateTitle>
+                </StateBlock>
+            </>
+        );
+    }
+
+    const topicsEmpty = filteredTopics.length === 0 && searchResults.length === 0 && !isSearching;
+
+    if (topicsEmpty) {
+        return renderShell(
+            <>
+                {headerBlock}
+                <StateBlock>
+                    <StateIcon>
+                        <HiHashtag />
+                    </StateIcon>
+                    <StateTitle>
+                        {hasQuery ? 'No topics match your search' : 'No topics yet'}
+                    </StateTitle>
+                    <StateMessage>
+                        {hasQuery
+                            ? 'Try a different keyword or check your spelling.'
+                            : 'Topics will appear here as the community creates them.'}
+                    </StateMessage>
+                </StateBlock>
+            </>
+        );
+    }
+
+    const renderRow = (t, keyPrefix) => {
+        const topicLower = t.topic.toLowerCase();
+        const isFollowing = isSubscribedTopic(t.topic);
+        const pending = isTopicPending(topicLower);
+        const hovering = hoverTopic === topicLower;
+        const tag = t.dominant_tag ? normalizeTag(t.dominant_tag) : null;
+
+        return (
+            <Row key={`${keyPrefix}-${t.topic}`}>
+                <RowIconWrap aria-hidden="true">
+                    <HiHashtag />
+                </RowIconWrap>
+                <RowMain>
+                    <TopicLine>
+                        <TopicLink to={`/t/${t.topic}`}>#{t.topic}</TopicLink>
+                        {tag && <TagBadge $tag={tag}>{tag}</TagBadge>}
+                    </TopicLine>
+                    <RowMeta>{formatCountMeta(t)}</RowMeta>
+                </RowMain>
+                <RowActions>
+                    <Button
+                        variant={isFollowing && hovering ? 'primaryDanger' : isFollowing ? 'subtle' : 'primary'}
+                        size="sm"
+                        minWidth="5.5rem"
+                        disabled={pending}
+                        loading={pending}
+                        onMouseEnter={() => setHoverTopic(topicLower)}
+                        onMouseLeave={() => setHoverTopic(null)}
+                        onClick={() => handleSubscribeToggle(t.topic)}
+                    >
+                        {getToggleLabel({
+                            isFollowing,
+                            hovering,
+                            pending,
+                            status: formatTopicStatus(topicLower),
+                        })}
+                    </Button>
+                </RowActions>
+            </Row>
+        );
+    };
+
+    return renderShell(
+        <>
+            {headerBlock}
+
+            {filteredTopics.length > 0 && (
+                <>
+                    <SectionHeader>
+                        <span>{hasQuery ? 'Matching topics' : 'All topics'}</span>
+                        <CountBadge>{filteredTopics.length}</CountBadge>
+                    </SectionHeader>
+                    <List>{filteredTopics.map((t) => renderRow(t, 'topic'))}</List>
+                </>
+            )}
+
+            {searchResults.length > 0 && (
+                <>
+                    <SectionHeader>
+                        <span>Topics with fewer than 10 posts</span>
+                        <CountBadge>{searchResults.length}</CountBadge>
+                    </SectionHeader>
+                    <List>{searchResults.map((t) => renderRow(t, 'search'))}</List>
+                </>
+            )}
+
+            {isSearching && (
+                <StateBlock role="status" aria-live="polite">
+                    <LoadingSpinner />
+                    <StateMessage>Searching for more topics…</StateMessage>
+                </StateBlock>
+            )}
+
+            {showSmallHint && (
+                <FootHint>
+                    and {smallTopicsCount} more topic{smallTopicsCount !== 1 ? 's' : ''} with fewer than 10 posts
+                </FootHint>
+            )}
+        </>
+    );
 }
