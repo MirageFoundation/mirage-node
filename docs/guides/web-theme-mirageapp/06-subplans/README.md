@@ -19,13 +19,15 @@ Plan 06 is too broad to ship in one PR. This folder splits it into focused one-P
 | 7 | Agents + Discover + NotFound | List + empty-state styling | ✅ Done | [`07-agents-discover-notfound.md`](./07-agents-discover-notfound.md) |
 | 8 | MobileBottomNav | Full restyle (deferred from Plan 02) | ⏳ Not started | [`08-mobile-bottom-nav.md`](./08-mobile-bottom-nav.md) |
 | 9 | Polish + QA | Spacing / typography / state / responsive / a11y + QA + optional default-theme switch | ⏳ Not started | [`09-polish-and-qa.md`](./09-polish-and-qa.md) |
+| 10 | Loading states + skeletons | Tokenized `Skeleton` primitive + per-route skeleton loaders; remove `Loading…` strings | ⏳ Not started | [`10-loading-states-skeletons.md`](./10-loading-states-skeletons.md) |
 
-Each sub-plan is one PR. Recommended order is **2 → 1 → 3 → 4 → 5 → 7 → 6 → 8 → 9** because:
+Each sub-plan is one PR. Recommended order is **2 → 1 → 3 → 4 → 5 → 7 → 6 → 8 → 10 → 9** because:
 
 - Sub-plan 2 (component restyle) unblocks every other sub-plan — Button/Toast/Tooltip leak into every route, so fixing them first avoids double-work.
 - Profile (1) is highest user-visible impact after components.
 - Bridge (6) has the most complex existing logic; it goes late so we aren't churning on restyle + logic at once.
-- Polish + QA (9) closes the plan.
+- Loading states + skeletons (10) lands after every route has its final layout, so skeletons can mirror the real shapes without rework.
+- Polish + QA (9) closes the plan and sweeps the finished skeletons as part of its dark/light + breakpoint pass.
 
 ---
 
@@ -51,7 +53,7 @@ CI=true npm run build
 
 ## When done
 
-When all nine sub-plans ship, update:
+When all ten sub-plans ship, update:
 
 - `../06-remaining-routes-and-polish.md` → status = ✅ Done
 - `../README.md` → Plan 06 row = ✅ Done
