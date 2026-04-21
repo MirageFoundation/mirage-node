@@ -576,7 +576,7 @@ const CompactFollowBtn = styled.button`
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
     border: 1px solid ${({ $danger, $active, theme }) => ($danger
-        ? theme.colors.voteDown
+        ? theme.colors.buttonDangerBorder
         : $active
             ? theme.colors.border
             : theme.colors.followBtnBg)};
@@ -598,7 +598,7 @@ const CompactFollowBtn = styled.button`
                 ? theme.colors.hoverBg
                 : theme.colors.followBtnBgHover)};
         border-color: ${({ $danger, $active, theme }) => ($danger
-            ? theme.colors.voteDown
+            ? theme.colors.buttonDangerBorder
             : $active
                 ? theme.colors.borderStrong
                 : theme.colors.followBtnBgHover)};
@@ -1829,17 +1829,19 @@ export default function ProfileView({
                                                 </AsideGiftSubBtn>
                                             )}
                                             {!isOwnProfile && address && (
-                                                <CompactFollowBtn
-                                                    type="button"
-                                                    $active={isFollowingProfile && !((isFollowingProfile && followHover) || isUnfollowAction)}
-                                                    $danger={(isFollowingProfile && followHover) || isUnfollowAction}
-                                                    onMouseEnter={() => setFollowHover(true)}
-                                                    onMouseLeave={() => setFollowHover(false)}
-                                                    disabled={isFollowInProgress}
-                                                    onClick={handleFollowToggle}
-                                                >
-                                                    {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
-                                                </CompactFollowBtn>
+                                                <AsideOnlyWhenHeaderHidden>
+                                                    <CompactFollowBtn
+                                                        type="button"
+                                                        $active={isFollowingProfile && !((isFollowingProfile && followHover) || isUnfollowAction)}
+                                                        $danger={(isFollowingProfile && followHover) || isUnfollowAction}
+                                                        onMouseEnter={() => setFollowHover(true)}
+                                                        onMouseLeave={() => setFollowHover(false)}
+                                                        disabled={isFollowInProgress}
+                                                        onClick={handleFollowToggle}
+                                                    >
+                                                        {isFollowInProgress ? formatStatusForPosition(myQueuePosition) || 'Processing' : isFollowingProfile ? followHover ? 'Unfollow' : 'Following' : 'Follow'}
+                                                    </CompactFollowBtn>
+                                                </AsideOnlyWhenHeaderHidden>
                                             )}
                                             {!isOwnProfile && address && isProfileBlocked && (
                                                 <AsideOnlyWhenHeaderHidden>
