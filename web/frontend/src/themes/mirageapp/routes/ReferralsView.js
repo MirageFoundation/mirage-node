@@ -191,9 +191,9 @@ const HeroBadge = styled.span`
     gap: 0.3rem;
     padding: 0.22rem 0.55rem;
     border-radius: 999px;
-    background: ${({ theme }) => theme.colors.bg};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    color: ${({ theme }) => theme.colors.subtleText};
+    background: ${({ $tone, theme }) => $tone === 'danger' ? `${theme.colors.voteDown}14` : theme.colors.bg};
+    border: 1px solid ${({ $tone, theme }) => $tone === 'danger' ? `${theme.colors.voteDown}40` : theme.colors.border};
+    color: ${({ $tone, theme }) => $tone === 'danger' ? theme.colors.voteDown : theme.colors.subtleText};
     font-size: 0.58rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -230,7 +230,8 @@ const ShareLinkPill = styled.div`
     border-radius: 10px;
     background: ${({ theme }) => theme.colors.bg};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    transition: border-color 0.15s ease;
+    opacity: ${({ $disabled }) => $disabled ? 0.8 : 1};
+    transition: border-color 0.15s ease, opacity 0.15s ease;
     overflow: hidden;
 
     &:hover {
@@ -301,6 +302,100 @@ const HeroEmpty = styled.div`
     font-weight: 500;
     line-height: 1.5;
     padding: 0.5rem 0.1rem;
+`;
+
+/* -------------------------------------------------------------------------- */
+/* Toggle — mirrors SettingsView's Toggle (42×24 track, 20px knob)            */
+/* -------------------------------------------------------------------------- */
+
+const ToggleTrack = styled.div`
+    width: 42px;
+    height: 24px;
+    flex: 0 0 42px;
+    border-radius: 12px;
+    background: ${({ $checked, theme }) => $checked ? theme.colors.focusBlue : theme.colors.surface3};
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
+`;
+
+const ToggleKnob = styled.div`
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    position: absolute;
+    top: 2px;
+    left: ${({ $checked }) => $checked ? '20px' : '2px'};
+    transition: left 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+`;
+
+function Toggle({ checked, onChange, disabled }) {
+    return (
+        <ToggleTrack
+            $checked={checked}
+            role="switch"
+            aria-checked={checked}
+            tabIndex={0}
+            style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+            onClick={() => {
+                if (disabled) return;
+                onChange({ target: { checked: !checked } });
+            }}
+            onKeyDown={(e) => {
+                if (disabled) return;
+                if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    onChange({ target: { checked: !checked } });
+                }
+            }}
+        >
+            <ToggleKnob $checked={checked} />
+        </ToggleTrack>
+    );
+}
+
+/* Referral-link toggle row embedded in the hero card. Border-top separates
+ * it from the share-link pill above. Layout mirrors Settings' ToggleRow —
+ * label / description stack on the left, Toggle pinned to the right. */
+const ToggleRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const ToggleText = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+`;
+
+const ToggleLabel = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.3;
+`;
+
+const ToggleDesc = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    font-weight: 500;
+    line-height: 1.4;
+`;
+
+const ToggleFeedback = styled.div`
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1.35;
+    padding: 0.15rem 0.1rem 0;
+    color: ${({ theme, $tone }) => $tone === 'error' ? theme.colors.voteDown : theme.colors.voteUp};
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -1126,6 +1221,12 @@ function ReferralsView({ state }) {
         shareUrl,
         handleLoadMore,
         handleCopy,
+        referralPrecheckEnabled,
+        referralPrecheckBusy,
+        referralPrecheckError,
+        referralPrecheckSuccess,
+        inviteCodesRequired,
+        handleReferralPrecheckToggle,
     } = hook;
 
     const history = Array.isArray(data?.active_history) ? data.active_history : [];
@@ -1191,24 +1292,31 @@ function ReferralsView({ state }) {
                         <HeroCard>
                             <HeroTopRow>
                                 <HeroEyebrow>Invite & earn</HeroEyebrow>
-                                {totalReferred > 0 && (
-                                    <HeroBadge>
-                                        <HiUserGroup style={{ width: '0.7rem', height: '0.7rem' }} />
-                                        {totalReferred} invited
+                                {inviteCodesRequired && !referralPrecheckEnabled ? (
+                                    <HeroBadge $tone="danger" title="Your referral link is turned off">
+                                        Link off
                                     </HeroBadge>
+                                ) : (
+                                    totalReferred > 0 && (
+                                        <HeroBadge>
+                                            <HiUserGroup style={{ width: '0.7rem', height: '0.7rem' }} />
+                                            {totalReferred} invited
+                                        </HeroBadge>
+                                    )
                                 )}
                             </HeroTopRow>
 
                             <HeroTextStack>
                                 <HeroTitle>Bring your people to Mirage.</HeroTitle>
                                 <HeroSubtitle>
-                                    Share your link — when they sign up, they appear here and you'll
-                                    see their weekly activity at a glance.
+                                    {inviteCodesRequired && !referralPrecheckEnabled
+                                        ? "Your referral link is currently off — turn it on below to let people sign up through it."
+                                        : "Share your link — when they sign up, they appear here and you'll see their weekly activity at a glance."}
                                 </HeroSubtitle>
                             </HeroTextStack>
 
                             {username && shareUrl ? (
-                                <ShareLinkPill>
+                                <ShareLinkPill $disabled={inviteCodesRequired && !referralPrecheckEnabled}>
                                     <ShareUrl
                                         value={shareUrl}
                                         readOnly
@@ -1231,6 +1339,30 @@ function ReferralsView({ state }) {
                                         ? 'Your share link will appear here once an invite code is available.'
                                         : 'Set a username to generate your referral share link.'}
                                 </HeroEmpty>
+                            )}
+                            {inviteCodesRequired && (
+                                <>
+                                    <ToggleRow>
+                                        <ToggleText>
+                                            <ToggleLabel>Enable referral links</ToggleLabel>
+                                            <ToggleDesc>
+                                                Lets people sign up via your personal link instead of
+                                                sharing invite codes directly.
+                                            </ToggleDesc>
+                                        </ToggleText>
+                                        <Toggle
+                                            checked={referralPrecheckEnabled}
+                                            disabled={referralPrecheckBusy}
+                                            onChange={e => handleReferralPrecheckToggle(!!e.target.checked)}
+                                        />
+                                    </ToggleRow>
+                                    {referralPrecheckError && (
+                                        <ToggleFeedback $tone="error">{referralPrecheckError}</ToggleFeedback>
+                                    )}
+                                    {referralPrecheckSuccess && (
+                                        <ToggleFeedback $tone="success">✓ {referralPrecheckSuccess}</ToggleFeedback>
+                                    )}
+                                </>
                             )}
                         </HeroCard>
                     </SectionBody>
