@@ -245,7 +245,7 @@ const MoreButton = styled.button`
 const TitleLink = styled(Link)`
     display: block;
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.88rem;
+    font-size: 0.72rem;
     font-weight: 700;
     line-height: 1.3;
     text-decoration: none;
@@ -261,12 +261,12 @@ const TitleLink = styled(Link)`
 const Body = styled.div`
     color: ${({ theme }) => theme.colors.cardBodyText};
     font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
-    font-size: 0.74rem;
-    line-height: 1.5;
+    font-size: 0.7rem;
+    line-height: 1.45;
     word-break: break-word;
     overflow-wrap: anywhere;
 
-    p { margin: 0 0 0.5rem; }
+    p { margin: 0 0 0.4rem; }
     p:last-child { margin-bottom: 0; }
 
     a { color: ${({ theme }) => theme.colors.link}; }
