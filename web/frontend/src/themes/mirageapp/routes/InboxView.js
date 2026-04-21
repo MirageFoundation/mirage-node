@@ -10,8 +10,8 @@ import {
     HiOutlineBellAlert,
     HiExclamationTriangle,
 } from "react-icons/hi2";
-import Button from "../components/Button.js";
 import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
+import ShowMoreButton from "../components/ShowMoreButton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { formatMirage } from "../../../utils/formatters";
@@ -398,15 +398,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadMoreWrap = styled.div`
-    padding: 0.85rem 1rem 1rem;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-
-    @media (max-width: 600px) {
-        padding: 0.75rem 0.85rem 1rem;
-    }
-`;
-
 /* ----- Action icon mapping (mirrors mobile `inbox-item.tsx`). ----- */
 
 function getActionIcon(type) {
@@ -660,17 +651,9 @@ export default function InboxView({ state }) {
                 })}
             </ReplyList>
             {hasMoreReplies && (
-                <LoadMoreWrap>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        fullWidth
-                        onClick={handleLoadMore}
-                        loading={isLoadingMore}
-                    >
-                        Load more
-                    </Button>
-                </LoadMoreWrap>
+                <ShowMoreButton onClick={handleLoadMore} loading={isLoadingMore} spacing="loose">
+                    Show more
+                </ShowMoreButton>
             )}
         </>
     );

@@ -440,12 +440,19 @@ export function useProfile({
                         }
                         const hasTopic = typeof next.topic === 'string' && next.topic.trim() !== '';
                         if (!hasTopic) {
-                            // Use parent post id (short prefix) as a placeholder so
-                            // the renderer accepts the row. The card surfaces this
-                            // as `#<short>` which links back to the parent thread.
-                            const root = (typeof next.root_post_id === 'string' && next.root_post_id) ? next.root_post_id : (next.target || '');
-                            const shortRoot = root ? String(root).slice(0, 8) : 'reply';
-                            next.topic = `comment-${shortRoot}`;
+                            // Prefer the parent post's topic (`root_topic`) when
+                            // the backend includes it — that's the real topic
+                            // users care about. Fall back to a `comment-<short>`
+                            // placeholder (keyed off root post id) so the shared
+                            // FeedRow renderer still accepts the row.
+                            const rootTopic = typeof next.root_topic === 'string' ? next.root_topic.trim() : '';
+                            if (rootTopic) {
+                                next.topic = rootTopic;
+                            } else {
+                                const root = (typeof next.root_post_id === 'string' && next.root_post_id) ? next.root_post_id : (next.target || '');
+                                const shortRoot = root ? String(root).slice(0, 8) : 'reply';
+                                next.topic = `comment-${shortRoot}`;
+                            }
                         }
                         return next;
                     })

@@ -17,6 +17,7 @@ import MobileBottomNav from './components/MobileBottomNav';
 import MobileHeader from './components/MobileHeader';
 import QuestHeroCard from './components/QuestHeroCard';
 import Sidebar from './components/Sidebar';
+import ShowMoreButton from './components/ShowMoreButton';
 import Skeleton, {
     SkeletonText,
     SkeletonCircle,
@@ -84,6 +85,7 @@ const components = {
     MobileHeader,
     QuestHeroCard,
     Sidebar,
+    ShowMoreButton,
     Skeleton,
     SkeletonText,
     SkeletonCircle,

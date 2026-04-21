@@ -9,10 +9,10 @@ import {
     HiOutlineMagnifyingGlass,
     HiExclamationTriangle,
 } from "react-icons/hi2";
-import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import CardView from "../components/CardView.js";
 import { FeedCardSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
+import ShowMoreButton from "../components/ShowMoreButton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -301,12 +301,6 @@ const RowMeta = styled.div`
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-`;
-
-const LoadMoreWrap = styled.div`
-    display: flex;
-    justify-content: center;
-    padding: 0.85rem 1rem 1.2rem;
 `;
 
 const StateBlock = styled.div`
@@ -608,18 +602,9 @@ export default function SearchResultsView({ state }) {
                     );
                 })}
                 {hasMorePosts && (
-                    <LoadMoreWrap>
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            fullWidth
-                            onClick={loadMorePosts}
-                            loading={loadingMorePosts}
-                            disabled={loadingMorePosts}
-                        >
-                            {loadingMorePosts ? "Loading…" : "Load more posts"}
-                        </Button>
-                    </LoadMoreWrap>
+                    <ShowMoreButton onClick={loadMorePosts} loading={loadingMorePosts} spacing="loose">
+                        Show more
+                    </ShowMoreButton>
                 )}
             </PostsList>
         );
@@ -656,18 +641,9 @@ export default function SearchResultsView({ state }) {
                     </RowItem>
                 ))}
                 {hasMoreTopics && (
-                    <LoadMoreWrap>
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            fullWidth
-                            onClick={loadMoreTopics}
-                            loading={loadingMoreTopics}
-                            disabled={loadingMoreTopics}
-                        >
-                            {loadingMoreTopics ? "Loading…" : "Load more topics"}
-                        </Button>
-                    </LoadMoreWrap>
+                    <ShowMoreButton onClick={loadMoreTopics} loading={loadingMoreTopics} spacing="loose">
+                        Show more
+                    </ShowMoreButton>
                 )}
             </List>
         );
@@ -723,18 +699,9 @@ export default function SearchResultsView({ state }) {
                     );
                 })}
                 {hasMoreUsers && (
-                    <LoadMoreWrap>
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            fullWidth
-                            onClick={loadMoreUsers}
-                            loading={loadingMoreUsers}
-                            disabled={loadingMoreUsers}
-                        >
-                            {loadingMoreUsers ? "Loading…" : "Load more users"}
-                        </Button>
-                    </LoadMoreWrap>
+                    <ShowMoreButton onClick={loadMoreUsers} loading={loadingMoreUsers} spacing="loose">
+                        Show more
+                    </ShowMoreButton>
                 )}
             </List>
         );

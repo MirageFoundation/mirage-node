@@ -16,7 +16,7 @@ import {
     HiExclamationTriangle,
     HiTrophy,
 } from "react-icons/hi2";
-import Button from "../components/Button.js";
+import ShowMoreButton from "../components/ShowMoreButton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { useReferrals, compareISOWeeks, shiftISOWeek, formatWeekRange } from "../../../logic/useReferrals";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
@@ -982,12 +982,6 @@ const StatusDot = styled.span`
     display: inline-block;
 `;
 
-const LoadMoreRow = styled.div`
-    display: flex;
-    justify-content: center;
-    padding: 1rem 1rem 0.25rem;
-`;
-
 /* -------------------------------------------------------------------------- */
 /* State blocks                                                               */
 /* -------------------------------------------------------------------------- */
@@ -1466,17 +1460,9 @@ function ReferralsView({ state }) {
                             })}
                         </List>
                         {hasMore && (
-                            <LoadMoreRow>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={handleLoadMore}
-                                    loading={loadingMore}
-                                    disabled={loadingMore}
-                                >
-                                    {loadingMore ? 'Loading…' : 'Load more'}
-                                </Button>
-                            </LoadMoreRow>
+                            <ShowMoreButton onClick={handleLoadMore} loading={loadingMore}>
+                                Show more
+                            </ShowMoreButton>
                         )}
                     </ListSectionBody>
                 )}
