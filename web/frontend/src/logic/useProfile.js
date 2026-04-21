@@ -275,9 +275,15 @@ export function useProfile({
         }
     }, [isOwnProfile, username, profileAddress]);
 
-    // Only fetch user status on 'profile' tab (balance, level, etc. not needed for follows/blocks)
+    // Fetch user status whenever the profile address changes. The header /
+    // aside card (username, balance, reserve, joined, tier, biography) are
+    // visible on every tab, so the fetch must not be gated on `activeTab`.
+    // Previously this was scoped to the Profile tab only, which meant
+    // landing on the page with `?tab=comments|submissions|algo` (e.g. after
+    // hitting "back" from a post / comment / algo link) left the header and
+    // aside blank until the user manually switched to the Profile tab.
     useEffect(() => {
-        if (activeTab !== 'profile' || !profileAddress) return;
+        if (!profileAddress) return;
         let cancelled = false;
         const fetchUserStatus = async () => {
             try {
@@ -356,7 +362,7 @@ export function useProfile({
         return () => {
             cancelled = true;
         };
-    }, [activeTab, profileAddress, isOwnProfile, username]);
+    }, [profileAddress, isOwnProfile, username]);
     useEffect(() => {
         if (isOwnProfile || !address || !profileAddress) {
             setIsFollowingProfile(false);
