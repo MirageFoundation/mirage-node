@@ -21,6 +21,7 @@ import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
 import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
+import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
 import { HiNoSymbol } from "react-icons/hi2";
 /**
@@ -1472,6 +1473,8 @@ function ViewPostView({
         giftSubscriptionLabel,
         subFeeLabel,
         agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
         getAwardCost,
         handleGiveAward,
         confirmAwardAction,
@@ -2023,56 +2026,12 @@ function ViewPostView({
         }
         // Report popup moved to a root-level `ConfirmDialog` (06.3 polish).
         if (confirmReportPost === post.post_id) return null;
-        if (confirmDonate?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>
-                        💰 Donate to {post.username || post.user_id.substring(0, 12) + '...'}:
-                    </span>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        background: theme.colors.surface2,
-                        border: `1px solid ${theme.colors.borderSubtle}`,
-                        borderRadius: '8px',
-                        padding: '0.2rem 0.5rem'
-                    }}>
-                        <input type="text" inputMode="numeric" value={formatDonateAmount(donateAmount)} onChange={e => handleDonateAmountChange(e.target.value)} placeholder="10,000" maxLength={11} disabled={isSendPending(confirmDonate?.userId)} style={{
-                            width: '5.5rem',
-                            background: 'transparent',
-                            border: 'none',
-                            outline: 'none',
-                            color: theme.colors.text,
-                            fontSize: '0.8rem',
-                            fontWeight: 700,
-                            textAlign: 'right'
-                        }} />
-                        <span style={{
-                            fontSize: '0.68rem',
-                            opacity: 0.7
-                        }}>MIRAGE</span>
-                    </div>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isSendPending(confirmDonate?.userId)}>
-                            {formatSendStatus(confirmDonate?.userId) || 'Send'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
+        // Gift Mirage / Gift Subscription / Give Award popups now render
+        // as root-level mirageapp `ConfirmDialog` modals (see below). We
+        // still surface their success/error banners inline so the user
+        // sees "Sent 10,000 MIRAGE!" / "Subscription gifted!" under the
+        // post card they acted on.
+        if (confirmDonate?.postId === post.post_id) return null;
         const donateMsg = donateMessages[post.post_id];
         if (donateMsg) {
             return <>
@@ -2085,51 +2044,7 @@ function ViewPostView({
                 </BlockSuccessMessage>}
             </>;
         }
-        if (confirmGiftSub?.postId === post.post_id) {
-            const giftFeeLabel = confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel;
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.25rem'
-                    }}>
-                        <span style={{
-                            whiteSpace: 'nowrap'
-                        }}>
-                            🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {post.username || post.user_id.substring(0, 12) + '...'}?{giftFeeLabel ? ` (${giftFeeLabel})` : ''}
-                        </span>
-                        {confirmGiftSub.loading && <span style={{
-                            fontSize: '0.75rem',
-                            opacity: 0.7
-                        }}>Loading expiry...</span>}
-                        {confirmGiftSub.expiryLabel && <span style={{
-                            fontSize: '0.75rem',
-                            opacity: 0.7
-                        }}>{confirmGiftSub.expiryLabel}</span>}
-                        {confirmGiftSub.error && <span style={{
-                            fontSize: '0.75rem',
-                            color: '#ef4444'
-                        }}>{confirmGiftSub.error}</span>}
-                    </div>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmGiftSubAction} disabled={isSubscribePending(confirmGiftSub?.userId) || confirmGiftSub.loading || !!confirmGiftSub.error}>
-                            {formatSubscribeStatus(confirmGiftSub?.userId) || 'Confirm'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelGiftSub}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
+        if (confirmGiftSub?.postId === post.post_id) return null;
         const giftMsg = giftSubMessages[post.post_id];
         if (giftMsg) {
             return <>
@@ -2142,87 +2057,7 @@ function ViewPostView({
                 </BlockSuccessMessage>}
             </>;
         }
-        if (confirmAward?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    width: '100%'
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        marginBottom: '0.5rem'
-                    }}>
-                        <span style={{
-                            fontWeight: 600,
-                            fontSize: '0.85rem',
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0
-                        }}>Give Award</span>
-                        <ConfirmButtons>
-                            <Button variant="ghost" size="sm" onClick={() => setConfirmAward(null)}>Cancel</Button>
-                        </ConfirmButtons>
-                    </div>
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: '0.4rem'
-                    }}>
-                        {AWARD_TYPES.map(award => {
-                            const costUmirage = getAwardCost(award.name);
-                            const costMirage = costUmirage != null && costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() + ' MIRAGE' : null;
-                            const canAfford = costUmirage != null && userBalanceUmirage !== null && userBalanceUmirage >= costUmirage;
-                            const disabled = isAwarding || !canAfford;
-                            return <button key={award.name} onClick={() => canAfford && confirmAwardAction(post.post_id, award.name)} disabled={disabled} style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.4rem',
-                                padding: '0.45rem 0.6rem',
-                                background: theme.colors.surface2,
-                                border: `1px solid ${theme.colors.borderSubtle}`,
-                                borderRadius: '8px',
-                                color: theme.colors.text,
-                                cursor: disabled ? isAwarding ? 'wait' : 'not-allowed' : 'pointer',
-                                opacity: disabled ? 0.4 : 1,
-                                fontSize: '0.78rem',
-                                transition: 'background 0.15s, opacity 0.15s'
-                            }} onMouseEnter={e => {
-                                if (!disabled) e.currentTarget.style.background = theme.colors.hover;
-                            }} onMouseLeave={e => {
-                                e.currentTarget.style.background = theme.colors.surface2;
-                            }}>
-                                <span style={{
-                                    fontSize: '1.1rem'
-                                }}>{award.icon}</span>
-                                <span style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'flex-start',
-                                    lineHeight: 1.2
-                                }}>
-                                    <span style={{
-                                        fontWeight: 600
-                                    }}>{award.label}</span>
-                                    <span style={{
-                                        fontSize: '0.68rem',
-                                        opacity: 0.6,
-                                        color: !canAfford ? '#ef4444' : 'inherit'
-                                    }}>
-                                        {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
-                                    </span>
-                                </span>
-                            </button>;
-                        })}
-                    </div>
-                    {isAwarding && <div style={{
-                        textAlign: 'center',
-                        marginTop: '0.4rem',
-                        fontSize: '0.75rem',
-                        opacity: 0.7
-                    }}>Submitting...</div>}
-                </div>
-            </BlockConfirmMessage>;
-        }
+        if (confirmAward?.postId === post.post_id) return null;
         const awardMsg = awardMessages[post.post_id];
         if (awardMsg) {
             return awardMsg.type === 'error' ? <BlockErrorMessage><span>⚠</span>{awardMsg.message}</BlockErrorMessage> : <BlockSuccessMessage><span>✓</span>{awardMsg.message}</BlockSuccessMessage>;
@@ -3325,6 +3160,23 @@ function ViewPostView({
                 const blockUserLabel = blockUserPost?.username
                     ? `@${blockUserPost.username}`
                     : (confirmBlockUser?.userId ? `${String(confirmBlockUser.userId).slice(0, 10)}…` : 'this user');
+                // Resolve friendly labels for the Gift Mirage / Gift
+                // Subscription dialogs. The hook (`useViewPost`) now
+                // stashes the target's `username` on the confirm state
+                // when it's available (see handleDonate /
+                // handleGiftSubscription), so we prefer that first and
+                // only fall back to the wallet address when the post is
+                // from an anonymous author.
+                const donateLabel = confirmDonate?.username
+                    ? `@${confirmDonate.username}`
+                    : (confirmDonate?.userId ? String(confirmDonate.userId) : 'this user');
+                const giftSubLabel = confirmGiftSub?.username
+                    ? `@${confirmGiftSub.username}`
+                    : (confirmGiftSub?.userId ? String(confirmGiftSub.userId) : 'this user');
+                const giftSubFeeLabel = confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel;
+                const giftSubFeeUmirage = confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage;
+                const donateBusy = isSendPending(confirmDonate?.userId);
+                const giftSubBusy = isSubscribePending(confirmGiftSub?.userId);
                 return <>
                     <ConfirmDialog
                         open={!!confirmBlockPost}
@@ -3374,6 +3226,46 @@ function ViewPostView({
                             setTimeout(() => { try { confirmReportAction(); } catch (_) { /* noop */ } }, 0);
                         }}
                         onCancel={cancelReport}
+                    />
+                    <GiftMirageDialog
+                        open={!!confirmDonate}
+                        recipientLabel={donateLabel}
+                        amountRaw={donateAmount}
+                        formatAmount={formatDonateAmount}
+                        onAmountChange={handleDonateAmountChange}
+                        pending={donateBusy}
+                        confirmLabel={formatSendStatus(confirmDonate?.userId) || 'Send'}
+                        userBalanceUmirage={userBalanceUmirage}
+                        onConfirm={confirmDonateAction}
+                        onCancel={cancelDonate}
+                    />
+                    <GiftSubscriptionDialog
+                        open={!!confirmGiftSub}
+                        recipientLabel={giftSubLabel}
+                        level={confirmGiftSub?.level}
+                        feeLabel={giftSubFeeLabel}
+                        feeUmirage={giftSubFeeUmirage}
+                        loading={!!confirmGiftSub?.loading}
+                        expiryLabel={confirmGiftSub?.expiryLabel}
+                        error={confirmGiftSub?.error}
+                        pending={giftSubBusy}
+                        confirmLabel={formatSubscribeStatus(confirmGiftSub?.userId) || 'Confirm'}
+                        userBalanceUmirage={userBalanceUmirage}
+                        onConfirm={confirmGiftSubAction}
+                        onCancel={cancelGiftSub}
+                    />
+                    <GiveAwardDialog
+                        open={!!confirmAward}
+                        awardTypes={AWARD_TYPES}
+                        getAwardCost={getAwardCost}
+                        userBalanceUmirage={userBalanceUmirage}
+                        isAwarding={isAwarding}
+                        onPick={(awardName) => {
+                            if (confirmAward?.postId) {
+                                confirmAwardAction(confirmAward.postId, awardName);
+                            }
+                        }}
+                        onCancel={() => setConfirmAward(null)}
                     />
                 </>;
             })()}

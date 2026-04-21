@@ -796,7 +796,7 @@ export function useProfile({
     const subFeePending = isSubscribePending(profileAddress);
     const subFeeStatus = formatSubscribeStatus(profileAddress);
 
-    const { subFeeLabel, agentFeeLabel } = useMemo(() => {
+    const { subFeeLabel, agentFeeLabel, subFeeUmirage, agentFeeUmirage } = useMemo(() => {
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
@@ -806,9 +806,11 @@ export function useProfile({
             return {
                 subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
                 agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
+                subFeeUmirage: sf > 0 ? sf : null,
+                agentFeeUmirage: af > 0 ? af : null,
             };
         } catch (_) { }
-        return { subFeeLabel: null, agentFeeLabel: null };
+        return { subFeeLabel: null, agentFeeLabel: null, subFeeUmirage: null, agentFeeUmirage: null };
     }, []);
 
     const handleGiftSub = () => {
@@ -1003,6 +1005,8 @@ export function useProfile({
         subFeeStatus,
         subFeeLabel,
         agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
         handleGiftSub,
         confirmGiftSubAction,
         cancelGiftSub
