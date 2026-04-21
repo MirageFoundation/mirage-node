@@ -7,6 +7,7 @@ import {
     HiXMark,
 } from "react-icons/hi2";
 import Button from "../components/Button.js";
+import { ListRowSkeletonList, ListRowSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -320,20 +321,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadingSpinner = styled.div`
-    width: 26px;
-    height: 26px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 const FootHint = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
@@ -423,11 +410,8 @@ export default function DiscoverView({ state }) {
     if (loading) {
         return renderShell(
             <>
-                {headerBlock}
-                <StateBlock role="status" aria-live="polite">
-                    <LoadingSpinner />
-                    <StateTitle>Loading topics…</StateTitle>
-                </StateBlock>
+                <PageHeaderSkeleton />
+                <ListRowSkeletonList count={8} />
             </>
         );
     }
@@ -522,10 +506,7 @@ export default function DiscoverView({ state }) {
             )}
 
             {isSearching && (
-                <StateBlock role="status" aria-live="polite">
-                    <LoadingSpinner />
-                    <StateMessage>Searching for more topics…</StateMessage>
-                </StateBlock>
+                <ListRowSkeleton />
             )}
 
             {showSmallHint && (

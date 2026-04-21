@@ -3,6 +3,7 @@ import styled, { useTheme } from "styled-components";
 import { HiChevronRight, HiShare, HiGift, HiPencilSquare, HiClipboardDocument, HiCheck } from "react-icons/hi2";
 import Button from "../components/Button.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
+import { ProfileHeaderSkeleton, FeedCardSkeletonList, FeedCardSkeleton, ListRowSkeletonList, ListRowSkeleton } from "../components/Skeleton.js";
 import { tooltipStyles } from "../components/Tooltip.js";
 import { useProfile } from "../../../logic/useProfile";
 import { useBlocks } from "../../../logic/useBlocks";
@@ -225,34 +226,7 @@ const InlineMono = styled(Mono)`
     text-overflow: ellipsis;
     display: block;
 `;
-const LoadingSpinner = styled.div`
-    width: 16px;
-    height: 16px;
-    border: 2px solid ${({
-    theme
-}) => theme.colors.border};
-    border-top: 2px solid ${({
-    theme
-}) => theme.colors.subtleText};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
 const SubtleMono = styled(Mono)`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-`;
-const LoadingRow = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0.5rem 0 0.75rem;
-    padding: 0.5rem 1rem;
     color: ${({
     theme
 }) => theme.colors.subtleText};
@@ -1076,21 +1050,25 @@ export default function ProfileView({
             <ModernPostFeed>
                 <CappedPageColumn>
                     <TabbedContainer>
-                        <ContainerBody style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            textAlign: 'center',
-                            padding: '2rem',
-                            gap: '0.5rem',
-                            minHeight: '200px'
-                        }}>
-                            {isResolvingUsername ? <span style={{
-                                color: theme.colors.subtleText
-                            }}>Looking up @{routeIdentity}...</span> : <span style={{
-                                color: theme.colors.voteDown
-                            }}>{usernameResolutionError}</span>}
+                        <ContainerBody>
+                            {isResolvingUsername ? (
+                                <>
+                                    <ProfileHeaderSkeleton />
+                                    <FeedCardSkeletonList count={3} />
+                                </>
+                            ) : (
+                                <div style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    textAlign: 'center',
+                                    padding: '2rem',
+                                    gap: '0.5rem',
+                                    minHeight: '200px',
+                                    color: theme.colors.voteDown,
+                                }}>{usernameResolutionError}</div>
+                            )}
                         </ContainerBody>
                     </TabbedContainer>
                 </CappedPageColumn>
@@ -1430,22 +1408,17 @@ export default function ProfileView({
                         </>}
 
                         {isPostsTab && profileUsesListFeed && <>
-                            {isLoadingRecentPosts && recentPosts.length === 0 && <LoadingRow>
-                                <LoadingSpinner />
-                                <SubtleMono>Loading posts...</SubtleMono>
-                            </LoadingRow>}
+                            {isLoadingRecentPosts && recentPosts.length === 0 && (
+                                <FeedCardSkeletonList count={4} />
+                            )}
                             {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
                                 color: theme.colors.voteDown
                             }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
                             {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
                             {recentPosts.length > 0 && <FeedComponent posts={recentPosts} state={state} showSortTabs={false} bleedShell={false} />}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && <ProfilePostsTabGutter><SubtleMono style={{
-                                display: 'block',
-                                marginTop: '0.5rem',
-                                fontStyle: 'italic'
-                            }}>
-                                Loading more...
-                            </SubtleMono></ProfilePostsTabGutter>}
+                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                <FeedCardSkeleton />
+                            )}
                             <div ref={recentBottomSentinelRef} style={{
                                 width: '100%',
                                 height: '20px',
@@ -1459,10 +1432,9 @@ export default function ProfileView({
                                 <option value="submissions">Submissions</option>
                                 <option value="comments">Comments</option>
                             </FilterSelect></ProfilePostsTabGutter>}
-                            {isLoadingRecentPosts && <LoadingRow>
-                                <LoadingSpinner />
-                                <SubtleMono>Loading posts...</SubtleMono>
-                            </LoadingRow>}
+                            {isLoadingRecentPosts && (
+                                <ListRowSkeletonList count={5} hasAvatar={false} />
+                            )}
                             {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
                                 color: theme.colors.voteDown
                             }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
@@ -1473,13 +1445,9 @@ export default function ProfileView({
                                     <PostMeta>{buildMetaLine(post)}</PostMeta>
                                 </PostItem>)}
                             </PostsList>}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && <ProfilePostsTabGutter><SubtleMono style={{
-                                display: 'block',
-                                marginTop: '0.5rem',
-                                fontStyle: 'italic'
-                            }}>
-                                Loading more...
-                            </SubtleMono></ProfilePostsTabGutter>}
+                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                <ListRowSkeleton hasAvatar={false} />
+                            )}
                             <div ref={recentBottomSentinelRef} style={{
                                 width: '100%',
                                 height: '20px',
@@ -1490,7 +1458,7 @@ export default function ProfileView({
                         {activeTab === 'algo' && <>
                             <SectionHeader>Topic preferences</SectionHeader>
                             <AlgoList>
-                                {prefsLoading && <AlgoEmpty>Loading...</AlgoEmpty>}
+                                {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={false} showMeta={false} />}
                                 {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
                                 {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No topic preference data yet.</AlgoEmpty>}
                                 {!prefsError && prefsTopics.length > 0 && (() => {
@@ -1520,7 +1488,7 @@ export default function ProfileView({
 
                             <SectionHeader>User preferences</SectionHeader>
                             <AlgoList>
-                                {prefsLoading && <AlgoEmpty>Loading...</AlgoEmpty>}
+                                {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={false} showMeta={false} />}
                                 {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
                                 {!prefsLoading && !prefsError && prefsAuthors.length === 0 && <AlgoEmpty>No user preference data yet.</AlgoEmpty>}
                                 {!prefsError && prefsAuthors.length > 0 && (() => {
@@ -1551,7 +1519,7 @@ export default function ProfileView({
 
                             <SectionHeader>Similar users</SectionHeader>
                             <AlgoList>
-                                {similarUsersLoading && <AlgoEmpty>Computing similarity...</AlgoEmpty>}
+                                {similarUsersLoading && <ListRowSkeletonList count={5} hasAvatar={false} showMeta={false} />}
                                 {!similarUsersLoading && similarUsersError && <AlgoEmpty $danger>{similarUsersError}</AlgoEmpty>}
                                 {!similarUsersLoading && !similarUsersError && similarUsers.length === 0 && <AlgoEmpty>No similar users found yet.</AlgoEmpty>}
                                 {!similarUsersError && similarUsers.length > 0 && <>
