@@ -1259,9 +1259,10 @@ const ActionButton = styled.a`
     padding: 0 12px;
     border-radius: 9999px;
     border: none;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme, $danger }) =>
-        $danger ? theme.colors.voteDown : theme.colors.feedCtrlText};
+    background: ${({ theme, $success }) =>
+        $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconBg};
+    color: ${({ theme, $danger, $success }) =>
+        $success ? theme.colors.voteUp : $danger ? theme.colors.voteDown : theme.colors.feedCtrlText};
     font-family: inherit;
     font-size: 0.62rem;
     font-weight: 500;
@@ -1271,13 +1272,14 @@ const ActionButton = styled.a`
     cursor: pointer;
     transition: background 0.12s ease, color 0.12s ease;
 
-    &:visited { color: ${({ theme, $danger }) =>
-        $danger ? theme.colors.voteDown : theme.colors.feedCtrlText}; }
+    &:visited { color: ${({ theme, $danger, $success }) =>
+        $success ? theme.colors.voteUp : $danger ? theme.colors.voteDown : theme.colors.feedCtrlText}; }
     &:hover,
     &:visited:hover {
-        background: ${({ theme }) => theme.colors.actionIconHoverBg};
-        color: ${({ theme, $danger }) =>
-            $danger ? theme.colors.voteDown : theme.colors.text};
+        background: ${({ theme, $success }) =>
+            $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconHoverBg};
+        color: ${({ theme, $danger, $success }) =>
+            $success ? theme.colors.voteUp : $danger ? theme.colors.voteDown : theme.colors.text};
     }
 
     svg { width: 16px; height: 16px; fill: currentColor; }
@@ -2254,16 +2256,9 @@ function ViewPostView({
             </>;
         }
 
-        // Show share success message for this post
-        const shMsg = shareMessages[post.post_id];
-        if (shMsg) {
-            return <>
-                <BlockSuccessMessage>
-                    <span>✓</span>
-                    {shMsg.message}
-                </BlockSuccessMessage>
-            </>;
-        }
+        // Share success is surfaced inline on the share button itself
+        // (label flips to "Link copied"). No bottom banner — matches the
+        // profile-card share feedback pattern.
 
         // Show error/success messages (only for root post to avoid duplicates)
         if (post.level === 0 || post.post_id === root.post_id) {
@@ -2415,14 +2410,30 @@ function ViewPostView({
                 <span>reply</span>
             </ActionButton>
             <MetaSeparatorAction />
-            <ActionButton onClick={() => handleShare(post)}>
-                <Icon aria-hidden="true">
-                    <svg viewBox="0 0 458.624 458.624">
-                        <path d="M339.588,314.529c-14.215,0-27.456,4.133-38.621,11.239l-112.682-78.67c1.809-6.315,2.798-12.976,2.798-19.871 c0-6.896-0.989-13.557-2.798-19.871l109.64-76.547c11.764,8.356,26.133,13.286,41.662,13.286c39.79,0,72.047-32.257,72.047-72.047 C411.634,32.258,379.378,0,339.588,0c-39.79,0-72.047,32.257-72.047,72.047c0,5.255,0.578,10.373,1.646,15.308l-112.424,78.491 c-10.974-6.759-23.892-10.666-37.727-10.666c-39.79,0-72.047,32.257-72.047,72.047s32.256,72.047,72.047,72.047 c13.834,0,26.753-3.907,37.727-10.666l113.292,79.097c-1.629,6.017-2.514,12.34-2.514,18.872c0,39.79,32.257,72.047,72.047,72.047 c39.79,0,72.047-32.257,72.047-72.047C411.635,346.787,379.378,314.529,339.588,314.529z" fill="currentColor" />
-                    </svg>
-                </Icon>
-                <span className="share-text">share</span>
-            </ActionButton>
+            {(() => {
+                const shareCopied = !!shareMessages[post.post_id];
+                return (
+                    <ActionButton
+                        onClick={() => handleShare(post)}
+                        $success={shareCopied}
+                        title={shareCopied ? 'Link copied!' : 'Share'}
+                        aria-live="polite"
+                    >
+                        <Icon aria-hidden="true">
+                            {shareCopied ? (
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M9.55 17.54l-4.24-4.24 1.41-1.41 2.83 2.83 7.07-7.07 1.41 1.41z" fill="currentColor" />
+                                </svg>
+                            ) : (
+                                <svg viewBox="0 0 458.624 458.624">
+                                    <path d="M339.588,314.529c-14.215,0-27.456,4.133-38.621,11.239l-112.682-78.67c1.809-6.315,2.798-12.976,2.798-19.871 c0-6.896-0.989-13.557-2.798-19.871l109.64-76.547c11.764,8.356,26.133,13.286,41.662,13.286c39.79,0,72.047-32.257,72.047-72.047 C411.634,32.258,379.378,0,339.588,0c-39.79,0-72.047,32.257-72.047,72.047c0,5.255,0.578,10.373,1.646,15.308l-112.424,78.491 c-10.974-6.759-23.892-10.666-37.727-10.666c-39.79,0-72.047,32.257-72.047,72.047s32.256,72.047,72.047,72.047 c13.834,0,26.753-3.907,37.727-10.666l113.292,79.097c-1.629,6.017-2.514,12.34-2.514,18.872c0,39.79,32.257,72.047,72.047,72.047 c39.79,0,72.047-32.257,72.047-72.047C411.635,346.787,379.378,314.529,339.588,314.529z" fill="currentColor" />
+                                </svg>
+                            )}
+                        </Icon>
+                        <span className="share-text">{shareCopied ? 'Link copied' : 'share'}</span>
+                    </ActionButton>
+                );
+            })()}
         </MetaRow>;
     };
     const getVideoThumbnailUrl = url => {
@@ -3061,18 +3072,6 @@ function ViewPostView({
                                             <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
                                                 {formatElapsed(post.timestamp)} ago
                                             </Tooltip>
-                                            {!isRoot && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <CollapseToggle
-                                                    type="button"
-                                                    onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
-                                                    aria-label={post.collapsed ? 'Expand' : 'Collapse'}
-                                                >
-                                                    <svg viewBox="0 0 24 24" style={{ transform: post.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
-                                                        <polyline points="6 9 12 15 18 9" />
-                                                    </svg>
-                                                </CollapseToggle>
-                                            </>}
                                             {/* Only show topic for root posts - comments inherit from root */}
                                             {isRoot && (() => {
                                                 const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
@@ -3088,6 +3087,21 @@ function ViewPostView({
                                                     <TagBadge $tag={tagLabel}>{tagLabel}</TagBadge>
                                                 </> : null;
                                             })()}
+                                            {/* Collapse/expand chevron for comments — rendered AFTER the
+                                              * content-warning tag so the chevron sits to the right of the
+                                              * tag badge rather than between the timestamp and the tag. */}
+                                            {!isRoot && <>
+                                                <MetaSeparator>·</MetaSeparator>
+                                                <CollapseToggle
+                                                    type="button"
+                                                    onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
+                                                    aria-label={post.collapsed ? 'Expand' : 'Collapse'}
+                                                >
+                                                    <svg viewBox="0 0 24 24" style={{ transform: post.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
+                                                        <polyline points="6 9 12 15 18 9" />
+                                                    </svg>
+                                                </CollapseToggle>
+                                            </>}
                                             {post.edited && <>
                                                 <MetaSeparator>·</MetaSeparator>
                                                 <Tooltip $dotted data-tooltip={formatTimeStamp(post.edited_ts)} style={{
