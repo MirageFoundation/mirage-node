@@ -6,8 +6,10 @@ import Button from "../components/Button.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { ProfileHeaderSkeleton, FeedCardSkeletonList, FeedCardSkeleton, ListRowSkeletonList, ListRowSkeleton } from "../components/Skeleton.js";
 import { tooltipStyles } from "../components/Tooltip.js";
+import { GiftMirageDialog, GiftSubscriptionDialog } from "../components/GiftDialogs.js";
 import { useProfile } from "../../../logic/useProfile";
 import { useBlocks } from "../../../logic/useBlocks";
+import useBalance from "../../../logic/useBalance.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { FeedViewToggle, loadViewMode, saveViewMode } from "../ListFeedView.js";
@@ -1242,6 +1244,8 @@ export default function ProfileView({
         subFeeStatus,
         subFeeLabel,
         agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
         handleGiftSub,
         confirmGiftSubAction,
         cancelGiftSub,
@@ -1291,6 +1295,11 @@ export default function ProfileView({
         formatUserStatus: formatBlockUserStatus,
         handleUnblockUser
     } = useBlocks({ state });
+    // Viewer's current balance (umirage). Used by the Gift Mirage / Gift
+    // Subscription dialogs to show the balance row + guard against
+    // insufficient-balance submits. Separate from `balance` returned by
+    // `useProfile`, which is the profile being viewed (not the viewer).
+    const { displayBalance: viewerBalanceUmirage } = useBalance();
     const profileAddrLower = String(profileAddress || '').trim().toLowerCase();
     const isProfileBlocked = !!profileAddrLower && blockedUsers.some(
         u => String(u || '').trim().toLowerCase() === profileAddrLower
@@ -1444,48 +1453,13 @@ export default function ProfileView({
                                     </span>
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
-                            {confirmGiftSub && <ProfileFieldRow>
-                                <div aria-hidden="true" />
-                                <ProfileFieldValuePlain>
-                                    <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.6rem',
-                                        width: '100%',
-                                        flexWrap: 'wrap',
-                                        background: theme.colors.inboxHighlightBg,
-                                        border: `1px solid ${theme.colors.inboxHighlightRail}`,
-                                        padding: '0.5rem 0.6rem',
-                                        boxSizing: 'border-box'
-                                    }}>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                            <span style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
-                                                🎁 {confirmGiftSub.level === 10 ? 'Gift agent subscription' : 'Gift subscription'} to {profileUsername || profileAddress?.substring(0, 12) + '...'}?{(confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel) ? ` (${confirmGiftSub.level === 10 ? agentFeeLabel : subFeeLabel})` : ''}
-                                            </span>
-                                            {confirmGiftSub.loading && (
-                                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Loading expiry...</span>
-                                            )}
-                                            {confirmGiftSub.expiryLabel && (
-                                                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{confirmGiftSub.expiryLabel}</span>
-                                            )}
-                                            {confirmGiftSub.error && (
-                                                <span style={{ fontSize: '0.75rem', color: theme.colors.voteDown }}>{confirmGiftSub.error}</span>
-                                            )}
-                                        </div>
-                                        <div style={{
-                                            display: 'flex',
-                                            gap: '0.5rem',
-                                            marginLeft: 'auto',
-                                            flexShrink: 0
-                                        }}>
-                                            <Button variant="warning" size="sm" onClick={confirmGiftSubAction} disabled={subFeePending || confirmGiftSub.loading || !!confirmGiftSub.error}>
-                                                {subFeeStatus || 'Confirm'}
-                                            </Button>
-                                            <Button variant="ghost" size="sm" onClick={cancelGiftSub}>Cancel</Button>
-                                        </div>
-                                    </div>
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>}
+                            {/* Gift Subscription confirmation moved to a root-level
+                              * mirageapp `GiftSubscriptionDialog` modal (matches
+                              * the Block / Report dialog visual language). The
+                              * `confirmGiftSub` state still drives visibility;
+                              * we just render it differently. The success /
+                              * error banner below remains inline so the user
+                              * sees "Subscription gifted!" next to the Tier row. */}
                             {giftSubMessage && <ProfileFieldRow>
                                 <div aria-hidden="true" />
                                 <ProfileFieldValuePlain>
@@ -1518,64 +1492,10 @@ export default function ProfileView({
                                     )}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
-                            {confirmDonate && <ProfileFieldRow>
-                                <div aria-hidden="true" />
-                                <ProfileFieldValuePlain>
-                                    <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.6rem',
-                                        width: '100%',
-                                        flexWrap: 'wrap',
-                                        background: theme.colors.inboxHighlightBg,
-                                        border: `1px solid ${theme.colors.inboxHighlightRail}`,
-                                        padding: '0.5rem 0.6rem',
-                                        boxSizing: 'border-box'
-                                    }}>
-                                        <span style={{
-                                            whiteSpace: 'nowrap',
-                                            fontSize: '0.8rem'
-                                        }}>
-                                            💰 Gift Mirage to {profileUsername || profileAddress?.substring(0, 12) + '...'}:
-                                        </span>
-                                        <div style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.35rem',
-                                            background: theme.colors.surface2,
-                                            border: `1px solid ${theme.colors.borderSubtle}`,
-                                            borderRadius: '8px',
-                                            padding: '0.2rem 0.5rem'
-                                        }}>
-                                            <input type="text" inputMode="numeric" value={formatDonateAmount(donateAmountRaw)} onChange={e => setDonateAmountRaw(e.target.value.replace(/[^\d]/g, ""))} placeholder="10,000" maxLength={11} disabled={donatePending} style={{
-                                                width: '5.5rem',
-                                                background: 'transparent',
-                                                border: 'none',
-                                                outline: 'none',
-                                                color: theme.colors.text,
-                                                fontSize: '0.75rem',
-                                                fontWeight: 500,
-                                                textAlign: 'right'
-                                            }} />
-                                            <span style={{
-                                                fontSize: '0.68rem',
-                                                opacity: 0.7
-                                            }}>MIRAGE</span>
-                                        </div>
-                                        <div style={{
-                                            display: 'flex',
-                                            gap: '0.5rem',
-                                            marginLeft: 'auto',
-                                            flexShrink: 0
-                                        }}>
-                                            <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={donatePending}>
-                                                {donateStatus || 'Send'}
-                                            </Button>
-                                            <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
-                                        </div>
-                                    </div>
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>}
+                            {/* Gift Mirage confirmation moved to a root-level
+                              * mirageapp `GiftMirageDialog` modal. Success /
+                              * error banner still renders inline below so the
+                              * user sees the outcome next to the Balance row. */}
                             {donateMessage && <ProfileFieldRow>
                                 <div aria-hidden="true" />
                                 <ProfileFieldValuePlain>
@@ -1955,5 +1875,37 @@ export default function ProfileView({
                 </ProfileTabbedContainer>
             </CappedPageColumn>
         </ModernPostFeed>
+        {/* Gift Mirage / Gift Subscription dialogs — rendered at the route
+          * root so a single modal owns the overlay + panel for the whole
+          * page. Visibility is driven by the existing `confirmDonate` /
+          * `confirmGiftSub` state in `useProfile`, matching the pattern
+          * used by ViewPostView and the Block/Report dialogs. */}
+        <GiftMirageDialog
+            open={!!confirmDonate}
+            recipientLabel={profileUsername ? `@${profileUsername}` : (profileAddress || 'this user')}
+            amountRaw={donateAmountRaw}
+            formatAmount={formatDonateAmount}
+            onAmountChange={(digits) => setDonateAmountRaw(digits)}
+            pending={donatePending}
+            confirmLabel={donateStatus || 'Send'}
+            userBalanceUmirage={viewerBalanceUmirage}
+            onConfirm={confirmDonateAction}
+            onCancel={cancelDonate}
+        />
+        <GiftSubscriptionDialog
+            open={!!confirmGiftSub}
+            recipientLabel={profileUsername ? `@${profileUsername}` : (profileAddress || 'this user')}
+            level={confirmGiftSub?.level}
+            feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
+            feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+            loading={!!confirmGiftSub?.loading}
+            expiryLabel={confirmGiftSub?.expiryLabel}
+            error={confirmGiftSub?.error}
+            pending={subFeePending}
+            confirmLabel={subFeeStatus || 'Confirm'}
+            userBalanceUmirage={viewerBalanceUmirage}
+            onConfirm={confirmGiftSubAction}
+            onCancel={cancelGiftSub}
+        />
     </ContentGrid>;
 }

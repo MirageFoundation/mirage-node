@@ -41,6 +41,16 @@ import Button from "./Button.js";
  *   reasonPlaceholder - input placeholder (default "Short reason")
  *   reasonMaxLength   - input max length (default 140)
  *   reasonInitial     - initial input value (when controlling externally)
+ *   confirmDisabled   - additional condition that disables the confirm button
+ *                       (on top of `pending` / missing reason). Useful for
+ *                       dialogs with async data loading (gift subscription
+ *                       expiry lookup) or input validation.
+ *   hideConfirm       - when true, the footer only renders the Cancel
+ *                       button. Used by the award picker where each award
+ *                       tile is its own confirm action.
+ *   children          - optional custom body content rendered inside the
+ *                       panel's `Body` slot. Paired with (or replacing)
+ *                       the built-in reason textarea.
  */
 
 const fadeIn = keyframes`
@@ -70,10 +80,13 @@ const Panel = styled.div`
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 14px;
     width: 100%;
-    /* Wide variant (~20% wider) is used by the Report dialog so the
-     * reason textarea has more room to breathe. Block/confirm dialogs
-     * keep the default 420px cap. */
-    max-width: ${({ $wide }) => ($wide ? '500px' : '420px')};
+    /* Variants:
+     *   default  — 420px (Block / simple confirm dialogs).
+     *   wide     — 540px (Report + Gift dialogs; textarea + info cards
+     *              read better with more room).
+     * Mobile (<600px) always snaps to full-width via the media query below. */
+    max-width: ${({ $wide, $extraWide }) =>
+        $extraWide ? '620px' : $wide ? '540px' : '420px'};
     max-height: 80vh;
     overflow: hidden;
     display: flex;
@@ -174,6 +187,10 @@ export default function ConfirmDialog({
     reasonMaxLength = 140,
     reasonInitial = "",
     wide = false,
+    extraWide = false,
+    confirmDisabled = false,
+    hideConfirm = false,
+    children,
 }) {
     const [reason, setReason] = useState(reasonInitial || "");
     const [touched, setTouched] = useState(false);
@@ -218,7 +235,7 @@ export default function ConfirmDialog({
 
     const trimmed = String(reason || "").trim();
     const reasonMissing = requireReason && trimmed.length === 0;
-    const confirmDisabled = pending || reasonMissing;
+    const effectiveConfirmDisabled = pending || reasonMissing || confirmDisabled;
 
     const handleConfirm = () => {
         if (requireReason && reasonMissing) {
@@ -248,6 +265,7 @@ export default function ConfirmDialog({
         <Overlay role="dialog" aria-modal="true" {...overlayProps}>
             <Panel
                 $wide={wide}
+                $extraWide={extraWide}
                 onMouseDown={e => {
                     // Any press inside the panel must not be treated as an
                     // overlay press (even if it bubbles up here for some
@@ -262,40 +280,47 @@ export default function ConfirmDialog({
                     <Title>{title}</Title>
                     {message && <Message>{message}</Message>}
                 </Header>
-                {requireReason && (
+                {(requireReason || children) && (
                     <Body>
-                        <ReasonField
-                            ref={inputRef}
-                            value={reason}
-                            onChange={e => setReason(e.target.value.slice(0, reasonMaxLength))}
-                            onBlur={() => setTouched(true)}
-                            placeholder={reasonPlaceholder}
-                            maxLength={reasonMaxLength}
-                            disabled={pending}
-                        />
-                        <ReasonMeta>
-                            <span>
-                                {touched && reasonMissing
-                                    ? <ReasonError>Reason is required.</ReasonError>
-                                    : "Keep it short and specific."}
-                            </span>
-                            <span>{trimmed.length}/{reasonMaxLength}</span>
-                        </ReasonMeta>
+                        {children}
+                        {requireReason && (
+                            <>
+                                <ReasonField
+                                    ref={inputRef}
+                                    value={reason}
+                                    onChange={e => setReason(e.target.value.slice(0, reasonMaxLength))}
+                                    onBlur={() => setTouched(true)}
+                                    placeholder={reasonPlaceholder}
+                                    maxLength={reasonMaxLength}
+                                    disabled={pending}
+                                />
+                                <ReasonMeta>
+                                    <span>
+                                        {touched && reasonMissing
+                                            ? <ReasonError>Reason is required.</ReasonError>
+                                            : "Keep it short and specific."}
+                                    </span>
+                                    <span>{trimmed.length}/{reasonMaxLength}</span>
+                                </ReasonMeta>
+                            </>
+                        )}
                     </Body>
                 )}
                 <Footer>
                     <Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
                         {cancelLabel}
                     </Button>
-                    <Button
-                        variant={confirmVariant}
-                        size="sm"
-                        onClick={handleConfirm}
-                        disabled={confirmDisabled}
-                        loading={pending}
-                    >
-                        {pending ? "Processing" : confirmLabel}
-                    </Button>
+                    {!hideConfirm && (
+                        <Button
+                            variant={confirmVariant}
+                            size="sm"
+                            onClick={handleConfirm}
+                            disabled={effectiveConfirmDisabled}
+                            loading={pending}
+                        >
+                            {pending ? "Processing" : confirmLabel}
+                        </Button>
+                    )}
                 </Footer>
             </Panel>
         </Overlay>

@@ -1107,6 +1107,15 @@ export function useViewPost({
             alert('Please log in to donate');
             return;
         }
+        // Resolve the target's username from whichever post in our tree
+        // matches `postId` so the Gift Mirage dialog can show "@alice"
+        // instead of the raw mirage1... wallet address.
+        const targetPost = root && root.post_id === postId
+            ? root
+            : (children || []).find(c => c && c.post_id === postId);
+        const targetUsername = targetPost && typeof targetPost.username === 'string'
+            ? targetPost.username.trim()
+            : '';
         setConfirmBlockPost(null);
         setConfirmBlockUser(null);
         setConfirmDeletePost(null);
@@ -1116,7 +1125,8 @@ export function useViewPost({
         setConfirmGiftSub(null);
         setConfirmDonate({
             userId: userAddress,
-            postId
+            postId,
+            username: targetUsername || null
         });
         try {
             if (postId) updatePost(postId, {
@@ -1138,6 +1148,15 @@ export function useViewPost({
             postId,
             level
         });
+        // Resolve the target's username (see handleDonate for the same
+        // lookup). Drives the "@alice" title in the Gift Subscription
+        // dialog.
+        const targetPost = root && root.post_id === postId
+            ? root
+            : (children || []).find(c => c && c.post_id === postId);
+        const targetUsername = targetPost && typeof targetPost.username === 'string'
+            ? targetPost.username.trim()
+            : '';
         setOpenMenuId(null);
         setConfirmDonate(null);
         setConfirmBlockPost(null);
@@ -1151,6 +1170,7 @@ export function useViewPost({
             userId: userAddress,
             postId,
             level,
+            username: targetUsername || null,
             loading: true,
             expiryLabel: null,
             error: null
@@ -1337,7 +1357,9 @@ export function useViewPost({
     const giftSubscriptionLabel = 'Gift Subscription';
     const {
         subFeeLabel,
-        agentFeeLabel
+        agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage
     } = useMemo(() => {
         void configUpdateTrigger;
         try {
@@ -1348,12 +1370,16 @@ export function useViewPost({
             const af = Number(tiers[2]?.period_fee || 0);
             return {
                 subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
-                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null
+                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
+                subFeeUmirage: sf > 0 ? sf : null,
+                agentFeeUmirage: af > 0 ? af : null
             };
         } catch (_) { }
         return {
             subFeeLabel: null,
-            agentFeeLabel: null
+            agentFeeLabel: null,
+            subFeeUmirage: null,
+            agentFeeUmirage: null
         };
     }, [configUpdateTrigger]);
     const getAwardCost = name => {
@@ -2636,6 +2662,8 @@ export function useViewPost({
         giftSubscriptionLabel,
         subFeeLabel,
         agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
         getAwardCost,
         handleGiveAward,
         confirmAwardAction,
