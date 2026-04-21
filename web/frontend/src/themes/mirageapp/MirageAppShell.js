@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { HiBars3 } from 'react-icons/hi2';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
+import MobileBottomNav, { MIRAGEAPP_BOTTOM_NAV_HEIGHT } from './components/MobileBottomNav';
 import Storage from '../../utils/Storage';
 
 /**
@@ -144,7 +145,8 @@ const Main = styled.main.attrs(({ $hidden }) => ({
     }
 
     @media (max-width: 600px) {
-        padding: 0 0.75rem 1.5rem;
+        /* Reserve space for the fixed MobileBottomNav + iOS safe-area. */
+        padding: 0 0.75rem calc(${MIRAGEAPP_BOTTOM_NAV_HEIGHT}px + 1rem + env(safe-area-inset-bottom, 0px));
     }
 `;
 
@@ -252,6 +254,7 @@ export default function MirageAppShell({ children, state }) {
             <DrawerPanel $open={drawerOpen}>
                 <Sidebar state={state} />
             </DrawerPanel>
+            <MobileBottomNav state={state} />
         </ShellRoot>
     );
 }

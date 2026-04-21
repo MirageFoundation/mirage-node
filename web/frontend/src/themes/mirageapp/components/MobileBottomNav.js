@@ -1,11 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import styled, { css } from 'styled-components';
+import styled from 'styled-components';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+    HiHome,
+    HiOutlineHome,
+    HiMagnifyingGlass,
+    HiOutlineMagnifyingGlass,
+    HiPlusCircle,
+    HiOutlinePlusCircle,
+    HiInbox,
+    HiOutlineInbox,
+    HiUser,
+    HiOutlineUser,
+} from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
 import { ProfileMenuContent } from './TopBar';
 
-// Nav container - flat oldreddit style
+/**
+ * mirageapp MobileBottomNav — mobile tab bar aligned with `mirage-mobile-app`'s
+ * tab layout. Rendered only ≤600px and portaled to `document.body` so it stays
+ * pinned to the visible viewport even when the main column scrolls.
+ *
+ * Per sub-plan 06.8 + RULES.md:
+ *   R1 — Bar sits on `bg` (single canvas), NOT `panel`.
+ *   R3 — Top divider uses `headerBorder` (stronger than `border`).
+ *   R5 — Active icon uses `focusBlue` + small dot indicator; no blue-ring focus.
+ *   R6 — Icons from `react-icons/hi2` (outline → filled on active).
+ *   R7 — Labels at `0.6rem/500`, `600` on active.
+ *
+ * Five tabs: Home, Search, Create, Inbox, Profile.
+ * Profile tab opens `ProfileMenuContent` in a bottom sheet (mirrors desktop
+ * avatar menu + mobile app behavior).
+ */
+
+// Height reserved for the bar (used for JS positioning + content padding).
+export const MIRAGEAPP_BOTTOM_NAV_HEIGHT = 56;
+
 const NavContainer = styled.nav`
     display: none;
 
@@ -15,15 +46,15 @@ const NavContainer = styled.nav`
         left: 0 !important;
         right: 0 !important;
         z-index: 10002 !important;
-        height: 40px;
+        height: ${MIRAGEAPP_BOTTOM_NAV_HEIGHT}px;
         width: 100%;
         max-width: 100vw;
         box-sizing: border-box;
-        border-top: 1px solid ${({ theme }) => theme.colors.border};
-        padding: 0 0.5rem;
+        background: ${({ theme }) => theme.colors.bg};
+        border-top: 1px solid ${({ theme }) => theme.colors.headerBorder};
+        padding: 0;
         padding-bottom: env(safe-area-inset-bottom, 0px);
         overflow: visible;
-        background: ${({ theme }) => theme.colors.panel};
     }
 `;
 
@@ -33,42 +64,89 @@ const NavItems = styled.div`
     margin: 0;
     justify-content: space-around;
     align-items: stretch;
-    height: 40px;
+    height: ${MIRAGEAPP_BOTTOM_NAV_HEIGHT}px;
     box-sizing: border-box;
 `;
 
-const navItemStyles = css`
+// Per R7: label typography 0.6rem / 500, active 600. Active color uses
+// `sidebarItemActiveText` — pure white in dark mode, pure black in light mode.
+const navItemCss = ({ theme, $active }) => `
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 2px;
     flex: 1;
+    min-width: 48px;
+    max-width: 96px;
     cursor: pointer;
     text-decoration: none;
-    color: ${({ theme, $active }) => $active ? theme.colors.text : theme.colors.subtleText};
+    color: ${$active ? theme.colors.sidebarItemActiveText : theme.colors.subtleText};
     user-select: none;
     -webkit-tap-highlight-color: transparent;
     position: relative;
+    background: transparent;
+    border: none;
+    padding: 0;
+    font: inherit;
+    transition: color 0.15s ease, background 0.15s ease;
+
+    /* Tap highlight — mirage hover tile, not a blue focus ring. */
+    &:hover,
+    &:active {
+        background: ${theme.colors.hoverBg};
+        color: ${$active ? theme.colors.sidebarItemActiveText : theme.colors.text};
+    }
+
+    /* Explicitly suppress blue outline / focus ring per R5. */
+    &:focus,
+    &:focus-visible {
+        outline: none;
+        box-shadow: none;
+    }
 
     svg {
-        width: 20px;
-        height: 20px;
-        fill: currentColor;
+        width: 24px;
+        height: 24px;
+        display: block;
     }
 `;
 
-const NavItemBase = styled.div`${navItemStyles}`;
-const NavItemLink = styled(Link)`${navItemStyles}`;
-const InboxNavItem = styled.a`${navItemStyles}`;
+const NavItemLink = styled(Link)`${navItemCss}`;
+const NavItemAnchor = styled.a`${navItemCss}`;
+const NavItemButton = styled.button`${navItemCss}`;
 
-const UnreadDot = styled.span`
-    position: absolute;
-    top: 6px;
-    right: calc(50% - 14px);
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #FF3B30;
+const NavLabel = styled.span`
+    font-size: 0.6rem;
+    font-weight: ${({ $active }) => ($active ? 600 : 500)};
+    line-height: 1;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 `;
+
+// Inbox unread pill — small red badge (reuses MobileHeader pattern).
+const InboxBadge = styled.span`
+    position: absolute;
+    top: 4px;
+    left: calc(50% + 6px);
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    background: #FF3B30;
+    border-radius: 999px;
+    border: 2px solid ${({ theme }) => theme.colors.bg};
+    color: #fff;
+    font-size: 0.5rem;
+    font-weight: 700;
+    line-height: 10px;
+    text-align: center;
+    box-sizing: border-box;
+`;
+
+const formatBadgeCount = (n) => (n > 99 ? '99+' : String(n));
 
 const ProfileSheetBackdrop = styled.div`
     position: fixed;
@@ -76,7 +154,7 @@ const ProfileSheetBackdrop = styled.div`
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.5);
+    background: ${({ theme }) => theme.colors.overlay};
     z-index: 10001;
 
     @media (min-width: 601px) {
@@ -87,10 +165,19 @@ const ProfileSheetBackdrop = styled.div`
 const ProfileSheet = styled.div`
     width: 100%;
     background-color: ${({ theme }) => theme.colors.panel};
-    border-top: 1px solid ${({ theme }) => theme.colors.border};
-    padding: 0.5rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
-    margin-bottom: 40px;
+    border-top: 1px solid ${({ theme }) => theme.colors.headerBorder};
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    padding: 0.6rem 0.9rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
+    /* Sit above the bottom nav. */
+    margin-bottom: ${MIRAGEAPP_BOTTOM_NAV_HEIGHT}px;
     box-sizing: border-box;
+    animation: slideUpProfileSheet 0.22s ease-out;
+
+    @keyframes slideUpProfileSheet {
+        from { transform: translateY(18px); opacity: 0; }
+        to   { transform: translateY(0);    opacity: 1; }
+    }
 
     @media (min-width: 601px) {
         display: none;
@@ -99,15 +186,15 @@ const ProfileSheet = styled.div`
 
 const ProfileSheetHandle = styled.div`
     width: 32px;
-    height: 2px;
+    height: 3px;
+    border-radius: 4px;
     background: ${({ theme }) => theme.colors.border};
+    opacity: 0.7;
     margin: 0 auto 0.4rem;
 `;
 
-// Routes that should not show the bottom nav
 const HIDDEN_ROUTES = [];
 
-// Check if current path matches or starts with given pattern
 const isPathActive = (pathname, patterns) => {
     if (!Array.isArray(patterns)) patterns = [patterns];
     return patterns.some(pattern => {
@@ -116,27 +203,23 @@ const isPathActive = (pathname, patterns) => {
     });
 };
 
-const NAV_HEIGHT = 40;
-
 function MobileBottomNav({ state }) {
     const location = useLocation();
     const navigate = useNavigate();
     const pathname = location?.pathname || '';
     const navRef = useRef(null);
 
-    // Don't run any logic on desktop - check initial window width
     const [isMobile, setIsMobile] = useState(() =>
         typeof window !== 'undefined' && window.innerWidth <= 600
     );
 
-    // Update on resize
     useEffect(() => {
         const checkMobile = () => setIsMobile(window.innerWidth <= 600);
         window.addEventListener('resize', checkMobile);
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
-    // State for unread inbox count (server-side, initialized from localStorage to survive remounts)
+    // Unread inbox count — seeded from localStorage so remounts don't flicker.
     const [inboxCount, setInboxCount] = useState(() => {
         try {
             const stored = localStorage.getItem('inbox_count');
@@ -145,67 +228,51 @@ function MobileBottomNav({ state }) {
     });
     const mountedRef = useRef(true);
 
-    // Bottom-sheet profile menu visibility
     const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
-
-    // Track if an input/textarea is focused (keyboard is likely open)
     const [isInputFocused, setIsInputFocused] = useState(false);
 
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const hasPublicKey = !!publicKey;
 
-    // Hide nav on certain routes
     const shouldHide = HIDDEN_ROUTES.some(route => pathname === route || pathname.startsWith(route));
 
-    // Determine active tab
-    const isHomeActive = isPathActive(pathname, ['/', '/home']) || pathname.startsWith('/t/');
-    const isFollowingActive = pathname === '/following';
+    const isHomeActive = isPathActive(pathname, ['/', '/home', '/following']) || pathname.startsWith('/t/');
+    const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
     const isCreateActive = pathname === '/create_post';
     const isInboxActive = pathname === '/inbox';
-    const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/agents']);
+    const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/agents', '/referrals', '/blocks']);
 
-    // Get current topic for create button
     const currentTopic = React.useMemo(() => {
         try {
             const m = pathname.match(/^\/t\/([^/]+)/);
             const t = m && m[1] ? decodeURIComponent(m[1]) : '';
             return t || '';
-        } catch (_) {
-            return '';
-        }
+        } catch (_) { return ''; }
     }, [pathname]);
 
-    // Position the nav using JavaScript instead of CSS bottom: 0
-    // This is more reliable across different mobile browser behaviors
+    // Position the nav with JS against the visual viewport so the iOS keyboard
+    // / URL bar don't leave a gap (matches oldreddit/onyx behavior).
     useEffect(() => {
-        // Skip on desktop
         if (!isMobile) return;
-
         const nav = navRef.current;
         if (!nav) return;
 
         const updatePosition = () => {
             if (!nav) return;
-
-            // Use visualViewport if available, otherwise fall back to window dimensions
             let viewportHeight;
             if (window.visualViewport) {
                 viewportHeight = window.visualViewport.height + window.visualViewport.offsetTop;
             } else {
                 viewportHeight = window.innerHeight;
             }
-
-            // Position nav at the bottom of the visible viewport
-            const topPosition = viewportHeight - NAV_HEIGHT;
+            const topPosition = viewportHeight - MIRAGEAPP_BOTTOM_NAV_HEIGHT;
             nav.style.top = `${Math.max(0, topPosition)}px`;
             nav.style.bottom = 'auto';
         };
 
-        // Update on various events
         updatePosition();
 
-        // Use requestAnimationFrame for smooth updates
         let rafId = null;
         const scheduleUpdate = () => {
             if (rafId) return;
@@ -215,74 +282,50 @@ function MobileBottomNav({ state }) {
             });
         };
 
-        // Listen to all relevant events
         window.addEventListener('resize', scheduleUpdate);
         window.addEventListener('scroll', scheduleUpdate);
         window.addEventListener('orientationchange', scheduleUpdate);
-
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', scheduleUpdate);
             window.visualViewport.addEventListener('scroll', scheduleUpdate);
         }
 
-        // Initial position update
-        updatePosition();
-
         return () => {
             window.removeEventListener('resize', scheduleUpdate);
             window.removeEventListener('scroll', scheduleUpdate);
             window.removeEventListener('orientationchange', scheduleUpdate);
-
             if (window.visualViewport) {
                 window.visualViewport.removeEventListener('resize', scheduleUpdate);
                 window.visualViewport.removeEventListener('scroll', scheduleUpdate);
             }
-
             if (rafId) cancelAnimationFrame(rafId);
         };
     }, [isMobile]);
 
-    // Track when text inputs are focused to hide bottom nav (keyboard open)
+    // Hide the bar when a text input is focused (keyboard open).
     useEffect(() => {
         if (!isMobile) return;
-
-        const handleFocusIn = (e) => {
+        const isText = (e) => {
             const tag = e.target?.tagName?.toLowerCase();
             const type = e.target?.type?.toLowerCase();
-            // Detect text inputs and textareas (not buttons, checkboxes, etc.)
-            const isTextInput = tag === 'textarea' ||
+            return tag === 'textarea' ||
                 (tag === 'input' && ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type));
-            if (isTextInput) {
-                setIsInputFocused(true);
-            }
         };
-
-        const handleFocusOut = (e) => {
-            const tag = e.target?.tagName?.toLowerCase();
-            const type = e.target?.type?.toLowerCase();
-            const isTextInput = tag === 'textarea' ||
-                (tag === 'input' && ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type));
-            if (isTextInput) {
-                setIsInputFocused(false);
-            }
-        };
-
+        const handleFocusIn = (e) => { if (isText(e)) setIsInputFocused(true); };
+        const handleFocusOut = (e) => { if (isText(e)) setIsInputFocused(false); };
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
-
         return () => {
             document.removeEventListener('focusin', handleFocusIn);
             document.removeEventListener('focusout', handleFocusOut);
         };
     }, [isMobile]);
 
-    // Close profile sheet on Escape key while it is open
+    // Close the profile sheet on Escape.
     useEffect(() => {
         if (!isMobile || !isProfileSheetOpen) return;
         const onKeyDown = (e) => {
-            if (e.key === 'Escape' || e.key === 'Esc') {
-                setIsProfileSheetOpen(false);
-            }
+            if (e.key === 'Escape' || e.key === 'Esc') setIsProfileSheetOpen(false);
         };
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
@@ -293,26 +336,18 @@ function MobileBottomNav({ state }) {
         return () => { mountedRef.current = false; };
     }, []);
 
-    // Listen for server-side inbox count from every API response
     useEffect(() => {
         if (!isMobile) return;
-        if (!publicKey) {
-            setInboxCount(0);
-            return;
-        }
-
+        if (!publicKey) { setInboxCount(0); return; }
         const handleInboxCount = (e) => {
             if (!mountedRef.current) return;
             const count = typeof e.detail === 'number' ? Math.max(0, e.detail) : 0;
-
             setInboxCount(count);
         };
-
         window.addEventListener('inboxCount', handleInboxCount);
         return () => window.removeEventListener('inboxCount', handleInboxCount);
     }, [isMobile, publicKey]);
 
-    // Close the profile sheet on any route change
     useEffect(() => {
         if (!isMobile) return;
         setIsProfileSheetOpen(false);
@@ -320,41 +355,31 @@ function MobileBottomNav({ state }) {
 
     const handleProfileClick = (e) => {
         e.preventDefault();
-
         if (!hasPublicKey) {
             navigate('/signup');
             return;
         }
-
         setIsProfileSheetOpen(true);
     };
 
-    const handleCloseProfileSheet = () => {
-        setIsProfileSheetOpen(false);
-    };
+    const handleCloseProfileSheet = () => setIsProfileSheetOpen(false);
 
-    const handleProfileMenuNavigate = (targetPath) => {
-        // Ensure mobile profile menu navigation snaps to top instantly
+    const handleProfileMenuNavigate = () => {
         try {
             if (typeof window !== 'undefined' && window.innerWidth <= 600) {
                 window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
             }
-        } catch (_) { }
+        } catch (_) { /* noop */ }
         setIsProfileSheetOpen(false);
     };
 
     const handleNavItemClick = () => {
-        if (isProfileSheetOpen) {
-            setIsProfileSheetOpen(false);
-        }
+        if (isProfileSheetOpen) setIsProfileSheetOpen(false);
     };
 
     const handleFeedNavClick = (targetPath, e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
-
-        if (isProfileSheetOpen) {
-            setIsProfileSheetOpen(false);
-        }
+        if (isProfileSheetOpen) setIsProfileSheetOpen(false);
 
         const isAlreadyOnRoute = pathname === targetPath ||
             (targetPath === '/home' && (pathname === '/' || pathname === '/home' || pathname.startsWith('/t/')));
@@ -367,13 +392,12 @@ function MobileBottomNav({ state }) {
         }
     };
 
-    // Don't render on desktop, hidden routes, or when keyboard is open
     if (!isMobile || shouldHide || isInputFocused) return null;
 
-    // Create link always points at /create_post; logged-out users see the welcome prompt there.
-    const createLink = hasPublicKey && currentTopic
-        ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
-        : '/create_post';
+    // Logged-out users land on /signup via the create tab (mirrors mobile app).
+    const createLink = hasPublicKey
+        ? (currentTopic ? `/create_post?topic=${encodeURIComponent(currentTopic)}` : '/create_post')
+        : '/signup';
 
     return ReactDOM.createPortal(
         <>
@@ -386,24 +410,22 @@ function MobileBottomNav({ state }) {
                         aria-current={isHomeActive ? 'page' : undefined}
                         onClick={(e) => handleFeedNavClick('/home', e)}
                     >
-                        <svg viewBox="0 0 24 24">
-                            {isHomeActive
-                                ? <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
-                                : <path d="M12 5.69l5 4.5V18h-2v-6H9v6H7v-7.81l5-4.5M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z" />
-                            }
-                        </svg>
+                        {isHomeActive ? <HiHome aria-hidden="true" /> : <HiOutlineHome aria-hidden="true" />}
+                        <NavLabel $active={isHomeActive}>Home</NavLabel>
                     </NavItemLink>
 
                     <NavItemLink
-                        to="/following"
-                        $active={isFollowingActive}
-                        aria-label="Following"
-                        aria-current={isFollowingActive ? 'page' : undefined}
-                        onClick={(e) => handleFeedNavClick('/following', e)}
+                        to="/search"
+                        $active={isSearchActive}
+                        aria-label="Search"
+                        aria-current={isSearchActive ? 'page' : undefined}
+                        onClick={handleNavItemClick}
                     >
-                        <svg viewBox="0 0 24 24">
-                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-                        </svg>
+                        {isSearchActive
+                            ? <HiMagnifyingGlass aria-hidden="true" />
+                            : <HiOutlineMagnifyingGlass aria-hidden="true" />
+                        }
+                        <NavLabel $active={isSearchActive}>Search</NavLabel>
                     </NavItemLink>
 
                     <NavItemLink
@@ -413,15 +435,14 @@ function MobileBottomNav({ state }) {
                         aria-current={isCreateActive ? 'page' : undefined}
                         onClick={handleNavItemClick}
                     >
-                        <svg viewBox="0 0 24 24">
-                            {isCreateActive
-                                ? <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
-                                : <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
-                            }
-                        </svg>
+                        {isCreateActive
+                            ? <HiPlusCircle aria-hidden="true" />
+                            : <HiOutlinePlusCircle aria-hidden="true" />
+                        }
+                        <NavLabel $active={isCreateActive}>Create</NavLabel>
                     </NavItemLink>
 
-                    <InboxNavItem
+                    <NavItemAnchor
                         href="/inbox"
                         $active={isInboxActive}
                         aria-label={inboxCount > 0 ? `Inbox - ${inboxCount} unread` : 'Inbox'}
@@ -434,39 +455,28 @@ function MobileBottomNav({ state }) {
                             }
                         }}
                     >
-                        <svg viewBox="0 0 24 24">
-                            {isInboxActive
-                                ? <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
-                                : <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z" />
-                            }
-                        </svg>
-                        {inboxCount > 0 && hasPublicKey && <UnreadDot />}
-                    </InboxNavItem>
+                        {isInboxActive ? <HiInbox aria-hidden="true" /> : <HiOutlineInbox aria-hidden="true" />}
+                        {inboxCount > 0 && hasPublicKey && (
+                            <InboxBadge aria-hidden="true">{formatBadgeCount(inboxCount)}</InboxBadge>
+                        )}
+                        <NavLabel $active={isInboxActive}>Inbox</NavLabel>
+                    </NavItemAnchor>
 
-                    <NavItemBase
-                        as="button"
+                    <NavItemButton
                         type="button"
                         onClick={handleProfileClick}
                         $active={isProfileActive}
                         aria-label="Profile"
                         aria-current={isProfileActive ? 'page' : undefined}
-                        style={{ background: 'transparent', border: 'none' }}
                     >
-                        <svg viewBox="0 0 24 24">
-                            {isProfileActive
-                                ? <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                                : <path d="M12 6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2m0 10c2.7 0 5.8 1.29 6 2H6c.23-.72 3.31-2 6-2m0-12C9.79 4 8 5.79 8 8s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 10c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                            }
-                        </svg>
-                    </NavItemBase>
+                        {isProfileActive ? <HiUser aria-hidden="true" /> : <HiOutlineUser aria-hidden="true" />}
+                        <NavLabel $active={isProfileActive}>Profile</NavLabel>
+                    </NavItemButton>
                 </NavItems>
             </NavContainer>
 
             {isProfileSheetOpen && (
-                <ProfileSheetBackdrop
-                    role="presentation"
-                    onClick={handleCloseProfileSheet}
-                >
+                <ProfileSheetBackdrop role="presentation" onClick={handleCloseProfileSheet}>
                     <ProfileSheet
                         role="dialog"
                         aria-modal="true"
