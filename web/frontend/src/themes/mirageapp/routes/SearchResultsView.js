@@ -12,6 +12,7 @@ import {
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import CardView from "../components/CardView.js";
+import { FeedCardSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -346,21 +347,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadingSpinner = styled.div`
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    border: 2px solid ${({ theme }) => theme.colors.border};
-    border-top-color: ${({ theme }) => theme.colors.focusBlue};
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        to {
-            transform: rotate(360deg);
-        }
-    }
-`;
-
 function formatPostCount(count) {
     const n = Number(count || 0);
     if (!n) return "";
@@ -529,15 +515,8 @@ export default function SearchResultsView({ state }) {
     if (loading) {
         return renderShell(
             <>
-                <HeaderRow>
-                    <HeaderTitle>Search</HeaderTitle>
-                </HeaderRow>
-                <HeaderSubRow>
-                    <HeaderSub>Searching for “{displayQuery}”…</HeaderSub>
-                </HeaderSubRow>
-                <StateBlock role="status" aria-live="polite">
-                    <LoadingSpinner />
-                </StateBlock>
+                <PageHeaderSkeleton />
+                <FeedCardSkeletonList count={4} />
             </>
         );
     }

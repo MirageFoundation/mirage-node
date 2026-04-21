@@ -4,6 +4,7 @@ import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
+import { InfoPanelSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useStats, TIER_NAMES, TIER_COLORS } from "../../../logic/useStats";
 
@@ -524,37 +525,6 @@ const TrendIndicator = styled.span`
 /* State blocks (loading / error / empty)                                     */
 /* -------------------------------------------------------------------------- */
 
-const StateBlock = styled.div`
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-    padding: 2.5rem 1.25rem;
-    text-align: center;
-    color: ${({ theme }) => theme.colors.subtleText};
-`;
-
-const LoadingSpinner = styled.div`
-    width: 26px;
-    height: 26px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
-const StateTitle = styled.div`
-    color: ${({ theme }) => theme.colors.text};
-    font-size: 0.9rem;
-    font-weight: 700;
-`;
-
 const ErrorMessage = styled.div`
     background-color: ${({ theme }) => theme.colors.buttonDangerBg};
     border: 1px solid ${({ theme }) => theme.colors.buttonDangerBorder};
@@ -710,7 +680,7 @@ export default function StatsView() {
         );
     };
 
-    const renderShell = body => (
+    const renderShell = (body, loadingHeader = false) => (
         <ContentGrid>
             <Helmet>
                 <title>Stats | Mirage</title>
@@ -720,25 +690,31 @@ export default function StatsView() {
                     <StatsTabbedContainer>
                         <StatsShellBody>
                             <StatsWrap>
-                            <HeaderRow>
-                                <HeaderTitle>Stats</HeaderTitle>
-                            </HeaderRow>
-                            <SectionDivider />
-                            <TabsRow role="tablist" aria-label="Stats sections" $count={TABS.length}>
-                                {TABS.map(tab => (
-                                    <TabButton
-                                        key={tab.id}
-                                        type="button"
-                                        role="tab"
-                                        aria-selected={activeTab === tab.id}
-                                        $active={activeTab === tab.id}
-                                        onClick={() => setActiveTab(tab.id)}
-                                    >
-                                        {tab.label}
-                                    </TabButton>
-                                ))}
-                                <TabIndicator $count={TABS.length} $index={activeTabIndex} aria-hidden="true" />
-                            </TabsRow>
+                            {loadingHeader ? (
+                                <PageHeaderSkeleton showSubtitle={false} titleWidth="25%" />
+                            ) : (
+                                <>
+                                    <HeaderRow>
+                                        <HeaderTitle>Stats</HeaderTitle>
+                                    </HeaderRow>
+                                    <SectionDivider />
+                                    <TabsRow role="tablist" aria-label="Stats sections" $count={TABS.length}>
+                                        {TABS.map(tab => (
+                                            <TabButton
+                                                key={tab.id}
+                                                type="button"
+                                                role="tab"
+                                                aria-selected={activeTab === tab.id}
+                                                $active={activeTab === tab.id}
+                                                onClick={() => setActiveTab(tab.id)}
+                                            >
+                                                {tab.label}
+                                            </TabButton>
+                                        ))}
+                                        <TabIndicator $count={TABS.length} $index={activeTabIndex} aria-hidden="true" />
+                                    </TabsRow>
+                                </>
+                            )}
                             {body}
                             </StatsWrap>
                         </StatsShellBody>
@@ -753,12 +729,14 @@ export default function StatsView() {
             <>
                 {error && !loading && <ErrorMessage>{error}</ErrorMessage>}
                 {loading && !error && (
-                    <StateBlock role="status" aria-live="polite">
-                        <LoadingSpinner />
-                        <StateTitle>Loading stats…</StateTitle>
-                    </StateBlock>
+                    <>
+                        <InfoPanelSkeleton rows={5} />
+                        <InfoPanelSkeleton rows={4} />
+                        <InfoPanelSkeleton rows={3} />
+                    </>
                 )}
-            </>
+            </>,
+            !error
         );
     }
 
@@ -1315,9 +1293,7 @@ export default function StatsView() {
                             )}
                         </>
                     ) : payoutsLoading ? (
-                        <StateBlock>
-                            <LoadingSpinner />
-                        </StateBlock>
+                        <InfoPanelSkeleton rows={4} />
                     ) : (
                         <SectionEmpty>No rewards recorded yet.</SectionEmpty>
                     )}

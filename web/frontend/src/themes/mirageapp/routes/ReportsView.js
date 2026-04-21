@@ -7,6 +7,7 @@ import {
     HiLockClosed,
 } from "react-icons/hi2";
 import Button from "../components/Button.js";
+import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -281,20 +282,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadingSpinner = styled.div`
-    width: 26px;
-    height: 26px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 const shortenReporter = addr => {
     if (!addr) return '';
     return `${addr.slice(0, 10)}…${addr.slice(-4)}`;
@@ -327,7 +314,7 @@ export default function ReportsView({ state }) {
 
     const viewerAddress = state && state.publicKey ? state.publicKey : '';
 
-    const renderShell = (body, titleCount) => (
+    const renderShell = (body, titleCount, loadingHeader = false) => (
         <ContentGrid>
             <Helmet>
                 <title>Reports | Mirage</title>
@@ -337,12 +324,16 @@ export default function ReportsView({ state }) {
                     <TabbedContainer>
                         <ContainerBody $fullWidth>
                             <ReportsWrap>
-                                <HeaderRow>
-                                    <HeaderTitle>Reports</HeaderTitle>
-                                    {typeof titleCount === 'number' && (
-                                        <HeaderCount>({titleCount})</HeaderCount>
-                                    )}
-                                </HeaderRow>
+                                {loadingHeader ? (
+                                    <PageHeaderSkeleton showSubtitle={false} titleWidth="30%" />
+                                ) : (
+                                    <HeaderRow>
+                                        <HeaderTitle>Reports</HeaderTitle>
+                                        {typeof titleCount === 'number' && (
+                                            <HeaderCount>({titleCount})</HeaderCount>
+                                        )}
+                                    </HeaderRow>
+                                )}
                                 {body}
                             </ReportsWrap>
                         </ContainerBody>
@@ -372,10 +363,9 @@ export default function ReportsView({ state }) {
 
     if (loading) {
         return renderShell(
-            <StateBlock role="status" aria-live="polite">
-                <LoadingSpinner />
-                <StateTitle>Loading reports…</StateTitle>
-            </StateBlock>
+            <ListRowSkeletonList count={5} />,
+            undefined,
+            true
         );
     }
 

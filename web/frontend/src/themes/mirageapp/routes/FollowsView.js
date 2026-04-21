@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import styled from "styled-components";
 import { HiHashtag, HiExclamationTriangle, HiUsers } from "react-icons/hi2";
 import Button from "../components/Button.js";
+import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -264,20 +265,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadingSpinner = styled.div`
-    width: 26px;
-    height: 26px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 const TABS = [
     { id: 'topics', label: 'Topics' },
     { id: 'users', label: 'Users' },
@@ -384,11 +371,8 @@ export default function FollowsView({ state }) {
     if (listsLoading) {
         return renderShell(
             <>
-                {headerBlock}
-                <StateBlock role="status" aria-live="polite">
-                    <LoadingSpinner />
-                    <StateTitle>Loading follows…</StateTitle>
-                </StateBlock>
+                <PageHeaderSkeleton />
+                <ListRowSkeletonList count={6} />
             </>
         );
     }

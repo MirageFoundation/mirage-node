@@ -8,6 +8,7 @@ import {
     HiArrowsUpDown,
 } from "react-icons/hi2";
 import Button from "../components/Button.js";
+import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -361,20 +362,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadingSpinner = styled.div`
-    width: 26px;
-    height: 26px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 function formatActive(ts) {
     const ago = formatTimeAgo(ts);
     return ago ? `Active ${ago}` : 'No activity yet';
@@ -446,11 +433,8 @@ export default function AgentsView({ state }) {
     if (loadingAgents || loadingEnabled) {
         return renderShell(
             <>
-                {headerBlock}
-                <StateBlock role="status" aria-live="polite">
-                    <LoadingSpinner />
-                    <StateTitle>Loading agents…</StateTitle>
-                </StateBlock>
+                <PageHeaderSkeleton />
+                <ListRowSkeletonList count={6} />
             </>
         );
     }

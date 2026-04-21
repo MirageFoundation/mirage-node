@@ -17,6 +17,19 @@ import MobileBottomNav from './components/MobileBottomNav';
 import MobileHeader from './components/MobileHeader';
 import QuestHeroCard from './components/QuestHeroCard';
 import Sidebar from './components/Sidebar';
+import Skeleton, {
+    SkeletonText,
+    SkeletonCircle,
+    SkeletonBlock,
+    FeedCardSkeleton,
+    FeedCardSkeletonList,
+    CommentSkeleton,
+    ListRowSkeleton,
+    ListRowSkeletonList,
+    InfoPanelSkeleton,
+    ProfileHeaderSkeleton,
+    PageHeaderSkeleton,
+} from './components/Skeleton';
 import StickerPicker from './components/StickerPicker';
 import Toast from './components/Toast';
 import Tooltip, { InfoIcon, tooltipStyles } from './components/Tooltip';
@@ -71,6 +84,18 @@ const components = {
     MobileHeader,
     QuestHeroCard,
     Sidebar,
+    Skeleton,
+    SkeletonText,
+    SkeletonCircle,
+    SkeletonBlock,
+    FeedCardSkeleton,
+    FeedCardSkeletonList,
+    CommentSkeleton,
+    ListRowSkeleton,
+    ListRowSkeletonList,
+    InfoPanelSkeleton,
+    ProfileHeaderSkeleton,
+    PageHeaderSkeleton,
     StickerPicker,
     Toast,
     Tooltip,

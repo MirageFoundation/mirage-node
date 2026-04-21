@@ -2,6 +2,7 @@ import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiClipboardDocument, HiCheck } from "react-icons/hi2";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
+import { Skeleton, ListRowSkeletonList } from "../components/Skeleton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
 
@@ -195,13 +196,6 @@ const InlineMono = styled(ValueText)`
     display: block;
     flex: 1;
     min-width: 0;
-`;
-
-const Placeholder = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.72rem;
-    font-weight: 500;
-    font-style: italic;
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -827,7 +821,7 @@ export default function NetworkView({ state }) {
     const activeTabIndex = Math.max(0, TABS.findIndex(t => t.id === activeTab));
 
     const renderValue = (v, suffix = '') => v === null || v === undefined
-        ? <Placeholder>(loading…)</Placeholder>
+        ? <Skeleton width="6rem" height="0.75rem" inline />
         : <ValueText>{v}{suffix}</ValueText>;
 
     const renderCopyRow = (label, addr, key) => (
@@ -835,7 +829,7 @@ export default function NetworkView({ state }) {
             <FieldLabel>{label}:</FieldLabel>
             <FieldValue>
                 <InlineMono title={addr || ''}>
-                    {addr || <Placeholder>(loading…)</Placeholder>}
+                    {addr || <Skeleton width="14rem" height="0.75rem" inline />}
                 </InlineMono>
                 {addr && (
                     <IconActionButton
@@ -857,7 +851,7 @@ export default function NetworkView({ state }) {
     );
 
     const renderPeers = () => {
-        if (peers === null) return <EmptyNote>(loading…)</EmptyNote>;
+        if (peers === null) return <ListRowSkeletonList count={3} hasAvatar={false} showMeta={false} />;
         if (!Array.isArray(peers) || peers.length === 0) return <EmptyNote>(none)</EmptyNote>;
         return (
             <ListBody>
@@ -879,7 +873,7 @@ export default function NetworkView({ state }) {
     };
 
     const renderTopHolders = () => {
-        if (circulationStats.top_accounts.length === 0) return <EmptyNote>(loading…)</EmptyNote>;
+        if (circulationStats.top_accounts.length === 0) return <ListRowSkeletonList count={5} hasAvatar={false} />;
         return (
             <ListBody>
                 {circulationStats.top_accounts.map((account, idx) => {
@@ -947,7 +941,7 @@ export default function NetworkView({ state }) {
                                                 <FieldValue>
                                                     {circulationStats.total_supply !== null
                                                         ? <ValueText>{formatMirageCompact(circulationStats.total_supply)} MIRAGE</ValueText>
-                                                        : <Placeholder>(loading…)</Placeholder>}
+                                                        : <Skeleton width="8rem" height="0.75rem" inline />}
                                                 </FieldValue>
                                             </FieldRow>
                                             <FieldRow>
@@ -955,7 +949,7 @@ export default function NetworkView({ state }) {
                                                 <FieldValue>
                                                     {typeof cfg.block_time === 'number'
                                                         ? <ValueText>{cfg.block_time}s</ValueText>
-                                                        : <Placeholder>(loading…)</Placeholder>}
+                                                        : <Skeleton width="3rem" height="0.75rem" inline />}
                                                 </FieldValue>
                                             </FieldRow>
                                             <FieldRow>
@@ -1018,7 +1012,7 @@ export default function NetworkView({ state }) {
                                                 <FieldLabel>Staked:</FieldLabel>
                                                 <FieldValue>
                                                     {stakedBalance === null
-                                                        ? <Placeholder>(loading…)</Placeholder>
+                                                        ? <Skeleton width="8rem" height="0.75rem" inline />
                                                         : <ValueText>{formatMirageCompact(stakedBalance)} MIRAGE</ValueText>}
                                                 </FieldValue>
                                             </FieldRow>
@@ -1026,7 +1020,7 @@ export default function NetworkView({ state }) {
                                                 <FieldLabel>Balance:</FieldLabel>
                                                 <FieldValue>
                                                     {serverBalance === null
-                                                        ? <Placeholder>(loading…)</Placeholder>
+                                                        ? <Skeleton width="8rem" height="0.75rem" inline />
                                                         : <ValueText>{formatMirageCompact(serverBalance)} MIRAGE</ValueText>}
                                                 </FieldValue>
                                             </FieldRow>
@@ -1034,7 +1028,7 @@ export default function NetworkView({ state }) {
                                                 <FieldLabel>Earned (24h):</FieldLabel>
                                                 <FieldValue>
                                                     {cfg.earned_24h == null
-                                                        ? <Placeholder>(loading…)</Placeholder>
+                                                        ? <Skeleton width="8rem" height="0.75rem" inline />
                                                         : <StatusPill $tone={cfg.earned_24h > 0 ? 'up' : 'neutral'}>
                                                             +{formatMirageCompact(cfg.earned_24h)} MIRAGE
                                                         </StatusPill>}
@@ -1044,7 +1038,7 @@ export default function NetworkView({ state }) {
                                                 <FieldLabel>Burned (24h):</FieldLabel>
                                                 <FieldValue>
                                                     {cfg.burned_24h == null
-                                                        ? <Placeholder>(loading…)</Placeholder>
+                                                        ? <Skeleton width="8rem" height="0.75rem" inline />
                                                         : <StatusPill $tone={cfg.burned_24h > 0 ? 'down' : 'neutral'}>
                                                             −{formatMirageCompact(cfg.burned_24h)} MIRAGE
                                                         </StatusPill>}

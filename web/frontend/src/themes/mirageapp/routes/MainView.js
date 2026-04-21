@@ -3,6 +3,7 @@ import { HiNoSymbol } from "react-icons/hi2";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
+import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
@@ -793,17 +794,6 @@ const MainFeedPanel = styled.div`
     background: ${({ theme }) => theme.colors.bg};
 `;
 
-const LoadingMoreIndicator = styled.div`
-    width: 100%;
-    margin-top: 0.5rem;
-    padding: 0.5rem 0;
-    text-align: center;
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.8rem;
-    font-style: italic;
-`;
 const LoadMoreButton = styled.button`
     display: block;
     width: 100%;
@@ -852,23 +842,6 @@ const LoadingCard = styled.div`
     $size
 }) => $size === 'compact' ? '0.5rem' : '0.65rem'};
     box-sizing: border-box;
-`;
-const LoadingSpinner = styled.div`
-    width: 24px;
-    height: 24px;
-    border: 3px solid ${({
-    theme
-}) => theme.colors.border};
-    border-top: 3px solid ${({
-    theme
-}) => theme.colors.subtleText};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
 `;
 const LoadingText = styled.div`
     color: ${({
@@ -1488,10 +1461,12 @@ const MainView = ({
                         </BlockedTopicState>}
 
                         {/* Loading state - only show to logged-in users */}
-                        {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && <LoadingCard $size={cardSize}>
-                            <LoadingSpinner />
-                            <LoadingText>Loading posts...</LoadingText>
-                        </LoadingCard>}
+                        {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && (
+                            <>
+                                <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
+                                <FeedCardSkeletonList count={5} />
+                            </>
+                        )}
 
                         {/* Empty home feed - only show to logged-in users */}
                         {isLoggedIn && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
@@ -1550,7 +1525,9 @@ const MainView = ({
                             return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
                         })()}
 
-                        {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
+                        {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
+                            <FeedCardSkeleton />
+                        )}
                         {isLoggedIn && <div ref={bottomSentinelRef} style={{
                             width: '100%',
                             minHeight: '1px'

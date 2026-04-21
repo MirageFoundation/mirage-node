@@ -11,6 +11,7 @@ import {
     HiExclamationTriangle,
 } from "react-icons/hi2";
 import Button from "../components/Button.js";
+import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { formatMirage } from "../../../utils/formatters";
@@ -397,20 +398,6 @@ const StateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const LoadingSpinner = styled.div`
-    width: 28px;
-    height: 28px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 const LoadMoreWrap = styled.div`
     padding: 0.85rem 1rem 1rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
@@ -491,10 +478,10 @@ export default function InboxView({ state }) {
 
     if (loading) {
         return renderShell(
-            <StateBlock role="status" aria-live="polite">
-                <LoadingSpinner />
-                <StateTitle>Loading inbox…</StateTitle>
-            </StateBlock>
+            <>
+                <PageHeaderSkeleton />
+                <ListRowSkeletonList count={6} />
+            </>
         );
     }
 

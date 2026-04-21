@@ -10,6 +10,7 @@ import * as tx from "../../../utils/tx.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
+import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
@@ -1134,20 +1135,6 @@ const VPStateMessage = styled.div`
     max-width: 24rem;
     color: ${({ theme }) => theme.colors.subtleText};
 `;
-const VPLoadingSpinner = styled.div`
-    width: 28px;
-    height: 28px;
-    border: 3px solid ${({ theme }) => theme.colors.border};
-    border-top: 3px solid ${({ theme }) => theme.colors.focusBlue};
-    border-radius: 50%;
-    animation: vpSpin 0.8s linear infinite;
-
-    @keyframes vpSpin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 /**
  * Blocked-post state — visual twin of `MainView`'s `BlockedTopicState`.
  * Shown when the viewer navigates to `/p/<id>` for a post they have
@@ -1769,10 +1756,14 @@ function ViewPostView({
                         </svg>
                         Back
                     </BackButton>
-                    {loading ? <VPStateBlock role="status" aria-live="polite">
-                        <VPLoadingSpinner />
-                        <VPStateTitle>Loading post…</VPStateTitle>
-                    </VPStateBlock> : <VPStateBlock role="alert">
+                    {loading ? (
+                        <div role="status" aria-live="polite" aria-label="Loading post">
+                            <FeedCardSkeleton />
+                            <CommentSkeleton />
+                            <CommentSkeleton indent={1} />
+                            <CommentSkeleton />
+                        </div>
+                    ) : <VPStateBlock role="alert">
                         <VPStateIcon $tone="danger">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
