@@ -478,7 +478,16 @@ export default function AgentsView({ state }) {
     const renderRow = (agent) => {
         const addrLower = (agent.address || '').toLowerCase();
         const enabled = isEnabled(agent.address);
+        /* `isPending(addr)` returns true for EVERY agent while `apply
+         *  order` is in-flight (it checks the global `__set_agents__`
+         *  key), which caused all Enable/Disable buttons to show a
+         *  spinner when only the Apply-order button was pressed. Scope
+         *  the loading spinner to per-agent pending state by excluding
+         *  the apply-order window. The button is still disabled during
+         *  apply-order (see `disabled={...}` below) so users can't
+         *  spam-click mid-reorder. */
         const pending = isPending(addrLower);
+        const toggleLoading = pending && !isApplyingOrder;
         const displayName = agent.username
             ? `@${agent.username}`
             : agent.address
@@ -534,8 +543,8 @@ export default function AgentsView({ state }) {
                         variant={enabled && hovering ? 'primaryDanger' : enabled ? 'subtle' : 'primary'}
                         size="sm"
                         minWidth="6.5rem"
-                        disabled={pending || !viewerAddress || loadingEnabled}
-                        loading={pending}
+                        disabled={pending || !viewerAddress || loadingEnabled || isApplyingOrder}
+                        loading={toggleLoading}
                         onMouseEnter={() => setHoverAgent(addrLower)}
                         onMouseLeave={() => setHoverAgent(null)}
                         onClick={() => handleToggle(agent.address)}
@@ -543,7 +552,7 @@ export default function AgentsView({ state }) {
                         {getToggleLabel({
                             enabled,
                             hovering,
-                            pending,
+                            pending: toggleLoading,
                             status: formatStatus(addrLower),
                         })}
                     </Button>
