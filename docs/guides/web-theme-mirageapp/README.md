@@ -99,6 +99,7 @@ A full diff of `themes/mirageapp/**` vs `themes/oldreddit/**` revealed that a la
 7. [`07-agents-discover-notfound.md`](./06-subplans/07-agents-discover-notfound.md) — Agents, Discover (topics), NotFound
 8. [`08-mobile-bottom-nav.md`](./06-subplans/08-mobile-bottom-nav.md) — MobileBottomNav full restyle (deferred from Plan 02)
 9. [`09-polish-and-qa.md`](./06-subplans/09-polish-and-qa.md) — spacing / typography / state / responsive / accessibility polish + QA + optional default-theme switch
+10. [`10-loading-states-skeletons.md`](./06-subplans/10-loading-states-skeletons.md) — tokenized `Skeleton` primitive + per-route skeleton loaders; replaces inherited `Loading…` text (runs after 08, before 09)
 
 ---
 
