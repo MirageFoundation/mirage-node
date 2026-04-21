@@ -2,7 +2,7 @@
 
 **Route:** `/bridge`
 **File:** `themes/mirageapp/routes/BridgeView.js`
-**Status:** ⏳ Not started
+**Status:** ⏭️ Skipped — `/bridge` has no nav entry point in the `mirageapp` UI (no sidebar / top-bar / footer link). Restyle deferred until the route is surfaced or the page is repurposed. Revisit in sub-plan 06.9 polish if needed.
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---
