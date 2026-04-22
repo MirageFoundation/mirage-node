@@ -28,6 +28,7 @@ import Storage from "../../utils/Storage";
 export const VIEW_MODE_KEY = 'mirageapp_feed_view_mode';
 export const VIEW_MODE_DEFAULT = 'compact';
 export const VIEW_MODES = ['card', 'compact'];
+export const VIEW_MODE_CHANGE_EVENT = 'mirageapp-feed-view-mode-change';
 
 const FEED_BUCKET_LABELS = {
     following: 'following',
@@ -650,6 +651,56 @@ export function loadViewMode() {
 export function saveViewMode(next) {
     if (!VIEW_MODES.includes(next)) return;
     try { Storage.save(VIEW_MODE_KEY, next); } catch (_) { /* noop */ }
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(VIEW_MODE_CHANGE_EVENT, {
+            detail: { viewMode: next }
+        }));
+    }
+}
+
+export function FeedSortToggle({ sortMode, onChange, className }) {
+    const [open, setOpen] = useState(false);
+    const anchorRef = useRef(null);
+    useOutsideClick(anchorRef, () => setOpen(false), open);
+
+    const currentSortLabel = SORT_LABELS[sortMode] || SORT_LABELS.best;
+    const handleChange = useCallback((next) => {
+        if (typeof onChange === 'function') onChange(next);
+        setOpen(false);
+    }, [onChange]);
+
+    return (
+        <PopoverRoot ref={anchorRef} className={className}>
+            <CtrlButton
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpen((v) => !v)}
+            >
+                <span>{currentSortLabel}</span>
+                <ChevronWrap $expanded={open}>
+                    <HiChevronDown />
+                </ChevronWrap>
+            </CtrlButton>
+            {open && (
+                <Menu role="menu" aria-label="Sort posts">
+                    <MenuHeader>Sort by</MenuHeader>
+                    {['best', 'new'].map((key) => (
+                        <MenuItem
+                            key={key}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={sortMode === key}
+                            $active={sortMode === key}
+                            onClick={() => handleChange(key)}
+                        >
+                            <span>{SORT_LABELS[key]}</span>
+                        </MenuItem>
+                    ))}
+                </Menu>
+            )}
+        </PopoverRoot>
+    );
 }
 
 /* Resolve the post's primary media URL + post body. Mirrors the helper in
@@ -1064,10 +1115,26 @@ export default function ListFeedView({
     useOutsideClick(sortAnchorRef, () => setSortOpen(false), sortOpen);
     useOutsideClick(viewAnchorRef, () => setViewOpen(false), viewOpen);
 
+    /* Keep this feed's internal viewMode in sync when another component
+     * (e.g. the top Home/Following toolbar) changes the view mode. */
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const sync = (e) => {
+            const next = e?.detail?.viewMode;
+            if (VIEW_MODES.includes(next)) {
+                setViewMode(next);
+            } else {
+                setViewMode(loadViewMode());
+            }
+        };
+        window.addEventListener(VIEW_MODE_CHANGE_EVENT, sync);
+        return () => window.removeEventListener(VIEW_MODE_CHANGE_EVENT, sync);
+    }, []);
+
     const changeView = useCallback((next) => {
         if (!VIEW_MODES.includes(next)) return;
         setViewMode(next);
-        try { Storage.save(VIEW_MODE_KEY, next); } catch (_) { /* noop */ }
+        saveViewMode(next);
         setViewOpen(false);
     }, []);
 

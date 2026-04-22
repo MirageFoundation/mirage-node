@@ -1,8 +1,11 @@
 import { Helmet } from "react-helmet-async";
-import { HiNoSymbol } from "react-icons/hi2";
+import { useCallback, useEffect, useState } from "react";
+import { HiNoSymbol, HiChevronDown } from "react-icons/hi2";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
+import QuestHeroCard from "../components/QuestHeroCard.js";
+import { FeedSortToggle, FeedViewToggle, loadViewMode, saveViewMode, VIEW_MODE_CHANGE_EVENT } from "../ListFeedView.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
 import styled, { useTheme } from "styled-components";
@@ -16,117 +19,236 @@ import { requireThemeColor } from "../../../utils/themeColor";
 
 // Mobile header branding for home/following feeds
 
-// Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
-const InviteOnlyBanner = styled.div`
-    background: ${({
-    theme
-}) => theme.name === 'light' ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)' : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
-    border: 2px solid ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(59, 130, 246, 0.5)' : 'rgba(96, 165, 250, 0.6)'};
-    border-radius: ${({
-    $size
-}) => $size === 'compact' ? '8px' : '10px'};
-    padding: ${({
-    $size
-}) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
-    display: flex;
-    flex-direction: column;
-    gap: ${({
-    $size
-}) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-    box-shadow: ${({
-    theme
-}) => theme.name === 'light' ? '0 0 12px rgba(59, 130, 246, 0.2)' : '0 0 15px rgba(96, 165, 250, 0.25)'};
+// Invite-only card — adapted from mirage-mobile-app `InviteCodesCard`:
+// clean panel surface, icon tile + title/subtitle + count badge + chevron header,
+// collapsed body = subtitle paragraph + gradient "Share Invite Code" CTA.
+const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
+    'data-feed-view-mode': $feedViewMode,
+}))`
+    width: 100%;
+    max-width: 720px;
+    margin: 0;
 
-    @media (max-width: 1000px) {
-        border-radius: ${({
-    $size
-}) => $size === 'compact' ? '6px' : '8px'};
-        padding: ${({
-    $size
-}) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
-    }
+    @media (min-width: 1001px) {
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
 
-    @media (max-width: 768px) {
-        border-radius: 6px;
-        padding: 0.4rem 0.6rem;
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
+            width: 80%;
+            max-width: none;
+            margin: 0;
+        }
     }
 `;
-const InviteBannerContentWrapper = styled.div`
+
+const InviteOnlyBanner = styled.div`
+    /* Match the post CardView exactly (border-radius: 8px; margin: 4px 0)
+     * so this banner aligns with the feed column and shares the same bg. */
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    align-self: flex-start;
+    margin: 4px 0;
+    /* Match the main page bg so the banner blends with the feed
+     * (no "floating card" look). */
+    background: ${({ theme }) => requireThemeColor(theme, 'bg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: none;
+
+    @media (max-width: 600px) {
+        border-radius: 6px;
+    }
+`;
+const InviteHeaderButton = styled.button`
+    all: unset;
+    box-sizing: border-box;
+    width: 100%;
     display: flex;
     align-items: center;
-    gap: 1rem;
-    flex: 1;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
 
-    @media (max-width: 768px) {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.75rem;
+    &:hover {
+        background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.02)'
+        : 'rgba(255, 255, 255, 0.03)'};
+    }
+
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        outline-offset: -2px;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.35rem 0.85rem;
     }
 `;
-const InviteBannerTextContent = styled.div`
+const InviteTitleRow = styled.div`
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    align-items: center;
+    gap: 0.4rem;
     flex: 1;
     min-width: 0;
-    padding-right: 3rem;
+`;
+const InviteIconTile = styled.div`
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    line-height: 1;
+    color: #667eea;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(102, 126, 234, 0.12)'
+        : 'rgba(102, 126, 234, 0.22)'};
+`;
+const InviteTitleStack = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+`;
+const InviteTitleText = styled.div`
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+`;
+const InviteSubtitleText = styled.div`
+    font-size: 0.6rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+`;
+const InviteHeaderRight = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+`;
+const InviteCountBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    padding: 0.08rem 0.35rem;
+    border-radius: 999px;
+    font-size: 0.58rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #667eea;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(102, 126, 234, 0.14)'
+        : 'rgba(102, 126, 234, 0.24)'};
+`;
+/* Match the post-card chevron (HiChevronDown from react-icons/hi2).
+ * Rotates -90deg when the panel is collapsed. */
+const InviteChevron = styled(HiChevronDown)`
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    transition: transform 0.2s ease;
+    transform: rotate(${({ $collapsed }) => ($collapsed ? '-90deg' : '0deg')});
+`;
+const InviteContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0 1rem 0.6rem;
 
-    @media (max-width: 768px) {
-        padding-right: 0;
+    @media (max-width: 600px) {
+        padding: 0 0.85rem 0.55rem;
     }
+`;
+const InviteSubtitleBody = styled.div`
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.64rem;
+    line-height: 1.35;
 `;
 const InviteBannerButton = styled.button`
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
-    padding: 0.45rem 0.9rem;
-    font-size: 0.7rem;
-    font-weight: 600;
+    width: 100%;
+    padding: 0.42rem 0.75rem;
+    font-size: 0.68rem;
+    font-weight: 700;
     font-family: inherit;
     color: #FFFFFF;
-    background: linear-gradient(135deg, #FF8C00 0%, #FF5722 100%);
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
     border: none;
-    border-radius: 6px;
+    border-radius: 7px;
     cursor: pointer;
     white-space: nowrap;
-    transition: transform 0.15s ease;
-    box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
-    flex-shrink: 0;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    box-shadow: 0 1px 5px rgba(102, 126, 234, 0.22);
 
-    &:hover {
+    &:hover:not(:disabled) {
         transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        opacity: 0.95;
     }
 
-    &:active {
+    &:active:not(:disabled) {
         transform: translateY(0);
     }
 
     &:disabled {
-        background: linear-gradient(135deg, #666 0%, #555 100%);
+        background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.05)'
+        : 'rgba(255, 255, 255, 0.06)'};
+        color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
         box-shadow: none;
         cursor: not-allowed;
-        opacity: 0.7;
-    }
-
-    @media (max-width: 1000px) {
-        padding: 0.4rem 0.75rem;
-    }
-
-    @media (max-width: 768px) {
-        width: 100%;
-        padding: 0.5rem 1rem;
     }
 `;
-const InviteBannerCount = styled.span`
-    font-size: 0.6rem;
-    color: rgba(255, 255, 255, 0.8);
-    font-weight: 500;
+const InviteBannerButtonArrow = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    line-height: 1;
+    transform: translateY(-1px);
+`;
+/* Vertical breathing room between the invite banner and the quest card
+ * so they don't visually collide. */
+const HomeSectionSpacer = styled.div`
+    height: 0.6rem;
 
-    @media (max-width: 1000px) {
+    @media (max-width: 768px) {
+        height: 0.5rem;
     }
+`;
+// Legacy alias kept so any stray references (e.g. older inline layouts) keep compiling.
+// Newer JSX uses the explicit `InviteContent` + `InviteSubtitleBody` components.
+const InviteBannerContentWrapper = InviteContent;
+const InviteBannerTextContent = InviteSubtitleBody;
+const InviteBannerCount = styled.span`
+    font-size: 0.62rem;
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
 `;
 
 // Collapse button for hero cards
@@ -177,33 +299,58 @@ const InviteModalContent = styled.div`
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
-    border-radius: 16px;
-    padding: 1.5rem;
-    max-width: 420px;
+    border-radius: 14px;
+    padding: 1.1rem 1rem 1rem;
+    max-width: 400px;
     width: 100%;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
 
     @media (max-width: 768px) {
-        padding: 1.25rem;
-        border-radius: 12px;
+        padding: 0.9rem 0.85rem 0.85rem;
+        border-radius: 11px;
     }
 `;
-const InviteModalHeader = styled.div`
+const InviteModalTopBar = styled.div`
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
-    margin-bottom: 1rem;
+    margin-bottom: 0.2rem;
+`;
+const InviteModalHero = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.35rem;
+    margin-bottom: 0.85rem;
+`;
+const InviteModalHeroIcon = styled.div`
+    width: 48px;
+    height: 48px;
+    border-radius: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    line-height: 1;
+    color: #667eea;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(102, 126, 234, 0.14)'
+        : 'rgba(102, 126, 234, 0.22)'};
+    margin-bottom: 0.2rem;
 `;
 const InviteModalTitle = styled.h2`
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: ${({
-    theme
-}) => theme.colors.text};
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme.colors.text};
     margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+`;
+const InviteModalSubtitle = styled.div`
+    font-size: 0.7rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    line-height: 1.3;
 `;
 const InviteModalClose = styled.button`
     background: none;
@@ -212,47 +359,137 @@ const InviteModalClose = styled.button`
     theme
 }) => theme.colors.subtleText};
     cursor: pointer;
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     line-height: 1;
     padding: 0;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
     &:hover {
         color: ${({
     theme
 }) => theme.colors.text};
+        background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.05)'
+        : 'rgba(255, 255, 255, 0.07)'};
     }
 `;
 const InviteCodeDisplay = styled.div`
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
-    border: 2px dashed rgba(102, 126, 234, 0.4);
-    border-radius: 12px;
-    padding: 1.25rem;
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
     text-align: center;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    align-items: center;
+`;
+const InviteCodeLabel = styled.div`
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: ${({ theme }) => theme.colors.subtleText};
 `;
 const InviteCodeText = styled.div`
-    font-size: 1.75rem;
+    font-size: 1.55rem;
     font-weight: 700;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     color: ${({
     theme
 }) => theme.colors.text};
-    letter-spacing: 0.1em;
-    margin-bottom: 0.5rem;
+    letter-spacing: 0.16em;
+    line-height: 1.1;
 
     @media (max-width: 768px) {
+        font-size: 1.3rem;
+        letter-spacing: 0.12em;
     }
 `;
 const InviteCodeSubtext = styled.div`
-    font-size: 0.75rem;
+    font-size: 0.65rem;
     color: ${({
     theme
 }) => theme.colors.subtleText};
 `;
+const InviteShareOptions = styled.div`
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+`;
+const InviteShareOption = styled.button`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.65rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.text};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 9px;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+
+    &:hover:not(:disabled) {
+        transform: translateY(-1px);
+        background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.02)'
+        : 'rgba(255, 255, 255, 0.04)'};
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+`;
+const InviteShareOptionIcon = styled.span`
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    color: #FFFFFF;
+    background: ${({ $tint }) => $tint || '#667eea'};
+    transition: background 0.15s ease;
+`;
+const InviteSocialDivider = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.2rem 0 0.55rem;
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: ${({ theme }) => theme.colors.subtleText};
+
+    &::before,
+    &::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: ${({ theme }) => theme.colors.border};
+    }
+`;
 const InviteShareButtons = styled.div`
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
 
     @media (max-width: 400px) {
         grid-template-columns: 1fr;
@@ -262,9 +499,9 @@ const InviteShareButton = styled.button`
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 0.6rem 0.75rem;
-    font-size: 0.75rem;
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.65rem;
     font-weight: 500;
     font-family: inherit;
     color: ${({
@@ -276,7 +513,7 @@ const InviteShareButton = styled.button`
     border: 1px solid ${({
     theme
 }) => theme.colors.border};
-    border-radius: 8px;
+    border-radius: 7px;
     cursor: pointer;
     transition: all 0.15s ease;
 
@@ -318,8 +555,8 @@ const InviteNativeShareButton = styled(InviteCopyButton)`
 const InviteDesktopShareButtons = styled.div`
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
 
     @media (max-width: 600px) {
         display: none;
@@ -327,7 +564,7 @@ const InviteDesktopShareButtons = styled.div`
 `;
 const InviteRemainingText = styled.div`
     text-align: center;
-    font-size: 0.7rem;
+    font-size: 0.62rem;
     color: ${({
     theme
 }) => theme.colors.subtleText};
@@ -341,35 +578,14 @@ const InviteNoCodesText = styled.div`
     font-size: 0.85rem;
 `;
 
-// Home feed info card for logged-in users
-const HomeFeedInfoCard = styled.div`
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.2);
-    border-radius: ${({
-    $size
-}) => $size === 'compact' ? '8px' : '10px'};
-    padding: ${({
-    $size
-}) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
-    display: flex;
-    flex-direction: column;
-    gap: ${({
-    $size
-}) => $size === 'compact' ? '0.25rem' : '0.35rem'};
-
-    @media (max-width: 1000px) {
-        border-radius: ${({
-    $size
-}) => $size === 'compact' ? '6px' : '8px'};
-        padding: ${({
-    $size
-}) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 6px;
-        padding: 0.4rem 0.6rem;
-    }
+// Top feed title row for home/following feeds — matches InboxView HeaderRow spacing
+const HomeFeedTitleBar = styled.div`
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    align-self: flex-start;
+    margin: 0;
+    padding: 0.5rem 1rem;
 `;
 
 // NSFW welcome hero - shown once to logged-in users on home feed
@@ -638,18 +854,16 @@ const IPhoneHeroButton = styled.a`
     }
 `;
 const HomeFeedInfoTitle = styled.div`
-    font-size: 0.7rem;
-    font-weight: 600;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: ${({
     theme
 }) => theme.colors.text};
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    line-height: 1;
-
-    @media (max-width: 1000px) {
-    }
+    gap: 0;
+    line-height: 1.2;
 `;
 const HomeFeedHeaderRow = styled.div`
     display: flex;
@@ -661,34 +875,8 @@ const HomeFeedHeaderRow = styled.div`
 const HomeFeedModeInline = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.2rem;
     font-size: 0.7rem;
-`;
-const HomeFeedInfoEmoji = styled.span`
-    font-size: 0.85rem;
-    line-height: 1;
-    display: inline-block;
-    transform: translateY(-1px);
-
-    @media (max-width: 1000px) {
-    }
-`;
-const HomeFeedInfoDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.65rem;
-    line-height: 1.5;
-
-    @media (max-width: 1000px) {
-    }
-
-    strong {
-        color: ${({
-    theme
-}) => theme.colors.text};
-        font-weight: 600;
-    }
 `;
 const HomeFeedModeSelect = styled.select`
     font-size: 0.65rem;
@@ -1052,6 +1240,7 @@ const MainView = ({
         showNsfwHero,
         isLoggedIn,
         inviteCodesEnabled,
+        questsEnabled,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,
@@ -1060,7 +1249,9 @@ const MainView = ({
         welcomeStats,
         welcomeStatsStale,
         inviteBannerCollapsed,
+        questCardCollapsed,
         toggleInviteBanner,
+        toggleQuestCard,
         nextAvailableCode,
         availableCodeCount,
         handleOpenInviteModal,
@@ -1079,6 +1270,40 @@ const MainView = ({
         setTopic,
         routeTopic
     });
+    const [feedViewMode, setFeedViewMode] = useState(() => loadViewMode());
+    useEffect(() => {
+        const syncFeedViewMode = () => setFeedViewMode(loadViewMode());
+        window.addEventListener(VIEW_MODE_CHANGE_EVENT, syncFeedViewMode);
+        return () => window.removeEventListener(VIEW_MODE_CHANGE_EVENT, syncFeedViewMode);
+    }, []);
+    const handleFeedViewModeChange = useCallback((next) => {
+        setFeedViewMode(next);
+        saveViewMode(next);
+    }, []);
+    // Local UI state for invite modal "Copy Code" button (distinct from "Copy Link")
+    const [rawCodeCopied, setRawCodeCopied] = useState(false);
+    const handleCopyRawInviteCode = useCallback(async () => {
+        const code = nextAvailableCode?.code;
+        if (!code) return;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(code);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = code;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            setRawCodeCopied(true);
+            setTimeout(() => setRawCodeCopied(false), 2000);
+        } catch (_err) {
+            /* clipboard denied — silent */
+        }
+    }, [nextAvailableCode]);
     if (error) {
         return <StyledError>{error}</StyledError>;
     }
@@ -1290,33 +1515,65 @@ const MainView = ({
                             </TopicHeroDescription>
                         </TopicHeroCard>}
 
-                        {/* Invite-only banner - shown only when invite codes are enabled on this node */}
-                        {isLoggedIn && showHero && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
-                            <HomeFeedHeaderRow>
-                                <HomeFeedInfoTitle>
-                                    <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Invite Codes
-                                    {inviteBannerCollapsed && <span style={{
-                                        fontWeight: 'normal'
-                                    }}>
-                                        {' '}{availableCodeCount === 0 ? '— None available' : `— ${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} left`}
-                                    </span>}
-                                </HomeFeedInfoTitle>
-                                <CollapseButton onClick={toggleInviteBanner}>
-                                    {inviteBannerCollapsed ? 'Show' : 'Hide'}
-                                </CollapseButton>
-                            </HomeFeedHeaderRow>
-                            {!inviteBannerCollapsed && <InviteBannerContentWrapper>
-                                <InviteBannerTextContent>
-                                    <HomeFeedInfoDescription>
+                        {(isLoggedIn && (urlTopic === 'home' || urlTopic === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
+                            {/* Keep only the feed title row at the top for home/following. */}
+                            <HomeFeedTitleBar role="region" aria-label={`${urlTopic} feed header`}>
+                                <HomeFeedHeaderRow>
+                                    <HomeFeedInfoTitle>
+                                        {urlTopic === 'home' ? 'Home' : 'Following'}
+                                    </HomeFeedInfoTitle>
+                                    <HomeFeedModeInline>
+                                        <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
+                                        <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
+                                    </HomeFeedModeInline>
+                                </HomeFeedHeaderRow>
+                            </HomeFeedTitleBar>
+                            {/* Invite-only banner - shown only when invite codes are enabled on this node */}
+                            {inviteCodesEnabled && <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
+                                <InviteHeaderButton
+                                    type="button"
+                                    onClick={toggleInviteBanner}
+                                    aria-expanded={!inviteBannerCollapsed}
+                                >
+                                    <InviteTitleRow>
+                                        <InviteIconTile aria-hidden="true">🎁</InviteIconTile>
+                                        <InviteTitleStack>
+                                            <InviteTitleText>Invite Codes</InviteTitleText>
+                                            <InviteSubtitleText>
+                                                {availableCodeCount > 0
+                                                    ? `${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} available`
+                                                    : 'No codes left'}
+                                            </InviteSubtitleText>
+                                        </InviteTitleStack>
+                                    </InviteTitleRow>
+                                    <InviteHeaderRight>
+                                        {availableCodeCount > 0 && (
+                                            <InviteCountBadge>{availableCodeCount}</InviteCountBadge>
+                                        )}
+                                        <InviteChevron $collapsed={inviteBannerCollapsed} aria-hidden="true" />
+                                    </InviteHeaderRight>
+                                </InviteHeaderButton>
+                                {!inviteBannerCollapsed && <InviteContent>
+                                    <InviteSubtitleBody>
                                         Mirage is now invite-only — because great conversations require great people!
                                         {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
-                                    </HomeFeedInfoDescription>
-                                </InviteBannerTextContent>
-                                <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
-                                    {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
-                                </InviteBannerButton>
-                            </InviteBannerContentWrapper>}
-                        </InviteOnlyBanner>}
+                                    </InviteSubtitleBody>
+                                    <InviteBannerButton
+                                        type="button"
+                                        onClick={handleOpenInviteModal}
+                                        disabled={availableCodeCount === 0}
+                                    >
+                                        {availableCodeCount > 0
+                                            ? 'Share Invite Code'
+                                            : 'No Codes Left'}
+                                    </InviteBannerButton>
+                                </InviteContent>}
+                            </InviteOnlyBanner>}
+
+                            {/* Quest hero card - shown below invite codes on home/following */}
+                            {inviteCodesEnabled && questsEnabled && <HomeSectionSpacer />}
+                            {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
+                        </FeedHeroColumn>}
 
                         {/* Android app banner - shown once for Android users until dismissed */}
                         {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
@@ -1377,43 +1634,8 @@ const MainView = ({
                             </NsfwHeroNote>
                         </NsfwWelcomeHero>}
 
-                        {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
-                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
-                            <HomeFeedHeaderRow>
-                                <HomeFeedInfoTitle>
-                                    <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
-                                </HomeFeedInfoTitle>
-                                <HomeFeedModeInline>
-                                    <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                        <option value="large">Large</option>
-                                        {!isMobile && <option value="compact">Compact</option>}
-                                        <option value="media">Media</option>
-                                    </HomeFeedModeSelect>
-                                </HomeFeedModeInline>
-                            </HomeFeedHeaderRow>
-                            <HomeFeedInfoDescription>
-                                Your followed topics plus fresh content to discover. <strong>The more you vote, the more your feed reflects your preferences.</strong>
-                            </HomeFeedInfoDescription>
-                        </HomeFeedInfoCard>}
-
-                        {/* Following feed info card - permanent for logged-in users */}
-                        {isLoggedIn && urlTopic === 'following' && showHero && <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
-                            <HomeFeedHeaderRow>
-                                <HomeFeedInfoTitle>
-                                    <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
-                                </HomeFeedInfoTitle>
-                                <HomeFeedModeInline>
-                                    <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                        <option value="large">Large</option>
-                                        {!isMobile && <option value="compact">Compact</option>}
-                                        <option value="media">Media</option>
-                                    </HomeFeedModeSelect>
-                                </HomeFeedModeInline>
-                            </HomeFeedHeaderRow>
-                            <HomeFeedInfoDescription>
-                                <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
-                            </HomeFeedInfoDescription>
-                        </HomeFeedInfoCard>}
+                        {/* Home/Following header cards moved to the very top of the feed
+                         * (see block rendered just after <TopicHeroCard>). */}
 
                         {/* Blocked topic state — takes precedence over loading/empty states */}
                         {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked topic">
@@ -1493,15 +1715,13 @@ const MainView = ({
                             // Feed header is now owned by ListFeedView (sort + view controls only).
                             // Create-post action and nav tabs live in the left rail / sidebar,
                             // so we no longer inject a sidebar column here.
-                            // Feed header is shown on home / following / all and on
-                            // any topic feed. `feedTitle` anchors to the left of the
-                            // toolbar; sort + view controls sit on the right.
+                            // Feed header is shown on all/topic feeds only.
+                            // Home/following keep the toolbar controls without an
+                            // extra title header above the posts.
                             const isTopicFeed = !!urlTopic && !['home', 'following', 'all'].includes(urlTopic);
-                            const showFeedToolbar = urlTopic === 'home' || urlTopic === 'following' || urlTopic === 'all' || isTopicFeed;
+                            const showFeedToolbar = urlTopic === 'all' || isTopicFeed;
                             let feedTitle = null;
-                            if (urlTopic === 'home') feedTitle = 'Home';
-                            else if (urlTopic === 'following') feedTitle = 'Following';
-                            else if (urlTopic === 'all') feedTitle = 'All';
+                            if (urlTopic === 'all') feedTitle = 'All';
                             else if (isTopicFeed) feedTitle = `#${urlTopic}`;
                             return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
                         })()}
@@ -1524,27 +1744,65 @@ const MainView = ({
             {/* Invite Code Modal */}
             {inviteModalOpen && <InviteModalOverlay onClick={() => setInviteModalOpen(false)}>
                 <InviteModalContent onClick={e => e.stopPropagation()}>
-                    <InviteModalHeader>
-                        <InviteModalTitle>
-                            <span role="img" aria-label="sparkles">✨</span> Share Your Invite Code
-                        </InviteModalTitle>
-                        <InviteModalClose onClick={() => setInviteModalOpen(false)}>&times;</InviteModalClose>
-                    </InviteModalHeader>
+                    <InviteModalTopBar>
+                        <InviteModalClose
+                            type="button"
+                            onClick={() => setInviteModalOpen(false)}
+                            aria-label="Close invite modal"
+                        >&times;</InviteModalClose>
+                    </InviteModalTopBar>
+                    <InviteModalHero>
+                        <InviteModalHeroIcon aria-hidden="true">🎁</InviteModalHeroIcon>
+                        <InviteModalTitle>Share Invite Code</InviteModalTitle>
+                        <InviteModalSubtitle>Invite a friend to join Mirage</InviteModalSubtitle>
+                    </InviteModalHero>
 
                     {nextAvailableCode ? <>
                         <InviteCodeDisplay>
+                            <InviteCodeLabel>Your Invite Code</InviteCodeLabel>
                             <InviteCodeText>{nextAvailableCode.code}</InviteCodeText>
                             <InviteCodeSubtext>Share this code with a friend to invite them</InviteCodeSubtext>
                         </InviteCodeDisplay>
 
-                        <InviteShareButtons>
-                            <InviteCopyButton onClick={handleCopyInviteCode}>
-                                {inviteCodeCopied ? '✓ Copied!' : 'Copy Invite Link'}
-                            </InviteCopyButton>
-                            {canNativeShare && <InviteNativeShareButton onClick={handleNativeShare}>
-                                <span role="img" aria-label="share">📤</span> Share via...
-                            </InviteNativeShareButton>}
-                        </InviteShareButtons>
+                        <InviteShareOptions>
+                            <InviteShareOption
+                                type="button"
+                                onClick={handleCopyRawInviteCode}
+                                title="Copy code to clipboard"
+                            >
+                                <InviteShareOptionIcon
+                                    $tint={rawCodeCopied ? '#10B981' : '#667eea'}
+                                    aria-hidden="true"
+                                >
+                                    {rawCodeCopied ? '✓' : '⧉'}
+                                </InviteShareOptionIcon>
+                                {rawCodeCopied ? 'Copied!' : 'Copy Code'}
+                            </InviteShareOption>
+                            <InviteShareOption
+                                type="button"
+                                onClick={handleCopyInviteCode}
+                                title="Copy share link to clipboard"
+                            >
+                                <InviteShareOptionIcon
+                                    $tint={inviteCodeCopied ? '#10B981' : '#6366F1'}
+                                    aria-hidden="true"
+                                >
+                                    {inviteCodeCopied ? '✓' : '🔗'}
+                                </InviteShareOptionIcon>
+                                {inviteCodeCopied ? 'Copied!' : 'Copy Link'}
+                            </InviteShareOption>
+                            <InviteShareOption
+                                type="button"
+                                onClick={canNativeShare ? handleNativeShare : handleCopyInviteCode}
+                                disabled={!canNativeShare && !handleCopyInviteCode}
+                                title={canNativeShare ? 'Share via…' : 'Share link'}
+                            >
+                                <InviteShareOptionIcon $tint="#10B981" aria-hidden="true">↗</InviteShareOptionIcon>
+                                Share
+                            </InviteShareOption>
+                        </InviteShareOptions>
+
+                        <InviteSocialDivider>or share on</InviteSocialDivider>
                         <InviteDesktopShareButtons>
                             <InviteShareButton as="a" href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText())}&url=${encodeURIComponent(getShareUrl())}`} target="_blank" rel="noopener noreferrer">
                                 <span role="img" aria-label="X">𝕏</span> Twitter/X
