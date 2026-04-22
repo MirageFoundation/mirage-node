@@ -13,6 +13,7 @@ import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import QuestHeroCard from "../components/QuestHeroCard.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { FeedSortToggle, FeedViewToggle, loadViewMode, saveViewMode, VIEW_MODE_CHANGE_EVENT } from "../ListFeedView.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
@@ -51,6 +52,18 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
             margin: 0;
         }
     }
+
+    /* Very large screens (> average laptop): lock the hero column to a
+     * fixed centered width so it tracks the stable feed column regardless
+     * of sidebar visibility OR feed view mode. */
+    @media (min-width: 1500px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    }
 `;
 
 /**
@@ -80,6 +93,18 @@ const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
             width: 80%;
             max-width: none;
             margin: 0;
+        }
+    }
+
+    /* Very large screens (> average laptop): lock the skeleton column to a
+     * fixed centered width so loading state matches the stable feed column
+     * regardless of sidebar visibility OR feed view mode. */
+    @media (min-width: 1500px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
         }
     }
 `;
@@ -716,8 +741,26 @@ const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
         }
     }
 
-    background: ${({ theme }) => requireThemeColor(theme, 'bg')};
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    /* Very large screens (> average laptop): lock the consent hero to a
+     * fixed centered width so it tracks the stable feed column regardless
+     * of sidebar visibility OR feed view mode. */
+    @media (min-width: 1500px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    }
+
+    /* Red tint — mirrors the danger palette used elsewhere in mirageapp
+     * (ReferralsView danger cards, Settings danger buttons): a soft
+     * voteDownBg wash + buttonDangerBorder outline so the consent
+     * prompt reads as a cautionary NSFW-flavored card. */
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(255, 59, 48, 0.06)'
+        : 'rgba(255, 69, 58, 0.08)'};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
     border-radius: 8px;
     padding: 0.75rem 1rem;
     display: flex;
@@ -746,9 +789,10 @@ const NsfwHeroIconTile = styled.div`
     justify-content: center;
     font-size: 0.85rem;
     line-height: 1;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(102, 126, 234, 0.14)'
-        : 'rgba(102, 126, 234, 0.22)'};
+    /* Icon tile picks up the same red wash so the 🔞 badge reads as
+     * warning-toned without introducing a new token. */
+    background: ${({ theme }) => requireThemeColor(theme, 'buttonDangerBg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
 `;
 const NsfwHeroTitle = styled.div`
     font-size: 0.78rem;
@@ -808,19 +852,21 @@ const NsfwHeroButton = styled.button`
     }
 
     ${({ $variant, theme }) => $variant === 'yes' ? `
-        background: ${theme.colors.gradient};
+        background: ${requireThemeColor(theme, 'voteDown')};
         color: #ffffff;
+        border-color: ${requireThemeColor(theme, 'voteDown')};
         &:hover {
             transform: translateY(-1px);
-            filter: brightness(1.05);
+            background: ${requireThemeColor(theme, 'voteDownHover')};
+            border-color: ${requireThemeColor(theme, 'voteDownHover')};
         }
     ` : `
         background: transparent;
         color: ${requireThemeColor(theme, 'text')};
-        border-color: ${requireThemeColor(theme, 'border')};
+        border-color: ${requireThemeColor(theme, 'buttonDangerBorder')};
         &:hover {
-            background: ${requireThemeColor(theme, 'hoverBg')};
-            border-color: ${requireThemeColor(theme, 'borderStrong')};
+            background: ${requireThemeColor(theme, 'buttonDangerBg')};
+            border-color: ${requireThemeColor(theme, 'voteDown')};
         }
     `}
 `;
@@ -1114,6 +1160,142 @@ const HeaderInlineLink = styled.a`
 const MainFeedPanel = styled.div`
     width: 100%;
     background: ${({ theme }) => theme.colors.bg};
+`;
+
+/**
+ * `FeedRailRow` wraps the feed column and the right-rail footer in a
+ * horizontal flex row. The rail butts flush against the feed (no gap)
+ * and its position is driven by two attributes — `data-sidebar-hidden`
+ * (owned by `Main` in `MirageAppShell`) and `data-feed-view-mode`
+ * (mirrored onto this row via `$feedViewMode`):
+ *
+ *   Sidebar visible, any view mode:
+ *     flush-left next to the sidebar — feed 720 px, rail 260 px.
+ *
+ *   Sidebar hidden + card view:
+ *     feed 720 px + rail 260 px centered together inside Main.
+ *
+ *   Sidebar hidden + compact view:
+ *     feed flex-grows to fill the column, rail sits pinned to the
+ *     right edge of the viewport (negative margin cancels Main's
+ *     right padding).
+ *
+ *   <= 1000 px:
+ *     shell is single-column and the rail hides itself. Feed column
+ *     collapses back to viewport-filling width.
+ *
+ * We also reassert `width: 100%; max-width: 720px` on every feed-width-
+ * aware descendant (tagged via `data-feed-view-mode`) so `ListFeedView`'s
+ * "sidebar hidden + compact → 80 %" rule does not fight the row layout
+ * inside FeedCol; the FeedCol itself owns the feed width instead.
+ */
+const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
+    'data-feed-view-mode': $feedViewMode,
+}))`
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    width: 100%;
+    box-sizing: border-box;
+
+    @media (min-width: 1001px) {
+        /* Neutralise width caps that ListFeedView / FeedHeroColumn apply
+         * based on data-feed-view-mode. !important is required because
+         * the ListFeedView "compact hidden -> 80 percent" rule has higher
+         * specificity (data-sidebar-hidden + data-feed-view-mode) than
+         * any selector we could practically chain here, and without this
+         * override the feed renders at 80 percent of FeedCol, leaving a
+         * visible gap between the feed and the rail. */
+        & [data-feed-view-mode] {
+            width: 100% !important;
+            max-width: none !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+        }
+
+        /* Sidebar visible (card or compact): small breathing gap between
+         * feed and rail so they do not butt together. */
+        [data-sidebar-hidden='false'] &[data-feed-view-mode] {
+            gap: 1.5rem;
+        }
+
+        /* Sidebar hidden + card view: center feed + rail as a block
+         * with the same breathing gap as the sidebar-visible states. */
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
+            max-width: calc(720px + 1.5rem + 260px);
+            margin-left: auto;
+            margin-right: auto;
+            gap: 1.5rem;
+        }
+
+        /* Sidebar hidden + compact view: row fills the full Main column
+         * (feed flex-grows; rail remains 260 px on the far right) with
+         * the same breathing gap as the sidebar-visible states. */
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
+            max-width: none;
+            margin-left: 0;
+            margin-right: 0;
+            gap: 1.5rem;
+        }
+    }
+
+    /* Very large screens (> average laptop): ALWAYS center the feed+rail
+     * pair inside Main with a consistent 1.5rem gap between them,
+     * regardless of sidebar visibility or view mode. Higher specificity
+     * (two attribute selectors) so these rules beat the 1001px rules
+     * above even at equal cascade order. */
+    @media (min-width: 1500px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            max-width: calc(720px + 1.5rem + 260px);
+            margin-left: auto;
+            margin-right: auto;
+            gap: 1.5rem;
+        }
+    }
+`;
+
+/**
+ * Feed column inside `FeedRailRow`.
+ *   - Sidebar visible: 720 px fixed track.
+ *   - Sidebar hidden + card: 720 px fixed (centered with the rail).
+ *   - Sidebar hidden + compact: flex-grows to fill the row (the rail
+ *     stays fixed width on the right so the feed expands into the
+ *     previously-empty space left of it).
+ *   - <= 1000 px: collapses to viewport-filling width (rail hidden).
+ */
+const FeedCol = styled.div`
+    min-width: 0;
+
+    @media (min-width: 1001px) {
+        flex: 0 0 720px;
+        width: 720px;
+        max-width: 720px;
+
+        [data-sidebar-hidden='true'] [data-feed-view-mode='compact'] & {
+            flex: 1 1 auto;
+            width: auto;
+            max-width: none;
+        }
+    }
+
+    /* At the large-screen centered layout, the feed returns to a fixed
+     * 720 px track even in compact view so the feed+rail pair is a
+     * predictable size for centering. Overrides the compact-hidden
+     * flex-grow rule above via later source order (matching specificity,
+     * but cascades later). */
+    @media (min-width: 1500px) {
+        [data-feed-view-mode] & {
+            flex: 0 0 720px;
+            width: 720px;
+            max-width: 720px;
+        }
+    }
+
+    @media (max-width: 1000px) {
+        flex: 1 1 auto;
+        width: 100%;
+    }
 `;
 
 /**
@@ -1608,7 +1790,8 @@ const MainView = ({
             <Helmet>
                 <title>{pageTitle} | Mirage</title>
             </Helmet>
-            <div>
+            <FeedRailRow $feedViewMode={feedViewMode}>
+            <FeedCol>
                 {header}
                 <MainFeedPanel>
                     <ModernPostFeed>
@@ -1758,6 +1941,9 @@ const MainView = ({
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
                         {/* Consent prompt — always show regardless of theme.caps.showHeroCards so
                             the mirageapp theme (which disables hero cards) still surfaces it. */}
+                        {/* Match the Invite↔Quest spacing (HomeSectionSpacer) so the
+                            Quest↔NSFW gap reads identical to the Invite↔Quest gap. */}
+                        {isLoggedIn && urlTopic === 'home' && showNsfwHero && questsEnabled && <HomeSectionSpacer />}
                         {isLoggedIn && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
                             <NsfwHeroHeader>
                                 <NsfwHeroIconTile aria-hidden="true">
@@ -1890,7 +2076,9 @@ const MainView = ({
                         </div>}
                     </ModernPostFeed>
                 </MainFeedPanel>
-            </div>
+            </FeedCol>
+            <FeedRightRail />
+            </FeedRailRow>
 
             {/* Invite Code Modal */}
             {inviteModalOpen && (

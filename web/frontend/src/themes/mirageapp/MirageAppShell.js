@@ -57,6 +57,16 @@ const Layout = styled.div`
         max-width: none;
         min-height: 0;
     }
+
+    /* Very large screens (> average laptop): drop the centered 1400px cap
+     * so the Sidebar stays pinned to the left viewport edge. The feed
+     * column centers itself within Main (see ListFeedView / MainView
+     * min-width: 1500px rules), so only the feed re-centers — sidebar
+     * and topbar content keep their original positions. */
+    @media (min-width: 1500px) {
+        max-width: none;
+        margin: 0;
+    }
 `;
 
 const SidebarCol = styled.div`

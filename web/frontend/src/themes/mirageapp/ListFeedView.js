@@ -90,6 +90,19 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
             margin: 0;
         }
     }
+
+    /* Very large screens (> average laptop): lock the feed to a fixed
+     * centered column so its position stays stable regardless of sidebar
+     * visibility OR feed view mode. Uses the same two-attribute specificity
+     * as the rules above (plus later source order) so it wins on overlap. */
+    @media (min-width: 1500px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    }
 `;
 
 /* Row slot owns the between-card divider so it sits OUTSIDE the card

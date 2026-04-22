@@ -59,6 +59,15 @@ const BarInner = styled.div`
         gap: 0.5rem;
         padding: 0 0.35rem;
     }
+
+    /* Very large screens (> average laptop): drop the centered 1400px cap
+     * so the brand / nav keep their left-edge position and the header
+     * content doesn't visually shift inward when the viewport widens.
+     * Matches the Layout override in MirageAppShell.js. */
+    @media (min-width: 1500px) {
+        max-width: none;
+        margin: 0;
+    }
 `;
 
 const BrandLink = styled(Link)`
