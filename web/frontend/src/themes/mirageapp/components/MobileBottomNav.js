@@ -16,6 +16,7 @@ import {
 } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
 import { ProfileMenuContent } from './TopBar';
+import ConfirmDialog from './ConfirmDialog.js';
 
 /**
  * mirageapp MobileBottomNav — mobile tab bar aligned with `mirage-mobile-app`'s
@@ -231,6 +232,7 @@ function MobileBottomNav({ state }) {
     const mountedRef = useRef(true);
 
     const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
+    const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
     const [isInputFocused, setIsInputFocused] = useState(false);
 
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
@@ -488,9 +490,27 @@ function MobileBottomNav({ state }) {
                         <ProfileMenuContent
                             displayName={username || ''}
                             onItemClick={handleProfileMenuNavigate}
+                            onSignOut={() => {
+                                setIsProfileSheetOpen(false);
+                                setSignOutDialogOpen(true);
+                            }}
                         />
                     </ProfileSheet>
                 </ProfileSheetBackdrop>
+            )}
+            {signOutDialogOpen && (
+                <ConfirmDialog
+                    open
+                    title="Sign out?"
+                    message="You’ll need your recovery phrase to log back in."
+                    confirmLabel="Sign out"
+                    confirmVariant="danger"
+                    onConfirm={() => {
+                        setSignOutDialogOpen(false);
+                        navigate('/sign_out');
+                    }}
+                    onCancel={() => setSignOutDialogOpen(false)}
+                />
             )}
         </>,
         document.body

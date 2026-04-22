@@ -837,7 +837,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
      * (block user/post/topic + report) and guarantees the Cancel button
      * works uniformly (resetting `activeDialog` to `null`).
      */
-    const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_topic' | 'report' | null
+    const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_topic' | 'report' | 'delete_post' | null
     const [dialogPending, setDialogPending] = useState(false);
 
     const openDialog = useCallback((mode) => {
@@ -896,14 +896,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         navigate(`/edit_post/${postId}`);
     }, [closeAllMenus, navigate, postId]);
 
-    const handleDelete = useCallback(async () => {
-        closeAllMenus();
-        if (!isLoggedIn) return;
+    const handleDelete = useCallback(() => openDialog('delete_post'), [openDialog]);
+
+    const confirmDeletePost = useCallback(async () => {
+        if (!postId) { closeDialog(); return; }
+        setDialogPending(true);
         try { await tx.deletePost(postId); } catch (_) { /* noop */ }
         if (typeof updatePost === 'function') {
             try { updatePost(postId, { deleted: true }); } catch (_) { /* noop */ }
         }
-    }, [closeAllMenus, isLoggedIn, postId, updatePost]);
+        closeDialog();
+    }, [postId, updatePost, closeDialog]);
 
     /* Give Award / Gift Mirage / Gift Subscription
      *
@@ -1268,6 +1271,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 reasonMaxLength={200}
                 wide
                 onConfirm={confirmReport}
+                onCancel={closeDialog}
+            />
+            <ConfirmDialog
+                open={activeDialog === 'delete_post'}
+                title="Delete this post?"
+                message="This will permanently remove your post from every feed. This action cannot be undone."
+                confirmLabel="Delete post"
+                confirmVariant="danger"
+                pending={dialogPending}
+                onConfirm={confirmDeletePost}
                 onCancel={closeDialog}
             />
             {/**
