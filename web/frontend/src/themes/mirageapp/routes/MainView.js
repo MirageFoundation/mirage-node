@@ -684,117 +684,154 @@ const HomeFeedTitleBar = styled.div`
     padding: 0.5rem 1rem;
 `;
 
-// NSFW welcome hero - shown once to logged-in users on home feed
-const NsfwWelcomeHero = styled.div`
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 127, 0.08) 100%);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
+// NSFW welcome hero — mirageapp: compact, app-style card using the
+// Mirage gradient accent. Matches the visual language of InviteOnlyBanner
+// (blends with page bg, rounded 8px, themed border) and TopicHeroCard.
+const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
+    'data-feed-view-mode': $feedViewMode,
+}))`
+    box-sizing: border-box;
+    width: 100%;
+    /* Width rules mirror FeedList (ListFeedView.js) + FeedHeroColumn so the
+     * consent card tracks the post column across both feed view modes and
+     * the sidebar-hidden state:
+     *   - default / sidebar visible: capped at 720px, left-aligned.
+     *   - sidebar hidden + card view:    centered 720px column.
+     *   - sidebar hidden + compact view: 80% wide, left-aligned. */
+    max-width: 720px;
+    margin: 4px 0;
+
+    @media (min-width: 1001px) {
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
+            width: 80%;
+            max-width: none;
+            margin: 4px 0;
+        }
+    }
+
+    background: ${({ theme }) => requireThemeColor(theme, 'bg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.5rem;
+    overflow: hidden;
 
-    @media (max-width: 1000px) {
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 8px;
-        padding: 0.85rem 1rem;
+    @media (max-width: 600px) {
+        border-radius: 6px;
+        padding: 0.65rem 0.85rem;
     }
 `;
-const NsfwHeroTitle = styled.div`
-    font-size: 1rem;
-    font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
+const NsfwHeroHeader = styled.div`
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
+`;
+const NsfwHeroIconTile = styled.div`
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    line-height: 1;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(102, 126, 234, 0.14)'
+        : 'rgba(102, 126, 234, 0.22)'};
+`;
+const NsfwHeroTitle = styled.div`
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
     line-height: 1.2;
-
-    @media (max-width: 768px) {
-    }
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 `;
 const NsfwHeroEmoji = styled.span`
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     line-height: 1;
 `;
 const NsfwHeroDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.8rem;
-    line-height: 1.6;
-
-    @media (max-width: 768px) {
-    }
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.68rem;
+    line-height: 1.5;
 
     strong {
-        color: ${({
-    theme
-}) => theme.colors.text};
+        color: ${({ theme }) => requireThemeColor(theme, 'text')};
         font-weight: 600;
     }
 `;
 const NsfwHeroButtons = styled.div`
     display: flex;
-    gap: 0.75rem;
-    margin-top: 0.25rem;
+    gap: 0.5rem;
+    margin-top: 0.15rem;
     flex-wrap: wrap;
 
-    @media (max-width: 768px) {
-        gap: 0.5rem;
+    @media (max-width: 600px) {
+        gap: 0.4rem;
     }
 `;
 const NsfwHeroButton = styled.button`
-    padding: 0.5rem 1.25rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
+    padding: 0.4rem 0.9rem;
+    border-radius: 7px;
+    font-size: 0.7rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
+    transition: transform 0.15s ease, background 0.15s ease,
+        border-color 0.15s ease, color 0.15s ease;
+    border: 1px solid transparent;
+    line-height: 1.2;
 
-    @media (max-width: 768px) {
-        padding: 0.45rem 1rem;
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        outline-offset: 2px;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.4rem 0.75rem;
         flex: 1;
         min-width: 80px;
     }
 
-    ${({
-    $variant
-}) => $variant === 'yes' ? `
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        color: #fff;
+    ${({ $variant, theme }) => $variant === 'yes' ? `
+        background: ${theme.colors.gradient};
+        color: #ffffff;
         &:hover {
-            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
             transform: translateY(-1px);
+            filter: brightness(1.05);
         }
     ` : `
-        background: rgba(100, 116, 139, 0.2);
-        color: #94a3b8;
-        border: 1px solid rgba(100, 116, 139, 0.3);
+        background: transparent;
+        color: ${requireThemeColor(theme, 'text')};
+        border-color: ${requireThemeColor(theme, 'border')};
         &:hover {
-            background: rgba(100, 116, 139, 0.3);
-            color: #cbd5e1;
+            background: ${requireThemeColor(theme, 'hoverBg')};
+            border-color: ${requireThemeColor(theme, 'borderStrong')};
         }
     `}
 `;
 const NsfwHeroNote = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.mutedText};
-    font-size: 0.7rem;
-    font-style: italic;
-    margin-top: 0.25rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.6rem;
+    line-height: 1.4;
+    margin-top: 0.1rem;
 
     a {
-        color: ${({
-    theme
-}) => theme.colors.link};
+        color: ${({ theme }) => requireThemeColor(theme, 'link')};
         text-decoration: none;
         &:hover {
             text-decoration: underline;
@@ -1719,19 +1756,24 @@ const MainView = ({
                         </IPhoneAppHero>}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
-                        {isLoggedIn && showHero && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero role="region" aria-label="Content preferences">
-                            <NsfwHeroTitle>
-                                <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
-                            </NsfwHeroTitle>
+                        {/* Consent prompt — always show regardless of theme.caps.showHeroCards so
+                            the mirageapp theme (which disables hero cards) still surfaces it. */}
+                        {isLoggedIn && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
+                            <NsfwHeroHeader>
+                                <NsfwHeroIconTile aria-hidden="true">
+                                    <NsfwHeroEmoji>🔞</NsfwHeroEmoji>
+                                </NsfwHeroIconTile>
+                                <NsfwHeroTitle>Allow adult content?</NsfwHeroTitle>
+                            </NsfwHeroHeader>
                             <NsfwHeroDescription>
                                 Mirage is uncensored and may include <strong>adult content</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
                             </NsfwHeroDescription>
                             <NsfwHeroButtons>
                                 <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>
-                                    Yes, show everything
+                                    Show everything
                                 </NsfwHeroButton>
                                 <NsfwHeroButton $variant="no" onClick={() => handleNsfwChoice(false)}>
-                                    No, keep it clean
+                                    Keep it clean
                                 </NsfwHeroButton>
                             </NsfwHeroButtons>
                             <NsfwHeroNote>
