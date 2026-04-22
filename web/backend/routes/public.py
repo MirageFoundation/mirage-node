@@ -2580,49 +2580,56 @@ def _row_to_post(
     return post
 
 
-# ---- Similar-user upvote set cache (in-process, per-owner) ----
+# ---- Similar-user upvote cache (backend-DB, per-owner) ----
 # The scoring path needs "which similar users upvoted each candidate post".
-# Postgres' only viable plan for that IN/IN query scans every vote row belonging
-# to the similar users (tens of thousands of rows for active voters), which
-# costs 100-250ms per home feed load even when the final intersection is tiny.
+# Postgres' only viable plan for the naive IN/IN query scans every vote row
+# belonging to the 30 similar users (tens of thousands of rows for active
+# voters) and costs 100-250ms per home feed load even when the final
+# intersection is tiny.
 #
-# Caching each similar-user's recent upvote set per-owner lets cold misses pay
-# the DB cost once every _SIM_UPVOTES_CACHE_TTL seconds per user (amortized
-# across every viewer for whom that user is a similar_addr), and reduces warm
-# lookups to pure in-memory set intersection.
+# We cache each owner's recent upvoted-post set in `user_upvote_cache` on the
+# backend DB (same pattern as `user_similarity_cache`). Shared across gunicorn
+# workers and container restarts, keyed on owner so there's no duplication
+# across viewers (the same active voter appears in many viewers' similarity
+# sets and only needs to be cached once).
 #
-# Cache payload is bounded by a 90-day window on votes.created_at: candidate
-# posts are dominated by recent posts, so older upvotes can't contribute to the
-# result. _SIM_UPVOTES_CACHE_MAX caps total distinct owners retained.
-_SIM_UPVOTES_CACHE_TTL = 600.0  # 10 minutes
-_SIM_UPVOTES_CACHE_MAX = 1000
+# Payload is bounded by a 90-day window on votes.created_at: candidate posts
+# are dominated by recent posts, so older upvotes can't contribute anyway.
+_SIM_UPVOTES_CACHE_TTL = 600  # 10 minutes, seconds
 _SIM_UPVOTES_WINDOW_SECS = 90 * 24 * 3600
-_sim_upvotes_cache: dict[str, tuple[float, frozenset[str]]] = {}
 
 
 def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]) -> dict[str, list[str]]:
     """
     Return {post_id: [voter_addr, ...]} for similar users that upvoted each
-    candidate post. Caches each similar user's recent upvote set in-process.
+    candidate post. Reads/writes a shared backend-DB cache keyed by owner.
     """
     if not post_ids or not similar_addrs:
         return {}
 
-    now = time.time()
-    post_set = set(post_ids)
-    per_user: dict[str, frozenset[str]] = {}
-    missing: list[str] = []
+    similar_list = list(similar_addrs)
+    now_ts = int(time.time())
 
-    for addr in similar_addrs:
-        entry = _sim_upvotes_cache.get(addr)
-        if entry and entry[0] > now:
-            per_user[addr] = entry[1]
-        else:
-            missing.append(addr)
+    cached: dict[str, frozenset[str]] = {}
+    with connect_backend_db() as bconn:
+        with bconn.cursor() as bcur:
+            bcur.execute(
+                """
+                SELECT owner, upvoted_posts
+                FROM user_upvote_cache
+                WHERE owner = ANY(%s) AND expires_at > %s
+                """,
+                (similar_list, now_ts),
+            )
+            for owner, posts in bcur.fetchall():
+                cached[owner] = frozenset(posts or ())
 
+    missing = [a for a in similar_list if a not in cached]
+
+    fetched: dict[str, frozenset[str]] = {}
     if missing:
         ph = ",".join(["%s"] * len(missing))
-        cutoff = int(now) - _SIM_UPVOTES_WINDOW_SECS
+        cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
         cur.execute(
             f"""
             SELECT LOWER(owner), LOWER(target)
@@ -2633,31 +2640,41 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
             """,
             missing + [cutoff],
         )
-        fetched: dict[str, set[str]] = {addr: set() for addr in missing}
+        raw: dict[str, list[str]] = {addr: [] for addr in missing}
         for owner, target in cur.fetchall():
-            bucket = fetched.get(owner)
+            bucket = raw.get(owner)
             if bucket is not None and target:
-                bucket.add(target)
+                bucket.append(target)
 
-        if len(_sim_upvotes_cache) >= _SIM_UPVOTES_CACHE_MAX:
-            stale = [k for k, v in _sim_upvotes_cache.items() if v[0] <= now]
-            for k in stale:
-                _sim_upvotes_cache.pop(k, None)
-            if len(_sim_upvotes_cache) >= _SIM_UPVOTES_CACHE_MAX:
-                _sim_upvotes_cache.clear()
+        expires_at = now_ts + _SIM_UPVOTES_CACHE_TTL
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                values_sql = ",".join(["(%s, %s, %s, %s)"] * len(raw))
+                params: list = []
+                for addr, posts in raw.items():
+                    params.extend((addr, posts, now_ts, expires_at))
+                bcur.execute(
+                    f"""
+                    INSERT INTO user_upvote_cache (owner, upvoted_posts, computed_at, expires_at)
+                    VALUES {values_sql}
+                    ON CONFLICT (owner) DO UPDATE SET
+                        upvoted_posts = EXCLUDED.upvoted_posts,
+                        computed_at = EXCLUDED.computed_at,
+                        expires_at = EXCLUDED.expires_at
+                    """,
+                    params,
+                )
+        for addr, posts in raw.items():
+            fetched[addr] = frozenset(posts)
 
-        expires = now + _SIM_UPVOTES_CACHE_TTL
-        for addr, upvoted in fetched.items():
-            fs = frozenset(upvoted)
-            _sim_upvotes_cache[addr] = (expires, fs)
-            per_user[addr] = fs
-
+    post_set = set(post_ids)
     result: dict[str, list[str]] = {}
-    for addr, upvoted in per_user.items():
-        if not upvoted:
-            continue
-        for pid in upvoted & post_set:
-            result.setdefault(pid, []).append(addr)
+    for per_user in (cached, fetched):
+        for addr, upvoted in per_user.items():
+            if not upvoted:
+                continue
+            for pid in upvoted & post_set:
+                result.setdefault(pid, []).append(addr)
     return result
 
 

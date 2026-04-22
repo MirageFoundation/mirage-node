@@ -271,6 +271,25 @@ def init_backend_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_similarity_owner_expires ON user_similarity_cache(LOWER(owner), expires_at)"
             )
 
+            # ── User upvote cache ────────────────────────────────────────
+            # Caches each owner's recent upvoted post ids so the home-feed
+            # scoring path can skip the 58k-row-per-request owner-index scan
+            # over `votes`. Shared across gunicorn workers (unlike an in-process
+            # dict) and survives container restarts.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_upvote_cache (
+                    owner TEXT PRIMARY KEY,
+                    upvoted_posts TEXT[] NOT NULL,
+                    computed_at BIGINT NOT NULL,
+                    expires_at BIGINT NOT NULL
+                )
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_upvote_cache_expires ON user_upvote_cache(expires_at)"
+            )
+
             # ── Push notifications ───────────────────────────────────────
             cur.execute(
                 """
