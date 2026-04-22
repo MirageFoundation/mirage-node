@@ -756,6 +756,7 @@ export function useProfile({
                 message: 'Minimum gift is 10,000 MIRAGE'
             });
             setTimeout(() => setDonateMessage(null), 5000);
+            setConfirmDonate(false);
             return;
         }
         console.debug('[ProfileView] donate.submit', {
@@ -764,24 +765,23 @@ export function useProfile({
         });
         try {
             const result = await tx.sendTokens(profileAddress, amount);
+            setConfirmDonate(false);
             if (result.success) {
                 setDonateMessage({
                     type: 'success',
                     message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!`
                 });
-                setConfirmDonate(false);
-                setTimeout(() => setDonateMessage(null), 5000);
             } else {
-                if (!result?.error) {
-                    throw new Error('Missing error for send_tokens');
-                }
+                const raw = String(result?.error || 'Transaction failed');
                 setDonateMessage({
                     type: 'error',
-                    message: `Failed: ${result.error}`
+                    message: `Failed: ${raw}`
                 });
-                setTimeout(() => setDonateMessage(null), 5000);
             }
+            setTimeout(() => setDonateMessage(null), 5000);
         } catch (error) {
+            console.error("Donate error:", error);
+            setConfirmDonate(false);
             setDonateMessage({
                 type: 'error',
                 message: `Error: ${error.message || error}`
@@ -796,13 +796,40 @@ export function useProfile({
     const subFeePending = isSubscribePending(profileAddress);
     const subFeeStatus = formatSubscribeStatus(profileAddress);
 
+    /* Re-evaluate when chainConfig lands after mount (e.g. fresh profile
+     * navigate). Mirrors `usePostGifts`' `configUpdateTrigger` listener so
+     * the GiftSubscriptionDialog shows the Fee row + insufficient-balance
+     * guard identically to the post-options flow. */
+    const [chainConfigTick, setChainConfigTick] = useState(0);
+    useEffect(() => {
+        const bump = () => setChainConfigTick(prev => prev + 1);
+        window.addEventListener('chainConfigUpdated', bump);
+        window.addEventListener('userStatusUpdated', bump);
+        try {
+            if (tx.needsChainConfigRefresh && tx.needsChainConfigRefresh()) {
+                Api.get('get_chain_config', undefined)
+                    .then(cfg => {
+                        if (cfg) {
+                            try { tx.cacheChainConfig(cfg); } catch (_) { }
+                        }
+                    })
+                    .catch(() => { });
+            }
+        } catch (_) { /* noop */ }
+        return () => {
+            window.removeEventListener('chainConfigUpdated', bump);
+            window.removeEventListener('userStatusUpdated', bump);
+        };
+    }, []);
+
     const { subFeeLabel, agentFeeLabel, subFeeUmirage, agentFeeUmirage } = useMemo(() => {
+        void chainConfigTick;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
-            const tiers = cfg?.subscription_tiers || [];
-            const sf = Number(tiers[1]?.period_fee || 0);
-            const af = Number(tiers[2]?.period_fee || 0);
+            const tiers = cfg?.subscription_tiers || cfg?.tiers || [];
+            const sf = Number(tiers?.[1]?.period_fee || 0);
+            const af = Number(tiers?.[2]?.period_fee || 0);
             return {
                 subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
                 agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
@@ -811,10 +838,17 @@ export function useProfile({
             };
         } catch (_) { }
         return { subFeeLabel: null, agentFeeLabel: null, subFeeUmirage: null, agentFeeUmirage: null };
-    }, []);
+    }, [chainConfigTick]);
 
     const handleGiftSub = () => {
-        if (!profileAddress || !hasValidAccount) return;
+        if (!profileAddress || !hasValidAccount) {
+            setGiftSubMessage({
+                type: 'error',
+                message: 'Please log in to gift a subscription'
+            });
+            setTimeout(() => setGiftSubMessage(null), 5000);
+            return;
+        }
         if (isSubscribePending(profileAddress)) return;
         const level = (userLevel >= 10) ? 10 : 1;
         console.debug('[ProfileView] gift-subscribe.confirm', { target: profileAddress, level });
