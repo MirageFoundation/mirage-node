@@ -27,6 +27,9 @@ import Storage from "../../../utils/Storage";
 import InlineMedia from "./InlineMedia";
 import MarkdownRenderer from "./MarkdownRenderer";
 import ConfirmDialog from "./ConfirmDialog";
+import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
+import usePostGifts from "../../../logic/usePostGifts";
+import { updateNotification } from "../../../utils/notifications";
 
 /**
  * CardView — Mirage-app inspired post card.
@@ -904,23 +907,73 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     /* Give Award / Gift Mirage / Gift Subscription
      *
-     * The bluemoon theme implements these as full in-card confirmation
-     * modals (donate amount entry, gift sub level picker, award catalog
-     * iframe, etc.) — porting them here would roughly double the file's
-     * size. For now we navigate to the author's profile, where the same
-     * flows already exist in bluemoon's user view, and append a query
-     * parameter so a future profile-side handler can auto-open the
-     * matching modal. */
-    const handleProfileAction = useCallback((action) => {
-        closeAllMenus();
-        const handle = post && (post.username || authorAddress);
-        if (!handle) return;
-        navigate(`/u/${encodeURIComponent(handle)}?action=${action}`);
-    }, [closeAllMenus, navigate, post, authorAddress]);
+     * These flows open their modals in-place via `usePostGifts` so the
+     * viewer never loses feed context (previously they navigated to the
+     * author's profile with `?action=...`, which was jarring when you
+     * were mid-scroll). The hook exposes three `confirm*` state objects
+     * that drive the matching `GiftDialogs` component rendered below.
+     */
+    const gifts = usePostGifts({ post });
+    const {
+        handleGiveAward: giftGiveAwardOpen,
+        handleGiftMirage: giftMirageOpen,
+        handleGiftSubscription: giftSubOpen,
+        confirmDonate,
+        donateAmountRaw,
+        donatePending,
+        donateMessage,
+        confirmGiftSub,
+        giftSubPending,
+        giftSubMessage,
+        confirmAward,
+        isAwarding,
+        awardMessage,
+        confirmDonateAction,
+        confirmGiftSubAction,
+        confirmAwardAction,
+        cancelDonate,
+        cancelGiftSub,
+        cancelAward,
+        handleDonateAmountChange,
+        formatDonateAmount,
+        viewerBalanceUmirage,
+        AWARD_TYPES: awardTypes,
+        getAwardCost,
+        subFeeLabel,
+        agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
+    } = gifts;
 
-    const handleGiveAward = useCallback(() => handleProfileAction('award'), [handleProfileAction]);
-    const handleGiftMirage = useCallback(() => handleProfileAction('gift_mirage'), [handleProfileAction]);
-    const handleGiftSubscription = useCallback(() => handleProfileAction('gift_subscription'), [handleProfileAction]);
+    const handleGiveAward = useCallback(() => {
+        closeAllMenus();
+        giftGiveAwardOpen();
+    }, [closeAllMenus, giftGiveAwardOpen]);
+    const handleGiftMirage = useCallback(() => {
+        closeAllMenus();
+        giftMirageOpen();
+    }, [closeAllMenus, giftMirageOpen]);
+    const handleGiftSubscription = useCallback(() => {
+        closeAllMenus();
+        giftSubOpen();
+    }, [closeAllMenus, giftSubOpen]);
+
+    /* Pipe gift-action success/error messages through the global Toast
+     * so the card itself stays uncluttered. Each message is a short-lived
+     * object (`{ type, message }`) returned by the hook; it auto-clears
+     * via its own timer after being dispatched. */
+    useEffect(() => {
+        if (!donateMessage) return;
+        updateNotification(donateMessage.message, 3, donateMessage.type === 'error');
+    }, [donateMessage]);
+    useEffect(() => {
+        if (!giftSubMessage) return;
+        updateNotification(giftSubMessage.message, 4, giftSubMessage.type === 'error');
+    }, [giftSubMessage]);
+    useEffect(() => {
+        if (!awardMessage) return;
+        updateNotification(awardMessage.message, 3, awardMessage.type === 'error');
+    }, [awardMessage]);
 
     const handleRevealMedia = useCallback((e) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
@@ -1216,6 +1269,52 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 wide
                 onConfirm={confirmReport}
                 onCancel={closeDialog}
+            />
+            {/**
+              * Gift Mirage / Gift Subscription / Give Award dialogs —
+              * rendered at the card's root so they sit above feed siblings
+              * and use the existing `ConfirmDialog` primitive for focus
+              * trap + overlay behavior. Previously these menu items
+              * navigated to the author's profile; now they open the
+              * modal in-place via `usePostGifts`.
+              */}
+            <GiftMirageDialog
+                open={!!confirmDonate}
+                recipientLabel={confirmDonate?.username ? `@${confirmDonate.username}` : `@${authorDisplay}`}
+                amountRaw={donateAmountRaw}
+                formatAmount={formatDonateAmount}
+                onAmountChange={handleDonateAmountChange}
+                pending={donatePending}
+                userBalanceUmirage={viewerBalanceUmirage}
+                onConfirm={confirmDonateAction}
+                onCancel={cancelDonate}
+            />
+            <GiftSubscriptionDialog
+                open={!!confirmGiftSub}
+                recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : `@${authorDisplay}`}
+                level={confirmGiftSub?.level}
+                feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
+                feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+                loading={!!confirmGiftSub?.loading}
+                expiryLabel={confirmGiftSub?.expiryLabel}
+                error={confirmGiftSub?.error}
+                pending={giftSubPending}
+                userBalanceUmirage={viewerBalanceUmirage}
+                onConfirm={confirmGiftSubAction}
+                onCancel={cancelGiftSub}
+            />
+            <GiveAwardDialog
+                open={!!confirmAward}
+                awardTypes={awardTypes}
+                getAwardCost={getAwardCost}
+                userBalanceUmirage={viewerBalanceUmirage}
+                isAwarding={isAwarding}
+                onPick={(awardName) => {
+                    if (confirmAward?.postId) {
+                        confirmAwardAction(awardName);
+                    }
+                }}
+                onCancel={cancelAward}
             />
         </Card>
     );
