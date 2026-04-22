@@ -1811,8 +1811,11 @@ def _get_home_feed_magic(
     sim_lookup = {u[0]: u[1] for u in similar_users}
     similar_addrs = set(sim_lookup.keys())
 
-    # 3. Load candidate posts (small targeted pool + random exploration)
+    # 3. Load candidate posts.
     per_source = limit * page * _seen_overfetch_factor(seen_posts, 4)
+    if page == 1:
+        # Cap first-page pool size to keep home-feed latency predictable.
+        per_source = min(per_source, 500)
     _t = time.monotonic()
     candidates = _load_home_candidates(
         cur,
@@ -2237,10 +2240,10 @@ def _load_home_candidates(
 ) -> list[dict]:
     """
     Load candidate posts for home feed from multiple sources:
+    0. Own posts (recent)
     1. Posts by similar users (recent)
     2. Posts upvoted by similar users (recent)
     3. Recent posts (discovery)
-    4. Random exploration (upvoted posts from wider time window)
     """
     results = []
     seen = set()
@@ -2374,40 +2377,6 @@ def _load_home_candidates(
         )
         if post:
             post["_source"] = "recent"
-            results.append(post)
-
-    # Source 4: Random exploration (upvoted posts from last 60 days)
-    # Pulls random posts that have at least one upvote, giving older quality
-    # content a chance to surface. Different results each request.
-    explore_limit = max(20, max_posts // 3)
-    cur.execute(
-        f"""SELECT {_POST_COLS}
-        FROM posts p
-        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
-          {bt_clause}
-          AND p.created_at > EXTRACT(EPOCH FROM NOW()) - 60 * 86400
-          AND EXISTS (
-              SELECT 1 FROM votes v
-              WHERE LOWER(v.target) = LOWER(p.txhash) AND v.user_vote > 0
-          )
-        ORDER BY RANDOM()
-        LIMIT %s""",
-        bt_params + [explore_limit],
-    )
-    for row in cur.fetchall():
-        post = _row_to_post(
-            row,
-            blocked_posts,
-            blocked_users,
-            allowed_tags,
-            seen,
-            blocked_topics,
-            blocked_topic_prefixes,
-            viewer=viewer,
-        )
-        if post:
-            post["_source"] = "explore"
             results.append(post)
 
     return results
