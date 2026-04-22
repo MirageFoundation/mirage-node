@@ -2607,10 +2607,13 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
     if not post_ids or not similar_addrs:
         return {}
 
-    similar_list = list(similar_addrs)
+    similar_list = list({str(addr).lower() for addr in similar_addrs if addr})
+    if not similar_list:
+        return {}
     now_ts = int(time.time())
 
     cached: dict[str, frozenset[str]] = {}
+    fetched: dict[str, frozenset[str]] = {}
     with connect_backend_db() as bconn:
         with bconn.cursor() as bcur:
             bcur.execute(
@@ -2624,31 +2627,29 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
             for owner, posts in bcur.fetchall():
                 cached[owner] = frozenset(posts or ())
 
-    missing = [a for a in similar_list if a not in cached]
+            missing = [a for a in similar_list if a not in cached]
+            if missing:
+                ph = ",".join(["%s"] * len(missing))
+                cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
+                cur.execute(
+                    f"""
+                    SELECT LOWER(owner), LOWER(target)
+                    FROM votes
+                    WHERE LOWER(owner) IN ({ph})
+                      AND user_vote > 0
+                      AND created_at > %s
+                    """,
+                    missing + [cutoff],
+                )
+                raw: dict[str, list[str]] = {addr: [] for addr in missing}
+                for owner, target in cur.fetchall():
+                    bucket = raw.get(owner)
+                    if bucket is not None and target:
+                        bucket.append(target)
 
-    fetched: dict[str, frozenset[str]] = {}
-    if missing:
-        ph = ",".join(["%s"] * len(missing))
-        cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
-        cur.execute(
-            f"""
-            SELECT LOWER(owner), LOWER(target)
-            FROM votes
-            WHERE LOWER(owner) IN ({ph})
-              AND user_vote > 0
-              AND created_at > %s
-            """,
-            missing + [cutoff],
-        )
-        raw: dict[str, list[str]] = {addr: [] for addr in missing}
-        for owner, target in cur.fetchall():
-            bucket = raw.get(owner)
-            if bucket is not None and target:
-                bucket.append(target)
-
-        expires_at = now_ts + _SIM_UPVOTES_CACHE_TTL
-        with connect_backend_db() as bconn:
-            with bconn.cursor() as bcur:
+                # Users with no recent upvotes get an empty array cached as a
+                # negative result so we don't re-query them every 10 minutes.
+                expires_at = now_ts + _SIM_UPVOTES_CACHE_TTL
                 values_sql = ",".join(["(%s, %s, %s, %s)"] * len(raw))
                 params: list = []
                 for addr, posts in raw.items():
@@ -2664,8 +2665,8 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
                     """,
                     params,
                 )
-        for addr, posts in raw.items():
-            fetched[addr] = frozenset(posts)
+                for addr, posts in raw.items():
+                    fetched[addr] = frozenset(posts)
 
     post_set = set(post_ids)
     result: dict[str, list[str]] = {}

@@ -286,9 +286,15 @@ def init_backend_schema() -> None:
                 )
             """
             )
+            # NOT VALID: skips scanning existing rows so an unexpected mixed-case
+            # row can't brick startup; still enforced for new writes.
+            cur.execute("ALTER TABLE user_upvote_cache DROP CONSTRAINT IF EXISTS user_upvote_cache_owner_lower")
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_upvote_cache_expires ON user_upvote_cache(expires_at)"
+                "ALTER TABLE user_upvote_cache "
+                "ADD CONSTRAINT user_upvote_cache_owner_lower CHECK (owner = LOWER(owner)) NOT VALID"
             )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_upvote_cache_expires ON user_upvote_cache(expires_at)")
+            _assert_table_schema("user_upvote_cache", {"owner", "upvoted_posts", "computed_at", "expires_at"})
 
             # ── Push notifications ───────────────────────────────────────
             cur.execute(
