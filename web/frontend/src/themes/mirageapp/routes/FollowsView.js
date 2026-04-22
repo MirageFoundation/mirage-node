@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Navigate, useLocation } from "react-router-dom";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 import { HiHashtag, HiExclamationTriangle, HiUsers } from "react-icons/hi2";
 import Button from "../components/Button.js";
 import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
@@ -222,6 +222,43 @@ const RowActions = styled.div`
     align-items: center;
 `;
 
+/**
+ * Following button that flips to a danger (red) "Unfollow" state on hover.
+ * Uses `!important` so the swap survives flatMode's !important overrides in
+ * `components/Button.js` (the `subtle` variant).
+ */
+const dangerHover = css`
+    background: ${({ theme }) => theme.colors.buttonDangerBg} !important;
+    color: ${({ theme }) => theme.colors.voteDown} !important;
+    border-color: ${({ theme }) => theme.colors.buttonDangerBorder} !important;
+`;
+
+const FollowingButton = styled(Button)`
+    [data-follow-label='hover'] { display: none; }
+    [data-follow-label='default'] { display: inline; }
+
+    &:hover:not(:disabled) {
+        ${dangerHover}
+        [data-follow-label='default'] { display: none; }
+        [data-follow-label='hover'] { display: inline; }
+    }
+    &:focus-visible:not(:disabled) {
+        ${dangerHover}
+        [data-follow-label='default'] { display: none; }
+        [data-follow-label='hover'] { display: inline; }
+    }
+`;
+
+function FollowingLabel({ status }) {
+    if (status) return status;
+    return (
+        <>
+            <span data-follow-label="default">Following</span>
+            <span data-follow-label="hover">Unfollow</span>
+        </>
+    );
+}
+
 /* ----- Empty / loading / error states (mirrors InboxView `StateBlock`). ----- */
 
 const StateBlock = styled.div`
@@ -437,7 +474,7 @@ export default function FollowsView({ state }) {
                                     <IdentityTitle>{topic}</IdentityTitle>
                                 </Identity>
                                 <RowActions onClick={e => e.stopPropagation()}>
-                                    <Button
+                                    <FollowingButton
                                         variant="subtle"
                                         size="sm"
                                         minWidth="5.5rem"
@@ -449,8 +486,8 @@ export default function FollowsView({ state }) {
                                             handleUnfollowTopic(e, topic);
                                         }}
                                     >
-                                        {status || 'Following'}
-                                    </Button>
+                                        <FollowingLabel status={status} />
+                                    </FollowingButton>
                                 </RowActions>
                             </Row>
                         );
@@ -501,7 +538,7 @@ export default function FollowsView({ state }) {
                                     <IdentityMeta title={userAddr}>{userAddr}</IdentityMeta>
                                 </Identity>
                                 <RowActions onClick={e => e.stopPropagation()}>
-                                    <Button
+                                    <FollowingButton
                                         variant="subtle"
                                         size="sm"
                                         minWidth="5.5rem"
@@ -513,8 +550,8 @@ export default function FollowsView({ state }) {
                                             handleUnfollowUser(e, userAddr);
                                         }}
                                     >
-                                        {status || 'Following'}
-                                    </Button>
+                                        <FollowingLabel status={status} />
+                                    </FollowingButton>
                                 </RowActions>
                             </Row>
                         );

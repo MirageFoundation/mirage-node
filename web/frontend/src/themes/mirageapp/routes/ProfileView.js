@@ -45,6 +45,23 @@ const formatAccountAge = (createdAt) => {
     if (days < 365) return `${Math.floor(days / 30)}mo`;
     return `${Math.floor(days / 365)}yr`;
 };
+/** Long-form age used by the profile details `Registered:` row. */
+const formatAccountAgeLong = (createdAt) => {
+    const ts = Number(createdAt);
+    if (!Number.isFinite(ts) || ts <= 0) return '—';
+    const nowSec = Date.now() / 1000;
+    const ageSec = nowSec - ts;
+    const days = ageSec / (60 * 60 * 24);
+    const hours = ageSec / 3600;
+    const minutes = ageSec / 60;
+    const pluralize = (value, unit) => `${value} ${unit}${value === 1 ? '' : 's'} ago`;
+    if (minutes < 1) return '—';
+    if (hours < 1) return pluralize(Math.floor(minutes), 'minute');
+    if (days < 1) return pluralize(Math.floor(hours), 'hour');
+    if (days < 30) return pluralize(Math.floor(days), 'day');
+    if (days < 365) return pluralize(Math.floor(days / 30), 'month');
+    return pluralize(Math.floor(days / 365), 'year');
+};
 /** Matches `SettingsView::SettingLabel` — primary text color, 0.72rem / 500. */
 const Label = styled.div`
     color: ${({ theme }) => theme.colors.text};
@@ -1526,7 +1543,7 @@ export default function ProfileView({
                             <ProfileFieldRow>
                                 <Label>Registered:</Label>
                                 <ProfileFieldValuePlain>
-                                    <Mono>{registeredDisplay}</Mono>
+                                    <Mono title={registeredDisplay}>{profileRegisteredAt ? formatAccountAgeLong(profileRegisteredAt) : registeredDisplay}</Mono>
                                 </ProfileFieldValuePlain>
                             </ProfileFieldRow>
                             <ProfileFieldRow>
@@ -1882,19 +1899,22 @@ export default function ProfileView({
           * used by ViewPostView and the Block/Report dialogs. */}
         <GiftMirageDialog
             open={!!confirmDonate}
-            recipientLabel={profileUsername ? `@${profileUsername}` : (profileAddress || 'this user')}
+            recipientLabel={profileUsername
+                ? `@${profileUsername}`
+                : (profileAddress ? `@${String(profileAddress).slice(0, 10)}…` : '@this user')}
             amountRaw={donateAmountRaw}
             formatAmount={formatDonateAmount}
-            onAmountChange={(digits) => setDonateAmountRaw(digits)}
+            onAmountChange={(value) => setDonateAmountRaw(String(value || '').replace(/[^\d]/g, ''))}
             pending={donatePending}
-            confirmLabel={donateStatus || 'Send'}
             userBalanceUmirage={viewerBalanceUmirage}
             onConfirm={confirmDonateAction}
             onCancel={cancelDonate}
         />
         <GiftSubscriptionDialog
             open={!!confirmGiftSub}
-            recipientLabel={profileUsername ? `@${profileUsername}` : (profileAddress || 'this user')}
+            recipientLabel={profileUsername
+                ? `@${profileUsername}`
+                : (profileAddress ? `@${String(profileAddress).slice(0, 10)}…` : '@this user')}
             level={confirmGiftSub?.level}
             feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
             feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
@@ -1902,7 +1922,6 @@ export default function ProfileView({
             expiryLabel={confirmGiftSub?.expiryLabel}
             error={confirmGiftSub?.error}
             pending={subFeePending}
-            confirmLabel={subFeeStatus || 'Confirm'}
             userBalanceUmirage={viewerBalanceUmirage}
             onConfirm={confirmGiftSubAction}
             onCancel={cancelGiftSub}

@@ -96,8 +96,8 @@ const ExplanationText = styled.div`
 
 
 const SecurityBanner = styled.div`
-    background-color: rgba(245, 158, 11, 0.1);
-    border: 1px solid #f59e0b;
+    background-color: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
     border-radius: 8px;
     padding: 0.5rem 1rem;
     margin: 0.25rem 1rem 0.35rem;
@@ -144,37 +144,56 @@ const InlinePasswordRow = styled.div`
 const PasswordInput = styled.input`
     flex: 1;
     min-width: 120px;
-    max-width: 220px;
-    padding: 0.3rem 0.5rem;
-    font-size: 0.7rem;
-    background-color: ${({ theme }) => theme.colors.inputBackground};
+    max-width: 260px;
+    box-sizing: border-box;
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 6px;
+    background: ${({ theme }) => theme.colors.inputBackground};
     color: ${({ theme }) => theme.colors.text};
-    box-sizing: border-box;
-    font-family: inherit;
+    padding: 0.35rem 0.6rem;
+    font: inherit;
+    font-size: 0.72rem;
+    line-height: 1.3;
+    transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+
+    &::placeholder {
+        color: ${({ theme }) => theme.colors.subtleText};
+    }
+
+    &:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.hoverBg || theme.colors.inputBackground};
+    }
 
     &:focus {
         outline: none;
-        border-color: ${({ theme }) => theme.colors.focusBlue};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        box-shadow: none;
+        background: ${({ theme }) => theme.colors.hoverBg || theme.colors.inputBackground};
+    }
+
+    &:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
     }
 `;
 
 const SmallButton = styled.button`
-    padding: 0.3rem 0.65rem;
-    font-size: 0.65rem;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.72rem;
+    line-height: 1.3;
     font-weight: 600;
     cursor: pointer;
-    border: none;
+    border: 1px solid ${({ theme }) => theme.colors.followBtnBg};
     border-radius: 6px;
-    background: ${({ theme }) => theme.colors.focusBlue};
+    background: ${({ theme }) => theme.colors.followBtnBg};
     color: #fff;
     font-family: inherit;
-    transition: opacity 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
     white-space: nowrap;
 
     &:hover:not(:disabled) {
-        opacity: 0.85;
+        background: ${({ theme }) => theme.colors.followBtnBgHover};
+        border-color: ${({ theme }) => theme.colors.followBtnBgHover};
     }
 
     &:disabled {
@@ -185,6 +204,12 @@ const SmallButton = styled.button`
 
 const DangerButton = styled(SmallButton)`
     background: ${({ theme }) => theme.colors.voteDown};
+    border-color: ${({ theme }) => theme.colors.voteDown};
+
+    &:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.voteDownHover || theme.colors.voteDown};
+        border-color: ${({ theme }) => theme.colors.voteDownHover || theme.colors.voteDown};
+    }
 `;
 
 const DangerInput = styled.input`
@@ -227,7 +252,7 @@ const SecurityError = styled.div`
 
 const SecuritySuccess = styled.div`
     background-color: ${({ theme }) => theme.colors.buttonSuccessBg};
-    border: 1px solid ${({ theme }) => theme.colors.buttonSuccessBorder};
+    border: 1px solid ${({ theme }) => `${theme.colors.voteUp}40`};
     border-radius: 8px;
     padding: 0.35rem 0.65rem;
     margin-top: 0.35rem;
@@ -451,7 +476,7 @@ const ToggleTrack = styled.div`
     height: 24px;
     flex: 0 0 42px;
     border-radius: 12px;
-    background: ${({ $checked, theme }) => $checked ? theme.colors.focusBlue : theme.colors.surface3};
+    background: ${({ $checked, theme }) => $checked ? theme.colors.followBtnBg : theme.colors.surface3};
     position: relative;
     cursor: pointer;
     transition: background 0.2s ease;
