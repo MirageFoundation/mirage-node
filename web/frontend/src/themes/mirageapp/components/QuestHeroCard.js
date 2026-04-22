@@ -88,10 +88,7 @@ const IconTile = styled.div`
     justify-content: center;
     font-size: 0.8rem;
     line-height: 1;
-    background: ${({ $tint, theme }) => {
-        const hex = $tint || '#667eea';
-        return theme.name === 'light' ? `${hex}1F` : `${hex}33`;
-    }};
+    background: transparent;
     color: ${({ $tint }) => $tint || '#667eea'};
 `;
 
@@ -466,6 +463,9 @@ const QuestRowReward = styled.span`
     background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(245, 158, 11, 0.14)'
         : 'rgba(245, 158, 11, 0.22)'};
+    border: 1px solid ${({ theme }) => theme.name === 'light'
+        ? 'rgba(245, 158, 11, 0.35)'
+        : 'rgba(245, 158, 11, 0.45)'};
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 
@@ -554,28 +554,56 @@ const QuestRowPercent = styled.span`
     font-variant-numeric: tabular-nums;
 `;
 
-const BalancedPill = styled.span`
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 0.05rem 0.28rem;
-    border-radius: 999px;
-    font-size: 0.5rem;
-    font-weight: ${({ $met }) => ($met ? '700' : '500')};
-    font-variant-numeric: tabular-nums;
-    color: ${({ $met, theme }) => $met
-        ? requireThemeColor(theme, 'voteUp')
-        : requireThemeColor(theme, 'subtleText')};
-    background: ${({ $met, theme }) => $met
-        ? (theme.name === 'light' ? 'rgba(22, 163, 74, 0.12)' : 'rgba(22, 163, 74, 0.22)')
-        : (theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.06)')};
+/* ---- Balanced-vote dual progress rows (mirrors mobile QuestRequirements) ---- */
+
+const BALANCED_UP_COLOR = '#10B981';
+const BALANCED_DOWN_COLOR = '#8B5CF6';
+
+const BalancedBarsGrid = styled.div`
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    width: 100%;
 `;
 
-const BalancedStack = styled.div`
-    display: inline-flex;
+const BalancedBarRow = styled.div`
+    display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 0.3rem;
+    min-width: 0;
+`;
+
+const BalancedArrow = styled.span`
     flex-shrink: 0;
+    font-size: 0.7rem;
+    line-height: 1;
+    color: ${({ $tint }) => $tint};
+`;
+
+const BalancedTrack = styled.div`
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.06)'
+        : 'rgba(255, 255, 255, 0.08)'};
+`;
+
+const BalancedFill = styled.div`
+    height: 100%;
+    border-radius: 2px;
+    width: ${({ $pct }) => `${Math.max(0, Math.min(100, $pct || 0))}%`};
+    background: ${({ $tint }) => $tint};
+    transition: width 0.3s ease;
+`;
+
+const BalancedCount = styled.span`
+    flex-shrink: 0;
+    font-size: 0.55rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-variant-numeric: tabular-nums;
 `;
 
 /* ============================================================
@@ -887,6 +915,9 @@ function getQuestRewardDisplay(rewards, rewardMultiplier) {
     const inviteCodeReward = rewards.find(r => r.type === 'invite_code');
     if (inviteCodeReward) {
         const count = inviteCodeReward.amount || 1;
+        /* Mobile renders invite-code rewards as `+{amount} Invite` — keep
+         * the singular label regardless of count to mirror the mobile
+         * QuestCard reward pill exactly. */
         return `+${count} Invite`;
     }
     if (mirageReward) {
@@ -914,7 +945,14 @@ function buildQuestDetails(quest) {
     }
     if (quest.unique_topics_min) items.push(`At least ${quest.unique_topics_min} different topics`);
     if (quest.quality_threshold) items.push(`Needs ${quest.quality_threshold}+ upvotes`);
-    if (quest.action_type === 'vote' && quest.count_vote_changes === false) items.push('New votes only (changes don\u2019t count)');
+    /* Mobile renders the "New votes only" requirement for ANY quest
+     * whose `count_vote_changes === false`, not just `vote`. Cover
+     * `balanced_vote` + any future vote-like action by dropping the
+     * action-type gate. */
+    if (quest.count_vote_changes === false
+        && (quest.action_type === 'vote' || quest.action_type === 'balanced_vote')) {
+        items.push('New votes only (changes don\u2019t count)');
+    }
     return items;
 }
 
@@ -933,6 +971,13 @@ const ACTION_COLORS = {
     comment_upvotes_received: '#6366F1',
     invite_recruit: '#14B8A6',
     claim_only: '#A855F7',
+    /* Additional action types the backend can emit that the mobile
+     * client inherits via default fallback — add explicit entries so
+     * each variant gets a distinct tile on the web card. */
+    unique_topic_post: '#0EA5E9',
+    comments_received: '#0891B2',
+    quality_comments: '#D946EF',
+    first_topic_post: '#FB7185',
 };
 const ACTION_EMOJI = {
     comment: '💬',
@@ -945,6 +990,10 @@ const ACTION_EMOJI = {
     comment_upvotes_received: '💭',
     invite_recruit: '👥',
     claim_only: '🎁',
+    unique_topic_post: '🗂',
+    comments_received: '📬',
+    quality_comments: '⭐',
+    first_topic_post: '🏴',
 };
 
 function getActionColor(actionType) {
@@ -952,6 +1001,28 @@ function getActionColor(actionType) {
 }
 function getActionEmoji(actionType) {
     return ACTION_EMOJI[actionType] || '⭐';
+}
+
+/* Format a unix timestamp (seconds) using the viewer's locale —
+ * mirrors mobile's `suspendedUntil.toLocaleDateString` + `toLocaleTimeString`
+ * split so the suspension box can show both parts. */
+function formatSuspensionDate(suspendedUntilSeconds) {
+    if (!suspendedUntilSeconds || suspendedUntilSeconds > 4000000000) return null;
+    try {
+        const d = new Date(suspendedUntilSeconds * 1000);
+        const date = d.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+        });
+        const time = d.toLocaleTimeString(undefined, {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+        return { date, time };
+    } catch (_) {
+        return null;
+    }
 }
 
 /* ============================================================
@@ -1131,8 +1202,13 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
     /* Suspended */
     if (questsSuspended) {
         const suspendedUntil = questsSuspensionInfo?.suspended_until;
-        const suspendedText = suspendedUntil && suspendedUntil <= 4000000000
-            ? `Suspended until ${new Date(suspendedUntil * 1000).toLocaleString()}`
+        const suspensionReason = typeof questsSuspensionInfo?.reason === 'string'
+            && questsSuspensionInfo.reason.trim().length > 0
+            ? questsSuspensionInfo.reason
+            : 'Your quest rewards have been suspended';
+        const formatted = formatSuspensionDate(suspendedUntil);
+        const suspendedUntilText = formatted
+            ? `Suspended until ${formatted.date} at ${formatted.time}`
             : 'Your quest rewards have been suspended.';
         return (
             <CardContainer $feedViewMode={feedViewMode}>
@@ -1141,7 +1217,7 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
                         <IconTile $tint="#EF4444">⚠️</IconTile>
                         <TitleStack>
                             <TitleText $color="#EF4444">Quests Suspended</TitleText>
-                            <SubtitleText $color="#F87171">Attempting to game the system</SubtitleText>
+                            <SubtitleText $color="#F87171" title={suspensionReason}>{suspensionReason}</SubtitleText>
                         </TitleStack>
                     </TitleRow>
                     <HeaderRight>
@@ -1150,7 +1226,7 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
                 </Header>
                 {!collapsed && (
                     <Body>
-                        <SuspendedBox>{suspendedText}</SuspendedBox>
+                        <SuspendedBox>{suspendedUntilText}</SuspendedBox>
                     </Body>
                 )}
             </CardContainer>
@@ -1343,19 +1419,46 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
 
                                         {/* Footer: progress bar + "n/target" + percent (or balanced split) */}
                                         {isBalanced ? (
-                                            <QuestRowFooter>
-                                                <BalancedStack>
-                                                    <BalancedPill $met={upvotes >= targetUpvotes} title="Upvotes">
-                                                        ↑{clampedUpvotes}/{quest.target_upvotes}
-                                                    </BalancedPill>
-                                                    <BalancedPill $met={downvotes >= targetDownvotes} title="Downvotes">
-                                                        ↓{clampedDownvotes}/{quest.target_downvotes}
-                                                    </BalancedPill>
-                                                </BalancedStack>
-                                                <QuestRowPercent $completed={quest.completed}>
-                                                    {quest.completed ? 'Completed!' : `${Math.round(questPct)}%`}
-                                                </QuestRowPercent>
-                                            </QuestRowFooter>
+                                            <>
+                                                {/* Mobile `QuestRequirements` renders dual colored
+                                                 * ↑/↓ progress bars for balanced_vote so each
+                                                 * side is visually trackable. Mirror the exact
+                                                 * layout here. */}
+                                                <BalancedBarsGrid>
+                                                    <BalancedBarRow title="Upvotes">
+                                                        <BalancedArrow $tint={BALANCED_UP_COLOR} aria-hidden="true">↑</BalancedArrow>
+                                                        <BalancedTrack>
+                                                            <BalancedFill
+                                                                $tint={BALANCED_UP_COLOR}
+                                                                $pct={targetUpvotes > 0 ? (clampedUpvotes / targetUpvotes) * 100 : 0}
+                                                            />
+                                                        </BalancedTrack>
+                                                        <BalancedCount>
+                                                            {clampedUpvotes}/{quest.target_upvotes}
+                                                        </BalancedCount>
+                                                    </BalancedBarRow>
+                                                    <BalancedBarRow title="Downvotes">
+                                                        <BalancedArrow $tint={BALANCED_DOWN_COLOR} aria-hidden="true">↓</BalancedArrow>
+                                                        <BalancedTrack>
+                                                            <BalancedFill
+                                                                $tint={BALANCED_DOWN_COLOR}
+                                                                $pct={targetDownvotes > 0 ? (clampedDownvotes / targetDownvotes) * 100 : 0}
+                                                            />
+                                                        </BalancedTrack>
+                                                        <BalancedCount>
+                                                            {clampedDownvotes}/{quest.target_downvotes}
+                                                        </BalancedCount>
+                                                    </BalancedBarRow>
+                                                </BalancedBarsGrid>
+                                                <QuestRowFooter>
+                                                    <QuestRowProgress>
+                                                        {clampedProgress} / {quest.target}
+                                                    </QuestRowProgress>
+                                                    <QuestRowPercent $completed={quest.completed}>
+                                                        {quest.completed ? 'Completed!' : `${Math.round(questPct)}%`}
+                                                    </QuestRowPercent>
+                                                </QuestRowFooter>
+                                            </>
                                         ) : (
                                             <>
                                                 <QuestRowProgressTrack>
