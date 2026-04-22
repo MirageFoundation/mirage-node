@@ -2580,32 +2580,84 @@ def _row_to_post(
     return post
 
 
+# ---- Similar-user upvote set cache (in-process, per-owner) ----
+# The scoring path needs "which similar users upvoted each candidate post".
+# Postgres' only viable plan for that IN/IN query scans every vote row belonging
+# to the similar users (tens of thousands of rows for active voters), which
+# costs 100-250ms per home feed load even when the final intersection is tiny.
+#
+# Caching each similar-user's recent upvote set per-owner lets cold misses pay
+# the DB cost once every _SIM_UPVOTES_CACHE_TTL seconds per user (amortized
+# across every viewer for whom that user is a similar_addr), and reduces warm
+# lookups to pure in-memory set intersection.
+#
+# Cache payload is bounded by a 90-day window on votes.created_at: candidate
+# posts are dominated by recent posts, so older upvotes can't contribute to the
+# result. _SIM_UPVOTES_CACHE_MAX caps total distinct owners retained.
+_SIM_UPVOTES_CACHE_TTL = 600.0  # 10 minutes
+_SIM_UPVOTES_CACHE_MAX = 1000
+_SIM_UPVOTES_WINDOW_SECS = 90 * 24 * 3600
+_sim_upvotes_cache: dict[str, tuple[float, frozenset[str]]] = {}
+
+
 def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]) -> dict[str, list[str]]:
     """
-    Load which similar users upvoted which posts.
-    Returns: {post_id: [voter_addr, ...]}
+    Return {post_id: [voter_addr, ...]} for similar users that upvoted each
+    candidate post. Caches each similar user's recent upvote set in-process.
     """
     if not post_ids or not similar_addrs:
         return {}
 
-    similar_list = list(similar_addrs)
-    post_placeholders = ",".join(["%s"] * len(post_ids))
-    user_placeholders = ",".join(["%s"] * len(similar_list))
+    now = time.time()
+    post_set = set(post_ids)
+    per_user: dict[str, frozenset[str]] = {}
+    missing: list[str] = []
 
-    query = f"""
-        SELECT LOWER(target), LOWER(owner)
-        FROM votes
-        WHERE LOWER(target) IN ({post_placeholders})
-          AND LOWER(owner) IN ({user_placeholders})
-          AND user_vote > 0
-    """
-    cur.execute(query, post_ids + similar_list)
+    for addr in similar_addrs:
+        entry = _sim_upvotes_cache.get(addr)
+        if entry and entry[0] > now:
+            per_user[addr] = entry[1]
+        else:
+            missing.append(addr)
 
-    result = {}
-    for target, voter in cur.fetchall():
-        if target not in result:
-            result[target] = []
-        result[target].append(voter)
+    if missing:
+        ph = ",".join(["%s"] * len(missing))
+        cutoff = int(now) - _SIM_UPVOTES_WINDOW_SECS
+        cur.execute(
+            f"""
+            SELECT LOWER(owner), LOWER(target)
+            FROM votes
+            WHERE LOWER(owner) IN ({ph})
+              AND user_vote > 0
+              AND created_at > %s
+            """,
+            missing + [cutoff],
+        )
+        fetched: dict[str, set[str]] = {addr: set() for addr in missing}
+        for owner, target in cur.fetchall():
+            bucket = fetched.get(owner)
+            if bucket is not None and target:
+                bucket.add(target)
+
+        if len(_sim_upvotes_cache) >= _SIM_UPVOTES_CACHE_MAX:
+            stale = [k for k, v in _sim_upvotes_cache.items() if v[0] <= now]
+            for k in stale:
+                _sim_upvotes_cache.pop(k, None)
+            if len(_sim_upvotes_cache) >= _SIM_UPVOTES_CACHE_MAX:
+                _sim_upvotes_cache.clear()
+
+        expires = now + _SIM_UPVOTES_CACHE_TTL
+        for addr, upvoted in fetched.items():
+            fs = frozenset(upvoted)
+            _sim_upvotes_cache[addr] = (expires, fs)
+            per_user[addr] = fs
+
+    result: dict[str, list[str]] = {}
+    for addr, upvoted in per_user.items():
+        if not upvoted:
+            continue
+        for pid in upvoted & post_set:
+            result.setdefault(pid, []).append(addr)
     return result
 
 
