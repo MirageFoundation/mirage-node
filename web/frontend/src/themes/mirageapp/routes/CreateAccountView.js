@@ -4,13 +4,12 @@ import Button from "../components/Button.js";
 import AuthPageShell, {
   AuthButtonRow,
   AuthErrorMessage,
+  AuthFieldRow,
   AuthHelperText,
-  AuthInlineBadge,
   AuthInput,
   AuthLabel,
   AuthLink,
   AuthLinkRow,
-  AuthPanel,
   AuthStack,
   AuthSubtlePanel,
 } from "../components/AuthPageShell.js";
@@ -19,149 +18,115 @@ import { getMaxInputLength } from "../../../utils/chainParams";
 import { formatError } from "../../../utils/errorMessages";
 import { useCreateAccount } from "../../../logic/useCreateAccount";
 
-const PanelTitle = styled.h2`
-  margin: 0 0 0.4rem;
-  color: ${({ theme }) => theme.colors.text};
-  font-size: 0.82rem;
-  font-weight: 600;
-  line-height: 1.2;
-`;
-
 const StatusLine = styled.div`
   color: ${({ theme }) => theme.colors.text};
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   line-height: 1.5;
 `;
 
-const FeatureGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem;
-  margin-top: 0.75rem;
-
-  @media (max-width: 600px) {
-    grid-template-columns: 1fr;
-  }
+const StatusMuted = styled.span`
+  color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const FeatureTile = styled.div`
+const WarningPanel = styled.div`
   display: flex;
   align-items: flex-start;
   gap: 0.55rem;
-  padding: 0.6rem 0.65rem;
-  border-radius: 0.75rem;
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  background: ${({ theme }) => theme.name === "light" ? "#FFFFFF" : "rgb(25, 28, 31)"};
-`;
-
-const FeatureIcon = styled.div`
-  width: 1.55rem;
-  height: 1.55rem;
-  flex: 0 0 auto;
+  padding: 0.6rem 0.75rem;
   border-radius: 0.55rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  line-height: 1;
-  background: ${({ $tone, theme }) =>
-    $tone === "purple"
-      ? "rgba(102, 126, 234, 0.18)"
-      : $tone === "green"
-        ? theme.colors.buttonSuccessBg
-        : "rgba(245, 158, 11, 0.18)"};
-  color: ${({ $tone, theme }) =>
-    $tone === "purple" ? "#667eea" : $tone === "green" ? theme.colors.voteUp : "#f59e0b"};
-`;
-
-const FeatureBody = styled.div`
-  min-width: 0;
-`;
-
-const FeatureTitle = styled.div`
+  border: 0.5px solid #f59e0b;
+  background: ${({ theme }) =>
+    theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
   color: ${({ theme }) => theme.colors.text};
-  font-size: 0.74rem;
-  font-weight: 600;
+  font-size: 0.7rem;
+  line-height: 1.5;
+`;
+
+const WarningIcon = styled.span`
+  flex: 0 0 auto;
+  color: #f59e0b;
+  font-size: 0.85rem;
   line-height: 1.2;
 `;
 
-const FeatureDesc = styled.div`
-  margin-top: 0.18rem;
-  color: ${({ theme }) => theme.colors.subtleText};
-  font-size: 0.66rem;
-  line-height: 1.4;
-`;
-
-const PreviewCard = styled.div`
-  margin-top: 0.65rem;
-  padding: 0.65rem 0.78rem;
-  border-radius: 0.75rem;
-  border: 1px dashed ${({ theme }) => theme.colors.border};
-  background: ${({ theme }) => theme.name === "light" ? "rgb(243, 243, 243)" : "rgb(36, 39, 45)"};
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-`;
-
-const PreviewLeft = styled.div`
+const WarningBody = styled.div`
   min-width: 0;
+
+  b {
+    font-weight: 600;
+  }
 `;
 
-const PreviewLabel = styled.div`
-  color: ${({ theme }) => theme.colors.subtleText};
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 600;
+const HandleField = styled.div`
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: 0.55rem;
+  background: ${({ theme }) => theme.colors.bg};
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.borderStrong};
+  }
+
+  &:focus-within {
+    border-color: ${({ theme }) => theme.colors.borderStrong};
+  }
 `;
 
-const PreviewValue = styled.div`
-  margin-top: 0.2rem;
-  color: ${({ theme }) => theme.colors.text};
-  font-size: 0.86rem;
-  font-weight: 600;
-  word-break: break-word;
-  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-`;
-
-const PreviewBadge = styled.span`
-  flex: 0 0 auto;
+const HandlePrefix = styled.span`
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.22rem 0.45rem;
-  border-radius: 999px;
-  background: ${({ theme }) => theme.colors.buttonSuccessBg};
-  color: ${({ theme }) => theme.colors.voteUp};
-  font-size: 0.6rem;
-  font-weight: 600;
+  padding: 0 0.55rem 0 0.7rem;
+  color: ${({ theme }) => theme.colors.subtleText};
+  font-size: 0.75rem;
+  font-weight: 500;
+  user-select: none;
+`;
 
-  &::before {
-    content: "";
-    width: 0.32rem;
-    height: 0.32rem;
-    border-radius: 999px;
-    background: currentColor;
+const HandleInput = styled.input`
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: ${({ theme }) => theme.colors.text};
+  padding: 0.55rem 0.7rem 0.55rem 0;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+  outline: none;
+
+  &::placeholder {
+    color: ${({ theme }) => theme.colors.subtleText};
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 `;
 
 const PrimaryButton = styled(Button)`
-  border: ${({ theme }) => theme.name === 'dark' ? '0.5px' : '1px'} solid rgba(102, 126, 234, 0.45) !important;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.22) !important;
+  border: none !important;
+  background: ${({ theme }) => theme.colors.gradient} !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transition: filter 0.15s ease !important;
 
   &:hover:not(:disabled) {
-    border-color: rgba(118, 75, 162, 0.75) !important;
-    box-shadow: 0 10px 22px rgba(102, 126, 234, 0.28) !important;
-    filter: brightness(1.05);
+    filter: brightness(1.08);
+  }
+
+  &:disabled {
+    opacity: 0.55;
   }
 `;
 
-function CreateAccountView({
-  state,
-  setCredentials,
-}) {
+function CreateAccountView({ state, setCredentials }) {
   const {
     nodeConfig,
     registrationEnabled,
@@ -183,18 +148,18 @@ function CreateAccountView({
     handleContinue,
     usernameFinal,
     configFetchDone,
-  } = useCreateAccount({
-    state,
-    setCredentials,
-  });
+  } = useCreateAccount({ state, setCredentials });
 
-  const pageTitle = fromRecovery ? "Finish setting up your account" : "Create your Mirage account";
+  const pageTitle = fromRecovery ? "Finish your account" : "Create your account";
   const pageDescription = fromRecovery
-    ? "We didn't find an account for that recovery phrase. Pick a username to create one now."
-    : "Pick a username — Mirage handles everything else on-chain.";
+    ? "No account exists for that recovery phrase yet. Pick a username to claim it."
+    : "Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant.";
 
   const continueDisabled =
-    submitting || Date.now() < cooldownUntil || usernameFinal.trim() === "" || referrerStatus === "checking";
+    submitting
+    || Date.now() < cooldownUntil
+    || usernameFinal.trim() === ""
+    || referrerStatus === "checking";
 
   const footer = (
     <AuthLinkRow>
@@ -206,17 +171,11 @@ function CreateAccountView({
   const renderUnavailable = (title, body) => (
     <ContentGrid>
       <Helmet>
-        <title>Create Account | Mirage</title>
+        <title>Create account | Mirage</title>
       </Helmet>
       <div>
         <ModernPostFeed>
-          <AuthPageShell
-            activeTab="create"
-            eyebrow="Mirage onboarding"
-            title={title}
-            description={body}
-            footer={footer}
-          >
+          <AuthPageShell title={title} description={body} footer={footer}>
             <AuthSubtlePanel>
               <StatusLine>{body}</StatusLine>
             </AuthSubtlePanel>
@@ -242,147 +201,151 @@ function CreateAccountView({
     );
   }
 
+  const referralInvalid = referrerStatus === "invalid" && refFromUrl;
+
+  const renderInviteSection = () => {
+    if (!inviteCodeRequired) return null;
+
+    if (referrerStatus === "valid") {
+      return (
+        <AuthSubtlePanel>
+          <StatusLine>
+            Referral from <strong>@{refFromUrl}</strong> applied.
+          </StatusLine>
+          {referrerAvailable > 0 ? (
+            <AuthHelperText>
+              {referrerAvailable} {referrerAvailable === 1 ? "code" : "codes"} remaining.
+            </AuthHelperText>
+          ) : null}
+        </AuthSubtlePanel>
+      );
+    }
+
+    if (referrerStatus === "checking") {
+      return (
+        <AuthSubtlePanel>
+          <StatusLine>
+            <StatusMuted>Validating referral link…</StatusMuted>
+          </StatusLine>
+        </AuthSubtlePanel>
+      );
+    }
+
+    if (referralInvalid) {
+      return (
+        <>
+          <AuthErrorMessage role="alert">
+            {formatError(referrerError)}
+          </AuthErrorMessage>
+          <AuthHelperText>
+            Have an invite code? <AuthLink href="/signup">Enter it manually</AuthLink>.
+          </AuthHelperText>
+        </>
+      );
+    }
+
+    return (
+      <AuthFieldRow>
+        <AuthLabel htmlFor="invite-code-entry">Invite code</AuthLabel>
+        <AuthInput
+          id="invite-code-entry"
+          placeholder="XXXX-XXXX"
+          value={inviteCode}
+          onChange={(event) => {
+            const raw = event.target.value.toUpperCase();
+            const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
+            const limited = alphanumOnly.slice(0, 8);
+            const formatted = limited.length > 4
+              ? `${limited.slice(0, 4)}-${limited.slice(4)}`
+              : limited;
+            setInviteCode(formatted);
+            setSubmitError("");
+          }}
+          maxLength={9}
+          name="invite-code-entry"
+          autoComplete="one-time-code"
+          autoCorrect="off"
+          autoCapitalize="characters"
+          spellCheck="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-bwignore="true"
+          data-form-type="other"
+        />
+      </AuthFieldRow>
+    );
+  };
+
+  const buttonLabel = buttonStatus === "preparing"
+    ? "Preparing…"
+    : buttonStatus === "submitting"
+      ? "Submitting…"
+      : buttonStatus === "verifying"
+        ? "Verifying…"
+        : "Create account";
+
   return (
     <ContentGrid>
       <Helmet>
-        <title>Create Account | Mirage</title>
+        <title>Create account | Mirage</title>
       </Helmet>
       <div>
         <ModernPostFeed>
           <AuthPageShell
-            activeTab="create"
-            eyebrow={fromRecovery ? "Recovery setup" : "Join Mirage"}
             title={pageTitle}
             description={pageDescription}
             footer={footer}
           >
             <AuthStack as="form" onSubmit={handleContinue}>
-              {fromRecovery ? (
-                <AuthSubtlePanel>
-                  <PanelTitle>Recovery phrase ready</PanelTitle>
-                  <StatusLine>
-                    No on-chain account exists for that phrase yet — create a new one to claim it.
-                  </StatusLine>
-                </AuthSubtlePanel>
-              ) : (
-                <FeatureGrid>
-                  <FeatureTile>
-                    <FeatureIcon $tone="purple" aria-hidden="true">⛓</FeatureIcon>
-                    <FeatureBody>
-                      <FeatureTitle>On-chain identity</FeatureTitle>
-                      <FeatureDesc>Your account lives on the Mirage blockchain.</FeatureDesc>
-                    </FeatureBody>
-                  </FeatureTile>
-                  <FeatureTile>
-                    <FeatureIcon $tone="green" aria-hidden="true">🛡</FeatureIcon>
-                    <FeatureBody>
-                      <FeatureTitle>Self-custody</FeatureTitle>
-                      <FeatureDesc>You control the keys — no resets needed.</FeatureDesc>
-                    </FeatureBody>
-                  </FeatureTile>
-                </FeatureGrid>
-              )}
+              {renderInviteSection()}
 
-              {inviteCodeRequired ? (
-                referrerStatus === "valid" ? (
-                  <AuthSubtlePanel>
-                    <PanelTitle>Invite ready</PanelTitle>
-                    <StatusLine>
-                      Referral from <strong>@{refFromUrl}</strong> is active.
-                    </StatusLine>
-                    {referrerAvailable > 0 ? (
-                      <AuthHelperText>
-                        {referrerAvailable} referral {referrerAvailable === 1 ? "code" : "codes"} left.
-                      </AuthHelperText>
-                    ) : null}
-                  </AuthSubtlePanel>
-                ) : referrerStatus === "checking" ? (
-                  <AuthSubtlePanel>
-                    <PanelTitle>Checking invite</PanelTitle>
-                    <StatusLine>Validating referral link…</StatusLine>
-                  </AuthSubtlePanel>
-                ) : referrerStatus === "invalid" && refFromUrl ? (
-                  <AuthSubtlePanel>
-                    <PanelTitle>Referral unavailable</PanelTitle>
-                    <AuthErrorMessage role="alert" style={{ marginTop: 0 }}>
-                      {formatError(referrerError)}
-                    </AuthErrorMessage>
+              {!referralInvalid ? (
+                <>
+                  <AuthFieldRow>
+                    <AuthLabel htmlFor="display-name-entry">Username</AuthLabel>
+                    <HandleField>
+                      <HandlePrefix aria-hidden="true">Anon-</HandlePrefix>
+                      <HandleInput
+                        id="display-name-entry"
+                        placeholder="your-name"
+                        value={usernameInput}
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                          const maxLen = getMaxInputLength(true);
+                          setUsernameInput(cleaned.slice(0, maxLen ?? 100));
+                          setSubmitError("");
+                        }}
+                        onPaste={(event) => event.preventDefault()}
+                        maxLength={getMaxInputLength(true) || 100}
+                        name="display-name-entry"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck="false"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        data-form-type="other"
+                      />
+                    </HandleField>
                     <AuthHelperText>
-                      Have an invite code? <AuthLink href="/signup">Enter it manually</AuthLink>
+                      Letters, numbers, and hyphens only.
                     </AuthHelperText>
-                  </AuthSubtlePanel>
-                ) : (
-                  <AuthPanel>
-                    <PanelTitle>Invite code</PanelTitle>
-                    <AuthLabel htmlFor="invite-code-entry">Enter your invite code</AuthLabel>
-                    <AuthInput
-                      id="invite-code-entry"
-                      placeholder="XXXX-XXXX"
-                      value={inviteCode}
-                      onChange={(event) => {
-                        const raw = event.target.value.toUpperCase();
-                        const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
-                        const limited = alphanumOnly.slice(0, 8);
-                        const formatted = limited.length > 4 ? `${limited.slice(0, 4)}-${limited.slice(4)}` : limited;
-                        setInviteCode(formatted);
-                        setSubmitError("");
-                      }}
-                      maxLength={9}
-                      name="invite-code-entry"
-                      autoComplete="one-time-code"
-                      autoCorrect="off"
-                      autoCapitalize="characters"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                    />
-                  </AuthPanel>
-                )
-              ) : null}
+                  </AuthFieldRow>
 
-              {!(referrerStatus === "invalid" && refFromUrl) ? (
-                <AuthPanel>
-                  <AuthLabel htmlFor="display-name-entry">Choose your username</AuthLabel>
-                  <AuthInput
-                    id="display-name-entry"
-                    placeholder="your-name"
-                    value={usernameInput}
-                    onChange={(event) => {
-                      const raw = event.target.value;
-                      const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
-                      const maxLen = getMaxInputLength(true);
-                      setUsernameInput(cleaned.slice(0, maxLen ?? 100));
-                      setSubmitError("");
-                    }}
-                    onPaste={(event) => {
-                      event.preventDefault();
-                    }}
-                    maxLength={getMaxInputLength(true) || 100}
-                    name="display-name-entry"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck="false"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                  />
-                  <AuthHelperText>
-                    Letters, numbers, and hyphens. Free accounts get the <strong>Anon-</strong> prefix.
-                  </AuthHelperText>
+                  {!fromRecovery ? (
+                    <WarningPanel role="note">
+                      <WarningIcon aria-hidden="true">⚠</WarningIcon>
+                      <WarningBody>
+                        Free accounts are prefixed with <b>Anon-</b> to prevent spam. You can upgrade with <b>MIRAGE</b> later to drop the prefix and unlock premium features.
+                      </WarningBody>
+                    </WarningPanel>
+                  ) : null}
 
-                  <PreviewCard>
-                    <PreviewLeft>
-                      <PreviewLabel>Your handle</PreviewLabel>
-                      <PreviewValue>{`Anon-${usernameFinal || "your-name"}`}</PreviewValue>
-                    </PreviewLeft>
-                    {usernameFinal ? <PreviewBadge>Looks good</PreviewBadge> : <AuthInlineBadge>Preview</AuthInlineBadge>}
-                  </PreviewCard>
-
-                  {submitError ? <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage> : null}
+                  {submitError ? (
+                    <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>
+                  ) : null}
 
                   <AuthButtonRow>
                     <PrimaryButton
@@ -393,16 +356,10 @@ function CreateAccountView({
                       size="sm"
                       loading={submitting}
                     >
-                      {buttonStatus === "preparing"
-                        ? "Preparing…"
-                        : buttonStatus === "submitting"
-                          ? "Submitting…"
-                          : buttonStatus === "verifying"
-                            ? "Verifying…"
-                            : "Continue"}
+                      {buttonLabel}
                     </PrimaryButton>
                   </AuthButtonRow>
-                </AuthPanel>
+                </>
               ) : null}
             </AuthStack>
           </AuthPageShell>

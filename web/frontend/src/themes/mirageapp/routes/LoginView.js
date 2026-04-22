@@ -5,97 +5,37 @@ import seedVault from "../../../utils/SeedVault";
 import AuthPageShell, {
   AuthButtonRow,
   AuthErrorMessage,
+  AuthFieldRow,
   AuthHelperText,
   AuthLabel,
+  AuthLabelHint,
+  AuthLabelRow,
   AuthLink,
   AuthLinkRow,
-  AuthPanel,
   AuthStack,
-  AuthSubtlePanel,
   AuthTextArea,
   AuthTextButton,
 } from "../components/AuthPageShell.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { useLogin } from "../../../logic/useLogin";
 
-const LabelRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
-`;
-
-const WordCount = styled.span`
-  display: inline-flex;
-  align-items: center;
-  padding: 0.12rem 0.45rem;
-  border-radius: 999px;
-  background: ${({ theme, $isValid }) =>
-    $isValid
-      ? theme.colors.buttonSuccessBg
-      : (theme.name === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)')};
-  color: ${({ theme, $isValid }) =>
-    $isValid ? theme.colors.voteUp : theme.colors.subtleText};
-  font-size: 0.6rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-  border: 1px solid ${({ theme, $isValid }) =>
-    $isValid
-      ? theme.colors.buttonSuccessBorder
-      : theme.colors.border};
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-`;
-
-const VaultRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-`;
-
-const VaultIcon = styled.div`
-  width: 1.7rem;
-  height: 1.7rem;
-  flex: 0 0 auto;
-  border-radius: 0.55rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #ffffff;
-  font-size: 0.85rem;
-  line-height: 1;
-`;
-
-const VaultBody = styled.div`
-  flex: 1;
-  min-width: 0;
-`;
-
-const VaultTitle = styled.div`
-  color: ${({ theme }) => theme.colors.text};
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.25;
-`;
-
 const PrimaryButton = styled(Button)`
-  border: ${({ theme }) => theme.name === 'dark' ? '0.5px' : '1px'} solid rgba(102, 126, 234, 0.45) !important;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.22) !important;
+  border: none !important;
+  background: ${({ theme }) => theme.colors.gradient} !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transition: filter 0.15s ease !important;
 
   &:hover:not(:disabled) {
-    border-color: rgba(118, 75, 162, 0.75) !important;
-    box-shadow: 0 10px 22px rgba(102, 126, 234, 0.28) !important;
-    filter: brightness(1.05);
+    filter: brightness(1.08);
+  }
+
+  &:disabled {
+    opacity: 0.55;
   }
 `;
 
-function LoginView({
-  state,
-  setCredentials,
-}) {
+function LoginView({ state, setCredentials }) {
   const {
     navigate,
     seedPhrase,
@@ -104,31 +44,26 @@ function LoginView({
     setError,
     loading,
     handleSubmit,
-  } = useLogin({
-    state,
-    setCredentials,
-  });
+  } = useLogin({ state, setCredentials });
 
   const trimmed = (seedPhrase || "").trim();
   const wordCount = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
   const wordsValid = wordCount === 12;
+  const showVault = seedVault.isLocked();
 
   return (
     <ContentGrid>
       <Helmet>
-        <title>Sign In | Mirage</title>
+        <title>Sign in | Mirage</title>
       </Helmet>
       <div>
         <ModernPostFeed>
           <AuthPageShell
-            activeTab="login"
-            eyebrow="Welcome back"
-            title="Sign in to Mirage"
-            description="Enter your 12-word recovery phrase to unlock your account."
-
+            title="Sign in"
+            description="Sign in to your existing Mirage account with your 12-word recovery phrase (each word is separated by a space)."
             footer={(
               <AuthLinkRow>
-                Don&apos;t have an account?
+                New to Mirage?
                 <AuthLink
                   href="/signup"
                   onClick={(event) => {
@@ -138,25 +73,22 @@ function LoginView({
                     }
                   }}
                 >
-                  Create one
+                  Create an account
                 </AuthLink>
               </AuthLinkRow>
             )}
           >
-            <AuthStack>
-              <AuthPanel as="form" onSubmit={handleSubmit}>
-                <LabelRow>
-                  <AuthLabel htmlFor="mirage-login-seed" style={{ marginBottom: 0 }}>
-                    Recovery phrase
-                  </AuthLabel>
-                  <WordCount $isValid={wordsValid}>
-                    {wordCount}/12 words
-                  </WordCount>
-                </LabelRow>
-
+            <AuthStack as="form" onSubmit={handleSubmit}>
+              <AuthFieldRow>
+                <AuthLabelRow>
+                  <AuthLabel htmlFor="mirage-login-seed">Recovery phrase</AuthLabel>
+                  <AuthLabelHint aria-live="polite">
+                    {wordCount}/12 {wordsValid ? "✓" : "words"}
+                  </AuthLabelHint>
+                </AuthLabelRow>
                 <AuthTextArea
                   id="mirage-login-seed"
-                  placeholder="twelve words separated by spaces"
+                  placeholder="Enter your 12-word recovery phrase"
                   value={seedPhrase}
                   onChange={(event) => {
                     setSeedPhrase(event.target.value.toLowerCase());
@@ -168,46 +100,32 @@ function LoginView({
                   disabled={loading}
                 />
                 <AuthHelperText>
-                  Mirage finds your username automatically once the phrase is verified.
+                  Your username is detected automatically once the phrase is verified.
                 </AuthHelperText>
+              </AuthFieldRow>
 
-                {error ? <AuthErrorMessage role="alert">{error}</AuthErrorMessage> : null}
+              {error ? <AuthErrorMessage role="alert">{error}</AuthErrorMessage> : null}
 
-                <AuthButtonRow>
-                  <PrimaryButton
-                    type="submit"
-                    disabled={loading}
-                    fullWidth
-                    mobileFullWidth
-                    size="sm"
-                    loading={loading}
+              <AuthButtonRow>
+                <PrimaryButton
+                  type="submit"
+                  disabled={loading}
+                  fullWidth
+                  mobileFullWidth
+                  size="sm"
+                  loading={loading}
+                >
+                  {loading ? "Signing in…" : "Sign in"}
+                </PrimaryButton>
+                {showVault ? (
+                  <AuthTextButton
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent("showVaultUnlock"))}
                   >
-                    {loading ? "Signing in…" : "Sign in"}
-                  </PrimaryButton>
-                </AuthButtonRow>
-              </AuthPanel>
-
-              {seedVault.isLocked() ? (
-                <AuthSubtlePanel>
-                  <VaultRow>
-                    <VaultIcon aria-hidden="true">🔒</VaultIcon>
-                    <VaultBody>
-                      <VaultTitle>Encrypted vault detected</VaultTitle>
-                      <AuthHelperText style={{ marginTop: 0 }}>
-                        Unlock the vault saved on this device instead.
-                      </AuthHelperText>
-                    </VaultBody>
-                  </VaultRow>
-                  <AuthButtonRow>
-                    <AuthTextButton
-                      type="button"
-                      onClick={() => window.dispatchEvent(new CustomEvent("showVaultUnlock"))}
-                    >
-                      Unlock saved vault
-                    </AuthTextButton>
-                  </AuthButtonRow>
-                </AuthSubtlePanel>
-              ) : null}
+                    Unlock saved vault on this device
+                  </AuthTextButton>
+                ) : null}
+              </AuthButtonRow>
             </AuthStack>
           </AuthPageShell>
         </ModernPostFeed>

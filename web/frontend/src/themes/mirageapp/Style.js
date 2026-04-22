@@ -29,10 +29,6 @@ export const Style = createThemeStyleRules`
     -ms-overflow-style: none;
   }
 
-  html.auth-page {
-    font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
-  }
-
   /* Hide the viewport scrollbar in WebKit/Blink (Chrome, Safari, Edge). */
   html::-webkit-scrollbar,
   body::-webkit-scrollbar {

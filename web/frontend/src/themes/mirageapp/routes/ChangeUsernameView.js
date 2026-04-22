@@ -197,14 +197,15 @@ const SuccessSubtext = styled.div`
 `;
 
 const PrimaryButton = styled(Button)`
-  border: ${({ theme }) => (theme.name === "dark" ? "0.5px" : "1px")} solid rgba(102, 126, 234, 0.45) !important;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.22) !important;
+  border: none !important;
+  background: ${({ theme }) => theme.colors.gradient} !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transition: filter 0.16s ease, box-shadow 0.16s ease !important;
 
   &:hover:not(:disabled) {
-    border-color: rgba(118, 75, 162, 0.75) !important;
-    box-shadow: 0 10px 22px rgba(102, 126, 234, 0.28) !important;
-    filter: brightness(1.05);
+    filter: brightness(1.08);
+    box-shadow: none !important;
   }
 `;
 
