@@ -16,7 +16,7 @@ from db import connect_backend_db
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL = 7200  # 2 hours
+CACHE_TTL = 86400  # 24 hours
 MIN_SHARED = 25
 MIN_SIMILARITY = 0.05
 MAX_SIMILAR_USERS = 30
@@ -108,10 +108,10 @@ def compute_user_similarities(cur, viewer: str) -> list:
 
 def get_or_compute_similarities(cur, viewer: str) -> list:
     """
-    Return cached similarities if fresh, otherwise recompute.
-
-    Cache is valid when: TTL not expired AND viewer's prefs unchanged since
-    the cache was built. Otherwise recompute immediately (SQL query is fast).
+    Return cached similarities if any non-expired rows exist, otherwise
+    recompute. With a 24h TTL we intentionally serve slightly-stale results
+    rather than re-running the cross-user Pearson aggregate on every request
+    — it was costing 100-500ms per home feed load.
 
     Args:
         cur: Indexer DB cursor (for preferences table reads).
@@ -125,7 +125,7 @@ def get_or_compute_similarities(cur, viewer: str) -> list:
         with bconn.cursor() as bcur:
             bcur.execute(
                 """
-                SELECT similar_user, similarity, shared_dims, computed_at
+                SELECT similar_user, similarity, shared_dims
                 FROM user_similarity_cache
                 WHERE LOWER(owner) = %s AND expires_at > %s
                 ORDER BY similarity DESC
@@ -136,17 +136,8 @@ def get_or_compute_similarities(cur, viewer: str) -> list:
             cached = bcur.fetchall()
 
     if cached:
-        cache_computed_at = cached[0][3]
-        cur.execute(
-            "SELECT MAX(updated_at) FROM preferences WHERE LOWER(owner) = %s",
-            (viewer_lower,),
-        )
-        row = cur.fetchone()
-        last_update = row[0] if row and row[0] else 0
-
-        if last_update <= cache_computed_at:
-            logger.debug("similarity.cache_hit: %s", viewer_lower[:12])
-            return [(r[0], r[1], r[2]) for r in cached]
+        logger.debug("similarity.cache_hit: %s", viewer_lower[:12])
+        return [(r[0], r[1], r[2]) for r in cached]
 
     start = time.time()
     similarities = compute_user_similarities(cur, viewer)
