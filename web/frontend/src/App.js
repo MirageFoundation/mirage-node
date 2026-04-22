@@ -421,8 +421,7 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch node config if missing, not cached, or stale (> 1h)
-        // Chain config is fetched lazily by views that need it (CreatePostView, ViewPostView, SubscriptionView).
+        // Fetch node config if missing, not cached, or stale (> 1h).
         try {
             const nowMs = Date.now();
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
@@ -439,6 +438,18 @@ class App extends Component {
                         // if the request fails before nodeConfig is cached.
                         try { window.dispatchEvent(new Event('nodeConfigUpdated')); } catch (_) { }
                     });
+            }
+        } catch (_) { }
+
+        // Fetch chain config in parallel with node config and get_posts so it
+        // doesn't serialize behind the feed request (it used to be fetched
+        // lazily from CardView after mount, trailing the home waterfall).
+        try {
+            if (tx.needsChainConfigRefresh()) {
+                console.debug('[App] get_chain_config.fetch begin (bootstrap parallel)');
+                Api.get('get_chain_config', undefined)
+                    .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+                    .catch(() => { });
             }
         } catch (_) { }
 
@@ -532,7 +543,12 @@ class App extends Component {
         try {
             if (publicKey) {
                 // Node config already fetched by componentDidMount; no need to re-fetch on login.
-                // Chain config fetched lazily by views that need it.
+                // Re-prime chain config after cache clear so views can read it immediately.
+                if (tx.needsChainConfigRefresh()) {
+                    Api.get('get_chain_config', undefined)
+                        .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+                        .catch(() => { });
+                }
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
                 Api.get('get_user_status', { address: publicKey, _cb: Date.now() })

@@ -1792,16 +1792,28 @@ def _get_home_feed_magic(
     viewer_lower = viewer.strip().lower() if viewer else ""
     now_ts = int(time.time())
 
+    # Phase timings. Logged by the caller (`get_posts` route) to help
+    # pinpoint which step of the home-feed pipeline dominates latency.
+    timings: dict[str, float] = {}
+
+    def _ms_since(t0: float) -> float:
+        return round((time.monotonic() - t0) * 1000, 2)
+
     # 1. Load user preferences
+    _t = time.monotonic()
     topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
+    timings["prefs_ms"] = _ms_since(_t)
 
     # 2. Get similar users (cached or computed on-demand)
+    _t = time.monotonic()
     similar_users = get_or_compute_similarities(cur, viewer_lower)
+    timings["sim_ms"] = _ms_since(_t)
     sim_lookup = {u[0]: u[1] for u in similar_users}
     similar_addrs = set(sim_lookup.keys())
 
     # 3. Load candidate posts (small targeted pool + random exploration)
     per_source = limit * page * _seen_overfetch_factor(seen_posts, 4)
+    _t = time.monotonic()
     candidates = _load_home_candidates(
         cur,
         viewer_lower,
@@ -1814,22 +1826,42 @@ def _get_home_feed_magic(
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
     )
+    timings["cand_ms"] = _ms_since(_t)
+    timings["cand_count"] = len(candidates)
 
     if not candidates:
-        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+        return {
+            "posts": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "has_more": False,
+            "_timings": timings,
+        }
 
     # 4. Load which posts similar users have upvoted
     post_ids = [c["post_id"] for c in candidates]
+    _t = time.monotonic()
     similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+    timings["sim_up_ms"] = _ms_since(_t)
 
     # 5. Load stats
+    _t = time.monotonic()
     vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
+    timings["stats_ms"] = _ms_since(_t)
+
+    _t = time.monotonic()
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    timings["uc_ms"] = _ms_since(_t)
+
+    _t = time.monotonic()
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
+    timings["aw_ms"] = _ms_since(_t)
 
     # 6. Score each post with Magic algorithm
+    _t_score = time.monotonic()
     scored_posts = []
 
     seen_penalized = 0
@@ -1879,6 +1911,8 @@ def _get_home_feed_magic(
 
     # 7. Sort by score descending
     scored_posts.sort(key=lambda p: -p["_score"])
+    timings["score_ms"] = _ms_since(_t_score)
+    timings["scored_count"] = len(scored_posts)
 
     # 8. Paginate
     start = (page - 1) * limit
@@ -1896,6 +1930,7 @@ def _get_home_feed_magic(
         "page": page,
         "limit": limit,
         "has_more": has_more,
+        "_timings": timings,
     }
 
 
@@ -4839,10 +4874,13 @@ def get_posts():
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
+
+        _t_blocked = time.monotonic()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
         blocked_topics = _get_blocked_topics(cur, address)
         blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_ms = round((time.monotonic() - _t_blocked) * 1000, 2)
 
         deleted_clause = _deleted_filter()
 
@@ -4859,11 +4897,13 @@ def get_posts():
 
         # ── Seen-posts: load persisted map for novelty scoring ────
         persisted_seen: dict[str, int] = {}
+        _t_seen = time.monotonic()
         if address and address.lower() != "guest":
             try:
                 persisted_seen = get_seen_map(address)
             except Exception:
                 logger.debug("get_posts.seen_load.err addr=%s", address[:12])
+        seen_ms = round((time.monotonic() - _t_seen) * 1000, 2)
 
         if feed in ("home", "following"):
             try:
@@ -4879,6 +4919,7 @@ def get_posts():
             except Exception:
                 pass
 
+            _t_feed = time.monotonic()
             # Home feed uses new similarity-based algorithm
             if feed == "home":
                 resp = _get_home_feed(
@@ -4908,10 +4949,21 @@ def get_posts():
                     blocked_topic_prefixes=blocked_topic_prefixes,
                     seen_posts=persisted_seen,
                 )
+            feed_ms = round((time.monotonic() - _t_feed) * 1000, 2)
 
+            enrich_ms = 0.0
+            agent_edits_ms = 0.0
+            filter_ms = 0.0
             if resp.get("posts"):
+                _t = time.monotonic()
                 _enrich_media_meta(cur, resp["posts"])
+                enrich_ms = round((time.monotonic() - _t) * 1000, 2)
+
+                _t = time.monotonic()
                 _apply_agent_edits(cur, resp["posts"], address)
+                agent_edits_ms = round((time.monotonic() - _t) * 1000, 2)
+
+                _t = time.monotonic()
                 resp["posts"] = _filter_posts_by_allowed_tags(
                     resp["posts"],
                     allowed_tags,
@@ -4919,7 +4971,33 @@ def get_posts():
                     context=f"get_posts.feed.{feed or 'unknown'}",
                     viewer=address,
                 )
+                filter_ms = round((time.monotonic() - _t) * 1000, 2)
                 _track_image_impressions(resp["posts"], rid, context=f"get_posts.feed.{feed or 'unknown'}")
+
+            # Emit one structured line for slow feed requests so we can see
+            # which step of the home-feed pipeline is dominating latency.
+            inner = resp.pop("_timings", {}) or {}
+            total_ms = round((time.monotonic() - t_start) * 1000, 2)
+            if total_ms > 2000:
+                log_event(
+                    rid,
+                    "get_posts.timing",
+                    feed=feed,
+                    sort=sort_mode,
+                    page=page,
+                    limit=limit,
+                    viewer=(address[:12] + "...") if address else "",
+                    blocked_ms=blocked_ms,
+                    seen_ms=seen_ms,
+                    feed_ms=feed_ms,
+                    enrich_ms=enrich_ms,
+                    agent_edits_ms=agent_edits_ms,
+                    filter_ms=filter_ms,
+                    total_ms=total_ms,
+                    returned=len(resp.get("posts") or []),
+                    **inner,
+                )
+
             conn.close()
             return jsonify(resp)
 
