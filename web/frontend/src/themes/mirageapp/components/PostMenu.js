@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styled from "styled-components";
-import { useNavigate } from "react-router-dom";
 import {
     HiOutlineLink,
     HiOutlineUserPlus,
@@ -18,6 +17,9 @@ import { follow, unfollow, isFollowing } from "../../../utils/FollowUsers";
 import { subscribe, unsubscribe, isSubscribed } from "../../../utils/Subscriptions";
 import Storage from "../../../utils/Storage";
 import ConfirmDialog from "./ConfirmDialog";
+import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
+import usePostGifts from "../../../logic/usePostGifts";
+import { updateNotification } from "../../../utils/notifications";
 
 /**
  * PostMenu — mirageapp Plan 06.3 polish round 3
@@ -224,9 +226,9 @@ const stop = e => { if (e && typeof e.stopPropagation === 'function') e.stopProp
 //
 // Mirrors the `MoreButton` popover in CardView: Copy link, Follow user,
 // Follow topic, Give Award, Gift Mirage, Gift Subscription. Gift / award
-// navigate to the author's profile with `?action=<id>` so the existing
-// profile-side flow can auto-open the matching modal (matches CardView's
-// `handleProfileAction` pattern).
+// flows open their modals in-place via `usePostGifts` — identical behavior
+// to CardView's MoreButton — so the compact list view no longer hijacks
+// the viewer into the author's profile on click.
 
 export function MoreMenuChip({
     post,
@@ -234,7 +236,6 @@ export function MoreMenuChip({
     updatePost, // eslint-disable-line no-unused-vars
     align = 'right',
 }) {
-    const navigate = useNavigate();
     const rootRef = useRef(null);
     const [open, setOpen] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -295,16 +296,69 @@ export function MoreMenuChip({
         } catch (_) { setTopicFollowOverride(!next); }
     }, [isLoggedIn, topic, followingTopic, viewerAddress]);
 
-    const handleProfileAction = useCallback((e, action) => {
-        stop(e); setOpen(false);
-        const handle = post && (post.username || authorAddress);
-        if (!handle) return;
-        navigate(`/u/${encodeURIComponent(handle)}?action=${action}`);
-    }, [navigate, post, authorAddress]);
+    /* Gift Mirage / Gift Subscription / Give Award — open in-place via
+     * `usePostGifts` so the viewer stays on the current feed (previously
+     * we navigated to `/u/<handle>?action=<kind>`, which was jarring
+     * mid-scroll). Matches the CardView behavior so both list and card
+     * modes feel identical. */
+    const gifts = usePostGifts({ post });
+    const {
+        handleGiveAward: giftGiveAwardOpen,
+        handleGiftMirage: giftMirageOpen,
+        handleGiftSubscription: giftSubOpen,
+        confirmDonate,
+        donateAmountRaw,
+        donatePending,
+        donateMessage,
+        confirmGiftSub,
+        giftSubPending,
+        giftSubMessage,
+        confirmAward,
+        isAwarding,
+        awardMessage,
+        confirmDonateAction,
+        confirmGiftSubAction,
+        confirmAwardAction,
+        cancelDonate,
+        cancelGiftSub,
+        cancelAward,
+        handleDonateAmountChange,
+        formatDonateAmount,
+        viewerBalanceUmirage,
+        AWARD_TYPES: awardTypes,
+        getAwardCost,
+        subFeeLabel,
+        agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
+    } = gifts;
+    const authorLabelShort = (post && typeof post.username === 'string' && post.username.trim())
+        ? `@${post.username.trim()}`
+        : (authorAddress ? `@${String(authorAddress).slice(0, 10)}…` : '@this user');
+
+    const handleGiveAward = useCallback(e => { stop(e); setOpen(false); giftGiveAwardOpen(); }, [giftGiveAwardOpen]);
+    const handleGiftMirage = useCallback(e => { stop(e); setOpen(false); giftMirageOpen(); }, [giftMirageOpen]);
+    const handleGiftSubscription = useCallback(e => { stop(e); setOpen(false); giftSubOpen(); }, [giftSubOpen]);
+
+    // Pipe gift-action status messages through the global Toast. Same
+    // pattern CardView uses; keeps PostMenu itself free of banner UI.
+    useEffect(() => {
+        if (!donateMessage) return;
+        updateNotification(donateMessage.message, 3, donateMessage.type === 'error');
+    }, [donateMessage]);
+    useEffect(() => {
+        if (!giftSubMessage) return;
+        updateNotification(giftSubMessage.message, 4, giftSubMessage.type === 'error');
+    }, [giftSubMessage]);
+    useEffect(() => {
+        if (!awardMessage) return;
+        updateNotification(awardMessage.message, 3, awardMessage.type === 'error');
+    }, [awardMessage]);
 
     if (!post || !postId) return null;
 
     return (
+        <>
         <PopoverRoot ref={rootRef} onClick={stop} data-no-card-click>
             <MoreButton
                 type="button"
@@ -331,15 +385,15 @@ export function MoreMenuChip({
                                 <HiOutlineHashtag />
                                 <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
                             </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={(e) => handleProfileAction(e, 'award')}>
+                            <MenuItemBtn type="button" onClick={handleGiveAward}>
                                 <HiOutlineSparkles />
                                 <span>Give Award</span>
                             </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={(e) => handleProfileAction(e, 'gift_mirage')}>
+                            <MenuItemBtn type="button" onClick={handleGiftMirage}>
                                 <HiOutlineGift />
                                 <span>Gift Mirage</span>
                             </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={(e) => handleProfileAction(e, 'gift_subscription')}>
+                            <MenuItemBtn type="button" onClick={handleGiftSubscription}>
                                 <HiOutlineGift />
                                 <span>Gift Subscription</span>
                             </MenuItemBtn>
@@ -348,6 +402,45 @@ export function MoreMenuChip({
                 </Menu>
             )}
         </PopoverRoot>
+        <GiftMirageDialog
+            open={!!confirmDonate}
+            recipientLabel={confirmDonate?.username ? `@${confirmDonate.username}` : authorLabelShort}
+            amountRaw={donateAmountRaw}
+            formatAmount={formatDonateAmount}
+            onAmountChange={handleDonateAmountChange}
+            pending={donatePending}
+            userBalanceUmirage={viewerBalanceUmirage}
+            onConfirm={confirmDonateAction}
+            onCancel={cancelDonate}
+        />
+        <GiftSubscriptionDialog
+            open={!!confirmGiftSub}
+            recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : authorLabelShort}
+            level={confirmGiftSub?.level}
+            feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
+            feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+            loading={!!confirmGiftSub?.loading}
+            expiryLabel={confirmGiftSub?.expiryLabel}
+            error={confirmGiftSub?.error}
+            pending={giftSubPending}
+            userBalanceUmirage={viewerBalanceUmirage}
+            onConfirm={confirmGiftSubAction}
+            onCancel={cancelGiftSub}
+        />
+        <GiveAwardDialog
+            open={!!confirmAward}
+            awardTypes={awardTypes}
+            getAwardCost={getAwardCost}
+            userBalanceUmirage={viewerBalanceUmirage}
+            isAwarding={isAwarding}
+            onPick={(awardName) => {
+                if (confirmAward?.postId) {
+                    confirmAwardAction(awardName);
+                }
+            }}
+            onCancel={cancelAward}
+        />
+        </>
     );
 }
 
