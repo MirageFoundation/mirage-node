@@ -23,7 +23,22 @@ import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
-import { HiNoSymbol } from "react-icons/hi2";
+import {
+    HiNoSymbol,
+    HiOutlineLink,
+    HiOutlineClipboardDocument,
+    HiOutlinePencilSquare,
+    HiOutlineTrash,
+    HiOutlineUserPlus,
+    HiOutlineUserMinus,
+    HiOutlineSparkles,
+    HiOutlineGift,
+    HiOutlineNoSymbol,
+    HiOutlineEyeSlash,
+    HiOutlineFlag,
+    HiOutlineHashtag,
+    HiOutlineShieldExclamation,
+} from "react-icons/hi2";
 /**
  * Post Details — root post container.
  *
@@ -1503,6 +1518,26 @@ function ViewPostView({
         updatePost
     });
 
+    // Inline block/report popover (parity with feed CardView's block chip).
+    // Anchored next to the share button in the action bar for each post /
+    // comment row. Keyed by post_id so only one popover is open at a time.
+    const [openBlockMenuId, setOpenBlockMenuId] = useState(null);
+    const [blockMenuPosition, setBlockMenuPosition] = useState({ top: 0, left: 0 });
+    const blockButtonRefs = useRef({});
+    const blockDropdownRef = useRef(null);
+    useEffect(() => {
+        if (!openBlockMenuId) return;
+        const handleClickOutside = event => {
+            const dropdown = blockDropdownRef.current;
+            const button = blockButtonRefs.current[openBlockMenuId];
+            if (dropdown && !dropdown.contains(event.target) && button && !button.contains(event.target)) {
+                setOpenBlockMenuId(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [openBlockMenuId]);
+
     /**
      * Blocked-post affordance (06.3 polish round 5) — wired to the same
      * `useBlocks` hook BlocksView uses, so unblocking from this page
@@ -2125,73 +2160,127 @@ function ViewPostView({
                 top: menuPosition.top,
                 left: menuPosition.left
             }} onClick={e => e.stopPropagation()}>
-                {isOwnPost && <>
-                    <MenuItem onClick={() => {
+                {(() => {
+                    const isRootPost = !!(post.title && String(post.title).trim() !== '');
+                    const itemLabel = isRootPost ? 'post' : 'comment';
+                    const itemLabelCap = isRootPost ? 'Post' : 'Comment';
+                    const topicLower = (post && typeof post.topic === 'string') ? post.topic.trim().toLowerCase() : '';
+                    const followingTopic = topicLower ? isSubscribedTopic(topicLower) : false;
+                    const postLinkPath = isRootPost
+                        ? `/p/${post.post_id}`
+                        : `/p/${post.post_id}`;
+                    const handleCopyLink = () => {
                         setOpenMenuId(null);
-                        const isRoot = !!(post.title && String(post.title).trim() !== '');
-                        if (isRoot) {
-                            navigate(`/create_post?post_id=${post.post_id}&edit=true`);
-                        } else {
-                            openEdit(post);
-                        }
-                    }}>Edit</MenuItem>
-                    <MenuItem onClick={() => {
+                        try {
+                            const url = `${window.location.origin}${postLinkPath}`;
+                            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(url);
+                            }
+                        } catch (_) { /* noop */ }
+                    };
+                    const handleCopyText = () => {
                         setOpenMenuId(null);
-                        handleDeletePost(post.post_id);
-                    }} data-danger="true">Delete</MenuItem>
-                </>}
-                {!isOwnPost && hasValidAccount && <>
-                    <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleFollowToggle(authorAddr);
-                    }}>
-                        {isUserPending(authorAddr) ? formatUserStatus(authorAddr) : isFollowingThisAuthor ? 'Unfollow user' : 'Follow user'}
-                    </MenuItem>
-                    <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleGiveAward(post.post_id);
-                    }}>Give Award</MenuItem>
-                    {viewerAddress !== 'guest' && <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleDonate(post.user_id, post.post_id);
-                    }}>Gift Mirage</MenuItem>}
-                    {viewerAddress !== 'guest' && <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleGiftSubscription(post.user_id, post.post_id, post.author_level);
-                    }} disabled={isSubscribePending(post.user_id)}>
-                        {formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}
-                    </MenuItem>}
-                    <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleBlockUser(post.user_id, post.post_id);
-                    }} data-danger="true">Block user</MenuItem>
-                    <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleBlockPost(post.post_id);
-                    }} data-danger="true">Block post</MenuItem>
-                    {post?.topic && <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleBlockTopic(post.topic, post.post_id);
-                    }} data-danger="true">Block topic</MenuItem>}
-                    {!isAdmin && <MenuItem onClick={() => {
-                        setOpenMenuId(null);
-                        handleReport(post.post_id);
-                    }}>Report</MenuItem>}
-                    {isAdmin && <>
-                        <MenuItem onClick={() => {
-                            setOpenMenuId(null);
-                            handleDeletePost(post.post_id);
-                        }} data-danger="true">🛡️ Mark post deleted</MenuItem>
-                        {questsEnabled && userSuspendedStatus !== true && <MenuItem onClick={() => {
-                            setOpenMenuId(null);
-                            handleSuspendFromQuests(post.user_id, post.post_id);
-                        }} data-danger="true">🛡️ Suspend from quests</MenuItem>}
-                        {questsEnabled && userSuspendedStatus === true && <MenuItem onClick={() => {
-                            setOpenMenuId(null);
-                            handleUnsuspendFromQuests(post.user_id, post.post_id);
-                        }}>🛡️ Unsuspend from quests</MenuItem>}
-                    </>}
-                </>}
+                        try {
+                            const parts = [];
+                            if (post.title && String(post.title).trim()) parts.push(String(post.title).trim());
+                            if (post.content && String(post.content).trim()) parts.push(String(post.content).trim());
+                            const text = parts.join('\n\n');
+                            if (text && typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(text);
+                            }
+                        } catch (_) { /* noop */ }
+                    };
+                    return <>
+                        <MenuItem onClick={handleCopyLink}>
+                            <HiOutlineLink />
+                            <span>Copy link</span>
+                        </MenuItem>
+                        <MenuItem onClick={handleCopyText}>
+                            <HiOutlineClipboardDocument />
+                            <span>Copy text</span>
+                        </MenuItem>
+                        {isOwnPost && <>
+                            <MenuItem onClick={() => {
+                                setOpenMenuId(null);
+                                if (isRootPost) {
+                                    navigate(`/create_post?post_id=${post.post_id}&edit=true`);
+                                } else {
+                                    openEdit(post);
+                                }
+                            }}>
+                                <HiOutlinePencilSquare />
+                                <span>Edit {itemLabel}</span>
+                            </MenuItem>
+                            <MenuItem data-danger="true" onClick={() => {
+                                setOpenMenuId(null);
+                                handleDeletePost(post.post_id);
+                            }}>
+                                <HiOutlineTrash />
+                                <span>Delete {itemLabel}</span>
+                            </MenuItem>
+                        </>}
+                        {!isOwnPost && hasValidAccount && <>
+                            <MenuItem onClick={() => {
+                                setOpenMenuId(null);
+                                handleFollowToggle(authorAddr);
+                            }}>
+                                {isFollowingThisAuthor ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
+                                <span>{isUserPending(authorAddr) ? formatUserStatus(authorAddr) : isFollowingThisAuthor ? 'Unfollow user' : 'Follow user'}</span>
+                            </MenuItem>
+                            {isRootPost && post?.topic && <MenuItem onClick={() => {
+                                setOpenMenuId(null);
+                                handleTopicFollowToggle(post.topic);
+                            }}>
+                                <HiOutlineHashtag />
+                                <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
+                            </MenuItem>}
+                            <MenuItem onClick={() => {
+                                setOpenMenuId(null);
+                                handleGiveAward(post.post_id);
+                            }}>
+                                <HiOutlineSparkles />
+                                <span>Give Award</span>
+                            </MenuItem>
+                            {viewerAddress !== 'guest' && <MenuItem onClick={() => {
+                                setOpenMenuId(null);
+                                handleDonate(post.user_id, post.post_id);
+                            }}>
+                                <HiOutlineGift />
+                                <span>Gift Mirage</span>
+                            </MenuItem>}
+                            {viewerAddress !== 'guest' && <MenuItem disabled={isSubscribePending(post.user_id)} onClick={() => {
+                                setOpenMenuId(null);
+                                handleGiftSubscription(post.user_id, post.post_id, post.author_level);
+                            }}>
+                                <HiOutlineGift />
+                                <span>{formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}</span>
+                            </MenuItem>}
+                            {isAdmin && <>
+                                <MenuItem data-danger="true" onClick={() => {
+                                    setOpenMenuId(null);
+                                    handleDeletePost(post.post_id);
+                                }}>
+                                    <HiOutlineShieldExclamation />
+                                    <span>Mark {itemLabel} deleted</span>
+                                </MenuItem>
+                                {questsEnabled && userSuspendedStatus !== true && <MenuItem data-danger="true" onClick={() => {
+                                    setOpenMenuId(null);
+                                    handleSuspendFromQuests(post.user_id, post.post_id);
+                                }}>
+                                    <HiOutlineShieldExclamation />
+                                    <span>Suspend from quests</span>
+                                </MenuItem>}
+                                {questsEnabled && userSuspendedStatus === true && <MenuItem onClick={() => {
+                                    setOpenMenuId(null);
+                                    handleUnsuspendFromQuests(post.user_id, post.post_id);
+                                }}>
+                                    <HiOutlineShieldExclamation />
+                                    <span>Unsuspend from quests</span>
+                                </MenuItem>}
+                            </>}
+                        </>}
+                    </>;
+                })()}
             </MenuDropdown>, document.body)}
         </MenuContainer>;
     };
@@ -2221,6 +2310,85 @@ function ViewPostView({
                 <span>reply</span>
             </ActionButton>
             <MetaSeparatorAction />
+            {(() => {
+                const isOwnPostRow = post && state && post.user_id === state.publicKey;
+                if (!isOwnPostRow) {
+                    const isRootPost = !!(post.title && String(post.title).trim() !== '');
+                    const itemLabel = isRootPost ? 'post' : 'comment';
+                    const isBlockOpen = openBlockMenuId === post.post_id;
+                    const handleBlockMenuClick = e => {
+                        e.stopPropagation();
+                        if (!isBlockOpen) {
+                            const btn = blockButtonRefs.current[post.post_id];
+                            if (btn) {
+                                const rect = btn.getBoundingClientRect();
+                                setBlockMenuPosition({
+                                    top: rect.bottom + 4,
+                                    left: Math.max(10, rect.right - 180)
+                                });
+                            }
+                        }
+                        setOpenBlockMenuId(isBlockOpen ? null : post.post_id);
+                    };
+                    return <>
+                        <ActionButton
+                            as="button"
+                            type="button"
+                            ref={el => { blockButtonRefs.current[post.post_id] = el; }}
+                            onClick={handleBlockMenuClick}
+                            title={`Block or report ${itemLabel}`}
+                            aria-haspopup="menu"
+                            aria-expanded={isBlockOpen}
+                            aria-label={`Block or report ${itemLabel}`}
+                            $danger
+                        >
+                            <Icon aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 0 1-6.3-12.9L16.9 18.3A7.96 7.96 0 0 1 12 20zm6.3-3.1L7.1 5.7A8 8 0 0 1 18.3 16.9z" fill="currentColor" />
+                                </svg>
+                            </Icon>
+                        </ActionButton>
+                        {isBlockOpen && ReactDOM.createPortal(
+                            <MenuDropdown
+                                ref={blockDropdownRef}
+                                style={{ top: blockMenuPosition.top, left: blockMenuPosition.left }}
+                                onClick={e => e.stopPropagation()}
+                            >
+                                <MenuItem data-danger="true" onClick={() => {
+                                    setOpenBlockMenuId(null);
+                                    handleBlockUser(post.user_id, post.post_id);
+                                }}>
+                                    <HiOutlineNoSymbol />
+                                    <span>Block user</span>
+                                </MenuItem>
+                                <MenuItem data-danger="true" onClick={() => {
+                                    setOpenBlockMenuId(null);
+                                    handleBlockPost(post.post_id);
+                                }}>
+                                    <HiOutlineEyeSlash />
+                                    <span>Block {itemLabel}</span>
+                                </MenuItem>
+                                {isRootPost && post?.topic && <MenuItem data-danger="true" onClick={() => {
+                                    setOpenBlockMenuId(null);
+                                    handleBlockTopic(post.topic, post.post_id);
+                                }}>
+                                    <HiOutlineNoSymbol />
+                                    <span>Block topic</span>
+                                </MenuItem>}
+                                <MenuItem data-danger="true" onClick={() => {
+                                    setOpenBlockMenuId(null);
+                                    handleReport(post.post_id);
+                                }}>
+                                    <HiOutlineFlag />
+                                    <span>Report {itemLabel}</span>
+                                </MenuItem>
+                            </MenuDropdown>,
+                            document.body
+                        )}
+                    </>;
+                }
+                return null;
+            })()}
             {(() => {
                 const shareCopied = !!shareMessages[post.post_id];
                 return (

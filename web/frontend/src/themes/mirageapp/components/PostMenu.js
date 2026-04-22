@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styled from "styled-components";
+import { useNavigate } from "react-router-dom";
 import {
     HiOutlineLink,
     HiOutlineUserPlus,
@@ -10,6 +11,9 @@ import {
     HiOutlineNoSymbol,
     HiOutlineFlag,
     HiOutlineEyeSlash,
+    HiOutlineClipboardDocument,
+    HiOutlinePencilSquare,
+    HiOutlineTrash,
 } from "react-icons/hi2";
 
 import * as tx from "../../../utils/tx";
@@ -236,13 +240,17 @@ export function MoreMenuChip({
     updatePost, // eslint-disable-line no-unused-vars
     align = 'right',
 }) {
+    const navigate = useNavigate();
     const rootRef = useRef(null);
     const [open, setOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [textCopied, setTextCopied] = useState(false);
     const [followOverride, setFollowOverride] = useState(null);
     const [topicFollowOverride, setTopicFollowOverride] = useState(null);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [deletePending, setDeletePending] = useState(false);
 
-    const { viewerAddress, isLoggedIn, postId, topic, authorAddress } = usePostIdentity(post, state);
+    const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
     const linkTarget = postId ? `/p/${postId}` : '#';
 
     const computedFollowingUser = (() => {
@@ -273,6 +281,50 @@ export function MoreMenuChip({
             setTimeout(() => setCopied(false), 2000);
         } catch (_) { /* noop */ }
     }, [linkTarget]);
+
+    const handleCopyText = useCallback(e => {
+        stop(e); setOpen(false);
+        const parts = [];
+        if (post && typeof post.title === 'string' && post.title.trim()) parts.push(post.title.trim());
+        if (post && typeof post.content === 'string' && post.content.trim()) parts.push(post.content.trim());
+        const text = parts.join('\n\n');
+        if (!text) return;
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
+                setTextCopied(true);
+                setTimeout(() => setTextCopied(false), 2000);
+            }
+        } catch (_) { /* noop */ }
+    }, [post]);
+
+    const handleEdit = useCallback(e => {
+        stop(e); setOpen(false);
+        if (!postId) return;
+        navigate(`/edit_post/${postId}`);
+    }, [navigate, postId]);
+
+    const handleDelete = useCallback(e => {
+        stop(e); setOpen(false);
+        setDeletePending(false);
+        setDeleteDialogOpen(true);
+    }, []);
+
+    const confirmDeletePost = useCallback(async () => {
+        if (!postId) { setDeleteDialogOpen(false); return; }
+        setDeletePending(true);
+        try { await tx.deletePost(postId); } catch (_) { /* noop */ }
+        if (typeof updatePost === 'function') {
+            try { updatePost(postId, { deleted: true }); } catch (_) { /* noop */ }
+        }
+        setDeleteDialogOpen(false);
+        setDeletePending(false);
+    }, [postId, updatePost]);
+
+    const cancelDeletePost = useCallback(() => {
+        setDeleteDialogOpen(false);
+        setDeletePending(false);
+    }, []);
 
     const handleFollowUser = useCallback(async e => {
         stop(e); setOpen(false);
@@ -375,7 +427,23 @@ export function MoreMenuChip({
                         <HiOutlineLink />
                         <span>{copied ? 'Copied!' : 'Copy link'}</span>
                     </MenuItemBtn>
-                    {isLoggedIn && (
+                    <MenuItemBtn type="button" onClick={handleCopyText}>
+                        <HiOutlineClipboardDocument />
+                        <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
+                    </MenuItemBtn>
+                    {isLoggedIn && isOwnPost && (
+                        <>
+                            <MenuItemBtn type="button" onClick={handleEdit}>
+                                <HiOutlinePencilSquare />
+                                <span>Edit post</span>
+                            </MenuItemBtn>
+                            <MenuItemBtn type="button" $danger onClick={handleDelete}>
+                                <HiOutlineTrash />
+                                <span>Delete post</span>
+                            </MenuItemBtn>
+                        </>
+                    )}
+                    {isLoggedIn && !isOwnPost && (
                         <>
                             <MenuItemBtn type="button" onClick={handleFollowUser}>
                                 {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
@@ -402,6 +470,16 @@ export function MoreMenuChip({
                 </Menu>
             )}
         </PopoverRoot>
+        <ConfirmDialog
+            open={deleteDialogOpen}
+            title="Delete this post?"
+            message="This will mark the post as deleted on-chain. You can't undo this action."
+            confirmLabel="Delete post"
+            confirmVariant="danger"
+            pending={deletePending}
+            onConfirm={confirmDeletePost}
+            onCancel={cancelDeletePost}
+        />
         <GiftMirageDialog
             open={!!confirmDonate}
             recipientLabel={confirmDonate?.username ? `@${confirmDonate.username}` : authorLabelShort}

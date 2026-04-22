@@ -13,6 +13,7 @@ import {
     HiOutlineNoSymbol,
     HiOutlineFlag,
     HiOutlineEyeSlash,
+    HiOutlineClipboardDocument,
 } from "react-icons/hi2";
 
 import { getThemeFamily } from "../../../registry/theme";
@@ -801,6 +802,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) { /* noop */ }
     }, [closeAllMenus, linkTarget]);
 
+    const [textCopied, setTextCopied] = useState(false);
+    const handleCopyText = useCallback(() => {
+        closeAllMenus();
+        const parts = [];
+        if (post && typeof post.title === 'string' && post.title.trim()) parts.push(post.title.trim());
+        if (post && typeof post.content === 'string' && post.content.trim()) parts.push(post.content.trim());
+        const text = parts.join('\n\n');
+        if (!text) return;
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
+                setTextCopied(true);
+                setTimeout(() => setTextCopied(false), 2500);
+            }
+        } catch (_) { /* noop */ }
+    }, [closeAllMenus, post]);
+
     const handleFollowUser = useCallback(async () => {
         closeAllMenus();
         if (!isLoggedIn || !authorAddress) return;
@@ -1088,6 +1106,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 <MenuItemBtn type="button" onClick={handleCopyLink}>
                                     <HiOutlineLink />
                                     <span>{shareCopied ? 'Copied!' : 'Copy link'}</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" onClick={handleCopyText}>
+                                    <HiOutlineClipboardDocument />
+                                    <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
                                 </MenuItemBtn>
                                 {isOwnPost && (
                                     <>
