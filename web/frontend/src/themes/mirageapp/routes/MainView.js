@@ -53,6 +53,37 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     }
 `;
 
+/**
+ * `FeedSkeletonColumn` mirrors the width rules applied by `ListFeedView`'s
+ * `FeedList` so loading-state skeletons render at the same width as real
+ * posts — 720px card / 80% compact when the sidebar is hidden — on home,
+ * following, and topic feeds. Keeping this parallel to `FeedHeroColumn`
+ * avoids cross-file coupling and makes the wrapper explicit at the
+ * skeleton render sites.
+ */
+const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
+    'data-feed-view-mode': $feedViewMode,
+}))`
+    width: 100%;
+    max-width: 720px;
+    margin: 0;
+
+    @media (min-width: 1001px) {
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
+            width: 100%;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
+            width: 80%;
+            max-width: none;
+            margin: 0;
+        }
+    }
+`;
+
 const InviteOnlyBanner = styled.div`
     /* Match the post CardView exactly (border-radius: 8px; margin: 4px 0)
      * so this banner aligns with the feed column and shares the same bg. */
@@ -1744,10 +1775,10 @@ const MainView = ({
 
                         {/* Loading state - only show to logged-in users */}
                         {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && (
-                            <>
+                            <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                 <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
                                 <FeedCardSkeletonList count={5} />
-                            </>
+                            </FeedSkeletonColumn>
                         )}
 
                         {/* Empty home feed - only show to logged-in users */}
@@ -1806,7 +1837,9 @@ const MainView = ({
                         })()}
 
                         {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
-                            <FeedCardSkeleton />
+                            <FeedSkeletonColumn $feedViewMode={feedViewMode}>
+                                <FeedCardSkeleton />
+                            </FeedSkeletonColumn>
                         )}
                         {isLoggedIn && <div ref={bottomSentinelRef} style={{
                             width: '100%',
