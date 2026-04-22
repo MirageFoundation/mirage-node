@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
     HiHome,
@@ -30,8 +30,10 @@ import { ProfileMenuContent } from './TopBar';
  *   R7 — Labels at `0.6rem/500`, `600` on active.
  *
  * Five tabs: Home, Search, Create, Inbox, Profile.
- * Profile tab opens `ProfileMenuContent` in a bottom sheet (mirrors desktop
- * avatar menu + mobile app behavior).
+ * Profile tab opens `ProfileMenuContent` inside a centered modal panel that
+ * matches the rest of the mirageapp theme (ConfirmDialog / OptionModal /
+ * GiftDialogs) — `panel` surface on `overlay` dim, 14px radius, fade-in +
+ * small slide-up — instead of a bottom-drawer sheet.
  */
 
 // Height reserved for the bar (used for JS positioning + content padding).
@@ -148,14 +150,26 @@ const InboxBadge = styled.span`
 
 const formatBadgeCount = (n) => (n > 99 ? '99+' : String(n));
 
+const fadeInBackdrop = keyframes`
+    from { opacity: 0; }
+    to   { opacity: 1; }
+`;
+
+const slideUpPanel = keyframes`
+    from { transform: translateY(8px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+`;
+
 const ProfileSheetBackdrop = styled.div`
     position: fixed;
     inset: 0;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: center;
+    padding: 1rem;
     background: ${({ theme }) => theme.colors.overlay};
     z-index: 10001;
+    animation: ${fadeInBackdrop} 0.15s ease;
 
     @media (min-width: 601px) {
         display: none;
@@ -164,33 +178,21 @@ const ProfileSheetBackdrop = styled.div`
 
 const ProfileSheet = styled.div`
     width: 100%;
+    max-width: 420px;
+    max-height: 80vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     background-color: ${({ theme }) => theme.colors.panel};
-    border-top: 1px solid ${({ theme }) => theme.colors.headerBorder};
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-    padding: 0.6rem 0.9rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
-    /* Sit above the bottom nav. */
-    margin-bottom: ${MIRAGEAPP_BOTTOM_NAV_HEIGHT}px;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 14px;
+    padding: 0.4rem 0;
     box-sizing: border-box;
-    animation: slideUpProfileSheet 0.22s ease-out;
-
-    @keyframes slideUpProfileSheet {
-        from { transform: translateY(18px); opacity: 0; }
-        to   { transform: translateY(0);    opacity: 1; }
-    }
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    animation: ${slideUpPanel} 0.2s ease;
 
     @media (min-width: 601px) {
         display: none;
     }
-`;
-
-const ProfileSheetHandle = styled.div`
-    width: 32px;
-    height: 3px;
-    border-radius: 4px;
-    background: ${({ theme }) => theme.colors.border};
-    opacity: 0.7;
-    margin: 0 auto 0.4rem;
 `;
 
 const HIDDEN_ROUTES = [];
@@ -483,7 +485,6 @@ function MobileBottomNav({ state }) {
                         aria-label="Profile menu"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <ProfileSheetHandle aria-hidden="true" />
                         <ProfileMenuContent
                             displayName={username || ''}
                             onItemClick={handleProfileMenuNavigate}
