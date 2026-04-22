@@ -7,6 +7,7 @@ import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { ContentGrid, ModernPostFeed, CappedPageColumn } from "../Layout";
+import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { MediaRow } from "../components/MediaAttachmentLayout.js";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
@@ -943,9 +944,10 @@ function CreatePostView({ state, setPosts, updatePost }) {
                         <LoggedOutPromptCard
                             role="region"
                             aria-label="Create a post on Mirage"
-                            eyebrow="Create post"
                             title="Sign in to post on Mirage"
                             description="Create an account or sign in to publish posts, join topics, and participate on-chain."
+                            notice="Currently in Private Beta — Invite Only"
+                            stats={getCachedWelcomeStats()}
                             links={[
                                 { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
                                 { label: 'Learn More', href: 'https://mirage.foundation', external: true },

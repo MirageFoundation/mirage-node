@@ -30,6 +30,7 @@ import {
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { useSearchResults } from "../../../logic/useSearchResults";
+import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 
 /**
  * `/search?q=...` — mirageapp full results view.
@@ -457,13 +458,10 @@ export default function SearchResultsView({ state }) {
                         <LoggedOutPromptCard
                             role="region"
                             aria-label="Search on Mirage"
-                            eyebrow="Search Mirage"
                             title={query ? "Sign in to search Mirage" : "Search Mirage"}
-                            description={
-                                query
-                                    ? `You searched for "${displayQuery}". Create an account or sign in to search topics, users, and posts.`
-                                    : "Search topics, users, and posts after you sign in."
-                            }
+                            description="Create an account or sign in to search topics, users, and posts."
+                            notice="Currently in Private Beta — Invite Only"
+                            stats={getCachedWelcomeStats()}
                             links={[
                                 {
                                     label: "Watch Introduction (YouTube)",

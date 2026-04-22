@@ -1791,7 +1791,6 @@ const MainView = ({
                         {!isLoggedIn && <LoggedOutPromptCard
                             role="region"
                             aria-label="Welcome to Mirage"
-                            eyebrow={urlTopic === 'following' ? 'Following feed' : 'Join Mirage'}
                             title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
                             notice="Currently in Private Beta — Invite Only"
                             description={urlTopic === 'following'
