@@ -5003,7 +5003,7 @@ def get_posts():
             # which step of the home-feed pipeline is dominating latency.
             inner = resp.pop("_timings", {}) or {}
             total_ms = round((time.monotonic() - t_start) * 1000, 2)
-            if total_ms > 2000:
+            if total_ms > 500:
                 log_event(
                     rid,
                     "get_posts.timing",
