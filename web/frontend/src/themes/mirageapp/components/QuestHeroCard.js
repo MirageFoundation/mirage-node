@@ -1,229 +1,696 @@
 /**
- * QuestHeroCard - Displays daily quests, progress, and claimable rewards
+ * QuestHeroCard - Displays daily quests, progress, and claimable rewards.
+ * Visual design adapted from the mirage-mobile-app `QuestsSummaryCard`:
+ *   - Clean panel background (no gradient overlay)
+ *   - Icon pill tile (36×36 tinted circle) + title / subtitle on the left
+ *   - Reward chip + rotating chevron on the right
+ *   - Expanded body: progress bar → flash quest card → quest rows → CTA button
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
 import styled, { css, keyframes } from 'styled-components';
+import { HiChevronDown } from 'react-icons/hi2';
 import { useRewards } from '../../../logic/useQuests';
 import Api from '../../../utils/api';
 import Storage from '../../../utils/Storage';
 import { requireThemeColor } from '../../../utils/themeColor';
 
-/** Quest section — no outer border; parent SidebarBox provides the box frame */
-const QuestCardContainer = styled.div`
+/* ============================================================
+ * Layout / shell
+ * ============================================================ */
+
+const CardContainer = styled.div`
     box-sizing: border-box;
-    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
-    display: flex;
-    flex-direction: column;
-`;
+    /* Match the post CardView exactly (border-radius: 8px; margin: 4px 0)
+     * so this card aligns with the feed column and shares the same bg. */
+    width: 100%;
+    max-width: 100%;
+    align-self: flex-start;
+    margin: 4px 0;
+    /* Use the main page background so the card blends with the feed
+     * (user wants it to feel flush with the feed, not a floating panel). */
+    background: ${({ theme }) => requireThemeColor(theme, 'bg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: none;
 
-/** Tinted header strip at top of widget — entire bar is clickable to toggle */
-const QuestHeader = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.5rem;
-    background: ${({ theme }) => requireThemeColor(theme, 'panelAlt')};
-    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    cursor: pointer;
-    user-select: none;
-
-    &:hover > * {
-        color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    @media (max-width: 600px) {
+        border-radius: 6px;
     }
 `;
 
-const QuestTitle = styled.div`
-    font-size: 0.6rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+const Header = styled.button`
+    all: unset;
+    box-sizing: border-box;
+    width: 100%;
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    line-height: 1.2;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.02)'
+        : 'rgba(255, 255, 255, 0.03)'};
+    }
+
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        outline-offset: -2px;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.35rem 0.85rem;
+    }
 `;
 
-const ResetTimer = styled.span`
+const TitleRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1;
+    min-width: 0;
+`;
+
+/** Rounded square tile — matches mobile `iconContainer` */
+const IconTile = styled.div`
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    line-height: 1;
+    background: ${({ $tint, theme }) => {
+        const hex = $tint || '#667eea';
+        return theme.name === 'light' ? `${hex}1F` : `${hex}33`;
+    }};
+    color: ${({ $tint }) => $tint || '#667eea'};
+`;
+
+const TitleStack = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+`;
+
+/** Row combining "Daily Quests" title + an inline live-ticking reset
+ * timer pill on its right (bluemoon-style). */
+const TitleLine = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+`;
+
+const TitleText = styled.div`
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: ${({ theme, $color }) => $color || requireThemeColor(theme, 'text')};
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+`;
+
+const SubtitleText = styled.div`
     font-size: 0.6rem;
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: 0;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    color: ${({ theme, $color }) => $color || requireThemeColor(theme, 'subtleText')};
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
 `;
 
-/** Body area inside the widget (below the header strip) */
-const QuestBody = styled.div`
-    padding: 0.35rem 0.5rem;
+/** Small pill showing the live-ticking "Xh Ym Zs left" next to the
+ * quest title — bluemoon-style. Updates every second because the
+ * `useRewards` hook decrements `secondsUntilReset` once per second. */
+const HeaderResetTimer = styled.span`
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.55rem;
+    font-weight: 600;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.05)'
+        : 'rgba(255, 255, 255, 0.08)'};
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+`;
+
+const HeaderRight = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+`;
+
+/** Small pill on the right of the header — reward or count */
+const HeaderBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 0.12rem 0.4rem;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+    color: ${({ $tint }) => $tint || '#22C55E'};
+    background: ${({ $tint, theme }) => {
+        const hex = $tint || '#22C55E';
+        return theme.name === 'light' ? `${hex}1F` : `${hex}33`;
+    }};
+    white-space: nowrap;
+`;
+
+/** Chevron that rotates 180° when collapsed — uses the same
+ * `HiChevronDown` icon as the post card for visual consistency. */
+const Chevron = styled(HiChevronDown)`
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    transition: transform 0.2s ease;
+    transform: rotate(${({ $collapsed }) => ($collapsed ? '-90deg' : '0deg')});
+`;
+
+const Body = styled.div`
+    padding: 0 1rem 0.6rem;
     display: flex;
     flex-direction: column;
+    gap: 0.45rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0.85rem 0.55rem;
+    }
+`;
+
+/* ============================================================
+ * Flash quest card
+ * ============================================================ */
+
+const FLASH_ACCENT = '#F59E0B';
+
+const FlashCard = styled.div`
+    border: 1px solid ${FLASH_ACCENT}4D;
+    border-radius: 7px;
+    padding: 0.4rem 0.5rem;
+    background: ${FLASH_ACCENT}0F;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+`;
+
+const FlashHeader = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+`;
+
+const FlashBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
     gap: 0.2rem;
+    font-size: 0.5rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: ${FLASH_ACCENT};
+`;
+
+const FlashTimer = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    font-size: 0.55rem;
+    font-weight: 600;
+    color: ${({ $urgent, theme }) => $urgent
+        ? requireThemeColor(theme, 'voteDown')
+        : FLASH_ACCENT};
+    font-variant-numeric: tabular-nums;
+`;
+
+const FlashRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+`;
+
+const FlashTitleText = styled.div`
+    flex: 1;
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    opacity: ${({ $completed }) => ($completed ? 1 : 0.85)};
+    line-height: 1.2;
+    min-width: 0;
+`;
+
+const FlashProgressText = styled.span`
+    font-size: 0.58rem;
+    color: ${FLASH_ACCENT};
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+`;
+
+const FlashProgressTrack = styled.div`
+    height: 3px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: ${FLASH_ACCENT}26;
+`;
+
+const FlashProgressFill = styled.div`
+    height: 100%;
+    border-radius: 2px;
+    width: ${({ $pct }) => `${Math.max(0, Math.min(100, $pct || 0))}%`};
+    background: ${({ $completed, theme }) => $completed
+        ? requireThemeColor(theme, 'voteUp')
+        : FLASH_ACCENT};
+    transition: width 0.3s ease;
+`;
+
+/* ============================================================
+ * Quest list rows
+ * ============================================================ */
+
+/* Uppercase section labels ("TODAY'S QUESTS", "FLASH QUEST") — adapted
+ * from mobile `styles.sectionTitle`. */
+const SectionLabel = styled.div`
+    font-size: 0.5rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    margin-top: 0.1rem;
+`;
+
+/* Loyalty multiplier chip (amber pill with flame glyph) — `RewardMultiplierBadge` */
+const MultiplierBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.55rem;
+    font-weight: 800;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    color: #F59E0B;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(245, 158, 11, 0.14)'
+        : 'rgba(245, 158, 11, 0.22)'};
+    border: 1px solid ${({ theme }) => theme.name === 'light'
+        ? 'rgba(245, 158, 11, 0.35)'
+        : 'rgba(245, 158, 11, 0.45)'};
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+
+    &::before {
+        content: '🔥';
+        font-size: 0.55rem;
+    }
 `;
 
 const QuestList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 0.35rem;
 `;
 
-const QuestItem = styled.div`
+/* Quest card — bigger bordered tile (not a tight row). Mirrors mobile
+ * `styles.questCard`: rounded 10px, panel bg (or success-tint when
+ * completed), 1-2px border. */
+const QuestRow = styled.div`
     display: flex;
-    align-items: flex-start;
-    gap: 0.4rem;
-    padding: 0.25rem 0;
-`;
-
-const QuestDetails = styled.div`
-    flex: 1;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 8px;
+    background: ${({ $completed, theme }) => $completed
+        ? (theme.name === 'light' ? 'rgba(16, 185, 129, 0.08)' : 'rgba(16, 185, 129, 0.12)')
+        : (theme.name === 'light' ? 'rgba(102, 126, 234, 0.06)' : 'rgba(102, 126, 234, 0.08)')};
+    border: 1px solid ${({ $completed, theme }) => $completed
+        ? (theme.name === 'light' ? 'rgba(16, 185, 129, 0.35)' : 'rgba(16, 185, 129, 0.45)')
+        : (theme.name === 'light' ? 'rgba(102, 126, 234, 0.18)' : 'rgba(102, 126, 234, 0.24)')};
     min-width: 0;
 `;
 
-const QuestName = styled.div`
-    font-size: 0.7rem;
-    font-weight: 400;
-    color: ${({ theme, $completed }) => $completed
-        ? requireThemeColor(theme, 'subtleText')
-        : requireThemeColor(theme, 'link')};
-    text-decoration: ${({ $completed }) => $completed ? 'line-through' : 'none'};
-    line-height: 1.35;
-`;
-
-const QuestDescription = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    line-height: 1.3;
-`;
-
-const QuestReward = styled.span`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
-    font-weight: 700;
-`;
-
-const FlashBadge = styled.span`
-    margin-left: 0.3rem;
-    font-size: 0.5rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
-`;
-
-const QuestRequirements = styled.ul`
-    font-size: 0.5rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    margin: 0.15rem 0 0 0;
-    padding-left: 0.9rem;
-    list-style-type: disc;
-
-    li {
-        margin: 0.05rem 0;
-    }
-
-    @media (max-width: 768px) {
-    }
-`;
-
-const LoyaltyBonusText = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    cursor: default;
-`;
-
-const ProgressContainer = styled.div`
+const QuestRowHeader = styled.div`
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: flex-start;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+`;
+
+/* Per-quest action-color icon tile */
+const QuestActionTile = styled.span`
+    position: relative;
     flex-shrink: 0;
-    min-width: 2.5rem;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    line-height: 1;
+    color: ${({ $tint }) => $tint || '#667eea'};
+    background: ${({ $tint, theme }) => {
+        const hex = $tint || '#667eea';
+        return theme.name === 'light' ? `${hex}26` : `${hex}33`;
+    }};
 `;
 
-const ProgressText = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-variant-numeric: tabular-nums;
+/* Small checkmark badge overlaid on the corner of the action tile */
+const QuestCompleteBadge = styled.span`
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.45rem;
+    font-weight: 800;
+    color: #FFFFFF;
+    background: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
+    border: 2px solid ${({ theme }) => requireThemeColor(theme, 'panel')};
+
+    &::before { content: '✓'; }
 `;
 
-const BalancedProgressText = styled.div`
-    font-size: 0.55rem;
-    font-variant-numeric: tabular-nums;
+/** Checkmark-circle / ellipse-outline — mimics Ionicons used in mobile */
+const QuestStatusIcon = styled.span`
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    margin-top: 1px;
+
+    ${({ $completed, theme }) => $completed
+        ? css`
+            background: ${requireThemeColor(theme, 'voteUp')};
+            color: #FFFFFF;
+            font-size: 0.7rem;
+            font-weight: 800;
+            line-height: 1;
+
+            &::before { content: '✓'; }
+        `
+        : css`
+            background: transparent;
+            border: 1.5px solid ${requireThemeColor(theme, 'subtleText')};
+            opacity: 0.55;
+        `}
+`;
+
+const QuestRowBody = styled.div`
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    gap: 2px;
+`;
+
+const QuestTopLine = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+`;
+
+const QuestRowTitle = styled.span`
+    flex: 1;
+    min-width: 0;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    opacity: ${({ $completed }) => ($completed ? 1 : 0.75)};
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+`;
+
+/* Sparkle reward pill (amber tint) — adapted from mobile `rewardBadge`. */
+const QuestRowReward = styled.span`
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    font-size: 0.54rem;
+    font-weight: 800;
+    padding: 0.1rem 0.35rem;
+    border-radius: 999px;
+    color: #F59E0B;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(245, 158, 11, 0.14)'
+        : 'rgba(245, 158, 11, 0.22)'};
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+
+    &::before {
+        content: '✨';
+        font-size: 0.5rem;
+    }
+`;
+
+const QuestRowProgress = styled.span`
+    flex-shrink: 0;
+    font-size: 0.58rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+`;
+
+const QuestRowDescription = styled.div`
+    font-size: 0.6rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    line-height: 1.25;
+    margin-top: 0;
+`;
+
+/* Bullet-point list for per-quest requirements / details.
+ * Mirrors mobile `QuestRequirements` rendering (dots + gray text). */
+const QuestDetailsList = styled.ul`
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
     gap: 1px;
 `;
-
-const BalancedProgressRow = styled.span`
+const QuestDetailItem = styled.li`
     display: flex;
-    align-items: center;
-    gap: 2px;
-    color: ${({ $met, theme }) => $met
-        ? requireThemeColor(theme, 'buttonSuccessBorder')
-        : requireThemeColor(theme, 'subtleText')};
-    font-weight: ${({ $met }) => $met ? '600' : '400'};
-`;
+    align-items: flex-start;
+    gap: 0.3rem;
+    font-size: 0.58rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    line-height: 1.25;
 
-const CheckMark = styled.span`
-    flex-shrink: 0;
-    color: ${({ theme }) => requireThemeColor(theme, 'buttonSuccessBorder')};
-    font-size: 0.65rem;
-    font-weight: 700;
-    line-height: 1.35;
-`;
-
-const ClaimSection = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.5rem;
-    padding-top: 0.2rem;
-    border-top: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-`;
-
-const ClaimButton = styled.button`
-    padding: 0.15rem 0.4rem;
-    border-radius: 2px;
-    font-size: 0.6rem;
-    font-weight: 700;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background 0.15s ease;
-
-    ${props => props.$hasRewards ? css`
-        background: ${({ theme }) => requireThemeColor(theme, 'panelAlt')};
-        color: ${({ theme }) => requireThemeColor(theme, 'link')};
-        border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-
-        &:hover:not(:disabled) {
-            color: ${({ theme }) => requireThemeColor(theme, 'linkHover')};
-            text-decoration: underline;
-        }
-    ` : css`
-        background: ${({ theme }) => requireThemeColor(theme, 'panelAlt')};
-        color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-        border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-        cursor: not-allowed;
-    `}
-
-    &:disabled {
-        cursor: not-allowed;
+    &::before {
+        content: '';
+        flex-shrink: 0;
+        width: 2.5px;
+        height: 2.5px;
+        border-radius: 999px;
+        margin-top: 0.42em;
+        background: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
         opacity: 0.7;
     }
 `;
 
-const ClaimErrorMessage = styled.div`
-    padding: 0.3rem 0.5rem;
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
-    line-height: 1.3;
+/* Per-quest progress bar row (mirrors mobile `questProgressContainer`) */
+const QuestRowProgressTrack = styled.div`
+    width: 100%;
+    height: 3px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.06)'
+        : 'rgba(255, 255, 255, 0.08)'};
+`;
+const QuestRowProgressFill = styled.div`
+    height: 100%;
+    border-radius: 2px;
+    width: ${({ $pct }) => `${Math.max(0, Math.min(100, $pct || 0))}%`};
+    background: ${({ $completed, $tint, theme }) => $completed
+        ? requireThemeColor(theme, 'voteUp')
+        : ($tint || '#F59E0B')};
+    transition: width 0.3s ease;
+`;
+const QuestRowFooter = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+`;
+const QuestRowPercent = styled.span`
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: ${({ $completed, theme }) => $completed
+        ? requireThemeColor(theme, 'voteUp')
+        : requireThemeColor(theme, 'subtleText')};
+    font-variant-numeric: tabular-nums;
 `;
 
-// Celebration animation
+const BalancedPill = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0.05rem 0.28rem;
+    border-radius: 999px;
+    font-size: 0.5rem;
+    font-weight: ${({ $met }) => ($met ? '700' : '500')};
+    font-variant-numeric: tabular-nums;
+    color: ${({ $met, theme }) => $met
+        ? requireThemeColor(theme, 'voteUp')
+        : requireThemeColor(theme, 'subtleText')};
+    background: ${({ $met, theme }) => $met
+        ? (theme.name === 'light' ? 'rgba(22, 163, 74, 0.12)' : 'rgba(22, 163, 74, 0.22)')
+        : (theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.06)')};
+`;
+
+const BalancedStack = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+`;
+
+/* ============================================================
+ * Footer CTA + loyalty multiplier
+ * ============================================================ */
+
+const ClaimFooter = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+`;
+
+const LoyaltyRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    font-size: 0.65rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+
+    &::before {
+        content: '⚡';
+        font-size: 0.75rem;
+    }
+`;
+
+const CtaButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.42rem 0.75rem;
+    border-radius: 7px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-family: inherit;
+    color: #FFFFFF;
+    border: none;
+    cursor: pointer;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    box-shadow: 0 1px 5px rgba(102, 126, 234, 0.22);
+    transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover:not(:disabled) {
+        opacity: 0.92;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    }
+
+    &:active:not(:disabled) {
+        transform: translateY(0);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+`;
+
+const ClaimErrorMessage = styled.div`
+    padding: 0.45rem 0.65rem;
+    font-size: 0.68rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
+    line-height: 1.35;
+    border-radius: 8px;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(239, 68, 68, 0.08)'
+        : 'rgba(239, 68, 68, 0.14)'};
+    border: 1px solid ${({ theme }) => theme.name === 'light'
+        ? 'rgba(239, 68, 68, 0.25)'
+        : 'rgba(239, 68, 68, 0.32)'};
+`;
+
+/* ============================================================
+ * Suspension + empty + loading states
+ * ============================================================ */
+
+const SuspendedBox = styled.div`
+    padding: 0.55rem 0.7rem;
+    border-radius: 8px;
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(239, 68, 68, 0.08)'
+        : 'rgba(239, 68, 68, 0.14)'};
+    border: 1px solid ${({ theme }) => theme.name === 'light'
+        ? 'rgba(239, 68, 68, 0.25)'
+        : 'rgba(239, 68, 68, 0.32)'};
+    color: ${({ theme }) => theme.name === 'light' ? '#EF4444' : '#F87171'};
+    font-size: 0.7rem;
+    line-height: 1.4;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+
+    &::before {
+        content: '⏱';
+        font-size: 0.85rem;
+        line-height: 1.1;
+    }
+`;
+
+const EmptyState = styled.div`
+    padding: 0.3rem 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.72rem;
+    line-height: 1.4;
+`;
+
+/* ============================================================
+ * Celebration overlay + confetti (unchanged behavior)
+ * ============================================================ */
+
 const confettiAnimation = keyframes`
     0% { transform: translateY(0) rotate(0deg); opacity: 1; }
     100% { transform: translateY(400px) rotate(720deg); opacity: 0; }
@@ -242,10 +709,7 @@ const countUpAnimation = keyframes`
 
 const CelebrationOverlay = styled.div`
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     background: rgba(0, 0, 0, 0.8);
     display: flex;
     align-items: center;
@@ -281,113 +745,34 @@ const CelebrationAmount = styled.div`
 
 const CelebrationClose = styled.button`
     padding: 0.75rem 2rem;
-    background: #22c55e;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 999px;
     font-size: 1rem;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: background 0.2s ease;
+    box-shadow: 0 4px 14px rgba(102, 126, 234, 0.45);
+    transition: transform 0.15s ease;
 
-    &:hover {
-        background: #16a34a;
-    }
+    &:hover { transform: translateY(-1px); }
 `;
 
 const ConfettiPiece = styled.div`
     position: absolute;
     width: 10px;
     height: 10px;
-    background: ${props => props.$color};
+    background: ${({ $color }) => $color};
     top: -10px;
-    left: ${props => props.$left}%;
-    animation: ${confettiAnimation} ${props => props.$duration}s linear forwards;
-    animation-delay: ${props => props.$delay}s;
+    left: ${({ $left }) => $left}%;
+    animation: ${confettiAnimation} ${({ $duration }) => $duration}s linear forwards;
+    animation-delay: ${({ $delay }) => $delay}s;
 `;
 
-const SuspendedBanner = styled.div`
-    text-align: left;
-    color: ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
-    font-size: 0.6rem;
-    line-height: 1.35;
-`;
+/* ============================================================
+ * Debug panel (unchanged behavior, minor restyling)
+ * ============================================================ */
 
-const EmptyState = styled.div`
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.6rem;
-    line-height: 1.4;
-`;
-
-/**
- * Format seconds into HH:MM:SS or MM:SS
- */
-function formatTime(seconds) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-
-    if (h > 0) {
-        return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    }
-    return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-/**
- * Get reward display text for a quest (handles MIRAGE and invite_code rewards)
- */
-function getQuestRewardDisplay(rewards, rewardMultiplier) {
-    if (!rewards || !Array.isArray(rewards)) return null;
-
-    const mirageReward = rewards.find(r => r.type === 'mirage');
-    const inviteCodeReward = rewards.find(r => r.type === 'invite_code');
-
-    if (inviteCodeReward) {
-        const count = inviteCodeReward.amount || 1;
-        return `+${count} Invite Code${count > 1 ? 's' : ''}`;
-    }
-
-    if (mirageReward) {
-        const amount = mirageReward.amount || 0;
-        const applyMultiplier = mirageReward.apply_multiplier !== false;
-        const displayAmount = applyMultiplier ? Math.round(amount * rewardMultiplier) : amount;
-        return `+${displayAmount.toLocaleString()} MIRAGE`;
-    }
-
-    return null;
-}
-
-/**
- * Get quest requirements as array of strings
- */
-function getQuestRequirements(quest) {
-    const reqs = [];
-    if (quest.min_content_length) {
-        reqs.push(`Min ${quest.min_content_length} characters`);
-    }
-    if (quest.time_spacing_minutes) {
-        const mins = quest.time_spacing_minutes;
-        reqs.push(mins >= 60 ? `Min ${mins / 60} hour${mins >= 120 ? 's' : ''} between each` : `Min ${mins} minute${mins === 1 ? '' : 's'} between each`);
-    }
-    if (quest.unique_target) {
-        reqs.push('Must be different targets');
-    }
-    if (quest.unique_topics_min) {
-        reqs.push(`At least ${quest.unique_topics_min} different topics`);
-    }
-    if (quest.quality_threshold) {
-        reqs.push(`Needs ${quest.quality_threshold}+ upvotes`);
-    }
-    // For vote quests, show if vote changes don't count
-    if (quest.action_type === 'vote' && quest.count_vote_changes === false) {
-        reqs.push('New votes only (changes don\'t count)');
-    }
-    return reqs;
-}
-
-const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
-
-// Debug panel styled components
 const DebugPanel = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem;
@@ -395,8 +780,8 @@ const DebugPanel = styled.div`
         ? 'rgba(239, 68, 68, 0.1)'
         : 'rgba(239, 68, 68, 0.15)'};
     border: 1px dashed rgba(239, 68, 68, 0.5);
-    border-radius: 6px;
-    font-size: 0.55rem;
+    border-radius: 8px;
+    font-size: 0.6rem;
 `;
 
 const DebugTitle = styled.div`
@@ -427,33 +812,26 @@ const DebugValue = styled.span`
 
 const DebugButton = styled.button`
     background: ${({ $variant }) =>
-        $variant === 'danger' ? 'rgba(239, 68, 68, 0.2)' :
-            $variant === 'success' ? 'rgba(34, 197, 94, 0.2)' :
-                'rgba(59, 130, 246, 0.2)'};
+        $variant === 'danger' ? 'rgba(239, 68, 68, 0.2)'
+            : $variant === 'success' ? 'rgba(34, 197, 94, 0.2)'
+                : 'rgba(59, 130, 246, 0.2)'};
     border: 1px solid ${({ $variant }) =>
-        $variant === 'danger' ? 'rgba(239, 68, 68, 0.5)' :
-            $variant === 'success' ? 'rgba(34, 197, 94, 0.5)' :
-                'rgba(59, 130, 246, 0.5)'};
+        $variant === 'danger' ? 'rgba(239, 68, 68, 0.5)'
+            : $variant === 'success' ? 'rgba(34, 197, 94, 0.5)'
+                : 'rgba(59, 130, 246, 0.5)'};
     color: ${({ $variant }) =>
-        $variant === 'danger' ? '#ef4444' :
-            $variant === 'success' ? '#22c55e' :
-                '#3b82f6'};
-    font-size: 0.5rem;
+        $variant === 'danger' ? '#ef4444'
+            : $variant === 'success' ? '#22c55e'
+                : '#3b82f6'};
+    font-size: 0.55rem;
     font-weight: 600;
-    padding: 0.2rem 0.4rem;
-    border-radius: 4px;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
     cursor: pointer;
     transition: all 0.15s ease;
 
-    &:hover:not(:disabled) {
-        opacity: 0.8;
-        transform: scale(1.02);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
+    &:hover:not(:disabled) { opacity: 0.85; }
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
 `;
 
 const DebugButtonGroup = styled.div`
@@ -465,34 +843,122 @@ const DebugButtonGroup = styled.div`
 
 const DebugInput = styled.input`
     width: 50px;
-    padding: 0.15rem 0.25rem;
-    font-size: 0.5rem;
+    padding: 0.15rem 0.3rem;
+    font-size: 0.55rem;
     border: 1px solid rgba(59, 130, 246, 0.5);
     border-radius: 4px;
     background: ${({ theme }) => theme.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
     text-align: center;
 
-    &:focus {
-        outline: none;
-        border-color: #3b82f6;
-    }
+    &:focus { outline: none; border-color: #3b82f6; }
 `;
 
 const DebugQuestRow = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.2rem 0.3rem;
+    padding: 0.2rem 0.35rem;
     margin: 0.15rem 0;
     background: ${({ theme }) => theme.name === 'light'
         ? 'rgba(0,0,0,0.03)'
         : 'rgba(255,255,255,0.03)'};
-    border-radius: 4px;
+    border-radius: 6px;
 `;
 
+/* ============================================================
+ * Helpers
+ * ============================================================ */
 
-export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
+/** `3h 12m` / `14m 5s` — matches mobile `formatTimeShort` + seconds */
+function formatTimeCompact(seconds) {
+    const s = Math.max(0, Math.floor(seconds || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
+    return `${sec}s`;
+}
+
+function getQuestRewardDisplay(rewards, rewardMultiplier) {
+    if (!rewards || !Array.isArray(rewards)) return null;
+    const mirageReward = rewards.find(r => r.type === 'mirage');
+    const inviteCodeReward = rewards.find(r => r.type === 'invite_code');
+    if (inviteCodeReward) {
+        const count = inviteCodeReward.amount || 1;
+        return `+${count} Invite`;
+    }
+    if (mirageReward) {
+        const amount = mirageReward.amount || 0;
+        const applyMultiplier = mirageReward.apply_multiplier !== false;
+        const displayAmount = applyMultiplier ? Math.round(amount * rewardMultiplier) : amount;
+        return `+${displayAmount.toLocaleString()}`;
+    }
+    return null;
+}
+
+/* Build the per-quest detail bullet list. First item is the quest
+ * description (if any), followed by structured requirement lines.
+ * Mirrors mobile `QuestRequirements`. */
+function buildQuestDetails(quest) {
+    const items = [];
+    if (quest.description) items.push(quest.description);
+    if (quest.min_content_length) items.push(`Minimum ${quest.min_content_length} characters`);
+    if (quest.unique_target === true) items.push('Must be different targets');
+    if (quest.time_spacing_minutes) {
+        const mins = quest.time_spacing_minutes;
+        items.push(mins >= 60
+            ? `${mins / 60} hour${mins === 60 ? '' : 's'} between actions`
+            : `${mins} min between actions`);
+    }
+    if (quest.unique_topics_min) items.push(`At least ${quest.unique_topics_min} different topics`);
+    if (quest.quality_threshold) items.push(`Needs ${quest.quality_threshold}+ upvotes`);
+    if (quest.action_type === 'vote' && quest.count_vote_changes === false) items.push('New votes only (changes don\u2019t count)');
+    return items;
+}
+
+const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#667eea', '#ec4899', '#764ba2'];
+
+/* Per-action colors / emojis — adapted from mobile `ACTION_COLORS`
+ * and `ACTION_ICONS`. Keeps visual parity with the mobile quests screen. */
+const ACTION_COLORS = {
+    comment: '#3B82F6',
+    vote: '#10B981',
+    balanced_vote: '#06B6D4',
+    post: '#8B5CF6',
+    follow: '#F59E0B',
+    share: '#EC4899',
+    upvotes_received: '#F97316',
+    comment_upvotes_received: '#6366F1',
+    invite_recruit: '#14B8A6',
+    claim_only: '#A855F7',
+};
+const ACTION_EMOJI = {
+    comment: '💬',
+    vote: '👍',
+    balanced_vote: '⇅',
+    post: '✍️',
+    follow: '➕',
+    share: '↗',
+    upvotes_received: '📈',
+    comment_upvotes_received: '💭',
+    invite_recruit: '👥',
+    claim_only: '🎁',
+};
+
+function getActionColor(actionType) {
+    return ACTION_COLORS[actionType] || '#667eea';
+}
+function getActionEmoji(actionType) {
+    return ACTION_EMOJI[actionType] || '⭐';
+}
+
+/* ============================================================
+ * Component
+ * ============================================================ */
+
+export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = false, onToggleCollapse }) {
     const {
         dailyQuests,
         flashQuest,
@@ -517,9 +983,38 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
     const [claimedInviteCodes, setClaimedInviteCodes] = useState(0);
     const [claimError, setClaimError] = useState(null);
 
+    /* Local live-ticking copies of the two countdowns. The `useRewards`
+     * hook has its own ticker but it can be interrupted by data refreshes
+     * or unmounted children, so we keep an independent 1s interval here
+     * to guarantee the UI updates every second. Both values resync
+     * whenever the underlying hook state changes. */
+    const [liveResetSeconds, setLiveResetSeconds] = useState(
+        Number.isFinite(secondsUntilReset) ? secondsUntilReset : 0,
+    );
+    const [liveFlashSeconds, setLiveFlashSeconds] = useState(
+        flashQuest?.seconds_remaining || 0,
+    );
+
+    useEffect(() => {
+        if (Number.isFinite(secondsUntilReset)) {
+            setLiveResetSeconds(secondsUntilReset);
+        }
+    }, [secondsUntilReset]);
+    useEffect(() => {
+        setLiveFlashSeconds(flashQuest?.seconds_remaining || 0);
+    }, [flashQuest?.id, flashQuest?.seconds_remaining]);
+
+    useEffect(() => {
+        const id = setInterval(() => {
+            setLiveResetSeconds(s => (s > 0 ? s - 1 : 0));
+            setLiveFlashSeconds(s => (s > 0 ? s - 1 : 0));
+        }, 1000);
+        return () => clearInterval(id);
+    }, []);
+
     const userAddress = Storage.load('publicKey', '');
 
-    // Debug panel state (controlled by BACKEND_DEBUG env var on backend)
+    // Debug panel state
     const [showDebug, setShowDebug] = useState(false);
     const [debugInfo, setDebugInfo] = useState(null);
     const [debugLoading, setDebugLoading] = useState(false);
@@ -580,363 +1075,428 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
     }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshAll]);
 
     useEffect(() => {
-        if (showDebug && debugEnabled) {
-            fetchDebugInfo();
-        }
+        if (showDebug && debugEnabled) fetchDebugInfo();
     }, [showDebug, debugEnabled, fetchDebugInfo]);
 
     const handleClaim = useCallback(async () => {
         setClaimError(null);
         const result = await claimRewards();
-
         if (result.success) {
-            // Find the MIRAGE reward amount
             const mirageReward = result.rewards?.find(r => r.type === 'mirage');
             const amount = mirageReward?.amount || 0;
-
-            // Find invite code rewards
             const inviteCodeReward = result.rewards?.find(r => r.type === 'invite_code');
             const inviteCodesCount = inviteCodeReward?.count || 0;
 
             setClaimedAmount(amount);
             setClaimedInviteCodes(inviteCodesCount);
             setShowCelebration(true);
-
-            // Refresh data
             refreshAll();
-
-            // If invite codes were claimed, notify other components to refresh
             if (inviteCodesCount > 0) {
                 window.dispatchEvent(new CustomEvent('inviteCodesUpdated'));
             }
         } else {
-            // Show user-friendly message from backend if available, otherwise show error code
             const errorMessage = result.message || result.error || 'Failed to claim rewards. Please try again later.';
             setClaimError(errorMessage);
-            // Clear error after 10 seconds
             setTimeout(() => setClaimError(null), 10000);
         }
     }, [claimRewards, refreshAll]);
 
-    const closeCelebration = useCallback(() => {
-        setShowCelebration(false);
-    }, []);
+    const closeCelebration = useCallback(() => setShowCelebration(false), []);
 
-    // If quests system is disabled, don't render anything
-    if (questsDisabled) {
-        return null;
-    }
+    if (questsDisabled) return null;
 
-    // Show loading state only on initial load (when we have no quests yet)
+    /* Loading (initial) */
     if (questsLoading && dailyQuests.length === 0) {
         return (
-            <QuestCardContainer>
-                <QuestHeader onClick={onToggleCollapse}>
-                    <QuestTitle>
-                        Daily Quests
-                        {collapsed && <ResetTimer>{' '}— loading...</ResetTimer>}
-                    </QuestTitle>
-                </QuestHeader>
+            <CardContainer $feedViewMode={feedViewMode}>
+                <Header type="button" onClick={onToggleCollapse} aria-expanded={!collapsed}>
+                    <TitleRow>
+                        <IconTile $tint="#F59E0B">🏆</IconTile>
+                        <TitleStack>
+                            <TitleText>Daily Quests</TitleText>
+                            <SubtitleText>loading…</SubtitleText>
+                        </TitleStack>
+                    </TitleRow>
+                    <HeaderRight>
+                        <Chevron $collapsed={collapsed} aria-hidden="true" />
+                    </HeaderRight>
+                </Header>
                 {!collapsed && (
-                    <QuestBody><EmptyState>Loading quests...</EmptyState></QuestBody>
+                    <Body><EmptyState>Loading quests…</EmptyState></Body>
                 )}
-            </QuestCardContainer>
+            </CardContainer>
         );
     }
 
-    // If suspended, show suspension message
+    /* Suspended */
     if (questsSuspended) {
+        const suspendedUntil = questsSuspensionInfo?.suspended_until;
+        const suspendedText = suspendedUntil && suspendedUntil <= 4000000000
+            ? `Suspended until ${new Date(suspendedUntil * 1000).toLocaleString()}`
+            : 'Your quest rewards have been suspended.';
         return (
-            <QuestCardContainer>
-                <QuestHeader onClick={onToggleCollapse}>
-                    <QuestTitle>Quests Suspended</QuestTitle>
-                </QuestHeader>
+            <CardContainer $feedViewMode={feedViewMode}>
+                <Header type="button" onClick={onToggleCollapse} aria-expanded={!collapsed}>
+                    <TitleRow>
+                        <IconTile $tint="#EF4444">⚠️</IconTile>
+                        <TitleStack>
+                            <TitleText $color="#EF4444">Quests Suspended</TitleText>
+                            <SubtitleText $color="#F87171">Attempting to game the system</SubtitleText>
+                        </TitleStack>
+                    </TitleRow>
+                    <HeaderRight>
+                        <Chevron $collapsed={collapsed} aria-hidden="true" />
+                    </HeaderRight>
+                </Header>
                 {!collapsed && (
-                    <QuestBody>
-                        <SuspendedBanner>
-                            Your quest rewards have been suspended. Reason: Attempting to game the system.
-                            {questsSuspensionInfo?.suspended_until && (
-                                <span>
-                                    {' '}{questsSuspensionInfo.suspended_until > 4000000000
-                                        ? '(Permanent)'
-                                        : `Until: ${new Date(questsSuspensionInfo.suspended_until * 1000).toISOString().replace('T', ' ').replace('Z', 'Z')}`
-                                    }
-                                </span>
-                            )}
-                        </SuspendedBanner>
-                    </QuestBody>
+                    <Body>
+                        <SuspendedBox>{suspendedText}</SuspendedBox>
+                    </Body>
                 )}
-            </QuestCardContainer>
+            </CardContainer>
         );
     }
 
-    // If error or no quests, show empty state
+    /* Empty / error */
     if (questsError || dailyQuests.length === 0) {
+        const subtitle = questsError
+            ? (typeof questsError === 'string' ? questsError : 'Unable to load quests')
+            : 'No quests available yet';
         return (
-            <QuestCardContainer>
-                <QuestHeader onClick={onToggleCollapse}>
-                    <QuestTitle>
-                        Daily Quests
-                        {collapsed && <ResetTimer>{' '}— none available</ResetTimer>}
-                    </QuestTitle>
-                </QuestHeader>
+            <CardContainer $feedViewMode={feedViewMode}>
+                <Header type="button" onClick={onToggleCollapse} aria-expanded={!collapsed}>
+                    <TitleRow>
+                        <IconTile $tint="#F59E0B">🏆</IconTile>
+                        <TitleStack>
+                            <TitleText>Daily Quests</TitleText>
+                            <SubtitleText>{subtitle}</SubtitleText>
+                        </TitleStack>
+                    </TitleRow>
+                    <HeaderRight>
+                        <Chevron $collapsed={collapsed} aria-hidden="true" />
+                    </HeaderRight>
+                </Header>
                 {!collapsed && (
-                    <QuestBody>
+                    <Body>
                         <EmptyState>
                             {questsError
                                 ? (typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.')
                                 : 'No quests available yet. Check back soon!'}
                         </EmptyState>
-                    </QuestBody>
+                    </Body>
                 )}
-            </QuestCardContainer>
+            </CardContainer>
         );
     }
 
+    /* Normal state */
+    const completedCount = dailyQuests.filter(q => q.completed).length;
+    const totalCount = dailyQuests.length;
+    const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+    const allComplete = totalCount > 0 && completedCount === totalCount;
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+
     const flashTarget = flashQuest?.target || 0;
     const flashProgress = flashQuest ? Math.min(flashQuest.progress || 0, flashTarget) : 0;
+    const flashPct = flashTarget > 0 ? (flashProgress / flashTarget) * 100 : 0;
+    const flashUrgent = flashQuest && liveFlashSeconds > 0 && liveFlashSeconds < 1800;
+    const flashVisible = flashQuest && liveFlashSeconds > 0;
+
+    /* Subtitle: just "X/Y completed" — the reset timer is shown on its
+     * own live-ticking pill next to the title. */
+    const headerSubtitle = `${completedCount}/${totalCount} completed`;
+
+    /* Header reward chip */
+    let headerChip = null;
+    if (hasClaimableRewards) {
+        const amountFmt = totalAfterMultiplier > 0
+            ? `+${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()}`
+            : null;
+        const invitesFmt = pendingInviteCodes > 0
+            ? `+${pendingInviteCodes} invite${pendingInviteCodes > 1 ? 's' : ''}`
+            : null;
+        headerChip = (
+            <HeaderBadge $tint="#22C55E">
+                <span aria-hidden="true">✨</span>
+                {amountFmt || invitesFmt}
+            </HeaderBadge>
+        );
+    }
+
+    /* CTA label */
+    let ctaLabel;
+    if (claiming) ctaLabel = 'Claiming…';
+    else if (!claimingAvailable) ctaLabel = 'Payouts Coming Soon';
+    else if (hasClaimableRewards) ctaLabel = 'Claim Rewards';
+    else if (allComplete) ctaLabel = 'All Quests Complete';
+    else ctaLabel = 'Complete Quests to Earn';
+
+    const ctaDisabled = !hasClaimableRewards || claiming || !claimingAvailable;
 
     return (
         <>
-            <QuestCardContainer role="region" aria-label="Daily Quests">
-                <QuestHeader onClick={onToggleCollapse}>
-                    <QuestTitle>
-                        Daily Quests
-                        {collapsed && (
-                            <ResetTimer>
-                                {' '}— {dailyQuests.filter(q => !q.completed).length} available
-                            </ResetTimer>
-                        )}
-                        {!collapsed && (
-                            <ResetTimer title="Time until daily quest reset">
-                                {formatTime(secondsUntilReset)} left
-                            </ResetTimer>
-                        )}
-                    </QuestTitle>
-                </QuestHeader>
-
-                {!collapsed && <QuestBody>
-                    <QuestList>
-                        {dailyQuests.map(quest => {
-                            const upvotes = quest.upvotes || 0;
-                            const downvotes = quest.downvotes || 0;
-                            const targetUpvotes = quest.target_upvotes || 0;
-                            const targetDownvotes = quest.target_downvotes || 0;
-                            const target = quest.target || 0;
-                            const clampedProgress = Math.min(quest.progress || 0, target);
-                            const clampedUpvotes = Math.min(upvotes, targetUpvotes);
-                            const clampedDownvotes = Math.min(downvotes, targetDownvotes);
-                            if (
-                                quest.action_type === 'balanced_vote' &&
-                                (upvotes > targetUpvotes || downvotes > targetDownvotes)
-                            ) {
-                                console.debug('quest.progress.clamped', {
-                                    id: quest.id,
-                                    upvotes,
-                                    downvotes,
-                                    targetUpvotes,
-                                    targetDownvotes,
-                                });
-                            }
-                            return (
-                                <QuestItem key={quest.id}>
-                                    <QuestDetails>
-                                        <QuestName $completed={quest.completed}>
-                                            {quest.title}{' '}
-                                            <QuestReward>{getQuestRewardDisplay(quest.rewards, rewardMultiplier)}</QuestReward>
-                                        </QuestName>
-                                        <QuestDescription>{quest.description}</QuestDescription>
-                                        {getQuestRequirements(quest).length > 0 && (
-                                            <QuestRequirements>
-                                                {getQuestRequirements(quest).map((req, i) => (
-                                                    <li key={i}>{req}</li>
-                                                ))}
-                                            </QuestRequirements>
-                                        )}
-                                    </QuestDetails>
-                                    {quest.completed ? (
-                                        <CheckMark aria-label="Completed">✓</CheckMark>
-                                    ) : (
-                                        <ProgressContainer>
-                                            {quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined ? (
-                                                <BalancedProgressText
-                                                    title={`Need ${quest.target_upvotes} upvotes and ${quest.target_downvotes} downvotes`}
-                                                >
-                                                    <BalancedProgressRow $met={upvotes >= targetUpvotes}>
-                                                        ↑{clampedUpvotes}/{quest.target_upvotes}
-                                                    </BalancedProgressRow>
-                                                    <BalancedProgressRow $met={downvotes >= targetDownvotes}>
-                                                        ↓{clampedDownvotes}/{quest.target_downvotes}
-                                                    </BalancedProgressRow>
-                                                </BalancedProgressText>
-                                            ) : (
-                                                <ProgressText>
-                                                    {clampedProgress}/{quest.target}
-                                                </ProgressText>
-                                            )}
-                                        </ProgressContainer>
-                                    )}
-                                </QuestItem>
-                            );
-                        })}
-
-                        {/* Flash quest if active */}
-                        {flashQuest && flashQuest.seconds_remaining > 0 && (
-                            <QuestItem>
-                                <QuestDetails>
-                                    <QuestName $completed={flashQuest.completed}>
-                                        {flashQuest.title}
-                                        <FlashBadge>flash</FlashBadge>{' '}
-                                        <QuestReward>{getQuestRewardDisplay(flashQuest.rewards, rewardMultiplier)}</QuestReward>
-                                    </QuestName>
-                                    <QuestDescription>
-                                        {flashQuest.description}{!flashQuest.completed && ` • ${formatTime(flashQuest.seconds_remaining)} left`}
-                                    </QuestDescription>
-                                    {getQuestRequirements(flashQuest).length > 0 && (
-                                        <QuestRequirements>
-                                            {getQuestRequirements(flashQuest).map((req, i) => (
-                                                <li key={i}>{req}</li>
-                                            ))}
-                                        </QuestRequirements>
-                                    )}
-                                </QuestDetails>
-                                {flashQuest.completed ? (
-                                    <CheckMark aria-label="Completed">✓</CheckMark>
-                                ) : (
-                                    <ProgressContainer>
-                                        <ProgressText>
-                                            {flashProgress}/{flashQuest.target}
-                                        </ProgressText>
-                                    </ProgressContainer>
+            <CardContainer $feedViewMode={feedViewMode} role="region" aria-label="Daily Quests">
+                <Header type="button" onClick={onToggleCollapse} aria-expanded={!collapsed}>
+                    <TitleRow>
+                        <IconTile $tint="#F59E0B">🏆</IconTile>
+                        <TitleStack>
+                            <TitleLine>
+                                <TitleText>Daily Quests</TitleText>
+                                {liveResetSeconds > 0 && (
+                                    <HeaderResetTimer title="Time until daily quest reset">
+                                        {formatTimeCompact(liveResetSeconds)} left
+                                    </HeaderResetTimer>
                                 )}
-                            </QuestItem>
+                            </TitleLine>
+                            <SubtitleText>{headerSubtitle}</SubtitleText>
+                        </TitleStack>
+                    </TitleRow>
+                    <HeaderRight>
+                        {headerChip}
+                        {rewardMultiplier > 1 && (
+                            <MultiplierBadge title="Loyalty multiplier increases from 1.0x to 5.0x over your first 50 completed quests">
+                                {rewardMultiplier.toFixed(2)}x
+                            </MultiplierBadge>
                         )}
-                    </QuestList>
+                        <Chevron $collapsed={collapsed} aria-hidden="true" />
+                    </HeaderRight>
+                </Header>
 
-                    <ClaimSection>
-                        <LoyaltyBonusText
-                            title="Loyalty multiplier increases from 1.0x to 5.0x over your first 50 completed quests"
-                        >
-                            {rewardMultiplier.toFixed(2)}x loyalty multiplier
-                        </LoyaltyBonusText>
-                        <ClaimButton
-                            onClick={handleClaim}
-                            disabled={!hasClaimableRewards || claiming || !claimingAvailable}
-                            $hasRewards={hasClaimableRewards && claimingAvailable}
-                            title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
-                        >
-                            {claiming ? 'claiming...' : !claimingAvailable ? 'coming soon' : hasClaimableRewards ? 'claim rewards' : 'complete quests'}
-                        </ClaimButton>
-                    </ClaimSection>
-
-                    {claimError && (
-                        <ClaimErrorMessage>{claimError}</ClaimErrorMessage>
-                    )}
-
-                    {/* Debug panel - only shows when BACKEND_DEBUG=true in backend.env */}
-                    {debugEnabled && (
-                        <div style={{ marginTop: '0.3rem' }}>
-                            <DebugButton onClick={() => setShowDebug(!showDebug)}>
-                                {showDebug ? '🔧 Hide Debug' : '🔧 Debug'}
-                            </DebugButton>
-                            {showDebug && (
-                                <DebugPanel>
-                                    <DebugTitle>🔧 Quest Debug Panel</DebugTitle>
-                                    {debugLoading ? (
-                                        <div>Loading...</div>
-                                    ) : debugInfo ? (
-                                        <>
-                                            <DebugRow>
-                                                <DebugLabel>Total Completed Quests:</DebugLabel>
-                                                <DebugValue>{debugInfo.completed_count}</DebugValue>
-                                            </DebugRow>
-                                            <DebugRow>
-                                                <DebugLabel>Unused Invite Codes:</DebugLabel>
-                                                <DebugValue>{debugInfo.unused_invite_codes}</DebugValue>
-                                            </DebugRow>
-                                            <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
-                                                <DebugLabel>invite_recruit:</DebugLabel>
-                                                <DebugRow>
-                                                    <span>
-                                                        Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} |
-                                                        Chance: {debugInfo.invite_recruit?.chance}
-                                                    </span>
-                                                    <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? '#22c55e' : '#6b7280' }}>
-                                                        {debugInfo.invite_recruit?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
-                                                    </DebugValue>
-                                                </DebugRow>
-                                            </div>
-                                            <div style={{ marginTop: '0.3rem' }}>
-                                                <DebugLabel>invite_earner:</DebugLabel>
-                                                <DebugRow>
-                                                    <span>
-                                                        Earned: {debugInfo.invite_earner?.completed || 0} |
-                                                        Next milestone: {debugInfo.invite_earner?.next_milestone}
-                                                        {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''} |
-                                                        Chance: {debugInfo.invite_earner?.chance}
-                                                    </span>
-                                                    <DebugValue style={{ color: debugInfo.invite_earner?.assigned ? '#22c55e' : '#6b7280' }}>
-                                                        {debugInfo.invite_earner?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
-                                                    </DebugValue>
-                                                </DebugRow>
-                                            </div>
-                                            <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
-                                                <DebugLabel>Today's Quests:</DebugLabel>
-                                                {debugInfo.today_quests?.map(q => (
-                                                    <DebugQuestRow key={q.quest_id}>
-                                                        <span>
-                                                            {q.quest_id} ({q.progress})
-                                                            {q.completed && ' ✓'}
-                                                        </span>
-                                                        {!q.completed && (
-                                                            <DebugButton
-                                                                $variant="success"
-                                                                onClick={() => debugCompleteQuest(q.quest_id)}
-                                                            >
-                                                                Complete
-                                                            </DebugButton>
-                                                        )}
-                                                    </DebugQuestRow>
-                                                ))}
-                                            </div>
-                                            <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
-                                                <DebugLabel>Set completed count:</DebugLabel>
-                                                <DebugRow>
-                                                    <DebugInput
-                                                        type="number"
-                                                        value={targetCompletedCount}
-                                                        onChange={e => setTargetCompletedCount(e.target.value)}
-                                                        min="0"
-                                                    />
-                                                    <DebugButton onClick={debugSetCompletedCount}>
-                                                        Set Count
-                                                    </DebugButton>
-                                                </DebugRow>
-                                            </div>
-                                            <DebugButtonGroup>
-                                                <DebugButton $variant="danger" onClick={debugResetQuests}>
-                                                    Reset Today's Quests
-                                                </DebugButton>
-                                                <DebugButton onClick={fetchDebugInfo}>
-                                                    Refresh Debug
-                                                </DebugButton>
-                                            </DebugButtonGroup>
-                                        </>
-                                    ) : (
-                                        <div>No debug info available</div>
+                {!collapsed && (
+                    <Body>
+                        {/* Flash quest */}
+                        {flashVisible && (
+                            <>
+                                <SectionLabel>Flash Quest</SectionLabel>
+                                <FlashCard>
+                                <FlashHeader>
+                                    <FlashBadge>
+                                        <span aria-hidden="true">⚡</span> Flash
+                                    </FlashBadge>
+                                    {!flashQuest.completed && (
+                                        <FlashTimer $urgent={flashUrgent}>
+                                            <span aria-hidden="true">⏱</span>
+                                            {formatTimeCompact(liveFlashSeconds)}
+                                        </FlashTimer>
                                     )}
-                                </DebugPanel>
-                            )}
-                        </div>
-                    )}
-                </QuestBody>}
-            </QuestCardContainer>
+                                </FlashHeader>
+                                <FlashRow>
+                                    <QuestStatusIcon $completed={flashQuest.completed} aria-hidden="true" />
+                                    <FlashTitleText $completed={flashQuest.completed}>
+                                        {flashQuest.title}
+                                    </FlashTitleText>
+                                    <FlashProgressText>
+                                        {flashProgress}/{flashQuest.target}
+                                    </FlashProgressText>
+                                </FlashRow>
+                                <FlashProgressTrack>
+                                    <FlashProgressFill $pct={flashPct} $completed={flashQuest.completed} />
+                                </FlashProgressTrack>
+                                </FlashCard>
+                            </>
+                        )}
+
+                        {/* Quest list — mobile-style bigger cards with per-quest progress */}
+                        <SectionLabel>Today's Quests</SectionLabel>
+                        <QuestList>
+                            {dailyQuests.map(quest => {
+                                const upvotes = quest.upvotes || 0;
+                                const downvotes = quest.downvotes || 0;
+                                const targetUpvotes = quest.target_upvotes || 0;
+                                const targetDownvotes = quest.target_downvotes || 0;
+                                const target = quest.target || 0;
+                                const clampedProgress = Math.min(quest.progress || 0, target);
+                                const clampedUpvotes = Math.min(upvotes, targetUpvotes);
+                                const clampedDownvotes = Math.min(downvotes, targetDownvotes);
+                                const rewardText = getQuestRewardDisplay(quest.rewards, rewardMultiplier);
+                                const detailItems = buildQuestDetails(quest);
+                                const isBalanced = quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined;
+                                const actionTint = getActionColor(quest.action_type);
+                                const actionEmoji = getActionEmoji(quest.action_type);
+                                const questPct = target > 0 ? (clampedProgress / target) * 100 : 0;
+
+                                return (
+                                    <QuestRow key={quest.id} $completed={quest.completed}>
+                                        <QuestRowHeader>
+                                            <QuestActionTile $tint={actionTint} aria-hidden="true">
+                                                {actionEmoji}
+                                                {quest.completed && <QuestCompleteBadge />}
+                                            </QuestActionTile>
+                                            <QuestRowBody>
+                                                <QuestTopLine>
+                                                    <QuestRowTitle $completed={quest.completed}>{quest.title}</QuestRowTitle>
+                                                    {rewardText && !quest.completed && (
+                                                        <QuestRowReward>{rewardText}</QuestRowReward>
+                                                    )}
+                                                </QuestTopLine>
+                                            </QuestRowBody>
+                                        </QuestRowHeader>
+
+                                        {/* Bullet-point details (description + requirements) */}
+                                        {detailItems.length > 0 && (
+                                            <QuestDetailsList>
+                                                {detailItems.map((item, idx) => (
+                                                    <QuestDetailItem key={idx}>{item}</QuestDetailItem>
+                                                ))}
+                                            </QuestDetailsList>
+                                        )}
+
+                                        {/* Footer: progress bar + "n/target" + percent (or balanced split) */}
+                                        {isBalanced ? (
+                                            <QuestRowFooter>
+                                                <BalancedStack>
+                                                    <BalancedPill $met={upvotes >= targetUpvotes} title="Upvotes">
+                                                        ↑{clampedUpvotes}/{quest.target_upvotes}
+                                                    </BalancedPill>
+                                                    <BalancedPill $met={downvotes >= targetDownvotes} title="Downvotes">
+                                                        ↓{clampedDownvotes}/{quest.target_downvotes}
+                                                    </BalancedPill>
+                                                </BalancedStack>
+                                                <QuestRowPercent $completed={quest.completed}>
+                                                    {quest.completed ? 'Completed!' : `${Math.round(questPct)}%`}
+                                                </QuestRowPercent>
+                                            </QuestRowFooter>
+                                        ) : (
+                                            <>
+                                                <QuestRowProgressTrack>
+                                                    <QuestRowProgressFill
+                                                        $pct={questPct}
+                                                        $tint={actionTint}
+                                                        $completed={quest.completed}
+                                                    />
+                                                </QuestRowProgressTrack>
+                                                <QuestRowFooter>
+                                                    <QuestRowProgress>
+                                                        {clampedProgress} / {quest.target}
+                                                    </QuestRowProgress>
+                                                    <QuestRowPercent $completed={quest.completed}>
+                                                        {quest.completed ? 'Completed!' : `${Math.round(questPct)}%`}
+                                                    </QuestRowPercent>
+                                                </QuestRowFooter>
+                                            </>
+                                        )}
+                                    </QuestRow>
+                                );
+                            })}
+                        </QuestList>
+
+                        {/* Footer: CTA (loyalty multiplier is shown in the progress header) */}
+                        <ClaimFooter>
+                            <CtaButton
+                                type="button"
+                                onClick={handleClaim}
+                                disabled={ctaDisabled}
+                                title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
+                            >
+                                {ctaLabel}
+                            </CtaButton>
+                        </ClaimFooter>
+
+                        {claimError && <ClaimErrorMessage>{claimError}</ClaimErrorMessage>}
+
+                        {/* Debug panel */}
+                        {debugEnabled && (
+                            <div style={{ marginTop: '0.3rem' }}>
+                                <DebugButton onClick={() => setShowDebug(!showDebug)}>
+                                    {showDebug ? '🔧 Hide Debug' : '🔧 Debug'}
+                                </DebugButton>
+                                {showDebug && (
+                                    <DebugPanel>
+                                        <DebugTitle>🔧 Quest Debug Panel</DebugTitle>
+                                        {debugLoading ? (
+                                            <div>Loading…</div>
+                                        ) : debugInfo ? (
+                                            <>
+                                                <DebugRow>
+                                                    <DebugLabel>Total Completed Quests:</DebugLabel>
+                                                    <DebugValue>{debugInfo.completed_count}</DebugValue>
+                                                </DebugRow>
+                                                <DebugRow>
+                                                    <DebugLabel>Unused Invite Codes:</DebugLabel>
+                                                    <DebugValue>{debugInfo.unused_invite_codes}</DebugValue>
+                                                </DebugRow>
+                                                <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                                    <DebugLabel>invite_recruit:</DebugLabel>
+                                                    <DebugRow>
+                                                        <span>
+                                                            Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} |
+                                                            Chance: {debugInfo.invite_recruit?.chance}
+                                                        </span>
+                                                        <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                            {debugInfo.invite_recruit?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
+                                                        </DebugValue>
+                                                    </DebugRow>
+                                                </div>
+                                                <div style={{ marginTop: '0.3rem' }}>
+                                                    <DebugLabel>invite_earner:</DebugLabel>
+                                                    <DebugRow>
+                                                        <span>
+                                                            Earned: {debugInfo.invite_earner?.completed || 0} |
+                                                            Next milestone: {debugInfo.invite_earner?.next_milestone}
+                                                            {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''} |
+                                                            Chance: {debugInfo.invite_earner?.chance}
+                                                        </span>
+                                                        <DebugValue style={{ color: debugInfo.invite_earner?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                            {debugInfo.invite_earner?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
+                                                        </DebugValue>
+                                                    </DebugRow>
+                                                </div>
+                                                <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                                    <DebugLabel>Today's Quests:</DebugLabel>
+                                                    {debugInfo.today_quests?.map(q => (
+                                                        <DebugQuestRow key={q.quest_id}>
+                                                            <span>
+                                                                {q.quest_id} ({q.progress})
+                                                                {q.completed && ' ✓'}
+                                                            </span>
+                                                            {!q.completed && (
+                                                                <DebugButton
+                                                                    $variant="success"
+                                                                    onClick={() => debugCompleteQuest(q.quest_id)}
+                                                                >
+                                                                    Complete
+                                                                </DebugButton>
+                                                            )}
+                                                        </DebugQuestRow>
+                                                    ))}
+                                                </div>
+                                                <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                                    <DebugLabel>Set completed count:</DebugLabel>
+                                                    <DebugRow>
+                                                        <DebugInput
+                                                            type="number"
+                                                            value={targetCompletedCount}
+                                                            onChange={e => setTargetCompletedCount(e.target.value)}
+                                                            min="0"
+                                                        />
+                                                        <DebugButton onClick={debugSetCompletedCount}>
+                                                            Set Count
+                                                        </DebugButton>
+                                                    </DebugRow>
+                                                </div>
+                                                <DebugButtonGroup>
+                                                    <DebugButton $variant="danger" onClick={debugResetQuests}>
+                                                        Reset Today's Quests
+                                                    </DebugButton>
+                                                    <DebugButton onClick={fetchDebugInfo}>
+                                                        Refresh Debug
+                                                    </DebugButton>
+                                                </DebugButtonGroup>
+                                            </>
+                                        ) : (
+                                            <div>No debug info available</div>
+                                        )}
+                                    </DebugPanel>
+                                )}
+                            </div>
+                        )}
+                    </Body>
+                )}
+            </CardContainer>
 
             {/* Celebration overlay */}
             {showCelebration && (
                 <CelebrationOverlay onClick={closeCelebration}>
-                    {/* Confetti pieces */}
                     {Array.from({ length: 30 }).map((_, i) => (
                         <ConfettiPiece
                             key={i}
