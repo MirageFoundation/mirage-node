@@ -233,7 +233,6 @@ function MobileBottomNav({ state }) {
 
     const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
     const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
-    const [isInputFocused, setIsInputFocused] = useState(false);
 
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const username = (state && state.username) ? state.username : Storage.load('username', '');
@@ -303,25 +302,6 @@ function MobileBottomNav({ state }) {
                 window.visualViewport.removeEventListener('scroll', scheduleUpdate);
             }
             if (rafId) cancelAnimationFrame(rafId);
-        };
-    }, [isMobile]);
-
-    // Hide the bar when a text input is focused (keyboard open).
-    useEffect(() => {
-        if (!isMobile) return;
-        const isText = (e) => {
-            const tag = e.target?.tagName?.toLowerCase();
-            const type = e.target?.type?.toLowerCase();
-            return tag === 'textarea' ||
-                (tag === 'input' && ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type));
-        };
-        const handleFocusIn = (e) => { if (isText(e)) setIsInputFocused(true); };
-        const handleFocusOut = (e) => { if (isText(e)) setIsInputFocused(false); };
-        document.addEventListener('focusin', handleFocusIn);
-        document.addEventListener('focusout', handleFocusOut);
-        return () => {
-            document.removeEventListener('focusin', handleFocusIn);
-            document.removeEventListener('focusout', handleFocusOut);
         };
     }, [isMobile]);
 
@@ -396,7 +376,15 @@ function MobileBottomNav({ state }) {
         }
     };
 
-    if (!isMobile || shouldHide || isInputFocused) return null;
+    // Keep the bar mounted even while a text input is focused. The
+    // `updatePosition` effect above already re-anchors the nav to the
+    // visual viewport (which shrinks when the virtual keyboard opens),
+    // so the bar floats above the keyboard rather than disappearing.
+    // Unmounting on focus previously caused the bar to vanish on the
+    // login / create-account screens — and on iOS the `focusout` event
+    // doesn't always fire when the keyboard dismisses, leaving the bar
+    // stuck hidden until the next route change.
+    if (!isMobile || shouldHide) return null;
 
     // Logged-out users land on /signup via the create tab (mirrors mobile app).
     const createLink = hasPublicKey
