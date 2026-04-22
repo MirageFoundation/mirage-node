@@ -1197,10 +1197,16 @@ def _load_vote_and_comment_stats(
     blocked_posts: set[str],
     blocked_users: set[str],
     viewer: str = "",
-) -> tuple[dict, dict, dict, dict]:
-    """Batch load points, comment counts, viewer's votes, and viewer's user_weight contributions."""
+) -> tuple[dict, dict, dict, dict, dict]:
+    """Batch load points, comment counts, viewer's votes, and viewer's user_weight contributions.
+
+    Returns (vote_totals, comment_counts, user_votes, user_weight_map, timings)
+    where timings has stats_vt_ms / stats_cc_ms / stats_uv_ms sub-phase numbers.
+    """
+    import time as _time
+
     if not post_ids:
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {"stats_vt_ms": 0.0, "stats_cc_ms": 0.0, "stats_uv_ms": 0.0}
 
     vote_totals: dict[str, float] = {}
     comment_counts: dict[str, int] = {}
@@ -1208,7 +1214,11 @@ def _load_vote_and_comment_stats(
     user_weight_map: dict[str, float] = {}
     id_ph = ",".join(["%s"] * len(post_ids))
 
+    def _ms_since(t0: float) -> float:
+        return round((_time.monotonic() - t0) * 1000, 2)
+
     # Points (sum of user_weight, excluding blocked users)
+    _t = _time.monotonic()
     if blocked_users:
         blocked_ph = ",".join(["%s"] * len(blocked_users))
         cur.execute(
@@ -1226,8 +1236,10 @@ def _load_vote_and_comment_stats(
     for tgt, total in cur.fetchall():
         if tgt:
             vote_totals[tgt] = float(total or 0.0)
+    stats_vt_ms = _ms_since(_t)
 
     # Comment counts
+    _t = _time.monotonic()
     deleted_bare = _deleted_filter_bare()
     all_blocked = (blocked_posts or set()) | (blocked_users or set())
     if all_blocked:
@@ -1254,8 +1266,10 @@ def _load_vote_and_comment_stats(
     for root_id, cnt in cur.fetchall():
         if root_id:
             comment_counts[root_id] = int(cnt or 0)
+    stats_cc_ms = _ms_since(_t)
 
     # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution
+    _t = _time.monotonic()
     viewer_lower = (viewer or "").strip().lower()
     if viewer_lower and viewer_lower != "guest":
         cur.execute(
@@ -1267,8 +1281,15 @@ def _load_vote_and_comment_stats(
             if tgt:
                 user_votes[tgt] = int(vote) if vote else 0
                 user_weight_map[tgt] = float(weight) if weight else 0.0
+    stats_uv_ms = _ms_since(_t)
 
-    return vote_totals, comment_counts, user_votes, user_weight_map
+    return (
+        vote_totals,
+        comment_counts,
+        user_votes,
+        user_weight_map,
+        {"stats_vt_ms": stats_vt_ms, "stats_cc_ms": stats_cc_ms, "stats_uv_ms": stats_uv_ms},
+    )
 
 
 def _load_following_candidates(
@@ -1424,7 +1445,7 @@ def _get_following_feed(
         has_more = len(candidates) > end
 
         page_ids = [p["post_id"] for p in page_posts]
-        vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+        vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
             cur, page_ids, blocked_posts, blocked_users, viewer_lower
         )
         _, award_details = _load_award_aggregates(cur, page_ids, blocked_users)
@@ -1471,7 +1492,7 @@ def _get_following_feed(
 
     # ── Magic: full scoring path ────────────────────────────────────
     post_ids = [c["post_id"] for c in candidates]
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+    vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
 
@@ -1724,7 +1745,7 @@ def _get_home_feed_newest(
     # Load vote/comment/award stats only for the posts we're returning
     page_ids = [p["post_id"] for p in page_posts]
     viewer_lower = (viewer or "").strip().lower()
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+    vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
         cur, page_ids, blocked_posts, blocked_users, viewer_lower
     )
     _, award_details = _load_award_aggregates(cur, page_ids, blocked_users)
@@ -1812,12 +1833,11 @@ def _get_home_feed_magic(
     similar_addrs = set(sim_lookup.keys())
 
     # 3. Load candidate posts.
-    per_source = limit * page * _seen_overfetch_factor(seen_posts, 4)
-    if page == 1:
-        # Cap first-page pool size to keep home-feed latency predictable.
-        per_source = min(per_source, 500)
+    # Cap the per-source pool size on all pages so feed latency stays bounded
+    # even when seen-post overfetch would otherwise multiply the query cost.
+    per_source = min(limit * page * _seen_overfetch_factor(seen_posts, 4), 500)
     _t = time.monotonic()
-    candidates = _load_home_candidates(
+    candidates, cand_timings = _load_home_candidates(
         cur,
         viewer_lower,
         similar_addrs,
@@ -1831,6 +1851,7 @@ def _get_home_feed_magic(
     )
     timings["cand_ms"] = _ms_since(_t)
     timings["cand_count"] = len(candidates)
+    timings.update(cand_timings)
 
     if not candidates:
         return {
@@ -1850,10 +1871,11 @@ def _get_home_feed_magic(
 
     # 5. Load stats
     _t = time.monotonic()
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+    vote_totals, comment_counts, user_votes, user_weight_map, stats_timings = _load_vote_and_comment_stats(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
     timings["stats_ms"] = _ms_since(_t)
+    timings.update(stats_timings)
 
     _t = time.monotonic()
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
@@ -2237,16 +2259,25 @@ def _load_home_candidates(
     now_ts: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """
     Load candidate posts for home feed from multiple sources:
     0. Own posts (recent)
     1. Posts by similar users (recent)
     2. Posts upvoted by similar users (recent)
     3. Recent posts (discovery)
+
+    Returns (candidates, timings) where timings maps src{0..3}_ms / src{0..3}_n
+    for per-source diagnostics.
     """
+    import time as _time
+
     results = []
     seen = set()
+    timings: dict[str, float] = {}
+
+    def _ms_since(t0: float) -> float:
+        return round((_time.monotonic() - t0) * 1000, 2)
 
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
@@ -2263,6 +2294,7 @@ def _load_home_candidates(
     min_ts = int(now_ts) - 86400
 
     # Source 0: Own posts (always included so the viewer always sees their content)
+    _t = _time.monotonic()
     cur.execute(
         f"""SELECT {_POST_COLS}
         FROM posts p
@@ -2275,6 +2307,7 @@ def _load_home_candidates(
         LIMIT %s""",
         [viewer, min_ts] + bt_params + [max_posts],
     )
+    src0_n = 0
     for row in cur.fetchall():
         post = _row_to_post(
             row,
@@ -2289,8 +2322,13 @@ def _load_home_candidates(
         if post:
             post["_source"] = "own"
             results.append(post)
+            src0_n += 1
+    timings["src0_ms"] = _ms_since(_t)
+    timings["src0_n"] = src0_n
 
     # Source 1: Posts BY similar users (root posts only)
+    _t = _time.monotonic()
+    src1_n = 0
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
@@ -2319,22 +2357,32 @@ def _load_home_candidates(
             if post:
                 post["_source"] = "similar_author"
                 results.append(post)
+                src1_n += 1
+    timings["src1_ms"] = _ms_since(_t)
+    timings["src1_n"] = src1_n
 
-    # Source 2: Posts UPVOTED by similar users
+    # Source 2: Posts UPVOTED by similar users.
+    # Drive from posts (uses idx_posts_created_at) and use EXISTS against the
+    # uniq_votes_owner_target index instead of seq-scanning votes. The old
+    # `FROM votes JOIN posts` plan did a full seq scan of ~128k upvote rows.
+    _t = _time.monotonic()
+    src2_n = 0
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
         cur.execute(
-            f"""SELECT DISTINCT ON (p.txhash)
-                   {_POST_COLS}
-            FROM votes v
-            JOIN posts p ON LOWER(v.target) = LOWER(p.txhash)
+            f"""SELECT {_POST_COLS}
+            FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-            WHERE LOWER(v.owner) IN ({placeholders})
-              AND v.user_vote > 0
+            WHERE EXISTS (
+                SELECT 1 FROM votes v
+                WHERE LOWER(v.target) = LOWER(p.txhash)
+                  AND LOWER(v.owner) IN ({placeholders})
+                  AND v.user_vote > 0
+              )
               AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
               {bt_clause}
-            ORDER BY p.txhash, p.created_at DESC
+            ORDER BY p.created_at DESC
             LIMIT %s""",
             similar_list + bt_params + [max_posts],
         )
@@ -2352,8 +2400,12 @@ def _load_home_candidates(
             if post:
                 post["_source"] = "similar_upvoted"
                 results.append(post)
+                src2_n += 1
+    timings["src2_ms"] = _ms_since(_t)
+    timings["src2_n"] = src2_n
 
     # Source 3: Recent posts (discovery)
+    _t = _time.monotonic()
     cur.execute(
         f"""SELECT {_POST_COLS}
         FROM posts p
@@ -2364,6 +2416,7 @@ def _load_home_candidates(
         LIMIT %s""",
         bt_params + [max_posts],
     )
+    src3_n = 0
     for row in cur.fetchall():
         post = _row_to_post(
             row,
@@ -2378,8 +2431,11 @@ def _load_home_candidates(
         if post:
             post["_source"] = "recent"
             results.append(post)
+            src3_n += 1
+    timings["src3_ms"] = _ms_since(_t)
+    timings["src3_n"] = src3_n
 
-    return results
+    return results, timings
 
 
 def _row_to_post(
@@ -2564,7 +2620,7 @@ def _get_guest_feed(
 
     # Load vote/comment/award stats (no viewer for guest)
     post_ids = [c["post_id"] for c in candidates]
-    vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    vote_totals, comment_counts, _, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     _, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
     for post in candidates:
@@ -2628,7 +2684,7 @@ def _get_guest_feed_magic(
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
     post_ids = [c["post_id"] for c in candidates]
-    vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    vote_totals, comment_counts, _, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
