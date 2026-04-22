@@ -6916,7 +6916,7 @@ def _verify_seen_signature(
 
     ok, guard_err = _guard_push_request(user_addr, "seen_posts", timestamp, nonce)
     if not ok:
-        return None, "invalid nonce"
+        return None, guard_err
     return user_addr.lower(), None
 
 

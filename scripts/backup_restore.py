@@ -793,6 +793,46 @@ set -e
 PG_DATA_DIR="/root/.mirage/postgres"
 PG_CONF="/etc/postgresql/16/main/postgresql.conf"
 
+reseed_db_sequences() {
+    local db="$1"
+    echo "Reseeding serial sequences in $db..."
+    su - postgres -c "psql -v ON_ERROR_STOP=1 -d \"$db\" <<'SQL_EOF'
+DO $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN
+        SELECT q.schema_name, q.table_name, q.column_name, q.seq_name
+        FROM (
+            SELECT
+                ns.nspname AS schema_name,
+                cls.relname AS table_name,
+                att.attname AS column_name,
+                pg_get_serial_sequence(format('%I.%I', ns.nspname, cls.relname), att.attname) AS seq_name
+            FROM pg_class cls
+            JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+            JOIN pg_attribute att ON att.attrelid = cls.oid
+            JOIN pg_attrdef def ON def.adrelid = cls.oid AND def.adnum = att.attnum
+            WHERE cls.relkind IN ('r', 'p')
+              AND ns.nspname = 'public'
+              AND att.attnum > 0
+              AND NOT att.attisdropped
+              AND pg_get_expr(def.adbin, def.adrelid) LIKE 'nextval(%'
+        ) q
+        WHERE q.seq_name IS NOT NULL
+    LOOP
+        EXECUTE format(
+            'SELECT setval(%L, GREATEST((SELECT COALESCE(MAX(%I), 1) FROM %I.%I), 1), true)',
+            rec.seq_name,
+            rec.column_name,
+            rec.schema_name,
+            rec.table_name
+        );
+    END LOOP;
+END $$;
+SQL_EOF"
+}
+
 if [ ! -f "$PG_DATA_DIR/PG_VERSION" ]; then
     echo "ERROR: PostgreSQL data directory missing: $PG_DATA_DIR" >&2
     exit 1
@@ -833,6 +873,7 @@ su - postgres -c "psql -c 'CREATE DATABASE mirage_backend OWNER mirage_backend'"
 
 echo "Restoring indexer SQL dump..."
 su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage_indexer -f /root/.mirage/backup_indexer.sql"
+reseed_db_sequences mirage_indexer
 
 echo "Granting read-only access on indexer DB..."
 su - postgres -c "psql -d mirage_indexer -c 'GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro'"
@@ -843,6 +884,7 @@ su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA
 if [ -f /root/.mirage/backup_backend.sql ]; then
     echo "Restoring backend SQL dump..."
     su - postgres -c "psql -v ON_ERROR_STOP=1 -d mirage_backend -f /root/.mirage/backup_backend.sql"
+    reseed_db_sequences mirage_backend
 else
     echo "No backend SQL dump found, backend DB will be initialized by the application"
 fi

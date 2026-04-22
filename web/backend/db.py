@@ -466,6 +466,10 @@ def init_backend_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_pending_rewards_unclaimed "
                 "ON pending_rewards(owner) WHERE claimed_at IS NULL"
             )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_rewards_event_dedupe "
+                "ON pending_rewards(owner, reward_type, reason, created_at)"
+            )
             _assert_table_schema(
                 "pending_rewards",
                 {
@@ -530,13 +534,9 @@ def init_backend_schema() -> None:
             """
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_user_seen_posts_owner_seen "
-                "ON user_seen_posts(owner, seen_at DESC)"
+                "CREATE INDEX IF NOT EXISTS idx_user_seen_posts_owner_seen " "ON user_seen_posts(owner, seen_at DESC)"
             )
-            cur.execute(
-                "ALTER TABLE user_seen_posts ADD COLUMN IF NOT EXISTS "
-                "view_count INT NOT NULL DEFAULT 1"
-            )
+            cur.execute("ALTER TABLE user_seen_posts ADD COLUMN IF NOT EXISTS " "view_count INT NOT NULL DEFAULT 1")
             _assert_table_schema(
                 "user_seen_posts",
                 {"owner", "post_id", "seen_at", "reason", "view_count"},
@@ -551,8 +551,12 @@ def init_backend_schema() -> None:
                 )
             """
             )
-            cur.execute("ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_level SMALLINT NOT NULL DEFAULT 0")
-            cur.execute("ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_last_sent_at BIGINT NOT NULL DEFAULT 0")
+            cur.execute(
+                "ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_level SMALLINT NOT NULL DEFAULT 0"
+            )
+            cur.execute(
+                "ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_last_sent_at BIGINT NOT NULL DEFAULT 0"
+            )
             _assert_table_schema(
                 "user_inbox_state",
                 {"owner", "inbox_last_viewed_at", "trending_level", "trending_last_sent_at"},

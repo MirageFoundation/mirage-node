@@ -43,7 +43,7 @@ done
 
 **Background**: this class of incident on the Mirage fleet has always been traced back to host-level memory pressure on an underprovisioned validator (4 GB RAM, no swap) causing a silent IAVL cache corruption — the committed state is correct on disk, but an in-memory read during `BeginBlock` returns a stale value, which produces a different apphash for that one height on that one node. `miraged rollback` cannot fix this; restore-from-peer can.
 
-**Canonical recovery**: restore a fresh backup from a healthy peer using `scripts/backup_restore.py`.
+**Canonical recovery for validator-only hosts** (`mirage.vote`, `146.190.108.140`, `139.59.9.96`): restore a fresh backup from a healthy peer using `scripts/backup_restore.py`.
 
 ```bash
 # From your workstation
@@ -57,6 +57,12 @@ scripts/backup_restore.py restore \
 `--migrate` rewrites the restored node to the sick operator's mnemonic, keyring, and moniker. It runs a safety guard (`verify_derived_consensus_key_matches_onchain`) immediately after the keyring import; if the derived consensus pubkey does not match the on-chain validator record, the restore aborts with three named recovery options. Only override with `--allow-consensus-key-change` if you are intentionally rotating the consensus key.
 
 Inside the keyring, `--migrate` replaces only the `validator` account key from the mnemonic. Every other named key in the backup keyring (e.g. `rewards_pool` for quest payouts) is preserved byte-for-byte, and the script logs the preserved set before and after so an operator can confirm nothing was silently dropped. If the post-import check reports missing keys, the specific service that depends on them (e.g. quest payouts on a `503 reward pool not configured` error) must be repaired by re-adding the key manually before the node is considered fully recovered.
+
+**Hard rule for `mirage.talk` (prod app host): do not run cross-node restore (`--migrate` from another node backup).**
+
+`mirage.talk` is not just a validator; it is the live app/backend data node (quests, points, referrals, invite state, stats, push state). Restoring it from another node's backup can overwrite `mirage_backend` with foreign state and permanently hide or drop user-facing progress until manual forensic merge/backfill.
+
+If `mirage.talk` has a chain-state issue, recover by resyncing chain state on that host (or restoring from a `mirage.talk` backup only), not by importing another node's full backup image.
 
 After the node catches up:
 
