@@ -14,6 +14,7 @@ import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
+import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -2869,9 +2870,10 @@ function ViewPostView({
                     <LoggedOutPromptCard
                         role="region"
                         aria-label="View post on Mirage"
-                        eyebrow="Post Details"
                         title="Sign in to view this post"
                         description="Create an account or sign in to read posts, vote, and join the conversation."
+                        notice="Currently in Private Beta — Invite Only"
+                        stats={getCachedWelcomeStats()}
                         links={[
                             { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },
                             { label: "Learn More", href: "https://mirage.foundation", external: true },
