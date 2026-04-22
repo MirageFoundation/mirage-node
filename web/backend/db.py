@@ -288,10 +288,21 @@ def init_backend_schema() -> None:
             )
             # NOT VALID: skips scanning existing rows so an unexpected mixed-case
             # row can't brick startup; still enforced for new writes.
-            cur.execute("ALTER TABLE user_upvote_cache DROP CONSTRAINT IF EXISTS user_upvote_cache_owner_lower")
+            # DO block with exception handler: race-safe when multiple gunicorn
+            # workers run init_backend_schema() concurrently (ALTER TABLE ADD
+            # CONSTRAINT has no IF NOT EXISTS variant, so we swallow the
+            # duplicate_object error instead).
             cur.execute(
-                "ALTER TABLE user_upvote_cache "
-                "ADD CONSTRAINT user_upvote_cache_owner_lower CHECK (owner = LOWER(owner)) NOT VALID"
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE user_upvote_cache
+                    ADD CONSTRAINT user_upvote_cache_owner_lower
+                    CHECK (owner = LOWER(owner)) NOT VALID;
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_upvote_cache_expires ON user_upvote_cache(expires_at)")
             _assert_table_schema("user_upvote_cache", {"owner", "upvoted_posts", "computed_at", "expires_at"})
