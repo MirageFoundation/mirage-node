@@ -7,6 +7,7 @@ import { normalizeThemeId } from '../../../registry/theme';
 import SearchDropdown from './SearchDropdown.js';
 import { useSearchDropdown } from '../../../logic/useSearchDropdown';
 import { dicebearAvatarUrl } from '../../../utils/avatar';
+import ConfirmDialog from './ConfirmDialog.js';
 
 /**
  * Reddit-style TopBar for the mirageapp theme.
@@ -402,6 +403,22 @@ const MenuItem = styled(Link)`
     font-size: 0.78rem;
     color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+`;
+
+const MenuButton = styled.button`
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.78rem;
+    color: ${({ theme }) => theme.colors.text};
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
     &:hover {
         background: ${({ theme }) => theme.colors.hoverBg};
     }
@@ -805,7 +822,7 @@ function GuestMenu() {
 }
 
 // Shared profile menu content — also used by MobileBottomNav and the user-menu dropdown.
-export function ProfileMenuContent({ displayName, onItemClick }) {
+export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
     const userLevel = Number(Storage.load('user_level', '0')) || 0;
     const isAdmin = userLevel >= 100;
     const [referralsEnabled, setReferralsEnabled] = useState(false);
@@ -826,6 +843,15 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
 
     const handleItemClick = (targetPath) => {
         if (typeof onItemClick === 'function') onItemClick(targetPath);
+    };
+
+    const handleSignOutClick = () => {
+        if (typeof onSignOut === 'function') {
+            onSignOut();
+        } else if (typeof onItemClick === 'function') {
+            // Fallback: close menu + legacy route navigation.
+            onItemClick('/sign_out');
+        }
     };
 
     return (
@@ -851,7 +877,7 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
                 </>
             )}
             <MenuDivider />
-            <MenuItem to="/sign_out" onClick={() => handleItemClick('/sign_out')}>Sign out</MenuItem>
+            <MenuButton type="button" onClick={handleSignOutClick}>Sign out</MenuButton>
         </>
     );
 }
@@ -895,6 +921,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     }, [isLoggedIn]);
 
     const [menuOpen, setMenuOpen] = useState(false);
+    const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
     const menuRef = useRef(null);
     useEffect(() => {
         const onDoc = (e) => {
@@ -972,6 +999,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     }, []);
 
     return (
+        <>
         <Bar>
             <BarInner>
             <SidebarToggleButton
@@ -1110,6 +1138,10 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                                 <ProfileMenuContent
                                     displayName={username}
                                     onItemClick={() => setMenuOpen(false)}
+                                    onSignOut={() => {
+                                        setMenuOpen(false);
+                                        setSignOutDialogOpen(true);
+                                    }}
                                 />
                             </Dropdown>
                         )}
@@ -1123,6 +1155,21 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
             </RightSpacer>
             </BarInner>
         </Bar>
+            {signOutDialogOpen && (
+                <ConfirmDialog
+                    open
+                    title="Sign out?"
+                    message="You’ll need your recovery phrase to log back in."
+                    confirmLabel="Sign out"
+                    confirmVariant="danger"
+                    onConfirm={() => {
+                        setSignOutDialogOpen(false);
+                        navigate('/sign_out');
+                    }}
+                    onCancel={() => setSignOutDialogOpen(false)}
+                />
+            )}
+        </>
     );
 }
 

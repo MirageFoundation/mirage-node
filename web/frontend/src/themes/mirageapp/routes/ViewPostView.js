@@ -1920,31 +1920,7 @@ function ViewPostView({
         if (confirmBlockPost === post.post_id) return null;
         if (confirmBlockUser?.postId === post.post_id) return null;
         if (confirmBlockTopic?.postId === post.post_id) return null;
-        if (confirmDeletePost === post.post_id) {
-            const isComment = post.target && post.target !== '';
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>⚠ Mark {isComment ? 'comment' : 'post'} as deleted?</span>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
-                            Delete
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
+        if (confirmDeletePost === post.post_id) return null;
         if (confirmSuspendQuests?.postId === post.post_id) {
             return <BlockConfirmMessage>
                 <div style={{
@@ -3208,6 +3184,25 @@ function ViewPostView({
                         onConfirm={confirmBlockTopicAction}
                         onCancel={cancelBlockTopic}
                     />
+                    {(() => {
+                        const deletePostId = confirmDeletePost;
+                        const deletePostObj = deletePostId ? state.posts?.[deletePostId] : null;
+                        const isComment = !!(deletePostObj && deletePostObj.target && deletePostObj.target !== '');
+                        return (
+                            <ConfirmDialog
+                                open={!!confirmDeletePost}
+                                title={isComment ? 'Delete this comment?' : 'Delete this post?'}
+                                message={isComment
+                                    ? 'This will permanently remove your comment. This action cannot be undone.'
+                                    : 'This will permanently remove your post from every feed. This action cannot be undone.'}
+                                confirmLabel={isComment ? 'Delete comment' : 'Delete post'}
+                                confirmVariant="danger"
+                                pending={isDeleting}
+                                onConfirm={confirmDeletePostAction}
+                                onCancel={cancelDeletePost}
+                            />
+                        );
+                    })()}
                     <ConfirmDialog
                         open={!!confirmReportPost}
                         title="🚨 Report this post? Provide a short reason."
