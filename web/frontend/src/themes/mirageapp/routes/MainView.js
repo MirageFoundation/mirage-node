@@ -150,9 +150,7 @@ const InviteIconTile = styled.div`
     font-size: 0.8rem;
     line-height: 1;
     color: #667eea;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(102, 126, 234, 0.12)'
-        : 'rgba(102, 126, 234, 0.22)'};
+    background: transparent;
 `;
 const InviteTitleStack = styled.div`
     display: flex;
