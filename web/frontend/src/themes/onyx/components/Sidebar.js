@@ -11,7 +11,7 @@ const SidebarContainer = styled.div`
     background: ${({ theme }) => theme.colors.sidebarBg };
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 6px;
-    padding: 0.75rem 1.05rem 0.75rem 0.75rem;
+    padding: 0.75rem;
     height: fit-content;
     margin: 1.75rem 0rem 0 -0.25rem;
 
@@ -47,7 +47,7 @@ const NavSection = styled.div`
 
 const NavItem = styled(Link)`
     display: block;
-    padding: 0.3rem 0.45rem;
+    padding: 0.2rem 0.4rem;
     border-radius: 4px;
     text-decoration: none;
     color: ${({ theme }) => theme.colors.text};
@@ -86,7 +86,7 @@ const SectionTitle = styled.h3`
 
 const TopicItem = styled(Link)`
     display: block;
-    padding: 0.28rem 0.35rem 0.28rem 0.5rem;
+    padding: 0.2rem 0.3rem 0.2rem 0.5rem;
     border-radius: 3px;
     text-decoration: none;
     color: ${({ theme }) => theme.colors.text};
@@ -105,7 +105,7 @@ const TopicItem = styled(Link)`
 
 const UserItem = styled(Link)`
     display: block;
-    padding: 0.24rem 0.35rem 0.24rem 0.5rem;
+    padding: 0.15rem 0.3rem 0.15rem 0.5rem;
     border-radius: 3px;
     text-decoration: none;
     color: ${({ theme }) => theme.colors.text};
