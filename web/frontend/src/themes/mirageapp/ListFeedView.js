@@ -337,7 +337,7 @@ const IconCompact = (props) => (
 //
 //   ┌──────┐  #topic · @user · time
 //   │ thumb│  Title (smaller than card-mode title)
-//   │ 72px │  [▲ cnt ▼]  N comments  Share  [⇱ expand]
+//   │ 72px │  [▲ cnt ▼]  [💬 N]       [⊘] [↗]  [⇱ expand]
 //   └──────┘
 //
 // When "expand" is clicked, the row reveals full-size InlineMedia + the
@@ -534,32 +534,78 @@ const CompactFooter = styled.div`
     margin-top: 0.1rem;
 `;
 
-/* Plain-text action button used for the "N comments" and "Share" labels.
- * Matches the 32px height of the vote pill + expand chip so the hover
- * tile lines up visually with the sibling filled chips. */
-const CompactTextAction = styled.button`
+/* Comment-count pill. Mirrors CardView's `ActionPill` exactly so the two
+ * view modes share a single visual language for the "N comments" chip:
+ * filled `actionIconBg` surface, 32px tall, icon + label, 0.62rem label. */
+const CompactActionPill = styled.button`
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 9999px;
+    border: none;
+    background: ${({ theme }) => theme.colors.actionIconBg};
+    color: ${({ theme }) => theme.colors.text};
+    font: inherit;
+    font-weight: 500;
+    font-size: 0.62rem;
+    line-height: 1;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s ease;
+
+    &:hover { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
+
+    svg {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
+    }
+`;
+
+/* Icon-only action chip used for the Share button at the right edge of
+ * the compact footer. Mirrors CardView's `ActionIconChip` (32×32 filled
+ * circle, swaps to a `buttonSuccessBg` pill with "Link copied" label
+ * when `$success` is set). */
+const CompactActionIconChip = styled.button`
     appearance: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 0.3rem;
+    width: ${({ $success }) => ($success ? 'auto' : '32px')};
     height: 32px;
-    padding: 0 12px;
-    margin: 0;
-    background: transparent;
-    border: none;
+    padding: ${({ $success }) => ($success ? '0 12px' : '0')};
     border-radius: 9999px;
-    font: inherit;
+    border: none;
+    background: ${({ theme, $success }) =>
+        $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconBg};
+    color: ${({ theme, $success }) =>
+        $success ? theme.colors.voteUp : theme.colors.text};
+    font-family: inherit;
     font-size: 0.62rem;
     font-weight: 500;
     line-height: 1;
-    color: ${({ theme }) => theme.colors.feedCtrlText};
     cursor: pointer;
     text-decoration: none;
-    transition: color 0.12s ease, background 0.12s ease;
+    transition: background 0.12s ease, color 0.12s ease, padding 0.12s ease, width 0.12s ease;
 
-    &:hover {
-        background: ${({ theme }) => theme.colors.actionIconHoverBg};
-        color: ${({ theme }) => theme.colors.sidebarItemActiveText};
+    &:hover { background: ${({ theme, $success }) =>
+        $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconHoverBg}; }
+
+    svg {
+        width: 15px;
+        height: 15px;
+        fill: currentColor;
+    }
+
+    /* Hide the share chip on narrow viewports so the compact footer stays
+     * uncluttered on mobile. Card view keeps its share pill — this only
+     * affects the list/compact layout. */
+    @media (max-width: 600px) {
+        display: none;
     }
 `;
 
@@ -595,13 +641,6 @@ const CompactExpandChip = styled.button`
 const CompactSpacer = styled.div`
     flex: 1 1 auto;
     min-width: 0;
-`;
-
-const CompactShareNote = styled.span`
-    font-size: 0.62rem;
-    font-weight: 500;
-    color: #22c55e;
-    margin-left: 0.25rem;
 `;
 
 /* Expanded content block rendered below the footer when the user clicks
@@ -651,6 +690,31 @@ function formatAge(tsSec) {
         day: 'numeric',
     });
 }
+
+/* Short numeric label for action-pill counts (e.g. "1.2K"). Mirrors the
+ * helper of the same name in CardView so compact + card rows render
+ * comment counts identically. */
+function formatCompact(num) {
+    const n = Number(num) || 0;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+}
+
+/* Icons mirrored from CardView so the compact footer reads with the same
+ * visual language as the card footer. Kept inline (rather than exported
+ * from CardView) to keep this view self-contained. */
+const CommentIcon = (p) => (
+    <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" {...p}>
+        <path d="M4 4h16v12H5.17L4 17.17V4zm0-2a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4z" fill="currentColor" />
+    </svg>
+);
+
+const ShareIcon = (p) => (
+    <svg viewBox="0 0 458.624 458.624" aria-hidden="true" {...p}>
+        <path d="M339.588,314.529c-14.215,0-27.456,4.133-38.621,11.239l-112.682-78.67c1.809-6.315,2.798-12.976,2.798-19.871 c0-6.896-0.989-13.557-2.798-19.871l109.64-76.547c11.764,8.356,26.133,13.286,41.662,13.286c39.79,0,72.047-32.257,72.047-72.047 C411.634,32.258,379.378,0,339.588,0c-39.79,0-72.047,32.257-72.047,72.047c0,5.255,0.578,10.373,1.646,15.308l-112.424,78.491 c-10.974-6.759-23.892-10.666-37.727-10.666c-39.79,0-72.047,32.257-72.047,72.047s32.256,72.047,72.047,72.047 c13.834,0,26.753-3.907,37.727-10.666l113.292,79.097c-1.629,6.017-2.514,12.34-2.514,18.872c0,39.79,32.257,72.047,72.047,72.047 c39.79,0,72.047-32.257,72.047-72.047C411.635,346.787,379.378,314.529,339.588,314.529z" fill="currentColor" />
+    </svg>
+);
 
 export function loadViewMode() {
     try {
@@ -907,16 +971,36 @@ function CompactRow({ post, state, updatePost }) {
 
             <CompactFooter onClick={stop}>
                 <VoteSection state={state} post={post} updatePost={updatePost} inline />
-                <CompactTextAction as={Link} to={linkTarget}>
-                    {commentCount} comment{commentCount !== 1 ? 's' : ''}
-                </CompactTextAction>
-                <CompactTextAction type="button" onClick={handleShare}>
-                    Share
-                </CompactTextAction>
-                {shareCopied && <CompactShareNote>link copied</CompactShareNote>}
+                {/* Comment count pill — mirrors CardView's ActionPill. */}
+                <CompactActionPill as={Link} to={linkTarget}>
+                    <CommentIcon />
+                    {formatCompact(commentCount)}
+                </CompactActionPill>
                 <CompactSpacer />
                 {/* Block/report chip — identical to CardView's action-row block chip. */}
                 <BlockChip post={post} state={state} updatePost={updatePost} align="right" />
+                {/* Share chip — mirrors CardView's ActionIconChip (swaps to
+                 * `$success` pill with "Link copied" label when the URL was
+                 * just written to the clipboard). */}
+                <CompactActionIconChip
+                    type="button"
+                    onClick={handleShare}
+                    title={shareCopied ? 'Link copied!' : 'Share'}
+                    aria-label={shareCopied ? 'Link copied' : 'Share post'}
+                    aria-live="polite"
+                    $success={shareCopied}
+                >
+                    {shareCopied ? (
+                        <>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9.55 17.54l-4.24-4.24 1.41-1.41 2.83 2.83 7.07-7.07 1.41 1.41z" fill="currentColor" />
+                            </svg>
+                            <span>Link copied</span>
+                        </>
+                    ) : (
+                        <ShareIcon />
+                    )}
+                </CompactActionIconChip>
                 {canExpand && (
                     <CompactExpandChip
                         type="button"
