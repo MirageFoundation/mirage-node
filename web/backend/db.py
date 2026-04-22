@@ -466,6 +466,28 @@ def init_backend_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_pending_rewards_unclaimed "
                 "ON pending_rewards(owner) WHERE claimed_at IS NULL"
             )
+            # Dedupe legacy rows before creating the unique index on the same
+            # 4-tuple. Rows created before the dedupe index existed may already
+            # contain duplicates (caused by sequence desync + retries), which
+            # would make CREATE UNIQUE INDEX fail on startup and keep the
+            # backend in a crash loop. Keep any row with claimed_at set (so
+            # payout history is preserved), then the lowest id.
+            cur.execute(
+                """
+                DELETE FROM pending_rewards
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY owner, reward_type, reason, created_at
+                                   ORDER BY (claimed_at IS NULL), id
+                               ) AS rn
+                        FROM pending_rewards
+                    ) ranked
+                    WHERE rn > 1
+                )
+                """
+            )
             cur.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_rewards_event_dedupe "
                 "ON pending_rewards(owner, reward_type, reason, created_at)"
