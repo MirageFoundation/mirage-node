@@ -1217,20 +1217,35 @@ def _load_vote_and_comment_stats(
     def _ms_since(t0: float) -> float:
         return round((_time.monotonic() - t0) * 1000, 2)
 
-    # Points (sum of user_weight, excluding blocked users)
+    # Points (sum of user_weight, excluding blocked users).
+    # Use a LATERAL join driven from the 200-row post_id set: the `IN (...)`
+    # form was getting hash-joined with a seq-scan of the full votes table
+    # (~135k rows, 250ms). LATERAL forces an index-driven lookup per id via
+    # idx_votes_target_lower — measured ~5x faster (250ms -> 50ms) on prod.
     _t = _time.monotonic()
+    pid_values = ",".join(["(%s)"] * len(post_ids))
     if blocked_users:
         blocked_ph = ",".join(["%s"] * len(blocked_users))
         cur.execute(
-            f"""SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
-                FROM votes WHERE LOWER(target) IN ({id_ph})
-                  AND LOWER(owner) NOT IN ({blocked_ph})
-                GROUP BY LOWER(target)""",
+            f"""SELECT t.pid, COALESCE(x.total, 0)
+                FROM (VALUES {pid_values}) AS t(pid)
+                LEFT JOIN LATERAL (
+                    SELECT SUM(v.user_weight) AS total
+                    FROM votes v
+                    WHERE LOWER(v.target) = t.pid
+                      AND LOWER(v.owner) NOT IN ({blocked_ph})
+                ) x ON true""",
             post_ids + list(blocked_users),
         )
     else:
         cur.execute(
-            f"SELECT LOWER(target), COALESCE(SUM(user_weight), 0) FROM votes WHERE LOWER(target) IN ({id_ph}) GROUP BY LOWER(target)",
+            f"""SELECT t.pid, COALESCE(x.total, 0)
+                FROM (VALUES {pid_values}) AS t(pid)
+                LEFT JOIN LATERAL (
+                    SELECT SUM(v.user_weight) AS total
+                    FROM votes v
+                    WHERE LOWER(v.target) = t.pid
+                ) x ON true""",
             post_ids,
         )
     for tgt, total in cur.fetchall():
@@ -1268,7 +1283,8 @@ def _load_vote_and_comment_stats(
             comment_counts[root_id] = int(cnt or 0)
     stats_cc_ms = _ms_since(_t)
 
-    # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution
+    # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution.
+    # Already fast (~2ms) via uniq_votes_owner_target index — kept as its own query.
     _t = _time.monotonic()
     viewer_lower = (viewer or "").strip().lower()
     if viewer_lower and viewer_lower != "guest":
