@@ -459,7 +459,7 @@ export default function DiscoverView({ state }) {
                 </RowIconWrap>
                 <RowMain>
                     <TopicLine>
-                        <TopicLink to={`/t/${t.topic}`}>#{t.topic}</TopicLink>
+                        <TopicLink to={`/t/${t.topic}`}>{t.topic}</TopicLink>
                         {tag && <TagBadge $tag={tag}>{tag}</TagBadge>}
                     </TopicLine>
                     <RowMeta>{formatCountMeta(t)}</RowMeta>
