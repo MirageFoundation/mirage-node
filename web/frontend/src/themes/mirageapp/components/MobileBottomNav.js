@@ -340,7 +340,10 @@ function MobileBottomNav({ state }) {
     const handleProfileClick = (e) => {
         e.preventDefault();
         if (!hasPublicKey) {
-            navigate('/signup');
+            // Match the large-screen behavior: send logged-out users to
+            // /profile so ProfileView can render its logged-out prompt,
+            // rather than redirecting straight to the signup form.
+            navigate('/profile');
             return;
         }
         setIsProfileSheetOpen(true);
@@ -386,10 +389,12 @@ function MobileBottomNav({ state }) {
     // stuck hidden until the next route change.
     if (!isMobile || shouldHide) return null;
 
-    // Logged-out users land on /signup via the create tab (mirrors mobile app).
-    const createLink = hasPublicKey
-        ? (currentTopic ? `/create_post?topic=${encodeURIComponent(currentTopic)}` : '/create_post')
-        : '/signup';
+    // Always route to /create_post so CreatePostView can render the same
+    // LoggedOutPromptCard logged-out users see on large screens — avoids
+    // dumping them straight onto the signup form.
+    const createLink = hasPublicKey && currentTopic
+        ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
+        : '/create_post';
 
     return ReactDOM.createPortal(
         <>

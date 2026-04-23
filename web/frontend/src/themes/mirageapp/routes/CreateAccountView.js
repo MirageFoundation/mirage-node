@@ -28,6 +28,18 @@ const StatusMuted = styled.span`
   color: ${({ theme }) => theme.colors.subtleText};
 `;
 
+/* Centered, non-wrapping status line used by the "Signup unavailable"
+ * error panel — keeps the long "Mirage could not load…" message on one
+ * line on larger screens (the shell widens via `wide`) while still
+ * wrapping gracefully below the 600px breakpoint. */
+const CenteredStatusLine = styled(StatusLine)`
+  text-align: center;
+
+  @media (min-width: 601px) {
+    white-space: nowrap;
+  }
+`;
+
 const WarningPanel = styled.div`
   display: flex;
   align-items: flex-start;
@@ -175,9 +187,9 @@ function CreateAccountView({ state, setCredentials }) {
       </Helmet>
       <div>
         <ModernPostFeed>
-          <AuthPageShell title={title} description={body} footer={footer}>
+          <AuthPageShell title={title} description={body} footer={footer} wide>
             <AuthSubtlePanel>
-              <StatusLine>{body}</StatusLine>
+              <CenteredStatusLine>{body}</CenteredStatusLine>
             </AuthSubtlePanel>
           </AuthPageShell>
         </ModernPostFeed>

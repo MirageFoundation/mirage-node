@@ -13,7 +13,7 @@ const Shell = styled.section`
 
 const Card = styled.div`
     width: 100%;
-    max-width: 24rem;
+    max-width: ${({ $wide }) => ($wide ? "44rem" : "24rem")};
     background: ${({ theme }) => theme.colors.bg};
     display: flex;
     flex-direction: column;
@@ -65,7 +65,8 @@ export const AuthDescription = styled.p`
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.72rem;
     line-height: 1.5;
-    max-width: 24rem;
+    max-width: 100%;
+    text-wrap: pretty;
 `;
 
 export const AuthBody = styled.div`
@@ -262,6 +263,7 @@ function AuthPageShell({
     title,
     description,
     footer,
+    wide = false,
 }) {
     useEffect(() => {
         document.documentElement.classList.add('auth-page');
@@ -270,7 +272,7 @@ function AuthPageShell({
 
     return (
         <Shell>
-            <Card>
+            <Card $wide={wide}>
                 <Header>
                     <BrandMark aria-hidden="true"><PalmTreeIcon /></BrandMark>
                     {(title || description) ? (

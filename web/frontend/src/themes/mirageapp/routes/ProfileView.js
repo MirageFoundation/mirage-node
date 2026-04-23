@@ -14,8 +14,11 @@ import { formatMirageCompact } from "../../../utils/formatters";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { FeedViewToggle, loadViewMode, saveViewMode } from "../ListFeedView.js";
 import { getAuthorColor } from "../../../utils/tierColors";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import MarkdownRenderer from "../components/MarkdownRenderer";
+import Storage from "../../../utils/Storage";
+import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
+import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -1135,7 +1138,54 @@ function ProfileCommentRow({ post }) {
 
 //
 
-export default function ProfileView({
+/**
+ * Logged-out guard — when a visitor without a publicKey lands on
+ * `/profile` (e.g. via the mobile bottom-nav Profile tab), there's no
+ * own profile to render. Show the same LoggedOutPromptCard used on
+ * `/create_post` so the experience matches the large-screen flow
+ * instead of rendering an empty shell or redirecting to /signup.
+ *
+ * `/u/:identity` routes still render normally so anonymous visitors
+ * can browse other users' profiles. Hooks that drive the real profile
+ * live inside `ProfileViewAuthenticated` so React's rules-of-hooks
+ * aren't violated when we short-circuit here.
+ */
+export default function ProfileView({ state }) {
+    const routeParams = useParams();
+    const viewerPublicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
+    const viewerIsLoggedIn = !!(viewerPublicKey && viewerPublicKey !== 'guest');
+    if (!viewerIsLoggedIn && !routeParams.identity) {
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>Profile | Mirage</title>
+                </Helmet>
+                <ModernPostFeed>
+                    <CappedPageColumn>
+                        <LoggedOutPromptCard
+                            role="region"
+                            aria-label="Sign in to view your profile"
+                            title="Sign in to view your profile"
+                            description="Create an account or sign in to see your identity, balance, posts, and settings."
+                            notice="Currently in Private Beta — Invite Only"
+                            stats={getCachedWelcomeStats()}
+                            links={[
+                                { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                                { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                            ]}
+                            inviteText="Have an invite code? Join the community today."
+                            primaryLabel="Create account"
+                            secondaryLabel="Sign in"
+                        />
+                    </CappedPageColumn>
+                </ModernPostFeed>
+            </ContentGrid>
+        );
+    }
+    return <ProfileViewAuthenticated state={state} />;
+}
+
+function ProfileViewAuthenticated({
     state
 }) {
     const { caps } = useTheme();
