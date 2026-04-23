@@ -253,6 +253,12 @@ const IconButton = styled(Link)`
         height: 34px;
         svg { width: 20px; height: 20px; }
     }
+
+    /* On small screens the MobileBottomNav takes over: Inbox is reachable
+     * from the bottom tab bar, so hide the redundant top-bar icon. */
+    @media (max-width: 600px) {
+        display: none;
+    }
 `;
 
 const CreateButton = styled(Link)`
@@ -276,6 +282,12 @@ const CreateButton = styled(Link)`
     @media (max-width: 1000px) {
         padding: 0.45rem 0.55rem;
         .create-label { display: none; }
+    }
+
+    /* Bottom nav exposes Create directly on ≤600px — hide the top-bar
+     * entry point to avoid duplicating the action. */
+    @media (max-width: 600px) {
+        display: none;
     }
 `;
 
@@ -537,8 +549,9 @@ const CompactSearchButton = styled.button`
     }
 
     @media (max-width: 600px) {
-        width: 32px;
-        height: 32px;
+        /* Bottom nav has a dedicated Search tab on ≤600px, so drop the
+         * top-bar search icon to avoid duplicating the entry point. */
+        display: none;
     }
 `;
 
