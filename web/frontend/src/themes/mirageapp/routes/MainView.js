@@ -9,6 +9,7 @@ import {
     HiLink,
     HiShare,
 } from "react-icons/hi2";
+import { FaGooglePlay, FaApple } from "react-icons/fa6";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
@@ -885,151 +886,175 @@ const NsfwHeroNote = styled.div`
     }
 `;
 
-// Android app banner - shown once to Android mobile users until dismissed
+// ============================================================
+// App-download hero cards (Android + iPhone) — mirageapp theme
+// Visuals match the QuestHeroCard language: flat panel on `bg`,
+// 1px `border`, 8px radius, icon tile + title/subtitle header,
+// gradient CTA button, neutral dismiss pill.
+// Platform color accents (Google green / Apple blue) are kept for
+// the icon tile + CTA so the cards still read as store-specific.
+// ============================================================
+const ANDROID_ACCENT = '#34A853';
+const IPHONE_ACCENT = '#007AFF';
+
 const AndroidAppHero = styled.div`
-    background: linear-gradient(135deg, rgba(52, 168, 83, 0.08) 0%, rgba(66, 133, 244, 0.08) 100%);
-    border: 1px solid rgba(66, 133, 244, 0.3);
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    align-self: flex-start;
+    margin: 4px 0;
+    background: ${({ theme }) => requireThemeColor(theme, 'bg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 8px;
+    padding: 0.7rem 1rem 0.75rem;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.55rem;
+    box-shadow: none;
 
-    @media (max-width: 1000px) {
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 8px;
-        padding: 0.85rem 1rem;
+    @media (max-width: 600px) {
+        border-radius: 6px;
+        padding: 0.6rem 0.85rem 0.65rem;
     }
 `;
+const IPhoneAppHero = styled(AndroidAppHero)``;
+
+/* Title row: icon tile + stacked title/subtitle */
 const AndroidHeroTitle = styled.div`
-    font-size: 1rem;
-    font-weight: 700;
-    color: ${({
-    theme
-}) => theme.colors.text};
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    line-height: 1.2;
-
-    @media (max-width: 768px) {
-    }
+    min-width: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    line-height: 1.25;
 `;
+
+/* Store-icon slot — no background tile, just the platform-tinted glyph
+ * sitting inline with the title. */
 const AndroidHeroEmoji = styled.span`
-    font-size: 1.1rem;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     line-height: 1;
-`;
-const AndroidHeroDescription = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.subtleText};
-    font-size: 0.8rem;
-    line-height: 1.6;
+    background: transparent;
+    color: ${({ theme }) => (theme.name === 'light' ? '#000' : '#fff')};
 
-    @media (max-width: 768px) {
+    svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    ${IPhoneAppHero} && {
+        color: ${({ theme }) => (theme.name === 'light' ? '#000' : '#fff')};
+        width: 22px;
+        height: 22px;
+
+        svg {
+            width: 22px;
+            height: 22px;
+        }
     }
 `;
+
+const AndroidHeroDescription = styled.div`
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.65rem;
+    line-height: 1.4;
+`;
+
 const AndroidHeroButtons = styled.div`
     display: flex;
-    gap: 0.75rem;
-    margin-top: 0.25rem;
+    gap: 0.4rem;
+    margin-top: 0.1rem;
     flex-wrap: wrap;
-
-    @media (max-width: 768px) {
-        gap: 0.5rem;
-    }
 `;
+
+/* Primary CTA — platform-tinted gradient, matches QuestHeroCard's
+ * `CtaButton` geometry (7px radius, 0.42rem × 0.75rem padding). */
 const AndroidHeroButton = styled.a`
-    padding: 0.5rem 1.25rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    flex: 1;
+    min-width: 120px;
+    padding: 0.42rem 0.75rem;
+    border-radius: 7px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-family: inherit;
     text-decoration: none;
     text-align: center;
-    background: linear-gradient(135deg, #34a853 0%, #2d9249 100%);
     color: #fff;
+    border: none;
+    cursor: pointer;
+    background: linear-gradient(90deg, #34A853 0%, #1E7E34 100%);
+    box-shadow: 0 1px 5px rgba(52, 168, 83, 0.22);
+    transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
     &:hover {
-        background: linear-gradient(135deg, #2d9249 0%, #267a3d 100%);
+        opacity: 0.92;
         transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(52, 168, 83, 0.3);
+        color: #fff;
+        text-decoration: none;
     }
 
-    @media (max-width: 768px) {
-        padding: 0.45rem 1rem;
-        flex: 1;
-        min-width: 80px;
+    &:active {
+        transform: translateY(0);
+    }
+
+    svg {
+        width: 0.9rem;
+        height: 0.9rem;
+        flex-shrink: 0;
     }
 `;
+
+const IPhoneHeroButton = styled(AndroidHeroButton)`
+    background: linear-gradient(90deg, #007AFF 0%, #5856D6 100%);
+    box-shadow: 0 1px 5px rgba(0, 122, 255, 0.22);
+
+    &:hover {
+        box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+    }
+
+    svg {
+        width: 1.1rem;
+        height: 1.1rem;
+    }
+`;
+
+/* Neutral dismiss pill — same geometry as CTA, subtle surface */
 const AndroidHeroDismiss = styled.button`
-    padding: 0.5rem 1.25rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    min-width: 100px;
+    padding: 0.42rem 0.75rem;
+    border-radius: 7px;
+    font-size: 0.68rem;
     font-weight: 600;
+    font-family: inherit;
     cursor: pointer;
-    transition: all 0.2s ease;
-    background: rgba(100, 116, 139, 0.2);
-    color: #94a3b8;
-    border: 1px solid rgba(100, 116, 139, 0.3);
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.04)'
+        : 'rgba(255, 255, 255, 0.06)'};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    transition: background 0.15s ease, color 0.15s ease;
 
     &:hover {
-        background: rgba(100, 116, 139, 0.3);
-        color: #cbd5e1;
-    }
-
-    @media (max-width: 768px) {
-        padding: 0.45rem 1rem;
-        flex: 1;
-        min-width: 80px;
-    }
-`;
-const IPhoneAppHero = styled.div`
-    background: linear-gradient(135deg, rgba(0, 122, 255, 0.08) 0%, rgba(88, 86, 214, 0.08) 100%);
-    border: 1px solid rgba(0, 122, 255, 0.3);
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-
-    @media (max-width: 1000px) {
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-    }
-
-    @media (max-width: 768px) {
-        border-radius: 8px;
-        padding: 0.85rem 1rem;
-    }
-`;
-const IPhoneHeroButton = styled.a`
-    padding: 0.5rem 1.25rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
-    text-decoration: none;
-    text-align: center;
-    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
-    color: #fff;
-
-    &:hover {
-        background: linear-gradient(135deg, #0066D6 0%, #4B49B8 100%);
-        transform: translateY(-1px);
-    }
-
-    @media (max-width: 768px) {
-        padding: 0.45rem 1rem;
-        flex: 1;
-        min-width: 80px;
+        background: ${({ theme }) => theme.name === 'light'
+        ? 'rgba(0, 0, 0, 0.07)'
+        : 'rgba(255, 255, 255, 0.1)'};
+        color: ${({ theme }) => requireThemeColor(theme, 'text')};
     }
 `;
 const HomeFeedInfoTitle = styled.div`
@@ -1904,16 +1929,16 @@ const MainView = ({
                         </FeedHeroColumn>}
 
                         {/* Android app banner - shown once for Android users until dismissed */}
-                        {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
+                        {showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
                             <AndroidHeroTitle>
-                                <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
+                                <AndroidHeroEmoji><FaGooglePlay aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on Play Store
                             </AndroidHeroTitle>
                             <AndroidHeroDescription>
                                 Get the native Android app for a faster, smoother experience with push notifications and offline support.
                             </AndroidHeroDescription>
                             <AndroidHeroButtons>
                                 <AndroidHeroButton href="https://play.google.com/store/apps/details?id=talk.mirage.mobile" target="_blank" rel="noopener noreferrer">
-                                    Get the app
+                                    <FaGooglePlay aria-hidden="true" /> Get the app
                                 </AndroidHeroButton>
                                 <AndroidHeroDismiss onClick={dismissAndroidBanner}>
                                     No thanks
@@ -1921,16 +1946,16 @@ const MainView = ({
                             </AndroidHeroButtons>
                         </AndroidAppHero>}
 
-                        {showHero && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
+                        {showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
                             <AndroidHeroTitle>
-                                <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on iPhone
+                                <AndroidHeroEmoji><FaApple aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on App Store
                             </AndroidHeroTitle>
                             <AndroidHeroDescription>
                                 Get the native iOS app for a faster, smoother experience with push notifications and offline support.
                             </AndroidHeroDescription>
                             <AndroidHeroButtons>
                                 <IPhoneHeroButton href="https://apps.apple.com/us/app/mirage-speak-your-mind/id6757619038" target="_blank" rel="noopener noreferrer">
-                                    Get the app
+                                    <FaApple aria-hidden="true" /> Get the app
                                 </IPhoneHeroButton>
                                 <AndroidHeroDismiss onClick={dismissIPhoneBanner}>
                                     No thanks
