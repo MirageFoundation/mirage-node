@@ -24,6 +24,7 @@ import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
+import { dicebearAvatarUrl } from "../../../utils/avatar";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -93,51 +94,301 @@ const PostCard = styled.div`
 /**
  * Comment row — reddit + mobile-app hybrid.
  *
- * Full-bleed flat row with a **left thread rail** at every depth level
- * (`1px solid theme.colors.border`, R3). No card background of its own;
- * hover lifts to `hoverBg` matching the feed card rhythm. Indentation is
- * carried by `margin-left` + the rail, matching mobile `comment-item.tsx`.
+ * Full-bleed flat row with **continuous Reddit-style ancestor rails**.
+ * Each comment renders one vertical 1px rail per ancestor depth level
+ * (drawn as 1px-wide `background-image` linear-gradients, so they tile
+ * seamlessly across consecutive sibling/descendant cards and form one
+ * unbroken vertical line through the whole sub-thread). Indentation is
+ * carried by `padding-left`, matching mobile `comment-item.tsx`.
  *
- * Level-0 (direct replies to the root) get no rail since they already sit
- * against the root post divider.
- *
- * Each comment also gets a subtle bottom divider between siblings so deep
- * threads read cleanly, even when text lengths differ dramatically.
+ * Level-0 (root) uses `PostCard` instead, so this component only ever
+ * sees `$level >= 1`. We deliberately drop the per-comment bottom divider
+ * here — the rails carry the visual rhythm and a horizontal line at every
+ * comment chops the rails into disconnected stubs (which is how the old
+ * styling read).
  */
+/*
+ * Reddit-style avatar-anchored threading.
+ *
+ * Geometry per non-root comment:
+ *   avatarLeft   = BASE_LEFT + (level - 1) * INDENT
+ *   railX        = avatarLeft - INDENT + AVATAR_SIZE / 2   // parent avatar center
+ *   contentLeft  = avatarLeft + AVATAR_SIZE + CONTENT_GAP
+ *
+ * Thread guide rules:
+ *   - Each parent draws a spine (::after) from its avatar center down to
+ *     the card bottom, BUT ONLY if it actually has children.
+ *   - Each child draws a J-curve (::before) from the parent's avatar
+ *     center down to its own avatar left.
+ *   - Non-last children also draw a full-height ancestor rail at the
+ *     parent's column so the line continues through them to the next
+ *     sibling. LAST children do NOT draw this rail — the line stops
+ *     at their avatar (J-curve only).
+ *   - The same logic applies recursively for grandparent columns.
+ */
+const COMMENT_BASE_LEFT_PX = 12;
+const COMMENT_BASE_LEFT_PX_MOBILE = 8;
+const COMMENT_INDENT_PX = 26;
+const COMMENT_INDENT_PX_MOBILE = 22;
+const COMMENT_AVATAR_SIZE_PX = 24;
+const COMMENT_AVATAR_SIZE_PX_MOBILE = 22;
+const COMMENT_RAIL_WIDTH_PX = 1;
+const COMMENT_CURVE_RADIUS_PX = 10;
+const COMMENT_CURVE_RADIUS_PX_MOBILE = 9;
+const COMMENT_CONTENT_GAP_PX = 8;
+const COMMENT_CONTENT_GAP_PX_MOBILE = 6;
+/* Avatar center y — split by collapsed state because padding-top differs.
+ * Computed as: padding-top + (meta-row-height / 2).
+ *   collapsed padding-top = 0.45rem ≈  7.2px  → center ≈ 13px
+ *   expanded  padding-top = 0.55rem ≈  8.8px  → center ≈ 15px
+ * Mobile uses proportionally smaller values. */
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX = 19;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX = 21;
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE = 17;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE = 19;
+
+function commentAvatarLeftPx(level, baseLeft, indent) {
+    const lvl = Math.max(Number(level) || 0, 1);
+    return baseLeft + (lvl - 1) * indent;
+}
+
+function commentContentLeftPx(level, baseLeft, indent, avatarSize, gap) {
+    const lvl = Math.max(Number(level) || 0, 0);
+    if (lvl === 0) return null;
+    return commentAvatarLeftPx(lvl, baseLeft, indent) + avatarSize + gap;
+}
+
+function commentRailXPx(level, baseLeft, indent, avatarSize) {
+    const lvl = Math.max(Number(level) || 0, 2);
+    return commentAvatarLeftPx(lvl - 1, baseLeft, indent) + avatarSize / 2;
+}
+
+/* In a pre-order flat array, a comment is the last child of its parent
+ * if every comment after it is either a descendant or belongs to an
+ * ancestor's next sibling branch. */
+function isLastChildInPreorder(array, index) {
+    const level = array[index].level;
+    for (let j = index + 1; j < array.length; j++) {
+        if (array[j].level <= level - 1) return true;
+        if (array[j].level === level) return false;
+    }
+    return true;
+}
+
+/* Find the parent of the comment at `index` in a pre-order array. */
+function getParentIndex(array, index) {
+    const level = array[index].level;
+    for (let j = index - 1; j >= 0; j--) {
+        if (array[j].level === level - 1) return j;
+    }
+    return -1;
+}
+
+/* Return the ancestor depths (1..level-1) that should draw a full-height
+ * rail on this comment's card. A depth D rail continues through this
+ * comment only if the ancestor at depth D+1 (in this comment's chain)
+ * is NOT the last child of its parent. */
+function getAncestorRailDepths(array, index) {
+    const level = array[index].level;
+    const depths = [];
+    let currentIndex = index;
+    for (let targetLevel = level; targetLevel >= 2; targetLevel--) {
+        if (!isLastChildInPreorder(array, currentIndex)) {
+            depths.push(targetLevel - 1);
+        }
+        const parentIndex = getParentIndex(array, currentIndex);
+        if (parentIndex === -1) break;
+        currentIndex = parentIndex;
+    }
+    return depths;
+}
+
+function buildAncestorRails(level, baseLeft, indent, avatarSize, color, activeDepths) {
+    const N = Math.max(Number(level) || 0, 0);
+    if (N < 2 || !activeDepths || activeDepths.length === 0) {
+        return { image: 'none', position: '0 0', size: '0 0' };
+    }
+    const images = [];
+    const positions = [];
+    const sizes = [];
+    for (const K of activeDepths) {
+        const x = commentAvatarLeftPx(K, baseLeft, indent) + avatarSize / 2;
+        images.push(`linear-gradient(${color}, ${color})`);
+        positions.push(`${x}px 0`);
+        sizes.push(`${COMMENT_RAIL_WIDTH_PX}px 100%`);
+    }
+    return {
+        image: images.join(', '),
+        position: positions.join(', '),
+        size: sizes.join(', '),
+    };
+}
+
 const CommentCard = styled(PostCard)`
-    border-bottom: 1px solid ${({ theme }) => theme.colors.borderSubtle};
+    position: relative;
+    border-bottom: none;
+    border-left: none;
     box-shadow: none;
     background: transparent;
+    background-color: transparent;
+    background-repeat: no-repeat;
+    margin-left: 0;
     gap: 0.35rem;
 
-    /* Each level indents a clean 1.15rem; deeper levels render a rail. */
-    margin-left: ${({ $level }) => `${Math.max(Number($level) || 0, 0) * 1.15}rem`};
-    padding: ${({ $isCollapsed, $level }) => {
-        const leftInset = Number($level) > 0 ? '0.9rem' : '1rem';
-        if ($isCollapsed) return `0.45rem ${leftInset} 0.45rem`;
-        return `0.65rem ${leftInset} 0.75rem`;
-    }};
-    border-left: ${({ $level, theme }) =>
-        Number($level) > 0 ? `1px solid ${theme.colors.border}` : 'none'};
+    /* Ancestor thread guides — only drawn at depths where this comment
+     * is NOT the last child in its ancestor chain, so the line continues
+     * through non-last siblings and stops at the last sibling's avatar. */
+    ${({ $level, $activeDepths, theme }) => {
+        const r = buildAncestorRails(
+            $level,
+            COMMENT_BASE_LEFT_PX,
+            COMMENT_INDENT_PX,
+            COMMENT_AVATAR_SIZE_PX,
+            theme.colors.borderSubtle || theme.colors.border,
+            $activeDepths,
+        );
+        return `
+            background-image: ${r.image};
+            background-position: ${r.position};
+            background-size: ${r.size};
+        `;
+    }}
 
-    &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
+    /* Own spine: drops from this comment's avatar center to the card
+     * bottom so descendants can continue the thread. Only drawn when
+     * this comment actually has children. */
+    &::after {
+        content: '';
+        position: absolute;
+        display: ${({ $level, $hasChildren, $isCollapsed }) => (Number($level) > 0 && $hasChildren && !$isCollapsed ? 'block' : 'none')};
+        top: ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+        left: ${({ $level }) =>
+            `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`};
+        width: ${COMMENT_RAIL_WIDTH_PX}px;
+        height: calc(100% - ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px);
+        background: ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        pointer-events: none;
     }
 
-    /* Persistent highlight for inbox-linked comments: left-rail accent +
-     * subtle tinted background so the single-canvas rule still holds. */
+    /* J-curve elbow: drops from the PARENT avatar's vertical center
+     * (one column left) down to this comment's avatar vertical center,
+     * then curves right and lands at this comment's avatar LEFT edge.
+     * Always drawn for depth >= 2 — it is the visual hook that connects
+     * this reply to its parent, regardless of whether this reply is
+     * the last child. */
+    &::before {
+        content: '';
+        position: absolute;
+        display: ${({ $level }) => (Number($level) >= 2 ? 'block' : 'none')};
+        top: 0;
+        left: ${({ $level }) =>
+            `${commentRailXPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`};
+        width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
+        height: ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
+        pointer-events: none;
+    }
+
+    padding: ${({ $isCollapsed, $level }) => {
+        const lvl = Math.max(Number($level) || 0, 0);
+        const leftPad = lvl > 0
+            ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX)}px`
+            : '1rem';
+        if ($isCollapsed) return `0.45rem 1rem 0.45rem ${leftPad}`;
+        return `0.55rem 1rem 0.7rem ${leftPad}`;
+    }};
+
+    &:hover {
+        background-color: ${({ theme }) => theme.colors.hoverBg};
+    }
+
     &.inbox-highlight {
         box-shadow: inset 3px 0 0 0 ${({ theme }) => theme.colors.inboxHighlightRail} !important;
-        background: ${({ theme }) => theme.colors.inboxHighlightBg} !important;
+        background-color: ${({ theme }) => theme.colors.inboxHighlightBg} !important;
     }
 
     @media (max-width: 1000px) {
-        margin-left: ${({ $level }) => `${Math.max(Number($level) || 0, 0) * 0.9}rem`};
+        ${({ $level, $activeDepths, theme }) => {
+            const r = buildAncestorRails(
+                $level,
+                COMMENT_BASE_LEFT_PX_MOBILE,
+                COMMENT_INDENT_PX_MOBILE,
+                COMMENT_AVATAR_SIZE_PX_MOBILE,
+                theme.colors.borderSubtle || theme.colors.border,
+                $activeDepths,
+            );
+            return `
+                background-image: ${r.image};
+                background-position: ${r.position};
+                background-size: ${r.size};
+            `;
+        }}
+        &::after {
+            left: ${({ $level }) =>
+                `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`};
+            top: ${({ $isCollapsed }) =>
+                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+            height: calc(100% - ${({ $isCollapsed }) =>
+                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px);
+        }
+        &::before {
+            left: ${({ $level }) =>
+                `${commentRailXPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`};
+            width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
+            height: ${({ $isCollapsed }) =>
+                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+            border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
+        }
         padding: ${({ $isCollapsed, $level }) => {
-            const leftInset = Number($level) > 0 ? '0.8rem' : '0.85rem';
-            if ($isCollapsed) return `0.4rem ${leftInset}`;
-            return `0.55rem ${leftInset} 0.65rem`;
+            const lvl = Math.max(Number($level) || 0, 0);
+            const leftPad = lvl > 0
+                ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE)}px`
+                : '0.85rem';
+            if ($isCollapsed) return `0.4rem 0.85rem 0.4rem ${leftPad}`;
+            return `0.5rem 0.85rem 0.6rem ${leftPad}`;
         }};
+    }
+`;
+
+/**
+ * DiceBear identicon avatar anchored to the username row of a
+ * `CommentCard`. Vertically centered on the username row text mid-line
+ * via `transform: translateY(-50%)` against a state-aware top constant.
+ * Sits at the end of the J-curve so the rail visually "delivers" the
+ * thread connection from the parent avatar into this comment's avatar.
+ */
+const CommentAvatar = styled.img.attrs({
+    alt: '',
+    'aria-hidden': true,
+    draggable: false,
+    loading: 'lazy',
+})`
+    position: absolute;
+    top: ${({ $isCollapsed }) =>
+        ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+    transform: translateY(-50%);
+    left: ${({ $level }) =>
+        `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX)}px`};
+    width: ${COMMENT_AVATAR_SIZE_PX}px;
+    height: ${COMMENT_AVATAR_SIZE_PX}px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface2 || theme.colors.panelAlt || theme.colors.bg};
+    object-fit: cover;
+    pointer-events: none;
+    z-index: 2;
+
+    @media (max-width: 1000px) {
+        top: ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+        left: ${({ $level }) =>
+            `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE)}px`};
+        width: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
+        height: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
     }
 `;
 /**
@@ -173,34 +424,121 @@ const StyledThreadReminder = styled.div`
  * the parent comment rail depth.
  */
 const ContinueThreadLink = styled(Link)`
+    position: relative;
     display: block;
     background: transparent;
+    background-color: transparent;
+    background-repeat: no-repeat;
     border: none;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    border-left: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 0;
-    padding: 0.55rem 0.85rem;
-    margin-left: ${({ $level }) => `${0.9 * Math.max(Number($level) || 0, 0) + 0.9}rem`};
+    margin-left: 0;
     margin-top: 0;
     margin-bottom: 0;
     color: ${({ theme }) => theme.colors.link};
     font-size: 0.72rem;
     font-weight: 500;
     text-decoration: none;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color 0.15s ease, background-color 0.15s ease;
+
+    /* The link inherits the parent's ancestor rails so the thread line
+     * continues seamlessly into this row. */
+    ${({ $activeDepths, theme }) => {
+        const r = buildAncestorRails(
+            0, /* level is irrelevant when activeDepths is passed directly */
+            COMMENT_BASE_LEFT_PX,
+            COMMENT_INDENT_PX,
+            COMMENT_AVATAR_SIZE_PX,
+            theme.colors.borderSubtle || theme.colors.border,
+            $activeDepths,
+        );
+        return `
+            background-image: ${r.image};
+            background-position: ${r.position};
+            background-size: ${r.size};
+        `;
+    }}
+
+    &::after {
+        content: '';
+        position: absolute;
+        top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
+        left: ${({ $level }) => {
+            const effective = (Number($level) || 0) + 1;
+            return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`;
+        }};
+        width: ${COMMENT_RAIL_WIDTH_PX}px;
+        height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px);
+        background: ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        pointer-events: none;
+    }
+
+    &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: ${({ $level }) => {
+            const effective = (Number($level) || 0) + 1;
+            return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`;
+        }};
+        width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
+        height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
+        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
+        pointer-events: none;
+    }
+
+    padding: ${({ $level }) => {
+        const effective = (Number($level) || 0) + 1;
+        const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX);
+        return `0.55rem 1rem 0.55rem ${leftPad}px`;
+    }};
 
     &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
+        background-color: ${({ theme }) => theme.colors.hoverBg};
         color: ${({
     theme
 }) => theme.colors.linkHover};
     }
 
     @media (max-width: 1000px) {
-        margin-left: ${({
-    $level
-}) => `${0.6 * (Number($level) || 0)}rem`};
-        padding: 0.4rem 0.6rem;
+        ${({ $activeDepths, theme }) => {
+            const r = buildAncestorRails(
+                0,
+                COMMENT_BASE_LEFT_PX_MOBILE,
+                COMMENT_INDENT_PX_MOBILE,
+                COMMENT_AVATAR_SIZE_PX_MOBILE,
+                theme.colors.borderSubtle || theme.colors.border,
+                $activeDepths,
+            );
+            return `
+                background-image: ${r.image};
+                background-position: ${r.position};
+                background-size: ${r.size};
+            `;
+        }}
+        &::after {
+            left: ${({ $level }) => {
+                const effective = (Number($level) || 0) + 1;
+                return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`;
+            }};
+            top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px;
+            height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px);
+        }
+        &::before {
+            left: ${({ $level }) => {
+                const effective = (Number($level) || 0) + 1;
+                return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`;
+            }};
+            width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
+            height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px;
+            border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
+        }
+        padding: ${({ $level }) => {
+            const effective = (Number($level) || 0) + 1;
+            const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE);
+            return `0.4rem 0.85rem 0.4rem ${leftPad}px`;
+        }};
     }
 `;
 
@@ -2988,18 +3326,30 @@ function ViewPostView({
                             </TopicHeroCard>
                         </TopicHeroWrapper>;
                     })()}
-                    {annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id)).map(post => {
-                        const normalizedPostId = String(post.post_id).toLowerCase();
-                        const isRoot = post.level === 0;
-                        const isCollapsed = !!(post.level > 0 && post.collapsed);
-                        const CardComponent = isRoot ? PostCard : CommentCard;
-                        // Flash: root uses rootFlash state, comments use post.flash
-                        const shouldFlash = isRoot ? rootFlash : !!post.flash;
-                        const displayLevel = post.level;
-                        // Persistent highlight for inbox-linked comments
-                        const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
-                        return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
-                            <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize}>
+                    {(() => {
+                        const visibleAnnotated = annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id));
+                        const ancestorDepthsMap = visibleAnnotated.map((_, idx) => getAncestorRailDepths(visibleAnnotated, idx));
+                        return visibleAnnotated.map((post, idx) => {
+                            const normalizedPostId = String(post.post_id).toLowerCase();
+                            const isRoot = post.level === 0;
+                            const isCollapsed = !!(post.level > 0 && post.collapsed);
+                            const CardComponent = isRoot ? PostCard : CommentCard;
+                            const shouldFlash = isRoot ? rootFlash : !!post.flash;
+                            const displayLevel = post.level;
+                            const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
+                            const hasChildren = (post.comments || 0) > 0;
+                            const activeDepths = ancestorDepthsMap[idx];
+                            return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
+                                <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
+                                    {!isRoot && (() => {
+                                        const seed = (post.username && String(post.username).trim())
+                                            || (post.user_id ? String(post.user_id) : 'anon');
+                                        return <CommentAvatar
+                                            $level={displayLevel}
+                                            $isCollapsed={isCollapsed}
+                                            src={dicebearAvatarUrl(seed, COMMENT_AVATAR_SIZE_PX)}
+                                        />;
+                                    })()}
                                 <ColumnFlex>
                                     {/* Mobile root post meta - two rows */}
                                     {isRoot && <MobileRootMeta>
@@ -3280,12 +3630,13 @@ function ViewPostView({
                                 const stateChildren = state.posts?.[post.post_id]?.children;
                                 const hasLoadedChildren = (post.children && post.children.length > 0) || (stateChildren && stateChildren.length > 0);
                                 if (hasLoadedChildren) return null;
-                                return <ContinueThreadLink to={`/p/${post.post_id}`} $level={displayLevel}>
+                                return <ContinueThreadLink to={`/p/${post.post_id}`} $level={displayLevel} $activeDepths={activeDepths}>
                                     Continue this thread →
                                 </ContinueThreadLink>;
                             })()}
                         </div>;
-                    })}
+                    });
+                })()}
                 </ModernPostFeed>
             </MainContentWrapper>
             {renderMobileReplyOverlay()}
