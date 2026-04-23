@@ -416,9 +416,11 @@ const CompactThumbLink = styled(Link)`
     }
 `;
 
-// Letter is hard-pinned to white in BOTH themes so it always reads cleanly on
-// the indigo->purple brand gradient. `sidebarItemActiveText` flips to black in
-// light mode, which disappears against the gradient — the previous behavior.
+/* No-media placeholder — a neutral surface tile with a small "text post"
+ * glyph (three lines). Matches the same `actionIconBg` surface used by the
+ * loaded-thumbnail wrapper, so empty rows read as a calm neutral tile rather
+ * than the loud indigo→purple brand gradient with a stamped-on initial.
+ * Inherits `subtleText` for the glyph so it adapts to dark + light themes. */
 const CompactThumbPlaceholder = styled.div`
     grid-row: 1 / span 3;
     display: flex;
@@ -427,18 +429,48 @@ const CompactThumbPlaceholder = styled.div`
     width: 84px;
     height: 84px;
     border-radius: 8px;
-    background: ${({ theme }) => theme.colors.gradient};
-    color: #ffffff;
-    font-size: 1.1rem;
-    font-weight: 700;
+    background: ${({ theme }) => theme.colors.actionIconBg};
+    color: ${({ theme }) => theme.colors.subtleText};
     flex-shrink: 0;
+
+    svg {
+        width: 36px;
+        height: 36px;
+        opacity: 0.85;
+    }
 
     @media (max-width: 600px) {
         width: 68px;
         height: 68px;
         border-radius: 6px;
+
+        svg {
+            width: 28px;
+            height: 28px;
+        }
     }
 `;
+
+/* Inline three-line "text post" glyph. Stroke uses `currentColor` so the icon
+ * inherits the placeholder's themed `subtleText` color. */
+function TextPostGlyph() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
+        >
+            <line x1="5" y1="8" x2="19" y2="8" />
+            <line x1="5" y1="13" x2="19" y2="13" />
+            <line x1="5" y1="18" x2="14" y2="18" />
+        </svg>
+    );
+}
 
 /* Header row mirrors CardView's HeaderMeta exactly so the two view modes
  * share a single metadata style. Font sizes + weights are copied 1:1.
@@ -920,13 +952,6 @@ function CompactRow({ post, state, updatePost }) {
     if (ts > 1e12) ts = Math.floor(ts / 1000);
 
     const commentCount = Number(post.comments) || 0;
-    // Placeholder letter = first character of the post author's username.
-    // Falls back to the author's wallet address, then '#' if neither is set,
-    // so anonymous / username-less rows still render a stable placeholder.
-    const placeholderSeed = (typeof post.username === 'string' && post.username.trim())
-        ? post.username.trim()
-        : (authorAddress || '');
-    const placeholderChar = (placeholderSeed[0] || '#').toUpperCase();
     const feedBucket = typeof post.feed_bucket === 'string' ? post.feed_bucket : '';
     const feedBucketLabel = feedBucket && feedBucket !== 'guest'
         ? (FEED_BUCKET_LABELS[feedBucket] || '')
@@ -944,7 +969,9 @@ function CompactRow({ post, state, updatePost }) {
                     <img src={thumbUrl} alt="" loading="lazy" />
                 </CompactThumbLink>
             ) : (
-                <CompactThumbPlaceholder aria-hidden="true">{placeholderChar}</CompactThumbPlaceholder>
+                <CompactThumbPlaceholder aria-hidden="true">
+                    <TextPostGlyph />
+                </CompactThumbPlaceholder>
             )}
 
             <CompactTopRow>
