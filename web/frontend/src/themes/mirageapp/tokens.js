@@ -147,6 +147,10 @@ const mirageappDarkColors = {
     menuDangerText: '#FF7B70',
 
     cardBodyText: 'rgb(187, 201, 211)',
+
+    // Comment thread rails (J-curve elbow + avatar spine) on post-details
+    // screen. Dedicated token so rails can diverge from `borderSubtle`.
+    commentThread: 'rgb(47, 48, 47)',
 };
 
 const mirageappLightColors = {
@@ -283,6 +287,9 @@ const mirageappLightColors = {
     menuDangerText: '#FF6A5E',
 
     cardBodyText: 'rgb(53, 61, 65)',
+
+    // Comment thread rails (light-mode pair for `commentThread`).
+    commentThread: 'rgb(222, 224, 222)',
 };
 
 function buildLayout(colors) {

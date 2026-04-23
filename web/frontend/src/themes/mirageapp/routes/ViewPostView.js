@@ -244,7 +244,7 @@ const CommentCard = styled(PostCard)`
             COMMENT_BASE_LEFT_PX,
             COMMENT_INDENT_PX,
             COMMENT_AVATAR_SIZE_PX,
-            theme.colors.borderSubtle || theme.colors.border,
+            theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
             $activeDepths,
         );
         return `
@@ -268,7 +268,7 @@ const CommentCard = styled(PostCard)`
         width: ${COMMENT_RAIL_WIDTH_PX}px;
         height: calc(100% - ${({ $isCollapsed }) =>
             ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px);
-        background: ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         pointer-events: none;
     }
 
@@ -288,8 +288,8 @@ const CommentCard = styled(PostCard)`
         width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
         height: ${({ $isCollapsed }) =>
             ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
-        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
-        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
         pointer-events: none;
     }
@@ -319,7 +319,7 @@ const CommentCard = styled(PostCard)`
                 COMMENT_BASE_LEFT_PX_MOBILE,
                 COMMENT_INDENT_PX_MOBILE,
                 COMMENT_AVATAR_SIZE_PX_MOBILE,
-                theme.colors.borderSubtle || theme.colors.border,
+                theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
                 $activeDepths,
             );
             return `
@@ -448,7 +448,7 @@ const ContinueThreadLink = styled(Link)`
             COMMENT_BASE_LEFT_PX,
             COMMENT_INDENT_PX,
             COMMENT_AVATAR_SIZE_PX,
-            theme.colors.borderSubtle || theme.colors.border,
+            theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
             $activeDepths,
         );
         return `
@@ -468,7 +468,7 @@ const ContinueThreadLink = styled(Link)`
         }};
         width: ${COMMENT_RAIL_WIDTH_PX}px;
         height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px);
-        background: ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         pointer-events: none;
     }
 
@@ -482,8 +482,8 @@ const ContinueThreadLink = styled(Link)`
         }};
         width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
         height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
-        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
-        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.borderSubtle || theme.colors.border};
+        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
         pointer-events: none;
     }
@@ -508,7 +508,7 @@ const ContinueThreadLink = styled(Link)`
                 COMMENT_BASE_LEFT_PX_MOBILE,
                 COMMENT_INDENT_PX_MOBILE,
                 COMMENT_AVATAR_SIZE_PX_MOBILE,
-                theme.colors.borderSubtle || theme.colors.border,
+                theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
                 $activeDepths,
             );
             return `
@@ -794,30 +794,32 @@ const MetaSeparator = styled.span`
  */
 const CollapseToggle = styled.button`
     appearance: none;
-    background: none;
-    border: none;
-    padding: 0 0.15rem;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    padding: 0;
+    box-sizing: border-box;
     margin: 0;
+    width: 14px;
+    height: 14px;
     color: ${({ theme }) => theme.colors.feedCtrlText};
     font-family: inherit;
-    font-size: 0.62rem;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 700;
     line-height: 1;
     cursor: pointer;
-    transition: color 0.12s ease;
+    transition: color 0.12s ease, border-color 0.12s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    vertical-align: middle;
+    text-align: center;
+    user-select: none;
 
-    svg {
-        width: 12px;
-        height: 12px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 2.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        transition: transform 0.15s ease;
+    & > span {
+        display: block;
+        line-height: 1;
+        transform: translateY(-0.5px);
     }
 
     &:hover {
@@ -876,6 +878,8 @@ const MobileRootMetaBottom = styled.div`
 
 // Desktop version - hide on mobile for root posts
 const DesktopMetaInfoRow = styled(MetaInfoRow)`
+    cursor: ${({ $clickable }) => ($clickable ? 'pointer' : 'default')};
+    user-select: ${({ $clickable }) => ($clickable ? 'none' : 'auto')};
     @media (max-width: 600px) {
         display: ${({
     $hideOnMobile
@@ -3396,7 +3400,16 @@ function ViewPostView({
                                         </MobileRootMetaBottom>
                                     </MobileRootMeta>}
                                     {/* Desktop meta info row (hidden on mobile for root posts) */}
-                                    <DesktopMetaInfoRow $hideOnMobile={isRoot}>
+                                    <DesktopMetaInfoRow
+                                        $hideOnMobile={isRoot}
+                                        $clickable={!isRoot}
+                                        onClick={!isRoot ? (e) => {
+                                            // Ignore clicks that landed on interactive children
+                                            // (author/topic links, menu button, tooltips with handlers).
+                                            if (e.target.closest && e.target.closest('a,button')) return;
+                                            toggleCollapsed(post.post_id, !!post.collapsed);
+                                        } : undefined}
+                                    >
                                         <MetaInfoRowLeft>
                                             {renderAuthorLink(post)}
                                             <MetaSeparator>·</MetaSeparator>
@@ -3428,9 +3441,7 @@ function ViewPostView({
                                                     onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
                                                     aria-label={post.collapsed ? 'Expand' : 'Collapse'}
                                                 >
-                                                    <svg viewBox="0 0 24 24" style={{ transform: post.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
-                                                        <polyline points="6 9 12 15 18 9" />
-                                                    </svg>
+                                                    <span aria-hidden="true">{post.collapsed ? '+' : '\u2212'}</span>
                                                 </CollapseToggle>
                                             </>}
                                             {post.edited && <>
