@@ -31,7 +31,7 @@ import { requireThemeColor } from "../../../utils/themeColor";
 
 // Invite-only card — adapted from mirage-mobile-app `InviteCodesCard`:
 // clean panel surface, icon tile + title/subtitle + count badge + chevron header,
-// collapsed body = subtitle paragraph + gradient "Share Invite Code" CTA.
+// collapsed body = subtitle paragraph + brand-blue "Share Invite Code" CTA.
 const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
@@ -260,18 +260,16 @@ const InviteBannerButton = styled.button`
     font-weight: 700;
     font-family: inherit;
     color: #FFFFFF;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    background: ${({ theme }) => requireThemeColor(theme, 'followBtnBg')};
     border: none;
     border-radius: 7px;
     cursor: pointer;
     white-space: nowrap;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-    box-shadow: 0 1px 5px rgba(102, 126, 234, 0.22);
+    transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 
     &:hover:not(:disabled) {
+        background: ${({ theme }) => requireThemeColor(theme, 'followBtnBgHover')};
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-        opacity: 0.95;
     }
 
     &:active:not(:disabled) {
@@ -283,7 +281,6 @@ const InviteBannerButton = styled.button`
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.06)'};
         color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-        box-shadow: none;
         cursor: not-allowed;
     }
 `;
