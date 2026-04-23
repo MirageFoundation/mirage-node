@@ -29,8 +29,37 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
     }
 }());
 
-/** Default when storage is missing, invalid, or an unknown id. */
-export const DEFAULT_THEME_ID = THEMES.mirageapp ? 'mirageapp' : THEME_MANIFESTS[0].id;
+/**
+ * Default theme when storage is missing, invalid, or an unknown id.
+ *
+ * ============================================================================
+ * HARD FAIL RULE — READ THIS BEFORE CHANGING ANYTHING BELOW.
+ * ============================================================================
+ *
+ * 1. The default theme is ALWAYS `bluemoon`. No exceptions. No "pick the first
+ *    manifest", no "pick mirageapp if present", no env-var override, no A/B
+ *    flag, no user-id-based gating. If you think you need to change this,
+ *    talk to nik first.
+ *
+ * 2. If `bluemoon` is not registered in `THEME_MANIFESTS`, THIS MODULE MUST
+ *    THROW at import time. Do NOT fall back to another theme. Do NOT default
+ *    to `THEME_MANIFESTS[0]`. A missing `bluemoon` manifest is a build-time
+ *    bug and must surface immediately — silent fallbacks hide regressions and
+ *    have burned us before.
+ *
+ * 3. No fallbacks anywhere in this file. Per `RULES.md` → "Do not use
+ *    fallbacks. Fail hard." This export is the single source of truth for
+ *    every caller (`normalizeThemeId`, storage migration, App bootstrap);
+ *    one silent fallback here cascades into every surface.
+ *
+ * If you are adding a new theme, add it to `themes/manifests.js` and leave
+ * THIS line alone. The default does not change when new themes ship.
+ * ============================================================================
+ */
+if (!THEMES.bluemoon) {
+    throw new Error('DEFAULT_THEME_ID: "bluemoon" manifest is missing from THEME_MANIFESTS — the default theme must always be bluemoon; no fallback is permitted.');
+}
+export const DEFAULT_THEME_ID = 'bluemoon';
 
 /**
  * Map legacy ids and unknown values to a registered theme id. Persists corrected values via callers.
