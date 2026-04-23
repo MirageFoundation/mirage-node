@@ -14,6 +14,8 @@ import {
     TabbedContainer,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { useDiscover, tagColors } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
 
@@ -43,13 +45,6 @@ const DiscoverWrap = styled.div`
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
-    }
-
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
     }
 `;
 
@@ -363,15 +358,18 @@ export default function DiscoverView({ state }) {
             <Helmet>
                 <title>Topics | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerBody $fullWidth>
-                            <DiscoverWrap>{body}</DiscoverWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerBody $fullWidth>
+                                <DiscoverWrap>{body}</DiscoverWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

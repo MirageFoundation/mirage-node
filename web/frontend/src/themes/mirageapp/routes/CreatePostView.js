@@ -6,7 +6,9 @@ import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
-import { ContentGrid, ModernPostFeed, CappedPageColumn } from "../Layout";
+import { ContentGrid, ModernPostFeed } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { MediaRow } from "../components/MediaAttachmentLayout.js";
 import StickerPicker from "../components/StickerPicker.js";
@@ -912,13 +914,6 @@ const Mono = styled.span`
 const ComposerColumn = styled.div`
     width: 100%;
     max-width: 720px;
-
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
-    }
 `;
 
 const TABS = [
@@ -939,25 +934,28 @@ function CreatePostView({ state, setPosts, updatePost }) {
                 <Helmet>
                     <title>Create Post | Mirage</title>
                 </Helmet>
-                <CappedPageColumn>
-                    <ModernPostFeed>
-                        <LoggedOutPromptCard
-                            role="region"
-                            aria-label="Create a post on Mirage"
-                            title="Sign in to post on Mirage"
-                            description="Create an account or sign in to publish posts, join topics, and participate on-chain."
-                            notice="Currently in Private Beta — Invite Only"
-                            stats={getCachedWelcomeStats()}
-                            links={[
-                                { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
-                                { label: 'Learn More', href: 'https://mirage.foundation', external: true },
-                            ]}
-                            inviteText="Have an invite code? Join the community today."
-                            primaryLabel="Create account"
-                            secondaryLabel="Sign in"
-                        />
-                    </ModernPostFeed>
-                </CappedPageColumn>
+                <FeedRailRow $feedViewMode="card">
+                    <FeedCol>
+                        <ModernPostFeed>
+                            <LoggedOutPromptCard
+                                role="region"
+                                aria-label="Create a post on Mirage"
+                                title="Sign in to post on Mirage"
+                                description="Create an account or sign in to publish posts, join topics, and participate on-chain."
+                                notice="Currently in Private Beta — Invite Only"
+                                stats={getCachedWelcomeStats()}
+                                links={[
+                                    { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                                    { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                                ]}
+                                inviteText="Have an invite code? Join the community today."
+                                primaryLabel="Create account"
+                                secondaryLabel="Sign in"
+                            />
+                        </ModernPostFeed>
+                    </FeedCol>
+                    <FeedRightRail />
+                </FeedRailRow>
             </ContentGrid>
         );
     }
@@ -1169,9 +1167,10 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
             <Helmet>
                 <title>{isEditMode ? 'Edit Post' : 'Create Post'} | Mirage</title>
             </Helmet>
-            <CappedPageColumn>
-                <ModernPostFeed>
-                    <ComposerColumn>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <ComposerColumn>
                         <HeaderRow>
                             <HeaderTitle>{isEditMode ? 'Edit post' : 'Create post'}</HeaderTitle>
                             <DraftsHint aria-hidden="true">Drafts(0)</DraftsHint>
@@ -1587,9 +1586,11 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                 </SubmitGroup>
                             </BottomBar>
                         </Stack>
-                    </ComposerColumn>
-                </ModernPostFeed>
-            </CappedPageColumn>
+                        </ComposerColumn>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
             {globalDragging && <GlobalDropOverlay>Drop image or video to upload</GlobalDropOverlay>}
         </ContentGrid>
     );

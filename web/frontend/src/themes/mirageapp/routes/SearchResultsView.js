@@ -21,6 +21,8 @@ import {
     ContainerTab,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import {
     FeedViewToggle,
     MemoCompactRow,
@@ -61,13 +63,6 @@ const SearchWrap = styled.div`
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
-    }
-
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
     }
 `;
 
@@ -711,16 +706,19 @@ export default function SearchResultsView({ state }) {
             <Helmet>
                 <title>{query ? `Search: ${query}` : "Search"} | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerTab>Search</ContainerTab>
-                        <ContainerBody $fullWidth>
-                            <SearchWrap>{body}</SearchWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerTab>Search</ContainerTab>
+                            <ContainerBody $fullWidth>
+                                <SearchWrap>{body}</SearchWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 
@@ -730,33 +728,36 @@ export default function SearchResultsView({ state }) {
                 <Helmet>
                     <title>{query ? `Search: ${query}` : "Search"} | Mirage</title>
                 </Helmet>
-                <div>
-                    <ModernPostFeed>
-                        <LoggedOutPromptCard
-                            role="region"
-                            aria-label="Search on Mirage"
-                            title={query ? "Sign in to search Mirage" : "Search Mirage"}
-                            description="Create an account or sign in to search topics, users, and posts."
-                            notice="Currently in Private Beta — Invite Only"
-                            stats={getCachedWelcomeStats()}
-                            links={[
-                                {
-                                    label: "Watch Introduction (YouTube)",
-                                    href: "https://www.youtube.com/watch?v=TOvP32ihQ0M",
-                                    external: true,
-                                },
-                                {
-                                    label: "Learn More",
-                                    href: "https://mirage.foundation",
-                                    external: true,
-                                },
-                            ]}
-                            inviteText="Have an invite code? Join the community today."
-                            primaryLabel="Create account"
-                            secondaryLabel="Sign in"
-                        />
-                    </ModernPostFeed>
-                </div>
+                <FeedRailRow $feedViewMode="card">
+                    <FeedCol>
+                        <ModernPostFeed>
+                            <LoggedOutPromptCard
+                                role="region"
+                                aria-label="Search on Mirage"
+                                title={query ? "Sign in to search Mirage" : "Search Mirage"}
+                                description="Create an account or sign in to search topics, users, and posts."
+                                notice="Currently in Private Beta — Invite Only"
+                                stats={getCachedWelcomeStats()}
+                                links={[
+                                    {
+                                        label: "Watch Introduction (YouTube)",
+                                        href: "https://www.youtube.com/watch?v=TOvP32ihQ0M",
+                                        external: true,
+                                    },
+                                    {
+                                        label: "Learn More",
+                                        href: "https://mirage.foundation",
+                                        external: true,
+                                    },
+                                ]}
+                                inviteText="Have an invite code? Join the community today."
+                                primaryLabel="Create account"
+                                secondaryLabel="Sign in"
+                            />
+                        </ModernPostFeed>
+                    </FeedCol>
+                    <FeedRightRail />
+                </FeedRailRow>
             </ContentGrid>
         );
     }

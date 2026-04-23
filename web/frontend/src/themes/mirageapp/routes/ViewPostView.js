@@ -8,6 +8,8 @@ import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
@@ -2084,81 +2086,87 @@ function ViewPostView({
     if (isPostBlocked || unblockInFlight) {
         const unblockBusy = unblockInFlight || isUnblockPostPending;
         return <ContentGrid>
-            <div>
-                <ModernPostFeed>
-                    <BackButton onClick={goBackToFeed}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                            <polyline points="12 19 5 12 12 5"></polyline>
-                        </svg>
-                        Back
-                    </BackButton>
-                    <BlockedPostState role="region" aria-label="Blocked post">
-                        <BlockedPostIcon aria-hidden="true">
-                            <HiNoSymbol />
-                        </BlockedPostIcon>
-                        <BlockedPostTitle>
-                            {unblockInFlight ? 'Unblocking post…' : 'This post is blocked'}
-                        </BlockedPostTitle>
-                        <BlockedPostMessage>
-                            {unblockInFlight
-                                ? 'Waiting for the unblock to commit on-chain. The post content will appear here shortly — hang tight.'
-                                : "You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page."}
-                        </BlockedPostMessage>
-                        <BlockedPostActions>
-                            {/* Standalone state panel — use `size="md"` (not
-                                `sm` like BlocksView rows) so the CTA has the
-                                same visual height as the primary buttons
-                                used elsewhere in the app. No radius override;
-                                Button's default `md` radius applies. */}
-                            <Button
-                                variant="danger"
-                                size="md"
-                                minWidth="5.5rem"
-                                disabled={unblockBusy}
-                                loading={unblockBusy}
-                                onClick={handleUnblockBlockedPost}
-                            >
-                                {unblockBusy ? (unblockPostStatus || 'Processing') : 'Unblock post'}
-                            </Button>
-                        </BlockedPostActions>
-                    </BlockedPostState>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <BackButton onClick={goBackToFeed}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="19" y1="12" x2="5" y2="12"></line>
+                                <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                            Back
+                        </BackButton>
+                        <BlockedPostState role="region" aria-label="Blocked post">
+                            <BlockedPostIcon aria-hidden="true">
+                                <HiNoSymbol />
+                            </BlockedPostIcon>
+                            <BlockedPostTitle>
+                                {unblockInFlight ? 'Unblocking post…' : 'This post is blocked'}
+                            </BlockedPostTitle>
+                            <BlockedPostMessage>
+                                {unblockInFlight
+                                    ? 'Waiting for the unblock to commit on-chain. The post content will appear here shortly — hang tight.'
+                                    : "You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page."}
+                            </BlockedPostMessage>
+                            <BlockedPostActions>
+                                {/* Standalone state panel — use `size="md"` (not
+                                    `sm` like BlocksView rows) so the CTA has the
+                                    same visual height as the primary buttons
+                                    used elsewhere in the app. No radius override;
+                                    Button's default `md` radius applies. */}
+                                <Button
+                                    variant="danger"
+                                    size="md"
+                                    minWidth="5.5rem"
+                                    disabled={unblockBusy}
+                                    loading={unblockBusy}
+                                    onClick={handleUnblockBlockedPost}
+                                >
+                                    {unblockBusy ? (unblockPostStatus || 'Processing') : 'Unblock post'}
+                                </Button>
+                            </BlockedPostActions>
+                        </BlockedPostState>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
 
     if (loading || error || depthError) {
         return <ContentGrid>
-            <div>
-                <ModernPostFeed>
-                    <BackButton onClick={goBackToFeed}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                            <polyline points="12 19 5 12 12 5"></polyline>
-                        </svg>
-                        Back
-                    </BackButton>
-                    {loading ? (
-                        <div role="status" aria-live="polite" aria-label="Loading post">
-                            <FeedCardSkeleton />
-                            <CommentSkeleton />
-                            <CommentSkeleton indent={1} />
-                            <CommentSkeleton />
-                        </div>
-                    ) : <VPStateBlock role="alert">
-                        <VPStateIcon $tone="danger">
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <BackButton onClick={goBackToFeed}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                                <line x1="12" y1="9" x2="12" y2="13" />
-                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                                <line x1="19" y1="12" x2="5" y2="12"></line>
+                                <polyline points="12 19 5 12 12 5"></polyline>
                             </svg>
-                        </VPStateIcon>
-                        <VPStateTitle>Couldn't load post</VPStateTitle>
-                        <VPStateMessage>{depthError || error}</VPStateMessage>
-                    </VPStateBlock>}
-                </ModernPostFeed>
-            </div>
+                            Back
+                        </BackButton>
+                        {loading ? (
+                            <div role="status" aria-live="polite" aria-label="Loading post">
+                                <FeedCardSkeleton />
+                                <CommentSkeleton />
+                                <CommentSkeleton indent={1} />
+                                <CommentSkeleton />
+                            </div>
+                        ) : <VPStateBlock role="alert">
+                            <VPStateIcon $tone="danger">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </VPStateIcon>
+                            <VPStateTitle>Couldn't load post</VPStateTitle>
+                            <VPStateMessage>{depthError || error}</VPStateMessage>
+                        </VPStateBlock>}
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
     const shortenAddress = address => {
@@ -3207,25 +3215,28 @@ function ViewPostView({
 
     if (!isLoggedIn) {
         return <ContentGrid>
-            <div>
-                <ModernPostFeed>
-                    <LoggedOutPromptCard
-                        role="region"
-                        aria-label="View post on Mirage"
-                        title="Sign in to view this post"
-                        description="Create an account or sign in to read posts, vote, and join the conversation."
-                        notice="Currently in Private Beta — Invite Only"
-                        stats={getCachedWelcomeStats()}
-                        links={[
-                            { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },
-                            { label: "Learn More", href: "https://mirage.foundation", external: true },
-                        ]}
-                        inviteText="Have an invite code? Join the community today."
-                        primaryLabel="Create account"
-                        secondaryLabel="Sign in"
-                    />
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <LoggedOutPromptCard
+                            role="region"
+                            aria-label="View post on Mirage"
+                            title="Sign in to view this post"
+                            description="Create an account or sign in to read posts, vote, and join the conversation."
+                            notice="Currently in Private Beta — Invite Only"
+                            stats={getCachedWelcomeStats()}
+                            links={[
+                                { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },
+                                { label: "Learn More", href: "https://mirage.foundation", external: true },
+                            ]}
+                            inviteText="Have an invite code? Join the community today."
+                            primaryLabel="Create account"
+                            secondaryLabel="Sign in"
+                        />
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
     if (root) {
@@ -3235,8 +3246,10 @@ function ViewPostView({
         const postDescription = mergedRoot && mergedRoot.content ? String(mergedRoot.content).trim().substring(0, 200) : root && root.content ? String(root.content).trim().substring(0, 200) : 'Decentralized social network';
         const imageUrl = `${origin}/images/logo.webp`;
         return <ContentGrid>
-            <MainContentWrapper>
-                <Helmet>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <MainContentWrapper>
+                        <Helmet>
                     <title>{postTitle} | Mirage</title>
                     <meta name="description" content={postDescription} />
                     <meta property="og:type" content="article" />
@@ -3649,7 +3662,10 @@ function ViewPostView({
                     });
                 })()}
                 </ModernPostFeed>
-            </MainContentWrapper>
+                    </MainContentWrapper>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
             {renderMobileReplyOverlay()}
             {/**
               * Destructive-action dialogs (block post/user/topic + report).
@@ -3799,28 +3815,33 @@ function ViewPostView({
         </ContentGrid>;
     } else {
         return <ContentGrid>
-            <MainContentWrapper>
-                <ModernPostFeed>
-                    <BackButton onClick={goBackToFeed}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                            <polyline points="12 19 5 12 12 5"></polyline>
-                        </svg>
-                        Back
-                    </BackButton>
-                    <VPStateBlock role="alert">
-                        <VPStateIcon $tone="danger">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                                <line x1="12" y1="9" x2="12" y2="13" />
-                                <line x1="12" y1="17" x2="12.01" y2="17" />
-                            </svg>
-                        </VPStateIcon>
-                        <VPStateTitle>Unable to load post</VPStateTitle>
-                        <VPStateMessage>Something went wrong. Try going back and opening the post again.</VPStateMessage>
-                    </VPStateBlock>
-                </ModernPostFeed>
-            </MainContentWrapper>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <MainContentWrapper>
+                        <ModernPostFeed>
+                            <BackButton onClick={goBackToFeed}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                </svg>
+                                Back
+                            </BackButton>
+                            <VPStateBlock role="alert">
+                                <VPStateIcon $tone="danger">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                        <line x1="12" y1="9" x2="12" y2="13" />
+                                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                </VPStateIcon>
+                                <VPStateTitle>Unable to load post</VPStateTitle>
+                                <VPStateMessage>Something went wrong. Try going back and opening the post again.</VPStateMessage>
+                            </VPStateBlock>
+                        </ModernPostFeed>
+                    </MainContentWrapper>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
 }
