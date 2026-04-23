@@ -25,7 +25,7 @@ import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost
  * Layout
  *  - Header row mirrors `InboxView::HeaderRow`/`HeaderTitle` (1.1rem/700,
  *    `0.25rem 1rem 0.5rem` padding) plus a trailing "Drafts" hint.
- *  - 720px capped `ComposerColumn` (matches Inbox width).
+ *  - 820px capped `ComposerColumn` (matches Inbox width).
  *  - Stacked blocks: topic pill → tabs → title input (shared across tabs)
  *    → tag pill → tab body (editor / carousel / link input) → bottom bar.
  *
@@ -910,10 +910,14 @@ const Mono = styled.span`
     overflow-wrap: anywhere;
 `;
 
-/** 720px cap — matches InboxView width. */
+/** 820px cap (960 px on large desktops) — matches InboxView width. */
 const ComposerColumn = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
+
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
 `;
 
 const TABS = [

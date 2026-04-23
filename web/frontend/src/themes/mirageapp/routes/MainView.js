@@ -37,13 +37,13 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: 0;
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -61,7 +61,7 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -71,7 +71,7 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
 /**
  * `FeedSkeletonColumn` mirrors the width rules applied by `ListFeedView`'s
  * `FeedList` so loading-state skeletons render at the same width as real
- * posts — 720px card / 80% compact when the sidebar is hidden — on home,
+ * posts — 820px card / 80% compact when the sidebar is hidden — on home,
  * following, and topic feeds. Keeping this parallel to `FeedHeroColumn`
  * avoids cross-file coupling and makes the wrapper explicit at the
  * skeleton render sites.
@@ -80,13 +80,13 @@ const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: 0;
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -104,7 +104,7 @@ const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -719,16 +719,16 @@ const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     /* Width rules mirror FeedList (ListFeedView.js) + FeedHeroColumn so the
      * consent card tracks the post column across both feed view modes and
      * the sidebar-hidden state:
-     *   - default / sidebar visible: capped at 720px, left-aligned.
-     *   - sidebar hidden + card view:    centered 720px column.
+     *   - default / sidebar visible: capped at 820px, left-aligned.
+     *   - sidebar hidden + card view:    centered 820px column.
      *   - sidebar hidden + compact view: 80% wide, left-aligned. */
-    max-width: 720px;
+    max-width: 820px;
     margin: 4px 0;
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -746,7 +746,7 @@ const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }

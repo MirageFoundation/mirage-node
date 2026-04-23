@@ -54,7 +54,7 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
          * both view modes. */
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'],
         [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
-            max-width: calc(720px + 1.5rem + 260px);
+            max-width: calc(820px + 1.5rem + 260px);
             margin-left: auto;
             margin-right: auto;
             gap: 1.5rem;
@@ -65,10 +65,12 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
      * pair inside Main with a consistent 1.5rem gap between them,
      * regardless of sidebar visibility or view mode. Higher specificity
      * (two attribute selectors) so these rules beat the 1001px rules
-     * above even at equal cascade order. */
+     * above even at equal cascade order. Feed column grows to 960 px
+     * (up from the 820 px laptop cap) so content reads more comfortably
+     * on large desktops / external monitors. */
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
-            max-width: calc(720px + 1.5rem + 260px);
+            max-width: calc(960px + 1.5rem + 260px);
             margin-left: auto;
             margin-right: auto;
             gap: 1.5rem;
@@ -78,30 +80,30 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
 
 /**
  * Feed column inside `FeedRailRow`.
- *   - Sidebar visible (card or compact): 720 px fixed track.
- *   - Sidebar hidden (card or compact): 720 px fixed (centered with
+ *   - Sidebar visible (card or compact): 820 px fixed track.
+ *   - Sidebar hidden (card or compact): 820 px fixed (centered with
  *     the rail). Compact mode intentionally matches card so the feed
  *     width + rail placement are identical in both modes.
+ *   - >= 1500 px (large desktops): column grows to 960 px.
  *   - <= 1000 px: collapses to viewport-filling width (rail hidden).
  */
 export const FeedCol = styled.div`
     min-width: 0;
 
     @media (min-width: 1001px) {
-        flex: 0 0 720px;
-        width: 720px;
-        max-width: 720px;
+        flex: 0 0 820px;
+        width: 820px;
+        max-width: 820px;
     }
 
-    /* Large-screen centered layout — redundant with the 1001px rule
-     * above now that compact no longer flex-grows, but kept for clarity
-     * so the intent ("feed is always 720 px above 1000 px") is obvious
-     * at both breakpoints. */
+    /* Large-screen centered layout — feed column grows to 960 px on
+     * viewports >= 1500 px so the content reads more comfortably on
+     * larger desktops / external monitors. */
     @media (min-width: 1500px) {
         [data-feed-view-mode] & {
-            flex: 0 0 720px;
-            width: 720px;
-            max-width: 720px;
+            flex: 0 0 960px;
+            width: 960px;
+            max-width: 960px;
         }
     }
 

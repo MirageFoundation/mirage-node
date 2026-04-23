@@ -72,14 +72,14 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: 0;
     background: ${({ theme }) => theme.colors.bg};
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -94,11 +94,12 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
     /* Very large screens (> average laptop): lock the feed to a fixed
      * centered column so its position stays stable regardless of sidebar
      * visibility OR feed view mode. Uses the same two-attribute specificity
-     * as the rules above (plus later source order) so it wins on overlap. */
+     * as the rules above (plus later source order) so it wins on overlap.
+     * Grows to 960 px on large desktops / external monitors. */
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 960px;
             margin-left: auto;
             margin-right: auto;
         }

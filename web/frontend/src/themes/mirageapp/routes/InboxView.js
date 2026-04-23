@@ -35,7 +35,7 @@ import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
  */
 
 /**
- * `InboxWrap` caps the inbox at the card-view feed width (720px) by
+ * `InboxWrap` caps the inbox at the card-view feed width (820px) by
  * default and left-aligns it in the content column. When the sidebar is
  * hidden on desktop, it expands like `ListFeedView`'s compact view
  * (width 80%, no max-width cap) but stays pinned to the LEFT — no auto
@@ -43,7 +43,7 @@ import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
  */
 const InboxWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     /* Pull the inbox up under the TopBar — cancels the top half of
      * ContainerBody's vertical padding without touching the shared
      * theme layout token (which would affect every route). */

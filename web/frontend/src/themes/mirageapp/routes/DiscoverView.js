@@ -40,11 +40,15 @@ import { normalizeTag } from "../../../utils/ContentTags";
 
 const DiscoverWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
+    }
+
+    @media (min-width: 1500px) {
+        max-width: 960px;
     }
 `;
 

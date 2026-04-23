@@ -38,7 +38,7 @@ function useDebugStateOverride() {
 
 const BlocksWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
