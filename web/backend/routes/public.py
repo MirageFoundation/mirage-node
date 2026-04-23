@@ -1191,12 +1191,85 @@ def _load_candidate_posts(
     return candidates
 
 
+def _load_vote_totals_cached(cur, post_ids: list[str], backend_cur=None) -> dict[str, float]:
+    """
+    Return {post_id: total_weight} via a 60s backend-DB cache. Only valid when
+    the viewer has no blocked users (the totals here are unfiltered). Callers
+    with blocked_users must use the live LATERAL query directly.
+    """
+    post_ids = list({str(pid).lower() for pid in post_ids if pid})
+    if not post_ids:
+        return {}
+
+    now_ts = int(time.time())
+    result: dict[str, float] = {}
+
+    def _read_and_fill_cache(bcur):
+        bcur.execute(
+            """
+            SELECT post_id, total_weight
+            FROM post_vote_totals_cache
+            WHERE post_id = ANY(%s) AND expires_at > %s
+            """,
+            (post_ids, now_ts),
+        )
+        for pid, total in bcur.fetchall():
+            result[pid] = float(total or 0.0)
+
+        missing = [pid for pid in post_ids if pid not in result]
+        if missing:
+            pid_values = ",".join(["(%s)"] * len(missing))
+            cur.execute(
+                f"""SELECT t.pid, COALESCE(x.total, 0)
+                    FROM (VALUES {pid_values}) AS t(pid)
+                    LEFT JOIN LATERAL (
+                        SELECT SUM(v.user_weight) AS total
+                        FROM votes v
+                        WHERE LOWER(v.target) = t.pid
+                    ) x ON true""",
+                missing,
+            )
+            fresh: dict[str, float] = {}
+            for tgt, total in cur.fetchall():
+                if tgt:
+                    fresh[tgt] = float(total or 0.0)
+
+            if fresh:
+                expires_at = now_ts + _VOTE_TOTALS_CACHE_TTL
+                values_sql = ",".join(["(%s, %s, %s, %s)"] * len(fresh))
+                params: list = []
+                for pid, total in fresh.items():
+                    params.extend((pid, total, now_ts, expires_at))
+                bcur.execute(
+                    f"""
+                    INSERT INTO post_vote_totals_cache (post_id, total_weight, computed_at, expires_at)
+                    VALUES {values_sql}
+                    ON CONFLICT (post_id) DO UPDATE SET
+                        total_weight = EXCLUDED.total_weight,
+                        computed_at = EXCLUDED.computed_at,
+                        expires_at = EXCLUDED.expires_at
+                    """,
+                    params,
+                )
+            result.update(fresh)
+
+    if backend_cur is not None:
+        _read_and_fill_cache(backend_cur)
+    else:
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                _read_and_fill_cache(bcur)
+
+    return result
+
+
 def _load_vote_and_comment_stats(
     cur,
     post_ids: list[str],
     blocked_posts: set[str],
     blocked_users: set[str],
     viewer: str = "",
+    backend_cur=None,
 ) -> tuple[dict, dict, dict, dict, dict]:
     """Batch load points, comment counts, viewer's votes, and viewer's user_weight contributions.
 
@@ -1223,8 +1296,8 @@ def _load_vote_and_comment_stats(
     # (~135k rows, 250ms). LATERAL forces an index-driven lookup per id via
     # idx_votes_target_lower — measured ~5x faster (250ms -> 50ms) on prod.
     _t = _time.monotonic()
-    pid_values = ",".join(["(%s)"] * len(post_ids))
     if blocked_users:
+        pid_values = ",".join(["(%s)"] * len(post_ids))
         blocked_ph = ",".join(["%s"] * len(blocked_users))
         cur.execute(
             f"""SELECT t.pid, COALESCE(x.total, 0)
@@ -1237,20 +1310,11 @@ def _load_vote_and_comment_stats(
                 ) x ON true""",
             post_ids + list(blocked_users),
         )
+        for tgt, total in cur.fetchall():
+            if tgt:
+                vote_totals[tgt] = float(total or 0.0)
     else:
-        cur.execute(
-            f"""SELECT t.pid, COALESCE(x.total, 0)
-                FROM (VALUES {pid_values}) AS t(pid)
-                LEFT JOIN LATERAL (
-                    SELECT SUM(v.user_weight) AS total
-                    FROM votes v
-                    WHERE LOWER(v.target) = t.pid
-                ) x ON true""",
-            post_ids,
-        )
-    for tgt, total in cur.fetchall():
-        if tgt:
-            vote_totals[tgt] = float(total or 0.0)
+        vote_totals = _load_vote_totals_cached(cur, post_ids, backend_cur=backend_cur)
     stats_vt_ms = _ms_since(_t)
 
     # Comment counts
@@ -1841,57 +1905,64 @@ def _get_home_feed_magic(
     topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
     timings["prefs_ms"] = _ms_since(_t)
 
-    # 2. Get similar users (cached or computed on-demand)
-    _t = time.monotonic()
-    similar_users = get_or_compute_similarities(cur, viewer_lower)
-    timings["sim_ms"] = _ms_since(_t)
-    sim_lookup = {u[0]: u[1] for u in similar_users}
-    similar_addrs = set(sim_lookup.keys())
+    with connect_backend_db() as backend_conn:
+        with backend_conn.cursor() as backend_cur:
+            # 2. Get similar users (cached or computed on-demand)
+            _t = time.monotonic()
+            similar_users = get_or_compute_similarities(cur, viewer_lower, backend_cur=backend_cur)
+            timings["sim_ms"] = _ms_since(_t)
+            sim_lookup = {u[0]: u[1] for u in similar_users}
+            similar_addrs = set(sim_lookup.keys())
 
-    # 3. Load candidate posts.
-    # Cap the per-source pool size on all pages so feed latency stays bounded
-    # even when seen-post overfetch would otherwise multiply the query cost.
-    per_source = min(limit * page * _seen_overfetch_factor(seen_posts, 4), 500)
-    _t = time.monotonic()
-    candidates, cand_timings = _load_home_candidates(
-        cur,
-        viewer_lower,
-        similar_addrs,
-        blocked_posts,
-        blocked_users,
-        allowed_tags,
-        per_source,
-        now_ts,
-        blocked_topics=blocked_topics,
-        blocked_topic_prefixes=blocked_topic_prefixes,
-    )
-    timings["cand_ms"] = _ms_since(_t)
-    timings["cand_count"] = len(candidates)
-    timings.update(cand_timings)
+            # 3. Load candidate posts.
+            # Cap the per-source pool size on all pages so feed latency stays bounded
+            # even when seen-post overfetch would otherwise multiply the query cost.
+            per_source = min(limit * page * _seen_overfetch_factor(seen_posts, 4), 500)
+            _t = time.monotonic()
+            candidates, cand_timings = _load_home_candidates(
+                cur,
+                viewer_lower,
+                similar_addrs,
+                blocked_posts,
+                blocked_users,
+                allowed_tags,
+                per_source,
+                now_ts,
+                blocked_topics=blocked_topics,
+                blocked_topic_prefixes=blocked_topic_prefixes,
+            )
+            timings["cand_ms"] = _ms_since(_t)
+            timings["cand_count"] = len(candidates)
+            timings.update(cand_timings)
 
-    if not candidates:
-        return {
-            "posts": [],
-            "total": 0,
-            "page": page,
-            "limit": limit,
-            "has_more": False,
-            "_timings": timings,
-        }
+            if not candidates:
+                return {
+                    "posts": [],
+                    "total": 0,
+                    "page": page,
+                    "limit": limit,
+                    "has_more": False,
+                    "_timings": timings,
+                }
 
-    # 4. Load which posts similar users have upvoted
-    post_ids = [c["post_id"] for c in candidates]
-    _t = time.monotonic()
-    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
-    timings["sim_up_ms"] = _ms_since(_t)
+            # 4. Load which posts similar users have upvoted
+            post_ids = [c["post_id"] for c in candidates]
+            _t = time.monotonic()
+            similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs, backend_cur=backend_cur)
+            timings["sim_up_ms"] = _ms_since(_t)
 
-    # 5. Load stats
-    _t = time.monotonic()
-    vote_totals, comment_counts, user_votes, user_weight_map, stats_timings = _load_vote_and_comment_stats(
-        cur, post_ids, blocked_posts, blocked_users, viewer_lower
-    )
-    timings["stats_ms"] = _ms_since(_t)
-    timings.update(stats_timings)
+            # 5. Load stats
+            _t = time.monotonic()
+            vote_totals, comment_counts, user_votes, user_weight_map, stats_timings = _load_vote_and_comment_stats(
+                cur,
+                post_ids,
+                blocked_posts,
+                blocked_users,
+                viewer_lower,
+                backend_cur=backend_cur,
+            )
+            timings["stats_ms"] = _ms_since(_t)
+            timings.update(stats_timings)
 
     _t = time.monotonic()
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
@@ -2598,8 +2669,15 @@ def _row_to_post(
 _SIM_UPVOTES_CACHE_TTL = 600  # 10 minutes, seconds
 _SIM_UPVOTES_WINDOW_SECS = 90 * 24 * 3600
 
+# Vote totals cache: feed scoring uses SUM(user_weight) over all votes per post,
+# which costs 0.3-0.9ms/post via LATERAL JOIN -> 100-260ms per home feed load
+# with 130-370 candidates. We cache the unfiltered total per post for 60s on
+# the backend DB. Only used when the viewer has no blocked users (the majority)
+# — blocked-user totals are viewer-dependent and fall through to the live query.
+_VOTE_TOTALS_CACHE_TTL = 60
 
-def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]) -> dict[str, list[str]]:
+
+def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str], backend_cur=None) -> dict[str, list[str]]:
     """
     Return {post_id: [voter_addr, ...]} for similar users that upvoted each
     candidate post. Reads/writes a shared backend-DB cache keyed by owner.
@@ -2614,59 +2692,66 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
 
     cached: dict[str, frozenset[str]] = {}
     fetched: dict[str, frozenset[str]] = {}
-    with connect_backend_db() as bconn:
-        with bconn.cursor() as bcur:
-            bcur.execute(
-                """
-                SELECT owner, upvoted_posts
-                FROM user_upvote_cache
-                WHERE owner = ANY(%s) AND expires_at > %s
+
+    def _read_and_fill_cache(bcur):
+        bcur.execute(
+            """
+            SELECT owner, upvoted_posts
+            FROM user_upvote_cache
+            WHERE owner = ANY(%s) AND expires_at > %s
+            """,
+            (similar_list, now_ts),
+        )
+        for owner, posts in bcur.fetchall():
+            cached[owner] = frozenset(posts or ())
+
+        missing = [a for a in similar_list if a not in cached]
+        if missing:
+            ph = ",".join(["%s"] * len(missing))
+            cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
+            cur.execute(
+                f"""
+                SELECT LOWER(owner), LOWER(target)
+                FROM votes
+                WHERE LOWER(owner) IN ({ph})
+                  AND user_vote > 0
+                  AND created_at > %s
                 """,
-                (similar_list, now_ts),
+                missing + [cutoff],
             )
-            for owner, posts in bcur.fetchall():
-                cached[owner] = frozenset(posts or ())
+            raw: dict[str, list[str]] = {addr: [] for addr in missing}
+            for owner, target in cur.fetchall():
+                bucket = raw.get(owner)
+                if bucket is not None and target:
+                    bucket.append(target)
 
-            missing = [a for a in similar_list if a not in cached]
-            if missing:
-                ph = ",".join(["%s"] * len(missing))
-                cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
-                cur.execute(
-                    f"""
-                    SELECT LOWER(owner), LOWER(target)
-                    FROM votes
-                    WHERE LOWER(owner) IN ({ph})
-                      AND user_vote > 0
-                      AND created_at > %s
-                    """,
-                    missing + [cutoff],
-                )
-                raw: dict[str, list[str]] = {addr: [] for addr in missing}
-                for owner, target in cur.fetchall():
-                    bucket = raw.get(owner)
-                    if bucket is not None and target:
-                        bucket.append(target)
+            # Users with no recent upvotes get an empty array cached as a
+            # negative result so we don't re-query them every 10 minutes.
+            expires_at = now_ts + _SIM_UPVOTES_CACHE_TTL
+            values_sql = ",".join(["(%s, %s, %s, %s)"] * len(raw))
+            params: list = []
+            for addr, posts in raw.items():
+                params.extend((addr, posts, now_ts, expires_at))
+            bcur.execute(
+                f"""
+                INSERT INTO user_upvote_cache (owner, upvoted_posts, computed_at, expires_at)
+                VALUES {values_sql}
+                ON CONFLICT (owner) DO UPDATE SET
+                    upvoted_posts = EXCLUDED.upvoted_posts,
+                    computed_at = EXCLUDED.computed_at,
+                    expires_at = EXCLUDED.expires_at
+                """,
+                params,
+            )
+            for addr, posts in raw.items():
+                fetched[addr] = frozenset(posts)
 
-                # Users with no recent upvotes get an empty array cached as a
-                # negative result so we don't re-query them every 10 minutes.
-                expires_at = now_ts + _SIM_UPVOTES_CACHE_TTL
-                values_sql = ",".join(["(%s, %s, %s, %s)"] * len(raw))
-                params: list = []
-                for addr, posts in raw.items():
-                    params.extend((addr, posts, now_ts, expires_at))
-                bcur.execute(
-                    f"""
-                    INSERT INTO user_upvote_cache (owner, upvoted_posts, computed_at, expires_at)
-                    VALUES {values_sql}
-                    ON CONFLICT (owner) DO UPDATE SET
-                        upvoted_posts = EXCLUDED.upvoted_posts,
-                        computed_at = EXCLUDED.computed_at,
-                        expires_at = EXCLUDED.expires_at
-                    """,
-                    params,
-                )
-                for addr, posts in raw.items():
-                    fetched[addr] = frozenset(posts)
+    if backend_cur is not None:
+        _read_and_fill_cache(backend_cur)
+    else:
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                _read_and_fill_cache(bcur)
 
     post_set = set(post_ids)
     result: dict[str, list[str]] = {}

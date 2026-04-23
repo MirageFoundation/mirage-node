@@ -307,6 +307,43 @@ def init_backend_schema() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_upvote_cache_expires ON user_upvote_cache(expires_at)")
             _assert_table_schema("user_upvote_cache", {"owner", "upvoted_posts", "computed_at", "expires_at"})
 
+            # ── Post vote totals cache ───────────────────────────────────
+            # Caches the unfiltered SUM(user_weight) per post so home-feed
+            # scoring can skip the 100-260ms LATERAL JOIN over `votes` for
+            # the no-blocked-users case (the vast majority of viewers).
+            # TTL is short (60s) because totals change whenever a vote lands;
+            # feed scoring tolerates ~1 min staleness.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS post_vote_totals_cache (
+                    post_id TEXT PRIMARY KEY,
+                    total_weight DOUBLE PRECISION NOT NULL,
+                    computed_at BIGINT NOT NULL,
+                    expires_at BIGINT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE post_vote_totals_cache
+                    ADD CONSTRAINT post_vote_totals_cache_post_id_lower
+                    CHECK (post_id = LOWER(post_id)) NOT VALID;
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_post_vote_totals_cache_expires "
+                "ON post_vote_totals_cache(expires_at)"
+            )
+            _assert_table_schema(
+                "post_vote_totals_cache",
+                {"post_id", "total_weight", "computed_at", "expires_at"},
+            )
+
             # ── Push notifications ───────────────────────────────────────
             cur.execute(
                 """

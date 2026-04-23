@@ -106,7 +106,7 @@ def compute_user_similarities(cur, viewer: str) -> list:
     return results
 
 
-def get_or_compute_similarities(cur, viewer: str) -> list:
+def get_or_compute_similarities(cur, viewer: str, backend_cur=None) -> list:
     """
     Return cached similarities if any non-expired rows exist, otherwise
     recompute. With a 24h TTL we intentionally serve slightly-stale results
@@ -121,19 +121,32 @@ def get_or_compute_similarities(cur, viewer: str) -> list:
     viewer_lower = viewer.strip().lower()
     now_ts = int(time.time())
 
-    with connect_backend_db() as bconn:
-        with bconn.cursor() as bcur:
-            bcur.execute(
-                """
-                SELECT similar_user, similarity, shared_dims
-                FROM user_similarity_cache
-                WHERE LOWER(owner) = %s AND expires_at > %s
-                ORDER BY similarity DESC
-                LIMIT %s
-                """,
-                (viewer_lower, now_ts, MAX_SIMILAR_USERS),
-            )
-            cached = bcur.fetchall()
+    if backend_cur is not None:
+        backend_cur.execute(
+            """
+            SELECT similar_user, similarity, shared_dims
+            FROM user_similarity_cache
+            WHERE LOWER(owner) = %s AND expires_at > %s
+            ORDER BY similarity DESC
+            LIMIT %s
+            """,
+            (viewer_lower, now_ts, MAX_SIMILAR_USERS),
+        )
+        cached = backend_cur.fetchall()
+    else:
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                bcur.execute(
+                    """
+                    SELECT similar_user, similarity, shared_dims
+                    FROM user_similarity_cache
+                    WHERE LOWER(owner) = %s AND expires_at > %s
+                    ORDER BY similarity DESC
+                    LIMIT %s
+                    """,
+                    (viewer_lower, now_ts, MAX_SIMILAR_USERS),
+                )
+                cached = bcur.fetchall()
 
     if cached:
         logger.debug("similarity.cache_hit: %s", viewer_lower[:12])
@@ -145,25 +158,41 @@ def get_or_compute_similarities(cur, viewer: str) -> list:
 
     if similarities:
         expires_at = now_ts + CACHE_TTL
-        with connect_backend_db() as bconn:
-            with bconn.cursor() as bcur:
-                bcur.execute("DELETE FROM user_similarity_cache WHERE LOWER(owner) = %s", (viewer_lower,))
-                values_sql = ",".join(["(%s, %s, %s, %s, %s, %s)"] * len(similarities))
-                params: list = []
-                for other_user, sim, shared in similarities:
-                    params.extend((viewer_lower, other_user, sim, shared, now_ts, expires_at))
-                bcur.execute(
-                    f"""
-                    INSERT INTO user_similarity_cache(owner, similar_user, similarity, shared_dims, computed_at, expires_at)
-                    VALUES {values_sql}
-                    ON CONFLICT (owner, similar_user) DO UPDATE SET
-                        similarity = EXCLUDED.similarity,
-                        shared_dims = EXCLUDED.shared_dims,
-                        computed_at = EXCLUDED.computed_at,
-                        expires_at = EXCLUDED.expires_at
-                    """,
-                    params,
-                )
+        values_sql = ",".join(["(%s, %s, %s, %s, %s, %s)"] * len(similarities))
+        params: list = []
+        for other_user, sim, shared in similarities:
+            params.extend((viewer_lower, other_user, sim, shared, now_ts, expires_at))
+
+        if backend_cur is not None:
+            backend_cur.execute("DELETE FROM user_similarity_cache WHERE LOWER(owner) = %s", (viewer_lower,))
+            backend_cur.execute(
+                f"""
+                INSERT INTO user_similarity_cache(owner, similar_user, similarity, shared_dims, computed_at, expires_at)
+                VALUES {values_sql}
+                ON CONFLICT (owner, similar_user) DO UPDATE SET
+                    similarity = EXCLUDED.similarity,
+                    shared_dims = EXCLUDED.shared_dims,
+                    computed_at = EXCLUDED.computed_at,
+                    expires_at = EXCLUDED.expires_at
+                """,
+                params,
+            )
+        else:
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    bcur.execute("DELETE FROM user_similarity_cache WHERE LOWER(owner) = %s", (viewer_lower,))
+                    bcur.execute(
+                        f"""
+                        INSERT INTO user_similarity_cache(owner, similar_user, similarity, shared_dims, computed_at, expires_at)
+                        VALUES {values_sql}
+                        ON CONFLICT (owner, similar_user) DO UPDATE SET
+                            similarity = EXCLUDED.similarity,
+                            shared_dims = EXCLUDED.shared_dims,
+                            computed_at = EXCLUDED.computed_at,
+                            expires_at = EXCLUDED.expires_at
+                        """,
+                        params,
+                    )
 
     logger.debug(
         "similarity.computed: %s -> %d users in %.1fms",
