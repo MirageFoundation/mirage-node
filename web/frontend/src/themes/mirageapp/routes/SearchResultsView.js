@@ -1,13 +1,14 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
     HiOutlineDocumentText,
     HiOutlineHashtag,
     HiOutlineUser,
     HiOutlineMagnifyingGlass,
     HiExclamationTriangle,
+    HiOutlineFire,
 } from "react-icons/hi2";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import CardView from "../components/CardView.js";
@@ -30,6 +31,7 @@ import {
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { useSearchResults } from "../../../logic/useSearchResults";
+import { useSearchDropdown } from "../../../logic/useSearchDropdown";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 
 /**
@@ -75,6 +77,147 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+`;
+
+/**
+ * Inline search form rendered at the top of the results view, visible
+ * only on screens where the TopBar's desktop search input is hidden
+ * (≤800px). Lets users run a new search when the MobileHeader /
+ * compact header only offers a search icon (no input).
+ */
+const MobileSearchForm = styled.form`
+    display: none;
+
+    @media (max-width: 800px) {
+        display: flex;
+        align-items: center;
+        margin: 0.15rem 1rem 0.6rem;
+        padding: 1px;
+        border-radius: 9999px;
+        background: ${({ theme }) => theme.colors.gradient};
+        transition: background 0.15s ease;
+
+        &:focus-within {
+            background: ${({ theme }) => theme.colors.focusBlue};
+        }
+    }
+`;
+
+const MobileSearchInner = styled.div`
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    border-radius: 9999px;
+    background: ${({ theme }) => theme.colors.bg};
+`;
+
+const MobileSearchIcon = styled.svg`
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: ${({ theme }) => theme.colors.subtleText};
+    pointer-events: none;
+`;
+
+const MobileSearchInput = styled.input`
+    width: 100%;
+    box-sizing: border-box;
+    padding: calc(0.4rem + 1px) 2.4rem calc(0.4rem + 1px) 2.1rem;
+    border-radius: 9999px;
+    border: none;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.8rem;
+    line-height: 1.2;
+    outline: none;
+
+    &::placeholder {
+        color: ${({ theme }) => theme.colors.subtleText};
+        font-size: 0.8rem;
+    }
+
+    &::-webkit-search-cancel-button,
+    &::-webkit-search-decoration,
+    &::-webkit-search-results-button,
+    &::-webkit-search-results-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+        display: none;
+    }
+`;
+
+const MobileSearchClear = styled.button`
+    position: absolute;
+    right: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: ${({ theme }) => theme.colors.subtleText};
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.text};
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    svg {
+        width: 14px;
+        height: 14px;
+    }
+`;
+
+/**
+ * Wrappers used to show / hide entire blocks based on viewport. The
+ * search page replaces the idle "Use the search bar" desktop copy with
+ * a trending-topics list on mobile, so we hide the desktop-only block
+ * below 800px and hide the mobile-only block above 800px.
+ */
+const DesktopOnly = styled.div`
+    @media (max-width: 800px) {
+        display: none;
+    }
+`;
+
+const MobileOnly = styled.div`
+    display: none;
+
+    @media (max-width: 800px) {
+        display: block;
+    }
+`;
+
+const TrendingSectionLabel = styled.div`
+    font-size: 0.6rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: ${({ theme }) => theme.colors.subtleText};
+    padding: 0.75rem 1rem 0.35rem;
+`;
+
+const TrendingList = styled.div`
+    display: flex;
+    flex-direction: column;
+`;
+
+const TrendingEmpty = styled.div`
+    padding: 1rem;
+    text-align: center;
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.68rem;
+    font-weight: 500;
 `;
 
 const HeaderTitle = styled.div`
@@ -357,6 +500,7 @@ function shortAddress(address) {
 }
 
 export default function SearchResultsView({ state }) {
+    const navigate = useNavigate();
     const {
         query,
         loading,
@@ -383,6 +527,139 @@ export default function SearchResultsView({ state }) {
     const activeTabIndex = useMemo(
         () => TABS.findIndex((t) => t.id === activeTab),
         [activeTab]
+    );
+
+    // Local input state for the small-screen inline search form (visible
+    // only on ≤800px, where the TopBar's desktop search input is hidden).
+    // Kept in sync with the URL `q` so reopening `/search?q=...` on mobile
+    // pre-populates the input, and editing / submitting updates the URL.
+    const [mobileQuery, setMobileQuery] = useState(query || "");
+    useEffect(() => {
+        setMobileQuery(query || "");
+    }, [query]);
+
+    const handleMobileSubmit = useCallback(
+        (e) => {
+            e.preventDefault();
+            const q = String(mobileQuery || "").trim();
+            if (!q) return;
+            navigate(`/search?q=${encodeURIComponent(q)}`);
+        },
+        [mobileQuery, navigate]
+    );
+
+    const handleMobileClear = useCallback(() => {
+        setMobileQuery("");
+    }, []);
+
+    // Debounced URL sync: while the user types in the mobile input, push
+    // the query into the URL (`?q=...`) via `replace` so `useSearchResults`
+    // re-fetches and the 3-tab view updates in place — mirroring the
+    // desktop experience where pressing Enter lands on the tabbed page.
+    // Skip when the trimmed value already matches the URL query to avoid
+    // redundant history entries / refetches while the user only added /
+    // removed whitespace.
+    useEffect(() => {
+        const trimmed = String(mobileQuery || "").trim();
+        const urlQuery = String(query || "").trim();
+        if (trimmed === urlQuery) return undefined;
+        const handle = setTimeout(() => {
+            if (!trimmed) {
+                navigate("/search", { replace: true });
+            } else {
+                navigate(`/search?q=${encodeURIComponent(trimmed)}`, {
+                    replace: true,
+                });
+            }
+        }, 350);
+        return () => clearTimeout(handle);
+    }, [mobileQuery, query, navigate]);
+
+    // Pull trending topics from the shared dropdown hook so the mobile
+    // idle state mirrors the desktop `SearchDropdown`. We intentionally
+    // don't push the typed query into the hook — live search runs via
+    // the URL-driven `useSearchResults` flow instead, which already
+    // renders the full 3-tab view under the input on mobile.
+    const { trendingTopics, isLoadingTrending } = useSearchDropdown();
+
+    const mobileSearchBar = (
+        <MobileSearchForm role="search" onSubmit={handleMobileSubmit}>
+            <MobileSearchInner>
+                <MobileSearchIcon viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
+                    />
+                </MobileSearchIcon>
+                <MobileSearchInput
+                    type="search"
+                    value={mobileQuery}
+                    onChange={(e) => setMobileQuery(e.target.value)}
+                    placeholder="Search Mirage"
+                    aria-label="Search"
+                    autoComplete="off"
+                    enterKeyHint="search"
+                />
+                {mobileQuery.length > 0 && (
+                    <MobileSearchClear
+                        type="button"
+                        onClick={handleMobileClear}
+                        aria-label="Clear search"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M6 6l12 12M18 6L6 18"
+                            />
+                        </svg>
+                    </MobileSearchClear>
+                )}
+            </MobileSearchInner>
+        </MobileSearchForm>
+    );
+
+    // Mobile-only trending-topics block. Shown directly under the mobile
+    // search input when the input is empty (matches the desktop
+    // `SearchDropdown` idle state). Hidden on desktop via the
+    // `MobileOnly` wrapper.
+    const mobileTrending = (
+        <MobileOnly>
+            <TrendingSectionLabel>Trending topics</TrendingSectionLabel>
+            {isLoadingTrending ? (
+                <TrendingEmpty>Loading trending topics…</TrendingEmpty>
+            ) : trendingTopics.length === 0 ? (
+                <TrendingEmpty>No trending topics available</TrendingEmpty>
+            ) : (
+                <TrendingList>
+                    {trendingTopics.map((topic) => (
+                        <RowItem
+                            key={`trending-${topic.topic}`}
+                            to={`/t/${encodeURIComponent(topic.topic)}`}
+                        >
+                            <RowIcon>
+                                <HiOutlineFire />
+                            </RowIcon>
+                            <RowMain>
+                                <RowPrimary>{topic.topic}</RowPrimary>
+                                <RowMeta>
+                                    {formatPostCount(
+                                        topic.post_count || topic.count
+                                    ) || "No posts yet"}
+                                </RowMeta>
+                            </RowMain>
+                        </RowItem>
+                    ))}
+                </TrendingList>
+            )}
+        </MobileOnly>
     );
 
     // Tracks whether the current `activeTab` was picked by the user (as
@@ -491,15 +768,19 @@ export default function SearchResultsView({ state }) {
                 <HeaderRow>
                     <HeaderTitle>Search</HeaderTitle>
                 </HeaderRow>
-                <StateBlock>
-                    <StateIcon>
-                        <HiOutlineMagnifyingGlass />
-                    </StateIcon>
-                    <StateTitle>Search Mirage</StateTitle>
-                    <StateMessage>
-                        Use the search bar above to find posts, topics, and users.
-                    </StateMessage>
-                </StateBlock>
+                {mobileSearchBar}
+                <DesktopOnly>
+                    <StateBlock>
+                        <StateIcon>
+                            <HiOutlineMagnifyingGlass />
+                        </StateIcon>
+                        <StateTitle>Search Mirage</StateTitle>
+                        <StateMessage>
+                            Use the search bar to find posts, topics, and users.
+                        </StateMessage>
+                    </StateBlock>
+                </DesktopOnly>
+                {mobileTrending}
             </>
         );
     }
@@ -507,6 +788,10 @@ export default function SearchResultsView({ state }) {
     if (loading) {
         return renderShell(
             <>
+                <HeaderRow>
+                    <HeaderTitle>Search</HeaderTitle>
+                </HeaderRow>
+                {mobileSearchBar}
                 <PageHeaderSkeleton />
                 <FeedCardSkeletonList count={4} />
             </>
@@ -519,6 +804,7 @@ export default function SearchResultsView({ state }) {
                 <HeaderRow>
                     <HeaderTitle>Search</HeaderTitle>
                 </HeaderRow>
+                {mobileSearchBar}
                 <HeaderSubRow>
                     <HeaderSub>Results for “{displayQuery}”</HeaderSub>
                 </HeaderSubRow>
@@ -539,6 +825,7 @@ export default function SearchResultsView({ state }) {
                 <HeaderRow>
                     <HeaderTitle>Search</HeaderTitle>
                 </HeaderRow>
+                {mobileSearchBar}
                 <HeaderSubRow>
                     <HeaderSub>Results for “{displayQuery}”</HeaderSub>
                 </HeaderSubRow>
@@ -722,6 +1009,7 @@ export default function SearchResultsView({ state }) {
             <HeaderRow>
                 <HeaderTitle>Search</HeaderTitle>
             </HeaderRow>
+            {mobileSearchBar}
             <HeaderSubRow>
                 <HeaderSub>Results for “{displayQuery}”</HeaderSub>
                 <ViewToggleSlot
