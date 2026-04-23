@@ -1581,7 +1581,7 @@ def _get_following_feed(
     similar_users = get_or_compute_similarities(cur, viewer_lower)
     sim_lookup = {u[0]: u[1] for u in similar_users}
     similar_addrs = set(sim_lookup.keys())
-    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+    similar_upvotes, _ = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
     now_ts = int(time.time())
@@ -1948,8 +1948,11 @@ def _get_home_feed_magic(
             # 4. Load which posts similar users have upvoted
             post_ids = [c["post_id"] for c in candidates]
             _t = time.monotonic()
-            similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs, backend_cur=backend_cur)
+            similar_upvotes, sim_up_timings = _load_similar_user_upvotes(
+                cur, post_ids, similar_addrs, backend_cur=backend_cur
+            )
             timings["sim_up_ms"] = _ms_since(_t)
+            timings.update(sim_up_timings)
 
             # 5. Load stats
             _t = time.monotonic()
@@ -2677,23 +2680,50 @@ _SIM_UPVOTES_WINDOW_SECS = 90 * 24 * 3600
 _VOTE_TOTALS_CACHE_TTL = 60
 
 
-def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str], backend_cur=None) -> dict[str, list[str]]:
+def _load_similar_user_upvotes(
+    cur,
+    post_ids: list[str],
+    similar_addrs: set[str],
+    backend_cur=None,
+) -> tuple[dict[str, list[str]], dict[str, float]]:
     """
-    Return {post_id: [voter_addr, ...]} for similar users that upvoted each
-    candidate post. Reads/writes a shared backend-DB cache keyed by owner.
+    Return ({post_id: [voter_addr, ...]}, timings) for similar users that
+    upvoted each candidate post. Reads/writes a shared backend-DB cache
+    keyed by owner.
+
+    timings sub-phases (used to track down the 160-230ms sim_up_ms tail):
+      sim_up_cache_ms     backend-DB SELECT from user_upvote_cache
+      sim_up_miss_ms      cold-fill (votes SELECT + UPSERT), 0 if all hit
+      sim_up_intersect_ms Python intersection over cached sets
+      sim_up_hits         similar users served from cache
+      sim_up_misses       similar users cold-filled this call
     """
+    import time as _time
+
+    def _ms_since(t0: float) -> float:
+        return round((_time.monotonic() - t0) * 1000, 2)
+
+    timings: dict[str, float] = {
+        "sim_up_cache_ms": 0.0,
+        "sim_up_miss_ms": 0.0,
+        "sim_up_intersect_ms": 0.0,
+        "sim_up_hits": 0,
+        "sim_up_misses": 0,
+    }
+
     if not post_ids or not similar_addrs:
-        return {}
+        return {}, timings
 
     similar_list = list({str(addr).lower() for addr in similar_addrs if addr})
     if not similar_list:
-        return {}
+        return {}, timings
     now_ts = int(time.time())
 
     cached: dict[str, frozenset[str]] = {}
     fetched: dict[str, frozenset[str]] = {}
 
     def _read_and_fill_cache(bcur):
+        _t = _time.monotonic()
         bcur.execute(
             """
             SELECT owner, upvoted_posts
@@ -2704,9 +2734,13 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
         )
         for owner, posts in bcur.fetchall():
             cached[owner] = frozenset(posts or ())
+        timings["sim_up_cache_ms"] = _ms_since(_t)
+        timings["sim_up_hits"] = len(cached)
 
         missing = [a for a in similar_list if a not in cached]
+        timings["sim_up_misses"] = len(missing)
         if missing:
+            _t = _time.monotonic()
             ph = ",".join(["%s"] * len(missing))
             cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
             cur.execute(
@@ -2745,6 +2779,7 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
             )
             for addr, posts in raw.items():
                 fetched[addr] = frozenset(posts)
+            timings["sim_up_miss_ms"] = _ms_since(_t)
 
     if backend_cur is not None:
         _read_and_fill_cache(backend_cur)
@@ -2753,6 +2788,7 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
             with bconn.cursor() as bcur:
                 _read_and_fill_cache(bcur)
 
+    _t = _time.monotonic()
     post_set = set(post_ids)
     result: dict[str, list[str]] = {}
     for per_user in (cached, fetched):
@@ -2761,7 +2797,8 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
                 continue
             for pid in upvoted & post_set:
                 result.setdefault(pid, []).append(addr)
-    return result
+    timings["sim_up_intersect_ms"] = _ms_since(_t)
+    return result, timings
 
 
 def _get_guest_feed(
@@ -5417,7 +5454,7 @@ def get_posts():
             similar_addrs = set(sim_lookup.keys())
 
             post_ids = [p["post_id"] for p in candidates]
-            similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+            similar_upvotes, _ = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
             unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
             unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
             topic_prefs: dict[str, float] = {}
