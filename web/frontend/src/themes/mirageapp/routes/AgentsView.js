@@ -1,0 +1,625 @@
+import { Helmet } from "react-helmet-async";
+import { Link } from "react-router-dom";
+import styled from "styled-components";
+import {
+    HiChevronDown,
+    HiExclamationTriangle,
+    HiUserGroup,
+    HiArrowsUpDown,
+} from "react-icons/hi2";
+import Button from "../components/Button.js";
+import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
+import {
+    ContentGrid,
+    ModernPostFeed,
+    TabbedContainer,
+    ContainerBody,
+} from "../Layout";
+import { useAgents, formatTimeAgo } from "../../../logic/useAgents";
+import { dicebearAvatarUrl } from "../../../utils/avatar";
+
+/**
+ * AgentsView — `mirageapp` Plan 06 sub-plan 07.
+ *
+ * Rules (`docs/guides/web-theme-mirageapp/RULES.md`):
+ *  - R1 rows sit on `theme.colors.bg`; section labels and the reorder
+ *    bar share the same canvas — no panel fill on the main column.
+ *  - R2 every color routed through a token.
+ *  - R3 rows separated by `1px solid theme.colors.border`.
+ *  - R4 data parity with `themes/bluemoon/routes/AgentsView.js`; visual
+ *    language from `mirage-mobile-app/src/pages/agents-screen.tsx`
+ *    (avatar + name + Agent badge + last active + bio + reorder
+ *    chevrons + Enable/Disable button).
+ *  - R6 chevrons come from `react-icons/hi2` (`HiChevronDown`). The
+ *    up-chevron is the same icon rotated 180°.
+ *  - R7 page heading 1.1rem/700; section labels 0.55rem/600 uppercase;
+ *    row title 0.85rem/600; last-active 0.62rem/500 subtle.
+ */
+
+const AgentsWrap = styled.div`
+    width: 100%;
+    max-width: 720px;
+    margin: -0.75rem 0 0;
+
+    @media (max-width: 1000px) {
+        margin-top: -0.5rem;
+    }
+
+    @media (min-width: 1001px) {
+        [data-sidebar-hidden='true'] & {
+            width: 80%;
+            max-width: none;
+        }
+    }
+`;
+
+const HeaderRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    padding: 0.25rem 1rem 0.5rem;
+`;
+
+const HeaderTitle = styled.div`
+    display: flex;
+    align-items: center;
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+`;
+
+const IntroBlock = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0 1rem 0.75rem;
+`;
+
+const IntroParagraph = styled.p`
+    margin: 0;
+    color: ${({ theme }) => theme.colors.cardBodyText};
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+
+    strong {
+        color: ${({ theme }) => theme.colors.text};
+        font-weight: 600;
+    }
+
+    em {
+        color: ${({ theme }) => theme.colors.text};
+        font-style: normal;
+        font-weight: 500;
+    }
+`;
+
+const ErrorBanner = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 1rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid ${({ theme }) => theme.colors.buttonDangerBorder};
+    background: ${({ theme }) => theme.colors.buttonDangerBg};
+    border-radius: 6px;
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.7rem;
+    font-weight: 500;
+
+    svg {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+    }
+`;
+
+const SectionHeader = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.65rem 1rem 0.4rem;
+`;
+
+const SectionLabel = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+`;
+
+const CountBadge = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    background: ${({ theme }) => theme.colors.surface2};
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    line-height: 1.4;
+`;
+
+const ReorderBar = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 1rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+
+    svg.reorder-icon {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        color: ${({ theme }) => theme.colors.subtleText};
+    }
+`;
+
+const ReorderHint = styled.span`
+    flex: 1;
+    min-width: 0;
+    font-size: 0.65rem;
+    font-weight: 500;
+    line-height: 1.35;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+
+const List = styled.div`
+    display: flex;
+    flex-direction: column;
+`;
+
+const Row = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.7rem 1rem;
+    background: transparent;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0.85rem;
+    }
+`;
+
+const RowHeader = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+`;
+
+const AvatarImg = styled.img`
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface3};
+    object-fit: cover;
+    flex-shrink: 0;
+    display: block;
+`;
+
+const Identity = styled.div`
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+`;
+
+const NameRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    flex-wrap: wrap;
+`;
+
+const NameLink = styled(Link)`
+    color: ${({ theme }) => theme.colors.text};
+    text-decoration: none;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.link};
+    }
+`;
+
+const AgentBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    background: ${({ theme }) => theme.colors.voteDownBg};
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+`;
+
+const LastActive = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1.3;
+`;
+
+const Bio = styled.p`
+    margin: 0.15rem 0 0;
+    color: ${({ theme }) => theme.colors.cardBodyText};
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.45;
+    word-break: break-word;
+`;
+
+const Actions = styled.div`
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+
+    @media (max-width: 600px) {
+        flex-direction: column-reverse;
+        align-items: stretch;
+        gap: 0.3rem;
+    }
+`;
+
+const OrderGroup = styled.div`
+    display: inline-flex;
+    gap: 0.25rem;
+`;
+
+const OrderButton = styled.button`
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 6px;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: transparent;
+    color: ${({ theme }) => theme.colors.text};
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+    svg {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.15s ease;
+        transform: rotate(${({ $direction }) => ($direction === 'up' ? '180deg' : '0deg')});
+    }
+
+    &:hover:not(:disabled) {
+        background: ${({ theme }) => theme.colors.hoverBg};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+    }
+
+    &:focus-visible {
+        outline: none;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+`;
+
+/* ----- Empty / loading / error states ----- */
+
+const StateBlock = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 2.5rem 1.25rem;
+    text-align: center;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+
+const StateIcon = styled.div`
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+
+    svg {
+        width: 22px;
+        height: 22px;
+        color: ${({ $tone, theme }) =>
+            $tone === 'danger' ? theme.colors.voteDown : theme.colors.subtleText};
+    }
+`;
+
+const StateTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.9rem;
+    font-weight: 700;
+`;
+
+const StateMessage = styled.div`
+    font-size: 0.75rem;
+    line-height: 1.5;
+    max-width: 24rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+
+function formatActive(ts) {
+    const ago = formatTimeAgo(ts);
+    return ago ? `Active ${ago}` : 'No activity yet';
+}
+
+function getToggleLabel({ enabled, hovering, pending, status }) {
+    if (pending) return status || (enabled ? 'Disabling…' : 'Enabling…');
+    if (enabled) return hovering ? 'Disable' : 'Enabled';
+    return 'Enable';
+}
+
+export default function AgentsView({ state }) {
+    const {
+        viewerAddress,
+        loadingAgents,
+        loadingEnabled,
+        errorMessage,
+        isApplyingOrder,
+        hoverAgent,
+        setHoverAgent,
+        isPending,
+        formatStatus,
+        isEnabled,
+        handleToggle,
+        hasDraftChanges,
+        moveAgent,
+        applyOrder,
+        displayOrder,
+        sortedAgents,
+        enabledCount,
+    } = useAgents({ state });
+
+    const renderShell = (body) => (
+        <ContentGrid>
+            <Helmet>
+                <title>Agents | Mirage</title>
+            </Helmet>
+            <div>
+                <ModernPostFeed>
+                    <TabbedContainer>
+                        <ContainerBody $fullWidth>
+                            <AgentsWrap>{body}</AgentsWrap>
+                        </ContainerBody>
+                    </TabbedContainer>
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>
+    );
+
+    const headerBlock = (
+        <>
+            <HeaderRow>
+                <HeaderTitle>Agents</HeaderTitle>
+            </HeaderRow>
+            <IntroBlock>
+                <IntroParagraph>
+                    <strong>Mirage has no built-in moderation</strong> — all content lives on-chain unaltered.
+                </IntroParagraph>
+                <IntroParagraph>
+                    <strong>Anyone</strong> can create an agent that filters spam, fixes tags, translates posts, or curates however they see fit. You choose which ones to trust, and your feed reflects their work while the originals stay untouched.
+                </IntroParagraph>
+                <IntroParagraph>
+                    The result is an <em>open marketplace of moderation</em> where quality rises through competition, not central authority.
+                </IntroParagraph>
+            </IntroBlock>
+        </>
+    );
+
+    if (loadingAgents || loadingEnabled) {
+        return renderShell(
+            <>
+                <PageHeaderSkeleton />
+                <ListRowSkeletonList count={6} />
+            </>
+        );
+    }
+
+    if (errorMessage && sortedAgents.length === 0) {
+        return renderShell(
+            <>
+                {headerBlock}
+                <StateBlock role="alert">
+                    <StateIcon $tone="danger">
+                        <HiExclamationTriangle />
+                    </StateIcon>
+                    <StateTitle>Couldn’t load agents</StateTitle>
+                    <StateMessage>{errorMessage}</StateMessage>
+                </StateBlock>
+            </>
+        );
+    }
+
+    if (sortedAgents.length === 0) {
+        return renderShell(
+            <>
+                {headerBlock}
+                <StateBlock>
+                    <StateIcon>
+                        <HiUserGroup />
+                    </StateIcon>
+                    <StateTitle>No agents available yet</StateTitle>
+                    <StateMessage>
+                        Agents curate and moderate your feed. When the first ones ship, they’ll show up here.
+                    </StateMessage>
+                </StateBlock>
+            </>
+        );
+    }
+
+    const enabledAgents = sortedAgents.slice(0, enabledCount);
+    const availableAgents = sortedAgents.slice(enabledCount);
+    const showReorderBar = enabledCount > 1;
+
+    const renderRow = (agent) => {
+        const addrLower = (agent.address || '').toLowerCase();
+        const enabled = isEnabled(agent.address);
+        /* `isPending(addr)` returns true for EVERY agent while `apply
+         *  order` is in-flight (it checks the global `__set_agents__`
+         *  key), which caused all Enable/Disable buttons to show a
+         *  spinner when only the Apply-order button was pressed. Scope
+         *  the loading spinner to per-agent pending state by excluding
+         *  the apply-order window. The button is still disabled during
+         *  apply-order (see `disabled={...}` below) so users can't
+         *  spam-click mid-reorder. */
+        const pending = isPending(addrLower);
+        const toggleLoading = pending && !isApplyingOrder;
+        const displayName = agent.username
+            ? `@${agent.username}`
+            : agent.address
+              ? `${agent.address.slice(0, 12)}…`
+              : 'Unknown';
+        const orderIdx = displayOrder.indexOf(addrLower);
+        const canMoveUp = enabled && orderIdx > 0;
+        const canMoveDown =
+            enabled && orderIdx >= 0 && orderIdx < displayOrder.length - 1;
+        const avatarSeed = agent.username || agent.address || addrLower;
+        const profileUrl = `/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`;
+        const hovering = hoverAgent === addrLower;
+
+        return (
+            <Row key={agent.address}>
+                <RowHeader>
+                    <AvatarImg
+                        src={dicebearAvatarUrl(avatarSeed, 36)}
+                        alt=""
+                        loading="lazy"
+                    />
+                    <Identity>
+                        <NameRow>
+                            <NameLink to={profileUrl}>{displayName}</NameLink>
+                            <AgentBadge>Agent</AgentBadge>
+                            <LastActive>{formatActive(agent.last_active)}</LastActive>
+                        </NameRow>
+                    </Identity>
+                    <Actions>
+                    {enabled && enabledCount > 1 && (
+                        <OrderGroup>
+                            <OrderButton
+                                type="button"
+                                $direction="up"
+                                onClick={() => moveAgent(addrLower, -1)}
+                                disabled={!canMoveUp || pending || isApplyingOrder}
+                                aria-label="Move agent up"
+                            >
+                                <HiChevronDown />
+                            </OrderButton>
+                            <OrderButton
+                                type="button"
+                                $direction="down"
+                                onClick={() => moveAgent(addrLower, 1)}
+                                disabled={!canMoveDown || pending || isApplyingOrder}
+                                aria-label="Move agent down"
+                            >
+                                <HiChevronDown />
+                            </OrderButton>
+                        </OrderGroup>
+                    )}
+                    <Button
+                        variant={enabled && hovering ? 'primaryDanger' : enabled ? 'subtle' : 'primary'}
+                        size="sm"
+                        minWidth="6.5rem"
+                        disabled={pending || !viewerAddress || loadingEnabled || isApplyingOrder}
+                        loading={toggleLoading}
+                        onMouseEnter={() => setHoverAgent(addrLower)}
+                        onMouseLeave={() => setHoverAgent(null)}
+                        onClick={() => handleToggle(agent.address)}
+                    >
+                        {getToggleLabel({
+                            enabled,
+                            hovering,
+                            pending: toggleLoading,
+                            status: formatStatus(addrLower),
+                        })}
+                    </Button>
+                    </Actions>
+                </RowHeader>
+                {agent.biography && <Bio>{agent.biography}</Bio>}
+            </Row>
+        );
+    };
+
+    return renderShell(
+        <>
+            {headerBlock}
+
+            {errorMessage && (
+                <ErrorBanner role="alert">
+                    <HiExclamationTriangle />
+                    <span>{errorMessage}</span>
+                </ErrorBanner>
+            )}
+
+            {enabledCount > 0 && (
+                <>
+                    <SectionHeader>
+                        <SectionLabel>Enabled agents</SectionLabel>
+                        <CountBadge>{enabledCount}</CountBadge>
+                    </SectionHeader>
+                    {showReorderBar && (
+                        <ReorderBar>
+                            <HiArrowsUpDown className="reorder-icon" aria-hidden="true" />
+                            <ReorderHint>
+                                Order matters. When two agents edit the same field, the one higher in your list wins.
+                            </ReorderHint>
+                            <Button
+                                variant="primary"
+                                size="xs"
+                                disabled={!hasDraftChanges || isApplyingOrder || !viewerAddress}
+                                loading={isApplyingOrder}
+                                onClick={applyOrder}
+                            >
+                                Apply order
+                            </Button>
+                        </ReorderBar>
+                    )}
+                    <List>{enabledAgents.map(renderRow)}</List>
+                </>
+            )}
+
+            <SectionHeader>
+                <SectionLabel>
+                    {enabledCount > 0 ? 'Available agents' : 'All agents'}
+                </SectionLabel>
+                <CountBadge>{availableAgents.length}</CountBadge>
+            </SectionHeader>
+            {availableAgents.length === 0 ? (
+                <StateBlock>
+                    <StateIcon>
+                        <HiUserGroup />
+                    </StateIcon>
+                    <StateTitle>All caught up</StateTitle>
+                    <StateMessage>
+                        Every available agent is already enabled for your feed.
+                    </StateMessage>
+                </StateBlock>
+            ) : (
+                <List>{availableAgents.map(renderRow)}</List>
+            )}
+        </>
+    );
+}

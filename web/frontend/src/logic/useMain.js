@@ -369,6 +369,31 @@ export function useMain({
     useEffect(() => {
         setBlockedTopicsLocal(new Set());
     }, [viewerAddress]);
+    // Hydrate the local blocked-topics set from the server on login / viewer
+    // change. Without this, `isTopicBlockedLocal` only reflects topics the
+    // viewer blocked in THIS session — so visiting /t/<already-blocked>
+    // would still render the normal "no posts" state on a fresh page load.
+    useEffect(() => {
+        if (!viewerAddress || viewerAddress === 'guest') return undefined;
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await Api.get('get_user_blocked', { address: viewerAddress });
+                if (cancelled) return;
+                const serverTopics = Array.isArray(data?.blocked_topics) ? data.blocked_topics : [];
+                if (serverTopics.length === 0) return;
+                setBlockedTopicsLocal(prev => {
+                    const next = new Set(prev);
+                    for (const raw of serverTopics) {
+                        const t = String(raw || '').trim().toLowerCase();
+                        if (t) next.add(t);
+                    }
+                    return next;
+                });
+            } catch (_) { /* noop — optimistic UI falls back to empty set */ }
+        })();
+        return () => { cancelled = true; };
+    }, [viewerAddress]);
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
     const [topicFollowHover, setTopicFollowHover] = useState(false);

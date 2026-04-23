@@ -807,13 +807,14 @@ class App extends Component {
     };
 
     toggleTheme = () => {
-        // Toggle between dark and light, but preserve themeMode
+        try { document.documentElement.classList.add('theme-switching'); } catch (_) { }
         this.setState((prev) => {
             const newTheme = prev.theme === 'dark' ? 'light' : 'dark';
-            // Temporarily override themeMode for toggle
             const tempMode = newTheme === 'dark' ? 'dark' : 'light';
             Storage.save('theme_mode', tempMode);
             return { theme: newTheme, themeMode: tempMode };
+        }, () => {
+            setTimeout(() => { try { document.documentElement.classList.remove('theme-switching'); } catch (_) { } }, 0);
         });
     };
 

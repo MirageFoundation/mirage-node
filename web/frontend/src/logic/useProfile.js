@@ -275,9 +275,15 @@ export function useProfile({
         }
     }, [isOwnProfile, username, profileAddress]);
 
-    // Only fetch user status on 'profile' tab (balance, level, etc. not needed for follows/blocks)
+    // Fetch user status whenever the profile address changes. The header /
+    // aside card (username, balance, reserve, joined, tier, biography) are
+    // visible on every tab, so the fetch must not be gated on `activeTab`.
+    // Previously this was scoped to the Profile tab only, which meant
+    // landing on the page with `?tab=comments|submissions|algo` (e.g. after
+    // hitting "back" from a post / comment / algo link) left the header and
+    // aside blank until the user manually switched to the Profile tab.
     useEffect(() => {
-        if (activeTab !== 'profile' || !profileAddress) return;
+        if (!profileAddress) return;
         let cancelled = false;
         const fetchUserStatus = async () => {
             try {
@@ -356,7 +362,7 @@ export function useProfile({
         return () => {
             cancelled = true;
         };
-    }, [activeTab, profileAddress, isOwnProfile, username]);
+    }, [profileAddress, isOwnProfile, username]);
     useEffect(() => {
         if (isOwnProfile || !address || !profileAddress) {
             setIsFollowingProfile(false);
@@ -420,7 +426,43 @@ export function useProfile({
                 params.allowed_tags = getAllowedTagsParam();
                 const res = await Api.get('get_user_posts', params);
                 if (cancelled) return;
-                const incoming = Array.isArray(res?.posts) ? res.posts : [];
+                const raw = Array.isArray(res?.posts) ? res.posts : [];
+                // Comments don't carry a `title` (parent post owns it) and the
+                // backend explicitly forbids a `topic` on comments. The shared
+                // FeedRow renderer drops any row missing either field, so we
+                // synthesize both here when rendering the Comments tab — title
+                // from the body's first line, topic from the parent post id —
+                // so users actually see their replies. Submissions untouched.
+                const incoming = (effectivePostsFilter === 'comments')
+                    ? raw.map(p => {
+                        if (!p) return p;
+                        const next = { ...p };
+                        const hasTitle = typeof next.title === 'string' && next.title.trim() !== '';
+                        if (!hasTitle) {
+                            const body = typeof next.content === 'string' ? next.content : '';
+                            const firstLine = body.split(/\r?\n/).find(l => l.trim() !== '') || '';
+                            const snippet = firstLine.trim().slice(0, 80);
+                            next.title = snippet ? (snippet + (firstLine.trim().length > 80 ? '…' : '')) : '(reply)';
+                        }
+                        const hasTopic = typeof next.topic === 'string' && next.topic.trim() !== '';
+                        if (!hasTopic) {
+                            // Prefer the parent post's topic (`root_topic`) when
+                            // the backend includes it — that's the real topic
+                            // users care about. Fall back to a `comment-<short>`
+                            // placeholder (keyed off root post id) so the shared
+                            // FeedRow renderer still accepts the row.
+                            const rootTopic = typeof next.root_topic === 'string' ? next.root_topic.trim() : '';
+                            if (rootTopic) {
+                                next.topic = rootTopic;
+                            } else {
+                                const root = (typeof next.root_post_id === 'string' && next.root_post_id) ? next.root_post_id : (next.target || '');
+                                const shortRoot = root ? String(root).slice(0, 8) : 'reply';
+                                next.topic = `comment-${shortRoot}`;
+                            }
+                        }
+                        return next;
+                    })
+                    : raw;
                 const hasMore = !!res?.has_more;
                 setRecentHasMore(hasMore);
                 setRecentPosts(prev => {
@@ -714,6 +756,7 @@ export function useProfile({
                 message: 'Minimum gift is 10,000 MIRAGE'
             });
             setTimeout(() => setDonateMessage(null), 5000);
+            setConfirmDonate(false);
             return;
         }
         console.debug('[ProfileView] donate.submit', {
@@ -722,24 +765,23 @@ export function useProfile({
         });
         try {
             const result = await tx.sendTokens(profileAddress, amount);
+            setConfirmDonate(false);
             if (result.success) {
                 setDonateMessage({
                     type: 'success',
                     message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!`
                 });
-                setConfirmDonate(false);
-                setTimeout(() => setDonateMessage(null), 5000);
             } else {
-                if (!result?.error) {
-                    throw new Error('Missing error for send_tokens');
-                }
+                const raw = String(result?.error || 'Transaction failed');
                 setDonateMessage({
                     type: 'error',
-                    message: `Failed: ${result.error}`
+                    message: `Failed: ${raw}`
                 });
-                setTimeout(() => setDonateMessage(null), 5000);
             }
+            setTimeout(() => setDonateMessage(null), 5000);
         } catch (error) {
+            console.error("Donate error:", error);
+            setConfirmDonate(false);
             setDonateMessage({
                 type: 'error',
                 message: `Error: ${error.message || error}`
@@ -754,23 +796,59 @@ export function useProfile({
     const subFeePending = isSubscribePending(profileAddress);
     const subFeeStatus = formatSubscribeStatus(profileAddress);
 
-    const { subFeeLabel, agentFeeLabel } = useMemo(() => {
+    /* Re-evaluate when chainConfig lands after mount (e.g. fresh profile
+     * navigate). Mirrors `usePostGifts`' `configUpdateTrigger` listener so
+     * the GiftSubscriptionDialog shows the Fee row + insufficient-balance
+     * guard identically to the post-options flow. */
+    const [chainConfigTick, setChainConfigTick] = useState(0);
+    useEffect(() => {
+        const bump = () => setChainConfigTick(prev => prev + 1);
+        window.addEventListener('chainConfigUpdated', bump);
+        window.addEventListener('userStatusUpdated', bump);
+        try {
+            if (tx.needsChainConfigRefresh && tx.needsChainConfigRefresh()) {
+                Api.get('get_chain_config', undefined)
+                    .then(cfg => {
+                        if (cfg) {
+                            try { tx.cacheChainConfig(cfg); } catch (_) { }
+                        }
+                    })
+                    .catch(() => { });
+            }
+        } catch (_) { /* noop */ }
+        return () => {
+            window.removeEventListener('chainConfigUpdated', bump);
+            window.removeEventListener('userStatusUpdated', bump);
+        };
+    }, []);
+
+    const { subFeeLabel, agentFeeLabel, subFeeUmirage, agentFeeUmirage } = useMemo(() => {
+        void chainConfigTick;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
-            const tiers = cfg?.subscription_tiers || [];
-            const sf = Number(tiers[1]?.period_fee || 0);
-            const af = Number(tiers[2]?.period_fee || 0);
+            const tiers = cfg?.subscription_tiers || cfg?.tiers || [];
+            const sf = Number(tiers?.[1]?.period_fee || 0);
+            const af = Number(tiers?.[2]?.period_fee || 0);
             return {
                 subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
                 agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
+                subFeeUmirage: sf > 0 ? sf : null,
+                agentFeeUmirage: af > 0 ? af : null,
             };
         } catch (_) { }
-        return { subFeeLabel: null, agentFeeLabel: null };
-    }, []);
+        return { subFeeLabel: null, agentFeeLabel: null, subFeeUmirage: null, agentFeeUmirage: null };
+    }, [chainConfigTick]);
 
     const handleGiftSub = () => {
-        if (!profileAddress || !hasValidAccount) return;
+        if (!profileAddress || !hasValidAccount) {
+            setGiftSubMessage({
+                type: 'error',
+                message: 'Please log in to gift a subscription'
+            });
+            setTimeout(() => setGiftSubMessage(null), 5000);
+            return;
+        }
         if (isSubscribePending(profileAddress)) return;
         const level = (userLevel >= 10) ? 10 : 1;
         console.debug('[ProfileView] gift-subscribe.confirm', { target: profileAddress, level });
@@ -938,6 +1016,9 @@ export function useProfile({
         getPostUrl,
         handleRecentPostClick,
         usernameDisplay,
+        balance,
+        reserveFunds,
+        profileRegisteredAt,
         balanceDisplay,
         reserveDisplay,
         registeredDisplay,
@@ -958,6 +1039,8 @@ export function useProfile({
         subFeeStatus,
         subFeeLabel,
         agentFeeLabel,
+        subFeeUmirage,
+        agentFeeUmirage,
         handleGiftSub,
         confirmGiftSubAction,
         cancelGiftSub

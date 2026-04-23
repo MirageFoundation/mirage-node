@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
+import { signPlainPayload } from "../utils/signPlain";
 
 export const PAGE_SIZE = 50;
 
@@ -64,7 +65,24 @@ export function useReferrals({ state, targetAddress }) {
     const location = useLocation();
     const publicKey = state && state.publicKey ? state.publicKey : Storage.load("publicKey", "");
     const username = state && state.username ? state.username : Storage.load("username", "");
-    const precheckEnabled = Storage.load('referral_precheck_enabled', false) === true;
+    const [precheckEnabled, setPrecheckEnabled] = useState(() => {
+        try {
+            return Storage.load('referral_precheck_enabled', false) === true;
+        } catch (_) {
+            return false;
+        }
+    });
+    const [referralPrecheckBusy, setReferralPrecheckBusy] = useState(false);
+    const [referralPrecheckError, setReferralPrecheckError] = useState('');
+    const [referralPrecheckSuccess, setReferralPrecheckSuccess] = useState('');
+    const [inviteCodesRequired] = useState(() => {
+        try {
+            const nc = JSON.parse(localStorage.getItem('nodeConfig') || '{}');
+            return !!nc.registration_invite_code_required;
+        } catch (_) {
+            return false;
+        }
+    });
 
     const effectiveAddress = targetAddress || publicKey;
     const isOwnReferrals = !targetAddress || targetAddress.toLowerCase() === publicKey.toLowerCase();
@@ -165,6 +183,37 @@ export function useReferrals({ state, targetAddress }) {
         } catch (_) { }
     };
 
+    /* Mirrors `useSettings::handleReferralPrecheckToggle`. Persists to the
+     * same `referral_precheck_enabled` key + `/referrals/precheck_opt_in`
+     * endpoint so the Referrals-page toggle stays in sync with the one on
+     * the Settings page. Only surfaced in the mirageapp ReferralsView. */
+    const handleReferralPrecheckToggle = async (nextVal) => {
+        if (!publicKey || referralPrecheckBusy) return;
+        setReferralPrecheckBusy(true);
+        setReferralPrecheckError('');
+        setReferralPrecheckSuccess('');
+        try {
+            const addr = String(publicKey).toLowerCase();
+            const sig = await signPlainPayload((ts, n) => `referrals_precheck_opt_in:${addr}:${nextVal ? 1 : 0}:${ts}:${n}`);
+            const res = await Api.post('referrals/precheck_opt_in', {
+                address: publicKey,
+                enabled: !!nextVal,
+                ...sig,
+            });
+            if (!res || res.precheck_enabled !== !!nextVal) {
+                throw new Error('Unexpected response');
+            }
+            setPrecheckEnabled(!!nextVal);
+            Storage.save('referral_precheck_enabled', !!nextVal);
+            setReferralPrecheckSuccess('Saved.');
+            setTimeout(() => setReferralPrecheckSuccess(''), 3000);
+        } catch (e) {
+            setReferralPrecheckError(String(e?.message || e || 'Failed to update'));
+        } finally {
+            setReferralPrecheckBusy(false);
+        }
+    };
+
     return {
         location,
         publicKey,
@@ -183,5 +232,11 @@ export function useReferrals({ state, targetAddress }) {
         shareUrl,
         handleLoadMore,
         handleCopy,
+        referralPrecheckEnabled: precheckEnabled,
+        referralPrecheckBusy,
+        referralPrecheckError,
+        referralPrecheckSuccess,
+        inviteCodesRequired,
+        handleReferralPrecheckToggle,
     };
 }
