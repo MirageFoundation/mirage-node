@@ -13,6 +13,8 @@ import {
 import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { formatMirage } from "../../../utils/formatters";
 import { useInbox, formatAwardLabel } from "../../../logic/useInbox";
@@ -53,11 +55,8 @@ const InboxWrap = styled.div`
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
     }
 `;
 
@@ -534,16 +533,19 @@ export default function InboxView({ state }) {
             <Helmet>
                 <title>{heading || 'Inbox'} | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerTab>Inbox</ContainerTab>
-                        <ContainerBody $fullWidth>
-                            <InboxWrap>{body}</InboxWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerTab>Inbox</ContainerTab>
+                            <ContainerBody $fullWidth>
+                                <InboxWrap>{body}</InboxWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

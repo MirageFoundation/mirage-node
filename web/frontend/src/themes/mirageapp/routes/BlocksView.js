@@ -16,6 +16,8 @@ import {
     TabbedContainer,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { useBlocks, shortenAddress } from "../../../logic/useBlocks";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 
@@ -45,11 +47,8 @@ const BlocksWrap = styled.div`
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
     }
 `;
 
@@ -325,15 +324,18 @@ export default function BlocksView({ state }) {
             <Helmet>
                 <title>Blocks | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerBody $fullWidth>
-                            <BlocksWrap>{body}</BlocksWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerBody $fullWidth>
+                                <BlocksWrap>{body}</BlocksWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

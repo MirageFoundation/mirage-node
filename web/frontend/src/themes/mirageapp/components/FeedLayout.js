@@ -27,6 +27,16 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
     box-sizing: border-box;
 
     @media (min-width: 1001px) {
+        /* Always fill at least the Main column's viewport height so the
+         * right rail (align-self: flex-end) sits on the bottom of the
+         * viewport even when the feed content is shorter than the
+         * screen (empty inbox, single post, loading state, etc.).
+         *
+         * Math: Layout shell is min-height: calc(100vh - 2.5rem - 1px)
+         * (TopBar + divider). Main adds 0.5rem top + 3rem bottom
+         * padding, so the inner content box is that minus 3.5rem. */
+        min-height: calc(100vh - 2.5rem - 1px - 3.5rem);
+
         /* Neutralise width caps that ListFeedView / FeedHeroColumn apply
          * based on data-feed-view-mode. !important is required because
          * the ListFeedView "compact hidden -> 80 percent" rule has higher

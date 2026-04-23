@@ -1,7 +1,9 @@
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiClipboardDocument, HiCheck } from "react-icons/hi2";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { Skeleton, ListRowSkeletonList } from "../components/Skeleton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
@@ -27,12 +29,16 @@ import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
 /* -------------------------------------------------------------------------- */
 
 const NetworkWrap = styled.div`
-    width: 90%;
-    margin: -0.75rem auto 0;
+    width: 100%;
+    max-width: 820px;
+    margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
-        width: 100%;
         margin-top: -0.5rem;
+    }
+
+    @media (min-width: 1500px) {
+        max-width: 960px;
     }
 `;
 
@@ -906,11 +912,12 @@ export default function NetworkView({ state }) {
             <Helmet>
                 <title>Network | Mirage</title>
             </Helmet>
-            <ModernPostFeed>
-                <CappedPageColumn>
-                    <NetworkTabbedContainer>
-                        <NetworkShellBody>
-                            <NetworkWrap>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <NetworkTabbedContainer>
+                            <NetworkShellBody>
+                                <NetworkWrap>
                             <HeaderRow>
                                 <HeaderTitle>Network</HeaderTitle>
                             </HeaderRow>
@@ -1067,11 +1074,13 @@ export default function NetworkView({ state }) {
                                     </ChartRow>
                                 </>
                             )}
-                            </NetworkWrap>
-                        </NetworkShellBody>
-                    </NetworkTabbedContainer>
-                </CappedPageColumn>
-            </ModernPostFeed>
+                                </NetworkWrap>
+                            </NetworkShellBody>
+                        </NetworkTabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 }
