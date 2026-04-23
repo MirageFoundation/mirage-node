@@ -105,6 +105,18 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
             margin-right: auto;
         }
     }
+
+    /* Ultrawide / 4K displays (> 1900 px): grow the feed column further
+     * so it fills more of the available viewport on large external
+     * monitors while remaining centered and readable. */
+    @media (min-width: 1900px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            width: 100%;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    }
 `;
 
 /* Row slot owns the between-card divider so it sits OUTSIDE the card

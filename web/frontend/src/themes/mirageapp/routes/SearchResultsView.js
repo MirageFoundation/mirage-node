@@ -68,6 +68,10 @@ const SearchWrap = styled.div`
     @media (min-width: 1500px) {
         max-width: 960px;
     }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
+    }
 `;
 
 const HeaderRow = styled.div`

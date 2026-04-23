@@ -86,6 +86,18 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
             gap: 1.5rem;
         }
     }
+
+    /* Ultrawide / 4K displays (> 1900 px): feed column grows to 1200 px
+     * so the feed+rail pair fills more of the viewport on large external
+     * monitors. Rail width stays fixed at 260 px. */
+    @media (min-width: 1900px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            max-width: calc(1200px + 1.5rem + 260px);
+            margin-left: auto;
+            margin-right: auto;
+            gap: 1.5rem;
+        }
+    }
 `;
 
 /**
@@ -114,6 +126,16 @@ export const FeedCol = styled.div`
             flex: 0 0 960px;
             width: 960px;
             max-width: 960px;
+        }
+    }
+
+    /* Ultrawide / 4K displays (> 1900 px): feed column grows to 1200 px
+     * so the feed fills more of the available space on large monitors. */
+    @media (min-width: 1900px) {
+        [data-feed-view-mode] & {
+            flex: 0 0 1200px;
+            width: 1200px;
+            max-width: 1200px;
         }
     }
 
