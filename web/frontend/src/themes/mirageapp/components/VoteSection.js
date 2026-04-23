@@ -78,7 +78,6 @@ const PillButton = styled.button`
     transition: color 0.12s ease, background 0.12s ease;
 
     &:disabled {
-        opacity: 0.6;
         cursor: default;
     }
 
@@ -154,7 +153,6 @@ const ColumnButton = styled.button`
     transition: color 0.12s ease, transform 0.12s ease;
 
     &:disabled {
-        opacity: 0.6;
         cursor: default;
     }
 
@@ -226,10 +224,25 @@ function MirageAppVoteSection({ state, post, updatePost, showToggle = true, inli
     const downActive = direction === -1;
 
     const [bounce, setBounce] = React.useState(null);
-    const onClick = (dir) => () => {
-        setBounce(dir);
-        setTimeout(() => setBounce(null), 320);
+    const bounceTimerRef = React.useRef(null);
+    React.useEffect(() => () => {
+        if (bounceTimerRef.current) clearTimeout(bounceTimerRef.current);
+    }, []);
+    const onClick = (dir) => (e) => {
+        // Fire the vote synchronously first so the network request is not
+        // blocked behind a React state flush (this is what made mirageapp
+        // feel ~1s slower than bluemoon).
         handleVote(post, dir);
+        // Drop focus so the hover/focus tint clears immediately, matching
+        // bluemoon's _voteClick behavior.
+        if (e && e.currentTarget) e.currentTarget.blur();
+        // Schedule the bounce after the click work is dispatched.
+        if (bounceTimerRef.current) clearTimeout(bounceTimerRef.current);
+        setBounce(dir);
+        bounceTimerRef.current = setTimeout(() => {
+            bounceTimerRef.current = null;
+            setBounce(null);
+        }, 320);
     };
 
     if (inline) {
