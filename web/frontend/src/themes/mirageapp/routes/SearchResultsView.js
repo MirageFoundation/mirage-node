@@ -366,6 +366,9 @@ const RowItem = styled(Link)`
     }
 `;
 
+/** "#" pill for topic result rows — mirrors `FollowsView::TopicIcon` /
+ *  `ProfileView::AlgoTopicChip` so topic chips read consistently across
+ *  the follows, algo, and search-results screens. */
 const RowIcon = styled.span`
     flex-shrink: 0;
     display: inline-flex;
@@ -373,11 +376,14 @@ const RowIcon = styled.span`
     justify-content: center;
     width: 28px;
     height: 28px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface2};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     color: ${({ theme }) => theme.colors.subtleText};
 
     svg {
-        width: 18px;
-        height: 18px;
+        width: 14px;
+        height: 14px;
     }
 `;
 
@@ -388,7 +394,7 @@ const RowAvatar = styled.img`
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    background: #232830;
+    background: ${({ theme }) => theme.colors.surface3};
     object-fit: cover;
 `;
 
@@ -400,13 +406,14 @@ const RowMain = styled.div`
     gap: 0.12rem;
 `;
 
-/* Primary line in topic / user result rows. Matches the Inbox row text
- * style (0.7rem / weight 500) so all full-bleed list routes share one
- * typography rhythm. */
+/* Primary line in topic / user result rows. Matches
+ * `ProfileView::AlgoIdentityTitle` (0.78rem / 600) so topic + user
+ * names read the same across the algo tab and search results. */
 const RowPrimary = styled.div`
-    font-size: 0.7rem;
-    font-weight: 500;
+    font-size: 0.78rem;
+    font-weight: 600;
     color: ${({ theme }) => theme.colors.text};
+    line-height: 1.25;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
