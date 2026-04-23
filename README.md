@@ -117,5 +117,3 @@ You don't need to install anything. Just visit a public node:
 - **Backend**: Python (Flask), Go (Mirage chain)
 - **Frontend**: React
 - **Consensus**: CometBFT (Tendermint)
-
-Start with the [API Documentation](docs/api-curl-examples.md).

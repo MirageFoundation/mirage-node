@@ -160,6 +160,7 @@ function withInboxLastViewed(params) {
     }
 }
 
+
 async function readErrorDetail(resp) {
     if (!resp) return 'request failed';
     const fallback = (resp.statusText && String(resp.statusText).trim()) || 'request failed';
@@ -197,7 +198,8 @@ async function readErrorDetail(resp) {
  * @param {RequestOptions=} options
  */
 async function get(path, params, options) {
-    const url = buildUrl(path, withInboxLastViewed(params));
+    const finalParams = withInboxLastViewed(params);
+    const url = buildUrl(path, finalParams);
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {

@@ -89,8 +89,6 @@ Subscription tiers were already live in the last production build. v1.5 extends 
 
 ## For developers and integrators
 
-See the technical migration guide in the developer docs (`chain-rpc-examples.md`) for concrete RPC and message examples.
-
 Key changes since the last production release:
 
 - Posts:

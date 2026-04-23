@@ -1,8 +1,12 @@
 import React from 'react';
 import { PostGrid, AnimatedCard } from './Layout';
 import CardView from './components/CardView';
+import ObservedCard from '../../components/ObservedCard';
+import { useSeenPosts } from '../../logic/useSeenPosts';
 
 export default function BlueMoonFeedView({ posts, state, updatePost, hidingPostsSet, flashingPostsSet, viewerAddress }) {
+    const { observePost, unobservePost } = useSeenPosts();
+
     if (!posts || posts.length === 0) return null;
 
     return (
@@ -28,8 +32,12 @@ export default function BlueMoonFeedView({ posts, state, updatePost, hidingPosts
                 const animDelay = isHiding ? 0 : Math.min(index * 50, 250);
 
                 return (
-                    <AnimatedCard
+                    <ObservedCard
                         key={post.post_id}
+                        postId={post.post_id}
+                        CardComponent={AnimatedCard}
+                        observePost={observePost}
+                        unobservePost={unobservePost}
                         $hiding={isHiding}
                         $flash={isFlashing}
                         style={{
@@ -41,7 +49,7 @@ export default function BlueMoonFeedView({ posts, state, updatePost, hidingPosts
                             post={post}
                             updatePost={updatePost}
                         />
-                    </AnimatedCard>
+                    </ObservedCard>
                 );
             })}
         </PostGrid>

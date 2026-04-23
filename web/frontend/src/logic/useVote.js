@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import * as tx from '../utils/tx';
 import Storage from '../utils/Storage';
 import { updateNotification } from '../utils/notifications';
+import { markPostVoted } from './useSeenPosts';
 
 export function usePendingVotes() {
     const [pendingVotes, setPendingVotes] = useState({});
@@ -63,6 +64,7 @@ export function useVoteHandler({ state, updatePost }) {
 
         const key = String(postIdValue).toLowerCase();
         if (isPending(postIdValue) || localPendingRef.current.has(key)) return;
+        markPostVoted(postIdValue);
         localPendingRef.current.add(key);
 
         let current;

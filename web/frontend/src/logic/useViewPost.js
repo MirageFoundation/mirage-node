@@ -8,6 +8,7 @@ import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalid
 import { fetchFollowedUsers, follow as followAuthor, unfollow as unfollowAuthor, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { usePendingFollows } from "./useFollowState.js";
 import { usePendingSends } from "./usePendingSends.js";
+import { markPostOpened, markPostReplied } from "./useSeenPosts.js";
 import { usePendingSubscribes } from "./usePendingSubscribes.js";
 import { uploadImage } from "../utils/ImageUpload";
 import { sortComments } from "../utils/SortComments";
@@ -1884,6 +1885,9 @@ export function useViewPost({
         try {
             const res = await tx.createCommentAsync(commentId, replyString);
             if (res && res.success) {
+                try {
+                    markPostReplied(commentId);
+                } catch (_) { }
                 // Clear reply text and attached state only on success
                 try {
                     updatePost(commentId, {
@@ -2089,6 +2093,10 @@ export function useViewPost({
         return num;
     }, [location.search]);
     const postId = routeParams.postId || null;
+
+    useEffect(() => {
+        if (postId) markPostOpened(postId);
+    }, [postId]);
 
     // Detect if loaded post is a comment (has non-empty target)
     const isViewingComment = React.useMemo(() => {

@@ -31,6 +31,7 @@ from flask import Blueprint, jsonify, request, has_request_context
 from error_utils import safe_error, api_error_code
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
+from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from user_last_seen import update_user_last_seen
 from params import load_params, expect_params
 from settings import (
@@ -64,6 +65,10 @@ from chain import (
     is_node_catching_up as _is_catching_up,
     get_connected_peers as _get_connected_peers,
 )
+
+
+def _now_epoch() -> int:
+    return int(time.time())
 
 
 def _get_balance(address) -> int:
@@ -232,11 +237,13 @@ def _filter_posts_by_allowed_tags(
     if not posts:
         return posts
     viewer_lower = (viewer or "").strip().lower()
+    now = _now_epoch()
     filtered = []
     own_kept = 0
     for post in posts:
         author_lower = (post.get("author") or post.get("user_id") or "").strip().lower()
-        if viewer_lower and author_lower == viewer_lower:
+        post_ts = int(post.get("timestamp") or 0)
+        if viewer_lower and author_lower == viewer_lower and post_ts >= now - 3600:
             own_kept += 1
             filtered.append(post)
             continue
@@ -273,12 +280,14 @@ def _filter_user_posts_by_allowed_tags(
     if not posts:
         return posts
     viewer_lower = (viewer or "").strip().lower()
+    now = _now_epoch()
     filtered = []
     removed = 0
     own_kept = 0
     for post in posts:
         author_lower = (post.get("user_id") or post.get("author") or "").strip().lower()
-        if viewer_lower and author_lower == viewer_lower:
+        post_ts = int(post.get("timestamp") or 0)
+        if viewer_lower and author_lower == viewer_lower and post_ts >= now - 3600:
             own_kept += 1
             filtered.append(post)
             continue
@@ -382,6 +391,58 @@ def _enrich_media_meta(cur, posts: list[dict]) -> None:
         pid = post.get("post_id", "")
         if pid in meta_map:
             post["media_meta"] = meta_map[pid]
+
+
+_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+_IMAGE_VARIANT_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+
+
+def _collect_image_impression_ids(posts: list[dict]) -> set[str]:
+    """Return unique Cloudflare image IDs from post media URLs."""
+    from urllib.parse import urlparse
+
+    ids: set[str] = set()
+    for post in posts or []:
+        media = post.get("media") or []
+        for raw_url in media:
+            if not raw_url:
+                continue
+            parsed = urlparse(str(raw_url))
+            host = (parsed.hostname or "").lower()
+            if not host.endswith("imagedelivery.net"):
+                continue
+            parts = [p for p in parsed.path.split("/") if p]
+            if len(parts) < 3:
+                raise ValueError("invalid imagedelivery url path")
+            image_id = parts[1]
+            variant = parts[2]
+            if not _IMAGE_ID_RE.match(image_id):
+                raise ValueError("invalid imagedelivery image_id")
+            if not _IMAGE_VARIANT_RE.match(variant):
+                raise ValueError("invalid imagedelivery variant")
+            ids.add(image_id.lower())
+    return ids
+
+
+def _track_image_impressions(posts: list[dict], rid: int, context: str) -> None:
+    """Upsert view counts for images attached to returned posts."""
+    image_ids = _collect_image_impression_ids(posts)
+    if not image_ids:
+        return
+    now_ts = int(time.time())
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO image_views (image_id, view_count, last_viewed_at)
+                VALUES (%s, 1, %s)
+                ON CONFLICT (image_id) DO UPDATE SET
+                    view_count = image_views.view_count + 1,
+                    last_viewed_at = EXCLUDED.last_viewed_at
+                """,
+                [(image_id, now_ts) for image_id in sorted(image_ids)],
+            )
+    log_event(rid, "image_impressions.ok", count=len(image_ids), context=context)
 
 
 # Allowed content tags used for topic safety classification
@@ -1091,6 +1152,9 @@ def _load_candidate_posts(
         root_topic_lower = root_topic_raw.lower()
 
         is_own = viewer_lower and author == viewer_lower
+        post_ts = int(ts) if ts else 0
+        if is_own and post_ts < _now_epoch() - 3600:
+            is_own = False
         if not is_own and (pid in blocked_posts or author in blocked_users):
             continue
         if not is_own and _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
@@ -1106,7 +1170,7 @@ def _load_candidate_posts(
                 "username": username or "",
                 "author_level": int(author_level) if author_level else 0,
                 "author_is_new": _is_new_user(int(author_created_at or 0)),
-                "timestamp": int(ts) if ts else 0,
+                "timestamp": post_ts,
                 "topic": topic_raw,
                 "topic_lower": topic_lower,
                 "root_topic": root_topic_raw,
@@ -1127,16 +1191,95 @@ def _load_candidate_posts(
     return candidates
 
 
+def _load_vote_totals_cached(cur, post_ids: list[str], backend_cur=None) -> dict[str, float]:
+    """
+    Return {post_id: total_weight} via a 60s backend-DB cache. Only valid when
+    the viewer has no blocked users (the totals here are unfiltered). Callers
+    with blocked_users must use the live LATERAL query directly.
+    """
+    post_ids = list({str(pid).lower() for pid in post_ids if pid})
+    if not post_ids:
+        return {}
+
+    now_ts = int(time.time())
+    result: dict[str, float] = {}
+
+    def _read_and_fill_cache(bcur):
+        bcur.execute(
+            """
+            SELECT post_id, total_weight
+            FROM post_vote_totals_cache
+            WHERE post_id = ANY(%s) AND expires_at > %s
+            """,
+            (post_ids, now_ts),
+        )
+        for pid, total in bcur.fetchall():
+            result[pid] = float(total or 0.0)
+
+        missing = [pid for pid in post_ids if pid not in result]
+        if missing:
+            pid_values = ",".join(["(%s)"] * len(missing))
+            cur.execute(
+                f"""SELECT t.pid, COALESCE(x.total, 0)
+                    FROM (VALUES {pid_values}) AS t(pid)
+                    LEFT JOIN LATERAL (
+                        SELECT SUM(v.user_weight) AS total
+                        FROM votes v
+                        WHERE LOWER(v.target) = t.pid
+                    ) x ON true""",
+                missing,
+            )
+            fresh: dict[str, float] = {}
+            for tgt, total in cur.fetchall():
+                if tgt:
+                    fresh[tgt] = float(total or 0.0)
+
+            if fresh:
+                expires_at = now_ts + _VOTE_TOTALS_CACHE_TTL
+                values_sql = ",".join(["(%s, %s, %s, %s)"] * len(fresh))
+                params: list = []
+                for pid, total in fresh.items():
+                    params.extend((pid, total, now_ts, expires_at))
+                bcur.execute(
+                    f"""
+                    INSERT INTO post_vote_totals_cache (post_id, total_weight, computed_at, expires_at)
+                    VALUES {values_sql}
+                    ON CONFLICT (post_id) DO UPDATE SET
+                        total_weight = EXCLUDED.total_weight,
+                        computed_at = EXCLUDED.computed_at,
+                        expires_at = EXCLUDED.expires_at
+                    """,
+                    params,
+                )
+            result.update(fresh)
+
+    if backend_cur is not None:
+        _read_and_fill_cache(backend_cur)
+    else:
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                _read_and_fill_cache(bcur)
+
+    return result
+
+
 def _load_vote_and_comment_stats(
     cur,
     post_ids: list[str],
     blocked_posts: set[str],
     blocked_users: set[str],
     viewer: str = "",
-) -> tuple[dict, dict, dict, dict]:
-    """Batch load points, comment counts, viewer's votes, and viewer's user_weight contributions."""
+    backend_cur=None,
+) -> tuple[dict, dict, dict, dict, dict]:
+    """Batch load points, comment counts, viewer's votes, and viewer's user_weight contributions.
+
+    Returns (vote_totals, comment_counts, user_votes, user_weight_map, timings)
+    where timings has stats_vt_ms / stats_cc_ms / stats_uv_ms sub-phase numbers.
+    """
+    import time as _time
+
     if not post_ids:
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {"stats_vt_ms": 0.0, "stats_cc_ms": 0.0, "stats_uv_ms": 0.0}
 
     vote_totals: dict[str, float] = {}
     comment_counts: dict[str, int] = {}
@@ -1144,26 +1287,38 @@ def _load_vote_and_comment_stats(
     user_weight_map: dict[str, float] = {}
     id_ph = ",".join(["%s"] * len(post_ids))
 
-    # Points (sum of user_weight, excluding blocked users)
+    def _ms_since(t0: float) -> float:
+        return round((_time.monotonic() - t0) * 1000, 2)
+
+    # Points (sum of user_weight, excluding blocked users).
+    # Use a LATERAL join driven from the 200-row post_id set: the `IN (...)`
+    # form was getting hash-joined with a seq-scan of the full votes table
+    # (~135k rows, 250ms). LATERAL forces an index-driven lookup per id via
+    # idx_votes_target_lower — measured ~5x faster (250ms -> 50ms) on prod.
+    _t = _time.monotonic()
     if blocked_users:
+        pid_values = ",".join(["(%s)"] * len(post_ids))
         blocked_ph = ",".join(["%s"] * len(blocked_users))
         cur.execute(
-            f"""SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
-                FROM votes WHERE LOWER(target) IN ({id_ph})
-                  AND LOWER(owner) NOT IN ({blocked_ph})
-                GROUP BY LOWER(target)""",
+            f"""SELECT t.pid, COALESCE(x.total, 0)
+                FROM (VALUES {pid_values}) AS t(pid)
+                LEFT JOIN LATERAL (
+                    SELECT SUM(v.user_weight) AS total
+                    FROM votes v
+                    WHERE LOWER(v.target) = t.pid
+                      AND LOWER(v.owner) NOT IN ({blocked_ph})
+                ) x ON true""",
             post_ids + list(blocked_users),
         )
+        for tgt, total in cur.fetchall():
+            if tgt:
+                vote_totals[tgt] = float(total or 0.0)
     else:
-        cur.execute(
-            f"SELECT LOWER(target), COALESCE(SUM(user_weight), 0) FROM votes WHERE LOWER(target) IN ({id_ph}) GROUP BY LOWER(target)",
-            post_ids,
-        )
-    for tgt, total in cur.fetchall():
-        if tgt:
-            vote_totals[tgt] = float(total or 0.0)
+        vote_totals = _load_vote_totals_cached(cur, post_ids, backend_cur=backend_cur)
+    stats_vt_ms = _ms_since(_t)
 
     # Comment counts
+    _t = _time.monotonic()
     deleted_bare = _deleted_filter_bare()
     all_blocked = (blocked_posts or set()) | (blocked_users or set())
     if all_blocked:
@@ -1190,8 +1345,11 @@ def _load_vote_and_comment_stats(
     for root_id, cnt in cur.fetchall():
         if root_id:
             comment_counts[root_id] = int(cnt or 0)
+    stats_cc_ms = _ms_since(_t)
 
-    # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution
+    # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution.
+    # Already fast (~2ms) via uniq_votes_owner_target index — kept as its own query.
+    _t = _time.monotonic()
     viewer_lower = (viewer or "").strip().lower()
     if viewer_lower and viewer_lower != "guest":
         cur.execute(
@@ -1203,8 +1361,15 @@ def _load_vote_and_comment_stats(
             if tgt:
                 user_votes[tgt] = int(vote) if vote else 0
                 user_weight_map[tgt] = float(weight) if weight else 0.0
+    stats_uv_ms = _ms_since(_t)
 
-    return vote_totals, comment_counts, user_votes, user_weight_map
+    return (
+        vote_totals,
+        comment_counts,
+        user_votes,
+        user_weight_map,
+        {"stats_vt_ms": stats_vt_ms, "stats_cc_ms": stats_cc_ms, "stats_uv_ms": stats_uv_ms},
+    )
 
 
 def _load_following_candidates(
@@ -1305,6 +1470,7 @@ def _get_following_feed(
     sort_mode: str = "magic",
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Following feed:
@@ -1331,7 +1497,8 @@ def _get_following_feed(
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    max_candidates = limit * page * 4
+    factor = _seen_overfetch_factor(seen_posts, 4)
+    max_candidates = limit * page * factor
     candidates, followed_topics, followed_users = _load_following_candidates(
         cur,
         viewer_lower,
@@ -1346,23 +1513,27 @@ def _get_following_feed(
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # ── Newest: fast path (no scoring) ──────────────────────────────
+    # ── Newest: pure chronological ──────────
     if sort_mode == "newest":
-        # Already chronological from DB query
+        for c in candidates:
+            c["_N"] = 1.0
+            c["_seen_count"] = 0
+
         start = (page - 1) * limit
         end = start + limit
         page_posts = candidates[start:end] if start < len(candidates) else []
         has_more = len(candidates) > end
 
-        # Only load stats for the page slice
         page_ids = [p["post_id"] for p in page_posts]
-        vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+        vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
             cur, page_ids, blocked_posts, blocked_users, viewer_lower
         )
         _, award_details = _load_award_aggregates(cur, page_ids, blocked_users)
 
         for post in page_posts:
             pid = post["post_id"]
+            sc = post.pop("_seen_count", 0)
+            n_val = post.pop("_N", 1.0)
             author_lower = (post.get("author") or "").strip().lower()
             is_own = author_lower == viewer_lower
             by_followed_user = author_lower in followed_users if author_lower else False
@@ -1373,6 +1544,8 @@ def _get_following_feed(
                 reason = "From a followed user"
             else:
                 reason = "From a followed topic"
+            if sc > 0:
+                reason += " · You've seen this before"
 
             post["points"] = vote_totals.get(pid, 0.0)
             post["comments"] = comment_counts.get(pid, 0)
@@ -1380,7 +1553,12 @@ def _get_following_feed(
             post["children"] = []
             post["feed_type"] = "following"
             post["feed_bucket"] = "newest"
-            post["feed_debug"] = {"reason": reason, "bucket": "newest"}
+            post["feed_debug"] = {
+                "reason": reason,
+                "bucket": "newest",
+                "N": round(n_val, 4),
+                "seen_count": sc,
+            }
             post["user_vote"] = user_votes.get(pid, 0)
             post["user_weight"] = user_weight_map.get(pid, 0.0)
 
@@ -1394,7 +1572,7 @@ def _get_following_feed(
 
     # ── Magic: full scoring path ────────────────────────────────────
     post_ids = [c["post_id"] for c in candidates]
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+    vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
 
@@ -1403,13 +1581,14 @@ def _get_following_feed(
     similar_users = get_or_compute_similarities(cur, viewer_lower)
     sim_lookup = {u[0]: u[1] for u in similar_users}
     similar_addrs = set(sim_lookup.keys())
-    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+    similar_upvotes, _ = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
     now_ts = int(time.time())
     topic_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
 
+    seen_penalized = 0
     for post in candidates:
         pid = post["post_id"]
         pts = float(vote_totals.get(pid, 0.0) or 0.0)
@@ -1436,9 +1615,13 @@ def _get_following_feed(
             False,
             unique_awarders,
             viewer=viewer_lower,
+            seen_posts=seen_posts,
         )
         if should_hide:
             continue
+
+        if debug.get("seen_count", 0) > 0:
+            seen_penalized += 1
 
         if is_own_post:
             reason = "Your post"
@@ -1459,6 +1642,14 @@ def _get_following_feed(
         post["user_weight"] = user_weight_map.get(pid, 0.0)
         debug["follow_reason"] = reason
         post["feed_debug"] = debug
+
+    if seen_penalized:
+        logger.debug(
+            "seen_penalty feed=following.magic viewer=%s penalized=%d/%d",
+            viewer_lower[:12],
+            seen_penalized,
+            len(candidates),
+        )
 
     candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
 
@@ -1487,24 +1678,24 @@ def _get_home_feed(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     sort_mode: str = "magic",
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Home feed.
 
     Sort modes:
-    - magic: Magic (unified score + reasons)
-    - newest: chronological ordering with the same debug breakdown
+    - magic: Magic (unified score + reasons + novelty penalty)
+    - newest: chronological (no novelty factor)
     """
     viewer_lower = viewer.strip().lower() if viewer else ""
     sort_mode = (sort_mode or "magic").strip().lower()
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    # Newest: fast chronological path (no scoring overhead)
+    # Newest: chronological, no novelty factor
     if sort_mode == "newest":
         return _get_home_feed_newest(
             cur,
@@ -1516,6 +1707,7 @@ def _get_home_feed(
             allowed_tags,
             blocked_topics=blocked_topics,
             blocked_topic_prefixes=blocked_topic_prefixes,
+            seen_posts=seen_posts,
         )
 
     # Guest users: magic-style scoring without personalization
@@ -1527,7 +1719,6 @@ def _get_home_feed(
             blocked_posts,
             blocked_users,
             allowed_tags,
-            seed=seed,
             blocked_topics=blocked_topics,
             blocked_topic_prefixes=blocked_topic_prefixes,
         )
@@ -1541,9 +1732,9 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        seed=seed,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
+        seen_posts=seen_posts,
     )
 
 
@@ -1557,12 +1748,13 @@ def _get_home_feed_newest(
     allowed_tags: set[str],
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
-    Fast chronological feed — no scoring, no similarity, no preferences.
+    Chronological feed with seen-novelty reordering.
 
-    Just fetches the newest root posts, filters blocked/tags, attaches
-    vote/comment stats, and paginates.
+    Posts are fetched newest-first, then reordered by timestamp × N so
+    previously-seen content drifts down while still appearing.
     """
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
@@ -1577,13 +1769,12 @@ def _get_home_feed_newest(
         blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
     )
 
-    # We need (page * limit) + 1 surviving posts to fill the page and know if there's more.
-    # Blocked/tag filtering can discard a large fraction, so we fetch in batches using
-    # cursor-based pagination (created_at < ?) to avoid scanning the entire table.
+    # Fetch in batches using cursor-based pagination (created_at < ?).
     need = page * limit + 1
+    factor = _seen_overfetch_factor(seen_posts, 3)
     seen: set[str] = set()
     posts: list[dict] = []
-    batch_size = max(500, need * 3)
+    batch_size = max(500, need * factor)
     last_ts = None
 
     while len(posts) < need:
@@ -1622,6 +1813,10 @@ def _get_home_feed_newest(
     if not posts:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
+    for p in posts:
+        p["_N"] = 1.0
+        p["_seen_count"] = 0
+
     start = (page - 1) * limit
     end = start + limit
     page_posts = posts[start:end] if start < len(posts) else []
@@ -1630,20 +1825,30 @@ def _get_home_feed_newest(
     # Load vote/comment/award stats only for the posts we're returning
     page_ids = [p["post_id"] for p in page_posts]
     viewer_lower = (viewer or "").strip().lower()
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+    vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
         cur, page_ids, blocked_posts, blocked_users, viewer_lower
     )
     _, award_details = _load_award_aggregates(cur, page_ids, blocked_users)
 
     for post in page_posts:
         pid = post["post_id"]
+        sc = post.pop("_seen_count", 0)
+        n_val = post.pop("_N", 1.0)
+        reason = "Newest"
+        if sc > 0:
+            reason += " · You've seen this before"
         post["points"] = vote_totals.get(pid, 0.0)
         post["comments"] = comment_counts.get(pid, 0)
         post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = "newest"
-        post["feed_debug"] = {"reason": "Newest", "bucket": "newest"}
+        post["feed_debug"] = {
+            "reason": reason,
+            "bucket": "newest",
+            "N": round(n_val, 4),
+            "seen_count": sc,
+        }
         post["user_vote"] = user_votes.get(pid, 0)
         post["user_weight"] = user_weight_map.get(pid, 0.0)
 
@@ -1664,21 +1869,23 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
+    seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Magic feed algorithm.
 
-    Single unified score: (S + V + U + P) × R
+    Single unified score: (S + V + U + P + A) × R × N
 
     Where:
     - S = similarity boost from similar users who upvoted
     - V = vote score (sqrt scaling)
     - U = unique commenter score (sqrt scaling)
     - P = preference boost from topic/author prefs (sqrt scaling)
+    - A = award score
     - R = recency decay (exponential)
+    - N = novelty factor from seen view_count
     """
     import time
     from similarity import get_or_compute_similarities
@@ -1686,46 +1893,93 @@ def _get_home_feed_magic(
     viewer_lower = viewer.strip().lower() if viewer else ""
     now_ts = int(time.time())
 
+    # Phase timings. Logged by the caller (`get_posts` route) to help
+    # pinpoint which step of the home-feed pipeline dominates latency.
+    timings: dict[str, float] = {}
+
+    def _ms_since(t0: float) -> float:
+        return round((time.monotonic() - t0) * 1000, 2)
+
     # 1. Load user preferences
+    _t = time.monotonic()
     topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
+    timings["prefs_ms"] = _ms_since(_t)
 
-    # 2. Get similar users (cached or computed on-demand)
-    similar_users = get_or_compute_similarities(cur, viewer_lower)
-    sim_lookup = {u[0]: u[1] for u in similar_users}
-    similar_addrs = set(sim_lookup.keys())
+    with connect_backend_db() as backend_conn:
+        with backend_conn.cursor() as backend_cur:
+            # 2. Get similar users (cached or computed on-demand)
+            _t = time.monotonic()
+            similar_users = get_or_compute_similarities(cur, viewer_lower, backend_cur=backend_cur)
+            timings["sim_ms"] = _ms_since(_t)
+            sim_lookup = {u[0]: u[1] for u in similar_users}
+            similar_addrs = set(sim_lookup.keys())
 
-    # 3. Load candidate posts (small targeted pool + random exploration)
-    per_source = limit * page * 4  # ~60 per source for page 1
-    candidates = _load_home_candidates(
-        cur,
-        viewer_lower,
-        similar_addrs,
-        blocked_posts,
-        blocked_users,
-        allowed_tags,
-        per_source,
-        now_ts,
-        blocked_topics=blocked_topics,
-        blocked_topic_prefixes=blocked_topic_prefixes,
-    )
+            # 3. Load candidate posts.
+            # Cap the per-source pool size on all pages so feed latency stays bounded
+            # even when seen-post overfetch would otherwise multiply the query cost.
+            per_source = min(limit * page * _seen_overfetch_factor(seen_posts, 4), 500)
+            _t = time.monotonic()
+            candidates, cand_timings = _load_home_candidates(
+                cur,
+                viewer_lower,
+                similar_addrs,
+                blocked_posts,
+                blocked_users,
+                allowed_tags,
+                per_source,
+                now_ts,
+                blocked_topics=blocked_topics,
+                blocked_topic_prefixes=blocked_topic_prefixes,
+            )
+            timings["cand_ms"] = _ms_since(_t)
+            timings["cand_count"] = len(candidates)
+            timings.update(cand_timings)
 
-    if not candidates:
-        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+            if not candidates:
+                return {
+                    "posts": [],
+                    "total": 0,
+                    "page": page,
+                    "limit": limit,
+                    "has_more": False,
+                    "_timings": timings,
+                }
 
-    # 4. Load which posts similar users have upvoted
-    post_ids = [c["post_id"] for c in candidates]
-    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+            # 4. Load which posts similar users have upvoted
+            post_ids = [c["post_id"] for c in candidates]
+            _t = time.monotonic()
+            similar_upvotes, sim_up_timings = _load_similar_user_upvotes(
+                cur, post_ids, similar_addrs, backend_cur=backend_cur
+            )
+            timings["sim_up_ms"] = _ms_since(_t)
+            timings.update(sim_up_timings)
 
-    # 5. Load stats
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
-        cur, post_ids, blocked_posts, blocked_users, viewer_lower
-    )
+            # 5. Load stats
+            _t = time.monotonic()
+            vote_totals, comment_counts, user_votes, user_weight_map, stats_timings = _load_vote_and_comment_stats(
+                cur,
+                post_ids,
+                blocked_posts,
+                blocked_users,
+                viewer_lower,
+                backend_cur=backend_cur,
+            )
+            timings["stats_ms"] = _ms_since(_t)
+            timings.update(stats_timings)
+
+    _t = time.monotonic()
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    timings["uc_ms"] = _ms_since(_t)
+
+    _t = time.monotonic()
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
+    timings["aw_ms"] = _ms_since(_t)
 
     # 6. Score each post with Magic algorithm
+    _t_score = time.monotonic()
     scored_posts = []
 
+    seen_penalized = 0
     for post in candidates:
         score, debug, should_hide = _score_magic(
             post,
@@ -1739,10 +1993,14 @@ def _get_home_feed_magic(
             True,
             unique_awarders,
             viewer=viewer_lower,
+            seen_posts=seen_posts,
         )
 
         if should_hide:
             continue
+
+        if debug.get("seen_count", 0) > 0:
+            seen_penalized += 1
 
         pid = post["post_id"]
         post["_score"] = score
@@ -1758,22 +2016,24 @@ def _get_home_feed_magic(
         post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
         scored_posts.append(post)
 
+    if seen_penalized:
+        logger.debug(
+            "seen_penalty feed=home.magic viewer=%s penalized=%d/%d",
+            viewer_lower[:12],
+            seen_penalized,
+            len(scored_posts),
+        )
+
     # 7. Sort by score descending
     scored_posts.sort(key=lambda p: -p["_score"])
+    timings["score_ms"] = _ms_since(_t_score)
+    timings["scored_count"] = len(scored_posts)
 
-    # 8. Interleave fresh/random picks with ranked posts, then paginate
-    interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
-    interleaved_posts = _prioritize_viewer_own_posts_in_interleaved(
-        interleaved_posts,
-        scored_posts,
-        viewer_lower,
-        now_ts,
-        max_pin=min(15, max(limit, 5)),
-    )
+    # 8. Paginate
     start = (page - 1) * limit
     end = start + limit
-    page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
-    has_more = len(interleaved_posts) > end
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
 
     # Clean up internal fields
     for post in page_posts:
@@ -1781,170 +2041,32 @@ def _get_home_feed_magic(
 
     return {
         "posts": page_posts,
-        "total": len(interleaved_posts),
+        "total": len(scored_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
+        "_timings": timings,
     }
 
 
-def _prioritize_viewer_own_posts_in_interleaved(
-    interleaved: list[dict],
-    scored_posts: list[dict],
-    viewer_lower: str,
-    now_ts: int,
-    max_pin: int = 15,
-) -> list[dict]:
-    """Interleave recent own posts into home magic without clustering.
-
-    Pattern: own -> fresh(random) -> ranked(score) -> fresh -> ranked -> ...
-    Only posts created within the last 24 hours are inserted; older own posts keep normal order.
-    This reorder only affects posts already present in ``interleaved``.
-    """
-    if not viewer_lower or viewer_lower == "guest" or not interleaved:
-        return interleaved
-    own_sorted = [
-        p for p in scored_posts if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower
-    ]
-    own_sorted.sort(key=lambda p: -int(p.get("timestamp") or 0))
-    min_ts = int(now_ts) - 86400
-    own_sorted = [p for p in own_sorted if int(p.get("timestamp") or 0) >= min_ts]
-    if not own_sorted:
-        return interleaved
-    pin_ids = [p["post_id"] for p in own_sorted[:max_pin]]
-    pin_set = set(pin_ids)
-    id_in_interleaved = {p["post_id"]: p for p in interleaved}
-    own_posts = [id_in_interleaved[pid] for pid in pin_ids if pid in id_in_interleaved]
-    if not own_posts:
-        return interleaved
-
-    rest = [p for p in interleaved if p["post_id"] not in pin_set]
-    fresh_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") == "fresh"]
-    ranked_queue = [p for p in rest if (p.get("feed_debug") or {}).get("interleave") != "fresh"]
-
-    out: list[dict] = []
-    consumed: set[str] = set()
-    f_idx = 0
-    r_idx = 0
-    for own in own_posts:
-        out.append(own)
-        if f_idx < len(fresh_queue):
-            picked = fresh_queue[f_idx]
-            f_idx += 1
-            consumed.add(picked["post_id"])
-            out.append(picked)
-        if r_idx < len(ranked_queue):
-            picked = ranked_queue[r_idx]
-            r_idx += 1
-            consumed.add(picked["post_id"])
-            out.append(picked)
-
-    if consumed:
-        rest = [p for p in rest if p["post_id"] not in consumed]
-    out.extend(rest)
-
-    logger.debug(
-        "home_magic.own_interleave viewer=%s own=%d consumed=%d interleaved=%d max_age_h=24",
-        viewer_lower[:12],
-        len(own_posts),
-        len(consumed),
-        len(interleaved),
-    )
-    return out
+_SEEN_K = 0.9
 
 
-def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -> list[dict]:
-    """
-    Alternate fresh/random and ranked posts 1:1.
+def _novelty_factor(view_count: int) -> float:
+    """N = 1 / (1 + K * view_count).  Unseen → 1.0, seen once → 0.526, etc."""
+    return 1.0 / (1.0 + _SEEN_K * max(0, view_count))
 
-    Each fresh slot draws from a 1-hour band:
-    - fresh from hour 0–1, then ranked #1
-    - fresh from hour 1–2, then ranked #2
-    - fresh from hour 2–3, then ranked #3
-    - ... up to hour 168 (7 days)
 
-    If a band is empty, fall back to the next ranked post.
-    """
-    import random
-
-    if not scored_posts:
-        return []
-
-    ranked_posts = list(scored_posts)
-    ranked_idx = 0
-    fresh_pool: dict[str, dict] = {str(p.get("post_id") or ""): p for p in scored_posts if p.get("post_id")}
-    used: set[str] = set()
-    interleaved: list[dict] = []
-    max_band_start = 168
-
-    def _next_ranked() -> dict | None:
-        nonlocal ranked_idx
-        while ranked_idx < len(ranked_posts):
-            post = ranked_posts[ranked_idx]
-            ranked_idx += 1
-            pid = str(post.get("post_id") or "")
-            if not pid or pid in used:
-                continue
-            used.add(pid)
-            fresh_pool.pop(pid, None)
-            debug = post.setdefault("feed_debug", {})
-            debug["interleave"] = "ranked"
-            return post
-        return None
-
-    while len(interleaved) < len(scored_posts):
-        slot = len(interleaved)
-        is_fresh_slot = (slot % 2) == 0
-
-        if is_fresh_slot:
-            k = slot // 2
-            band_start = k
-            band_end = k + 1
-
-            if band_start >= max_band_start:
-                ranked_post = _next_ranked()
-                if ranked_post is None:
-                    break
-                interleaved.append(ranked_post)
-                continue
-
-            eligible = []
-            for post in fresh_pool.values():
-                pid = str(post.get("post_id") or "")
-                if not pid or pid in used:
-                    continue
-                age_hours = max(0.0, (now_ts - int(post.get("timestamp", 0) or 0)) / 3600.0)
-                if float(band_start) <= age_hours < float(band_end):
-                    eligible.append(post)
-
-            if eligible:
-                rng = random.Random(int(seed) + int(k))
-                picked = eligible[rng.randrange(len(eligible))]
-                pid = str(picked.get("post_id") or "")
-                if pid:
-                    used.add(pid)
-                    fresh_pool.pop(pid, None)
-                debug = picked.setdefault("feed_debug", {})
-                debug["interleave"] = "fresh"
-                debug["fresh_band"] = f"{band_start}h-{band_end}h"
-                debug["bucket"] = "fresh"
-                debug["reason"] = "Discover"
-                picked["feed_bucket"] = "fresh"
-                interleaved.append(picked)
-                continue
-
-            fallback = _next_ranked()
-            if fallback is None:
-                break
-            interleaved.append(fallback)
-            continue
-
-        ranked_post = _next_ranked()
-        if ranked_post is None:
-            break
-        interleaved.append(ranked_post)
-
-    return interleaved
+def _seen_overfetch_factor(
+    seen_posts: dict[str, int] | None,
+    base_factor: int,
+    max_factor: int = 6,
+) -> int:
+    if not seen_posts:
+        return base_factor
+    seen_ratio = min(len(seen_posts) / max(1, 1000), 0.8)
+    factor = max(base_factor, int(base_factor / (1 - seen_ratio)))
+    return min(max_factor, factor)
 
 
 def _score_magic(
@@ -1959,9 +2081,10 @@ def _score_magic(
     use_prefs: bool = True,
     unique_awarders: dict[str, int] | None = None,
     viewer: str = "",
+    seen_posts: dict[str, int] | None = None,
 ) -> tuple[float, dict, bool]:
     """
-    Magic scoring: (S + V + U + P + A) × R
+    Magic scoring: (S + V + U + P + A) × R × N
 
     Components (uniform weighting):
     - S = sqrt(similarity_sum)
@@ -1970,6 +2093,7 @@ def _score_magic(
     - P = sqrt(max(0, topic_pref + author_pref))
     - A = sqrt(unique_award_givers)
     - R = 1 / (1 + (age_hours/9)^1.585) — decay: 4.5h=0.75, 9h=0.5, 18h=0.25, 36h=0.11
+    - N = 1 / (1 + 3 * view_count) — novelty: unseen=1.0, seen once=0.25
 
     Returns (score, debug_info, should_hide).
     """
@@ -1989,7 +2113,6 @@ def _score_magic(
     author = post["author"]
     topic_lower = (post.get("topic") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
-    is_own = viewer and (author or "").strip().lower() == viewer
 
     if use_prefs:
         # Check user preference - hide severely disliked content
@@ -1997,7 +2120,7 @@ def _score_magic(
         author_pref = _clamp_pref_raw(float(author_prefs.get(author, 0) or 0.0))
         combined_pref = topic_pref + author_pref
 
-        if combined_pref <= HIDE_THRESHOLD and not is_own:
+        if combined_pref <= HIDE_THRESHOLD:
             return 0.0, {}, True
     else:
         # Non-home feeds: preferences are not part of the score (P=0) and we do not hide.
@@ -2013,7 +2136,7 @@ def _score_magic(
 
     # S = Similarity boost (always >= 0)
     upvoters = similar_upvotes.get(pid, [])
-    raw_sim = 1.0 if is_own else sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
+    raw_sim = sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
     S = math.sqrt(max(0.0, raw_sim))
 
     # V = Vote score (signed sqrt: negative votes hurt the score)
@@ -2025,9 +2148,6 @@ def _score_magic(
     U = math.sqrt(max(0.0, float(unique_count)))
 
     # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
-    if is_own:
-        author_pref = PREF_RAW_CAP
-        combined_pref = topic_pref + author_pref
     P = _sqrt_signed(combined_pref)
 
     # A = Award score (unique awarders, always >= 0)
@@ -2039,8 +2159,12 @@ def _score_magic(
     age_hours = max(0, (now_ts - timestamp) / 3600)
     R = 1 / (1 + (age_hours / 9) ** 1.585)
 
+    # N = Novelty factor from seen view_count
+    seen_count = (seen_posts or {}).get(pid, 0)
+    N = _novelty_factor(seen_count)
+
     # Final score
-    score = (S + V + U + P + A) * R
+    score = (S + V + U + P + A) * R * N
 
     # Determine primary reason based on dominant component
     components = [("S", S), ("V", V), ("U", U), ("P", P), ("A", A)]
@@ -2067,18 +2191,22 @@ def _score_magic(
         reason = "Fresh content"
         bucket = "discovery"
 
+    if seen_count > 0:
+        reason += " · You've seen this before"
+
     debug = {
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score), 4),
-        "equation": "(√S + √V + √U + √P + √A) × R",
-        # Raw input values (before sqrt) so the formula makes sense
+        "equation": "(√S + √V + √U + √P + √A) × R × N",
         "S": round(raw_sim, 3),
         "V": round(net_vote, 3),
         "U": unique_count,
         "P": round(combined_pref, 3),
         "A": award_count,
         "R": round(R, 4),
+        "N": round(N, 4),
+        "seen_count": seen_count,
         "age_hours": round(age_hours, 1),
         "t_pref": round(topic_pref, 1),
         "a_pref": round(author_pref, 1),
@@ -2221,16 +2349,25 @@ def _load_home_candidates(
     now_ts: int,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """
     Load candidate posts for home feed from multiple sources:
+    0. Own posts (recent)
     1. Posts by similar users (recent)
     2. Posts upvoted by similar users (recent)
     3. Recent posts (discovery)
-    4. Random exploration (upvoted posts from wider time window)
+
+    Returns (candidates, timings) where timings maps src{0..3}_ms / src{0..3}_n
+    for per-source diagnostics.
     """
+    import time as _time
+
     results = []
     seen = set()
+    timings: dict[str, float] = {}
+
+    def _ms_since(t0: float) -> float:
+        return round((_time.monotonic() - t0) * 1000, 2)
 
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
@@ -2247,6 +2384,7 @@ def _load_home_candidates(
     min_ts = int(now_ts) - 86400
 
     # Source 0: Own posts (always included so the viewer always sees their content)
+    _t = _time.monotonic()
     cur.execute(
         f"""SELECT {_POST_COLS}
         FROM posts p
@@ -2259,6 +2397,7 @@ def _load_home_candidates(
         LIMIT %s""",
         [viewer, min_ts] + bt_params + [max_posts],
     )
+    src0_n = 0
     for row in cur.fetchall():
         post = _row_to_post(
             row,
@@ -2273,8 +2412,13 @@ def _load_home_candidates(
         if post:
             post["_source"] = "own"
             results.append(post)
+            src0_n += 1
+    timings["src0_ms"] = _ms_since(_t)
+    timings["src0_n"] = src0_n
 
     # Source 1: Posts BY similar users (root posts only)
+    _t = _time.monotonic()
+    src1_n = 0
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
@@ -2303,22 +2447,32 @@ def _load_home_candidates(
             if post:
                 post["_source"] = "similar_author"
                 results.append(post)
+                src1_n += 1
+    timings["src1_ms"] = _ms_since(_t)
+    timings["src1_n"] = src1_n
 
-    # Source 2: Posts UPVOTED by similar users
+    # Source 2: Posts UPVOTED by similar users.
+    # Drive from posts (uses idx_posts_created_at) and use EXISTS against the
+    # uniq_votes_owner_target index instead of seq-scanning votes. The old
+    # `FROM votes JOIN posts` plan did a full seq scan of ~128k upvote rows.
+    _t = _time.monotonic()
+    src2_n = 0
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
         cur.execute(
-            f"""SELECT DISTINCT ON (p.txhash)
-                   {_POST_COLS}
-            FROM votes v
-            JOIN posts p ON LOWER(v.target) = LOWER(p.txhash)
+            f"""SELECT {_POST_COLS}
+            FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-            WHERE LOWER(v.owner) IN ({placeholders})
-              AND v.user_vote > 0
+            WHERE EXISTS (
+                SELECT 1 FROM votes v
+                WHERE LOWER(v.target) = LOWER(p.txhash)
+                  AND LOWER(v.owner) IN ({placeholders})
+                  AND v.user_vote > 0
+              )
               AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
               {bt_clause}
-            ORDER BY p.txhash, p.created_at DESC
+            ORDER BY p.created_at DESC
             LIMIT %s""",
             similar_list + bt_params + [max_posts],
         )
@@ -2336,8 +2490,12 @@ def _load_home_candidates(
             if post:
                 post["_source"] = "similar_upvoted"
                 results.append(post)
+                src2_n += 1
+    timings["src2_ms"] = _ms_since(_t)
+    timings["src2_n"] = src2_n
 
     # Source 3: Recent posts (discovery)
+    _t = _time.monotonic()
     cur.execute(
         f"""SELECT {_POST_COLS}
         FROM posts p
@@ -2348,6 +2506,7 @@ def _load_home_candidates(
         LIMIT %s""",
         bt_params + [max_posts],
     )
+    src3_n = 0
     for row in cur.fetchall():
         post = _row_to_post(
             row,
@@ -2362,42 +2521,11 @@ def _load_home_candidates(
         if post:
             post["_source"] = "recent"
             results.append(post)
+            src3_n += 1
+    timings["src3_ms"] = _ms_since(_t)
+    timings["src3_n"] = src3_n
 
-    # Source 4: Random exploration (upvoted posts from last 60 days)
-    # Pulls random posts that have at least one upvote, giving older quality
-    # content a chance to surface. Different results each request.
-    explore_limit = max(20, max_posts // 3)
-    cur.execute(
-        f"""SELECT {_POST_COLS}
-        FROM posts p
-        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
-          {bt_clause}
-          AND p.created_at > EXTRACT(EPOCH FROM NOW()) - 60 * 86400
-          AND EXISTS (
-              SELECT 1 FROM votes v
-              WHERE LOWER(v.target) = LOWER(p.txhash) AND v.user_vote > 0
-          )
-        ORDER BY RANDOM()
-        LIMIT %s""",
-        bt_params + [explore_limit],
-    )
-    for row in cur.fetchall():
-        post = _row_to_post(
-            row,
-            blocked_posts,
-            blocked_users,
-            allowed_tags,
-            seen,
-            blocked_topics,
-            blocked_topic_prefixes,
-            viewer=viewer,
-        )
-        if post:
-            post["_source"] = "explore"
-            results.append(post)
-
-    return results
+    return results, timings
 
 
 def _row_to_post(
@@ -2479,7 +2607,10 @@ def _row_to_post(
 
     relayer_lower = (relayer or "").strip().lower()
     viewer_lower = (viewer or "").strip().lower()
+    post_ts = int(ts) if ts else 0
     is_own = viewer_lower and author == viewer_lower
+    if is_own and post_ts < _now_epoch() - 3600:
+        is_own = False
     if pid in seen:
         return None
     if not is_own and (pid in blocked_posts or author in blocked_users):
@@ -2498,8 +2629,7 @@ def _row_to_post(
     except Exception:
         media = []
 
-    seen.add(pid)
-    return {
+    post = {
         "post_id": pid,
         "author": author,
         "user_id": author,
@@ -2520,35 +2650,176 @@ def _row_to_post(
         "media_meta": [],
         "relayer": relayer_lower,
     }
+    seen.add(pid)
+    return post
 
 
-def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]) -> dict[str, list[str]]:
+# ---- Similar-user upvote cache (backend-DB, per-owner) ----
+# The scoring path needs "which similar users upvoted each candidate post".
+# Postgres' only viable plan for the naive IN/IN query scans every vote row
+# belonging to the 30 similar users (tens of thousands of rows for active
+# voters) and costs 100-250ms per home feed load even when the final
+# intersection is tiny.
+#
+# We cache each owner's recent upvoted-post set in `user_upvote_cache` on the
+# backend DB (same pattern as `user_similarity_cache`). Shared across gunicorn
+# workers and container restarts, keyed on owner so there's no duplication
+# across viewers (the same active voter appears in many viewers' similarity
+# sets and only needs to be cached once).
+#
+# Payload is bounded by a 30-day window on votes.created_at: candidate posts
+# are dominated by posts from the last few days, so older upvotes can't
+# contribute to the intersection anyway.
+# TTL is 1h: a similar user's upvote history barely shifts within an hour,
+# and a short TTL was producing ~30% miss rate per request (130-290ms
+# miss-fill) on top of an already-filtered cache read.
+_SIM_UPVOTES_CACHE_TTL = 3600
+_SIM_UPVOTES_WINDOW_SECS = 30 * 24 * 3600
+
+# Vote totals cache: feed scoring uses SUM(user_weight) over all votes per post,
+# which costs 0.3-0.9ms/post via LATERAL JOIN -> 100-260ms per home feed load
+# with 130-370 candidates. We cache the unfiltered total per post for 60s on
+# the backend DB. Only used when the viewer has no blocked users (the majority)
+# — blocked-user totals are viewer-dependent and fall through to the live query.
+_VOTE_TOTALS_CACHE_TTL = 60
+
+
+def _load_similar_user_upvotes(
+    cur,
+    post_ids: list[str],
+    similar_addrs: set[str],
+    backend_cur=None,
+) -> tuple[dict[str, list[str]], dict[str, float]]:
     """
-    Load which similar users upvoted which posts.
-    Returns: {post_id: [voter_addr, ...]}
+    Return ({post_id: [voter_addr, ...]}, timings) for similar users that
+    upvoted each candidate post. Reads/writes a shared backend-DB cache
+    keyed by owner.
+
+    timings sub-phases (used to track down the 160-230ms sim_up_ms tail):
+      sim_up_cache_ms     backend-DB SELECT from user_upvote_cache
+      sim_up_miss_ms      cold-fill (votes SELECT + UPSERT), 0 if all hit
+      sim_up_intersect_ms Python intersection over cached sets
+      sim_up_hits         similar users served from cache
+      sim_up_misses       similar users cold-filled this call
     """
+    import time as _time
+
+    def _ms_since(t0: float) -> float:
+        return round((_time.monotonic() - t0) * 1000, 2)
+
+    timings: dict[str, float] = {
+        "sim_up_cache_ms": 0.0,
+        "sim_up_miss_ms": 0.0,
+        "sim_up_intersect_ms": 0.0,
+        "sim_up_hits": 0,
+        "sim_up_misses": 0,
+    }
+
     if not post_ids or not similar_addrs:
-        return {}
+        return {}, timings
 
-    similar_list = list(similar_addrs)
-    post_placeholders = ",".join(["%s"] * len(post_ids))
-    user_placeholders = ",".join(["%s"] * len(similar_list))
+    similar_list = list({str(addr).lower() for addr in similar_addrs if addr})
+    if not similar_list:
+        return {}, timings
+    now_ts = int(time.time())
 
-    query = f"""
-        SELECT LOWER(target), LOWER(owner)
-        FROM votes
-        WHERE LOWER(target) IN ({post_placeholders})
-          AND LOWER(owner) IN ({user_placeholders})
-          AND user_vote > 0
-    """
-    cur.execute(query, post_ids + similar_list)
+    cached: dict[str, frozenset[str]] = {}
+    fetched: dict[str, frozenset[str]] = {}
 
-    result = {}
-    for target, voter in cur.fetchall():
-        if target not in result:
-            result[target] = []
-        result[target].append(voter)
-    return result
+    post_set = set(post_ids)
+
+    def _read_and_fill_cache(bcur):
+        # Filter the cached TEXT[] to the candidate post_ids in Postgres so we
+        # don't ship every user's full 90-day upvote history over the wire
+        # just to intersect it in Python — that was costing ~60ms per request
+        # even with a 100% cache hit (30 users × ~5k TEXT[] entries = multi-MB
+        # transfer + psycopg deserialization). Post-filter rows are at most a
+        # few dozen strings per user.
+        _t = _time.monotonic()
+        bcur.execute(
+            """
+            SELECT owner,
+                   ARRAY(
+                       SELECT t FROM unnest(upvoted_posts) t
+                       WHERE t = ANY(%s)
+                   ) AS matches
+            FROM user_upvote_cache
+            WHERE owner = ANY(%s) AND expires_at > %s
+            """,
+            (list(post_set), similar_list, now_ts),
+        )
+        for owner, matches in bcur.fetchall():
+            cached[owner] = frozenset(matches or ())
+        timings["sim_up_cache_ms"] = _ms_since(_t)
+        timings["sim_up_hits"] = len(cached)
+
+        missing = [a for a in similar_list if a not in cached]
+        timings["sim_up_misses"] = len(missing)
+        if missing:
+            _t = _time.monotonic()
+            ph = ",".join(["%s"] * len(missing))
+            cutoff = now_ts - _SIM_UPVOTES_WINDOW_SECS
+            cur.execute(
+                f"""
+                SELECT LOWER(owner), LOWER(target)
+                FROM votes
+                WHERE LOWER(owner) IN ({ph})
+                  AND user_vote > 0
+                  AND created_at > %s
+                """,
+                missing + [cutoff],
+            )
+            raw: dict[str, list[str]] = {addr: [] for addr in missing}
+            for owner, target in cur.fetchall():
+                bucket = raw.get(owner)
+                if bucket is not None and target:
+                    bucket.append(target)
+
+            # Users with no recent upvotes get an empty array cached as a
+            # negative result so we don't re-query them every 10 minutes.
+            expires_at = now_ts + _SIM_UPVOTES_CACHE_TTL
+            values_sql = ",".join(["(%s, %s, %s, %s)"] * len(raw))
+            params: list = []
+            for addr, posts in raw.items():
+                params.extend((addr, posts, now_ts, expires_at))
+            bcur.execute(
+                f"""
+                INSERT INTO user_upvote_cache (owner, upvoted_posts, computed_at, expires_at)
+                VALUES {values_sql}
+                ON CONFLICT (owner) DO UPDATE SET
+                    upvoted_posts = EXCLUDED.upvoted_posts,
+                    computed_at = EXCLUDED.computed_at,
+                    expires_at = EXCLUDED.expires_at
+                """,
+                params,
+            )
+            for addr, posts in raw.items():
+                fetched[addr] = frozenset(posts)
+            timings["sim_up_miss_ms"] = _ms_since(_t)
+
+    if backend_cur is not None:
+        _read_and_fill_cache(backend_cur)
+    else:
+        with connect_backend_db() as bconn:
+            with bconn.cursor() as bcur:
+                _read_and_fill_cache(bcur)
+
+    _t = _time.monotonic()
+    result: dict[str, list[str]] = {}
+    # `cached` rows are already filtered to post_set in SQL; `fetched` rows
+    # still carry the full recent upvote set and need Python intersection.
+    for addr, upvoted in cached.items():
+        if not upvoted:
+            continue
+        for pid in upvoted:
+            result.setdefault(pid, []).append(addr)
+    for addr, upvoted in fetched.items():
+        if not upvoted:
+            continue
+        for pid in upvoted & post_set:
+            result.setdefault(pid, []).append(addr)
+    timings["sim_up_intersect_ms"] = _ms_since(_t)
+    return result, timings
 
 
 def _get_guest_feed(
@@ -2578,7 +2849,7 @@ def _get_guest_feed(
 
     # Load vote/comment/award stats (no viewer for guest)
     post_ids = [c["post_id"] for c in candidates]
-    vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    vote_totals, comment_counts, _, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     _, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
     for post in candidates:
@@ -2617,7 +2888,6 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
@@ -2643,7 +2913,7 @@ def _get_guest_feed_magic(
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
     post_ids = [c["post_id"] for c in candidates]
-    vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    vote_totals, comment_counts, _, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
@@ -2686,19 +2956,18 @@ def _get_guest_feed_magic(
         scored_posts.append(post)
 
     scored_posts.sort(key=lambda p: -float(p.get("_score", 0.0)))
-    interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
 
     start = (page - 1) * limit
     end = start + limit
-    page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
-    has_more = len(interleaved_posts) > end
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
 
     for p in page_posts:
         p.pop("_score", None)
 
     return {
         "posts": page_posts,
-        "total": len(interleaved_posts),
+        "total": len(scored_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
@@ -4859,10 +5128,13 @@ def get_posts():
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
+
+        _t_blocked = time.monotonic()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
         blocked_topics = _get_blocked_topics(cur, address)
         blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_ms = round((time.monotonic() - _t_blocked) * 1000, 2)
 
         deleted_clause = _deleted_filter()
 
@@ -4876,6 +5148,17 @@ def get_posts():
             return jsonify({"error": "unsupported sort mode", "sort_mode": sort_mode}), 400
 
         sort_mode = sort_mode or "magic"
+
+        # ── Seen-posts: load persisted map for novelty scoring ────
+        persisted_seen: dict[str, int] = {}
+        _t_seen = time.monotonic()
+        if address and address.lower() != "guest":
+            try:
+                persisted_seen = get_seen_map(address)
+            except Exception:
+                logger.debug("get_posts.seen_load.err addr=%s", address[:12])
+        seen_ms = round((time.monotonic() - _t_seen) * 1000, 2)
+
         if feed in ("home", "following"):
             try:
                 log_event(
@@ -4890,6 +5173,7 @@ def get_posts():
             except Exception:
                 pass
 
+            _t_feed = time.monotonic()
             # Home feed uses new similarity-based algorithm
             if feed == "home":
                 resp = _get_home_feed(
@@ -4900,10 +5184,10 @@ def get_posts():
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
-                    seed=int(time.time() // 60),
                     sort_mode=sort_mode,
                     blocked_topics=blocked_topics_exact,
                     blocked_topic_prefixes=blocked_topic_prefixes,
+                    seen_posts=persisted_seen,
                 )
             else:
                 resp = _get_following_feed(
@@ -4917,11 +5201,23 @@ def get_posts():
                     sort_mode=sort_mode,
                     blocked_topics=blocked_topics_exact,
                     blocked_topic_prefixes=blocked_topic_prefixes,
+                    seen_posts=persisted_seen,
                 )
+            feed_ms = round((time.monotonic() - _t_feed) * 1000, 2)
 
+            enrich_ms = 0.0
+            agent_edits_ms = 0.0
+            filter_ms = 0.0
             if resp.get("posts"):
+                _t = time.monotonic()
                 _enrich_media_meta(cur, resp["posts"])
+                enrich_ms = round((time.monotonic() - _t) * 1000, 2)
+
+                _t = time.monotonic()
                 _apply_agent_edits(cur, resp["posts"], address)
+                agent_edits_ms = round((time.monotonic() - _t) * 1000, 2)
+
+                _t = time.monotonic()
                 resp["posts"] = _filter_posts_by_allowed_tags(
                     resp["posts"],
                     allowed_tags,
@@ -4929,6 +5225,33 @@ def get_posts():
                     context=f"get_posts.feed.{feed or 'unknown'}",
                     viewer=address,
                 )
+                filter_ms = round((time.monotonic() - _t) * 1000, 2)
+                _track_image_impressions(resp["posts"], rid, context=f"get_posts.feed.{feed or 'unknown'}")
+
+            # Emit one structured line for slow feed requests so we can see
+            # which step of the home-feed pipeline is dominating latency.
+            inner = resp.pop("_timings", {}) or {}
+            total_ms = round((time.monotonic() - t_start) * 1000, 2)
+            if total_ms > 500:
+                log_event(
+                    rid,
+                    "get_posts.timing",
+                    feed=feed,
+                    sort=sort_mode,
+                    page=page,
+                    limit=limit,
+                    viewer=(address[:12] + "...") if address else "",
+                    blocked_ms=blocked_ms,
+                    seen_ms=seen_ms,
+                    feed_ms=feed_ms,
+                    enrich_ms=enrich_ms,
+                    agent_edits_ms=agent_edits_ms,
+                    filter_ms=filter_ms,
+                    total_ms=total_ms,
+                    returned=len(resp.get("posts") or []),
+                    **inner,
+                )
+
             conn.close()
             return jsonify(resp)
 
@@ -4964,7 +5287,7 @@ def get_posts():
 
         # Fetch candidate posts. For magic mode we must rank in Python using the same Magic scorer.
         # (Eligibility comes from the topic filter; ranking is always via `_score_magic`.)
-        max_candidates = max(500, limit * page * 3)
+        max_candidates = max(500, limit * page * _seen_overfetch_factor(persisted_seen, 3))
         order_clause = "ORDER BY p.created_at DESC"
 
         t_select = time.monotonic()
@@ -5152,7 +5475,7 @@ def get_posts():
             similar_addrs = set(sim_lookup.keys())
 
             post_ids = [p["post_id"] for p in candidates]
-            similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+            similar_upvotes, _ = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
             unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
             unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
             topic_prefs: dict[str, float] = {}
@@ -5173,6 +5496,7 @@ def get_posts():
                     False,
                     unique_awarders,
                     viewer=address_lower,
+                    seen_posts=persisted_seen,
                 )
                 if should_hide:
                     continue
@@ -5197,7 +5521,11 @@ def get_posts():
             for p in result:
                 p.pop("_score", None)
         else:
-            # newest: just return the newest candidates (already by created_at desc)
+            # newest: pure chronological
+            for c in candidates:
+                c["_N"] = 1.0
+                c["_seen_count"] = 0
+
             start = (page - 1) * limit
             end = start + limit
             page_posts = candidates[start:end] if start < len(candidates) else []
@@ -5206,6 +5534,11 @@ def get_posts():
             result = []
             for post in page_posts:
                 pid = post["post_id"]
+                sc = post.pop("_seen_count", 0)
+                n_val = post.pop("_N", 1.0)
+                reason = "Newest"
+                if sc > 0:
+                    reason += " · You've seen this before"
                 post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
                 post["awards"] = award_details.get(pid, [])
@@ -5216,10 +5549,9 @@ def get_posts():
                 post["user_weight"] = user_weight_map.get(pid, 0.0)
                 post["feed_debug"] = {
                     "bucket": "newest",
-                    "reason": "Newest",
-                    "score": float(post.get("timestamp", 0) or 0),
-                    "equation": "timestamp",
-                    "formula": f"ts = {int(post.get('timestamp', 0) or 0)}",
+                    "reason": reason,
+                    "N": round(n_val, 4),
+                    "seen_count": sc,
                 }
                 result.append(post)
 
@@ -5233,6 +5565,7 @@ def get_posts():
                 context=f"get_posts.topic.{topic or 'all'}",
                 viewer=address,
             )
+            _track_image_impressions(result, rid, context=f"get_posts.topic.{topic or 'all'}")
 
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
@@ -5616,6 +5949,7 @@ def get_user_posts():
                 context=f"get_user_posts.{post_type or 'all'}",
                 viewer=viewer,
             )
+            _track_image_impressions(result, rid, context=f"get_user_posts.{post_type or 'all'}")
         conn.close()
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
@@ -6271,6 +6605,7 @@ def get_comments():
         _collect_posts(children, all_posts_for_overlay)
         _enrich_media_meta(cur, all_posts_for_overlay)
         _apply_agent_edits(cur, all_posts_for_overlay, address)
+        _track_image_impressions(all_posts_for_overlay, rid, context="get_comments")
 
         resp = {"root": root, "children": children}
 
@@ -6591,7 +6926,7 @@ def get_inbox():
             FROM inbox_events
             WHERE LOWER(recipient) = %s
               AND LOWER(actor) != %s
-              AND event_type IN ('follow', 'donation', 'subscription_gift')
+              AND event_type IN ('follow', 'donation', 'subscription_gift', 'trending')
             ORDER BY created_at DESC
             LIMIT %s
             """,
@@ -6601,6 +6936,48 @@ def get_inbox():
         logger.info(
             f"[get_inbox] Backend events query: {(time.time() - t_backend)*1000:.1f}ms, rows={len(backend_rows)}"
         )
+
+        trending_posts: dict[str, dict] = {}
+        missing_event_keys: list[str] = []
+        if backend_rows:
+            trending_tx_hashes = sorted(
+                {str(row[5] or "").strip().lower() for row in backend_rows if (row[2] or "") == "trending" and row[5]}
+            )
+            if trending_tx_hashes:
+                placeholders = ",".join(["%s"] * len(trending_tx_hashes))
+                cur.execute(
+                    f"""
+                    SELECT LOWER(txhash), COALESCE(title, ''), COALESCE(content, ''), LOWER(owner),
+                           COALESCE(topic, '')
+                    FROM posts WHERE LOWER(txhash) IN ({placeholders}) AND deleted = FALSE
+                    """,
+                    trending_tx_hashes,
+                )
+                for prow in cur.fetchall():
+                    trending_posts[prow[0]] = {
+                        "title": prow[1] or "",
+                        "content": prow[2] or "",
+                        "owner": prow[3] or "",
+                        "topic": prow[4] or "",
+                    }
+                for row in backend_rows:
+                    if (row[2] or "") != "trending":
+                        continue
+                    tx_hash_lc = str(row[5] or "").strip().lower()
+                    if tx_hash_lc not in trending_posts:
+                        missing_event_keys.append(str(row[0] or "").lower())
+            if missing_event_keys:
+                placeholders = ",".join(["%s"] * len(missing_event_keys))
+                bcur.execute(
+                    f"DELETE FROM inbox_events WHERE event_key IN ({placeholders})",
+                    missing_event_keys,
+                )
+                missing_set = set(missing_event_keys)
+                backend_rows = [row for row in backend_rows if (row[0] or "").lower() not in missing_set]
+                logger.debug(
+                    "[get_inbox] Dropped stale trending events count=%d",
+                    len(missing_event_keys),
+                )
 
         # Get total count via a separate lightweight query
         count_query = f"""
@@ -6636,7 +7013,7 @@ def get_inbox():
             SELECT COUNT(*) FROM inbox_events
             WHERE LOWER(recipient) = %s
               AND LOWER(actor) != %s
-              AND event_type IN ('follow', 'donation', 'subscription_gift')
+              AND event_type IN ('follow', 'donation', 'subscription_gift', 'trending')
             """,
             (viewer_lower, viewer_lower),
         )
@@ -6694,24 +7071,43 @@ def get_inbox():
             event_type = row[2] or ""
             item_timestamp = int(row[3]) if row[3] is not None else 0
             amount = int(row[4]) if row[4] is not None else None
+            tx_hash_lc = (row[5] or "").lower()
             profile = backend_profiles.get(actor_owner, {})
+
+            context_id = ""
+            context_content = ""
+            context_title = ""
+            context_owner = viewer_lower
+            root_post_id = ""
+            item_topic = ""
+            if event_type == "trending":
+                post = trending_posts.get(tx_hash_lc)
+                if not post:
+                    continue
+                context_id = tx_hash_lc
+                context_title = post["title"]
+                context_content = post["content"]
+                context_owner = post["owner"]
+                root_post_id = tx_hash_lc
+                item_topic = post["topic"]
+
             items.append(
                 {
                     "item_id": event_key,
                     "actor_owner": actor_owner,
                     "item_timestamp": item_timestamp,
                     "item_content": "",
-                    "context_id": "",
-                    "context_content": "",
-                    "context_title": "",
+                    "context_id": context_id,
+                    "context_content": context_content,
+                    "context_title": context_title,
                     "context_target": "",
-                    "context_owner": viewer_lower,
+                    "context_owner": context_owner,
                     "actor_username": profile.get("username", ""),
-                    "root_post_id": "",
+                    "root_post_id": root_post_id,
                     "actor_level": profile.get("level", 0),
                     "item_award_type": "",
                     "item_type": event_type,
-                    "item_topic": "",
+                    "item_topic": item_topic,
                     "actor_created_at": profile.get("created_at", 0),
                     "amount": amount,
                 }
@@ -6809,6 +7205,93 @@ def get_inbox():
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
         return safe_error(e, context="get_inbox")
+
+
+def _verify_seen_signature(
+    address: str,
+    pub_b64: str,
+    sig_b64: str,
+    timestamp_raw: str | int | None,
+    nonce_raw: str | int | None,
+):
+    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
+
+    if not (pub_b64 and sig_b64):
+        return None, "missing required fields"
+    try:
+        timestamp = int(timestamp_raw)
+    except (TypeError, ValueError):
+        return None, "invalid timestamp"
+    nonce, err = _parse_envelope_nonce({"envelope_nonce": nonce_raw})
+    if err is not None:
+        return None, "invalid envelope_nonce"
+
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return None, "invalid relay fields"
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return None, "invalid relay fields"
+
+    user_addr = _derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, "invalid pubkey"
+    if address and address.lower() != user_addr.lower():
+        return None, "address does not match pubkey"
+
+    signed_payload = f"seen_posts:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return None, "invalid signature"
+
+    ok, guard_err = _guard_push_request(user_addr, "seen_posts", timestamp, nonce)
+    if not ok:
+        return None, guard_err
+    return user_addr.lower(), None
+
+
+@public_bp.route("/api/seen_posts", methods=["POST"])
+def seen_posts_beacon():
+    """Fallback endpoint for sendBeacon flush of seen post IDs on tab close."""
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or "").strip().lower()
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
+    timestamp_raw = data.get("timestamp")
+    nonce_raw = data.get("envelope_nonce")
+    if not address:
+        return jsonify({"error": "address required"}), 400
+    if address == "guest":
+        return jsonify({"ok": True, "ingested": 0})
+    user_addr, err = _verify_seen_signature(address, pub_b64, sig_b64, timestamp_raw, nonce_raw)
+    if not user_addr:
+        return jsonify({"error": err or "invalid signature"}), 400
+
+    posts_raw = data.get("posts") or []
+    if not isinstance(posts_raw, list):
+        return jsonify({"error": "posts must be a list"}), 400
+    entries = []
+    fallback_reason = str(data.get("reason", "view")).strip().lower()
+    for entry in posts_raw[:100]:
+        if isinstance(entry, str):
+            pid = normalize_post_id(entry)
+            reason = fallback_reason
+        elif isinstance(entry, dict) and entry.get("id"):
+            pid = normalize_post_id(entry.get("id"))
+            reason = str(entry.get("reason") or fallback_reason).strip().lower()
+        else:
+            continue
+        if pid:
+            entries.append((pid, reason))
+
+    try:
+        count = ingest_seen_batch(user_addr, entries, fallback_reason)
+    except Exception:
+        logger.debug("seen_posts_beacon.err addr=%s", address[:12])
+        count = 0
+    return jsonify({"ok": True, "ingested": count})
 
 
 @public_bp.route("/api/mark_inbox_viewed", methods=["POST"])
@@ -6990,6 +7473,17 @@ def get_upload_url():
         if not upload_url:
             log_event(rid, "get_upload_url.err", error="missing_upload_url")
             return jsonify({"error": "no upload URL received from cloudflare"}), 500
+
+        # Register image in catalog for GC tracking
+        if upload_id:
+            upload_id_norm = upload_id.lower()
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    bcur.execute(
+                        "INSERT INTO image_catalog (image_id, created_at) VALUES (%s, %s) ON CONFLICT (image_id) DO NOTHING",
+                        (upload_id_norm, int(time.time())),
+                    )
+            log_event(rid, "image_catalog.registered", image_id=upload_id_norm)
 
         log_event(rid, "get_upload_url.ok", upload_id=upload_id)
         return jsonify({"uploadURL": upload_url, "id": upload_id, "accountHash": account_hash})

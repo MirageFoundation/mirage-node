@@ -444,16 +444,25 @@ def _truncate(text: str, max_len: int = 150) -> str:
     return text[: max_len - 1] + "…"
 
 
-def _send_push_to_user(owner: str, title: str, body: str, data: dict) -> None:
+def _send_push_to_user(
+    owner: str,
+    title: str,
+    body: str,
+    data: dict,
+    *,
+    tokens: list[tuple[str, str]] | None = None,
+    skip_throttle: bool = False,
+) -> bool:
     """Send push to all devices for an owner, respecting the 5/30-min throttle."""
-    tokens = _get_tokens_for_owner(owner)
+    if tokens is None:
+        tokens = _get_tokens_for_owner(owner)
     if not tokens:
         logger.debug("[Push] No tokens for %s, skipping", owner[:16])
-        return
+        return False
 
-    if not _try_throttle_send(owner):
+    if not skip_throttle and not _try_throttle_send(owner):
         logger.debug("[Push] Throttled for %s, suppressed", owner[:16])
-        return
+        return False
 
     messages = [_build_expo_message(token, title, body, data) for token, _platform in tokens]
     tickets = _send_expo_push_batch(messages)
@@ -462,7 +471,10 @@ def _send_push_to_user(owner: str, title: str, body: str, data: dict) -> None:
         if ticket_id:
             _store_receipt(ticket_id, token)
             ok_count += 1
+    if ok_count == 0:
+        logger.debug("[Push] No successful tickets for %s", owner[:16])
     logger.info("[Push] Sent %d/%d to %s: %s", ok_count, len(messages), owner[:16], title)
+    return ok_count > 0
 
 
 def _fire_and_forget(fn, *args):
@@ -997,6 +1009,58 @@ def _do_donation_push(
     }
     _send_push_to_user(recipient_addr, title, body, data)
     _check_old_receipts()
+
+
+def send_push_for_trending(
+    recipient_owner: str,
+    title_preview: str,
+    tx_hash: str,
+) -> bool:
+    """Fire push for a trending post to a recipient."""
+    if not PUSH_NOTIFICATIONS_ENABLED:
+        logger.debug("[Push] Disabled, skipping trending push for %s", recipient_owner[:16])
+        return False
+    tokens = _get_tokens_for_owner(recipient_owner)
+    if not tokens:
+        logger.debug("[Push] No tokens for trending recipient=%s", recipient_owner[:16])
+        return False
+    if not _try_throttle_send(recipient_owner):
+        logger.debug("[Push] Throttled, skipping trending recipient=%s", recipient_owner[:16])
+        return False
+    logger.info(
+        "[Push] Firing trending push: recipient=%s tx=%s",
+        recipient_owner[:16],
+        tx_hash[:16],
+    )
+    sent = _do_trending_push(recipient_owner, title_preview, tx_hash, tokens)
+    if sent:
+        _maybe_flush_pending_summaries()
+        return True
+    logger.debug("[Push] Trending delivery failed recipient=%s tx=%s", recipient_owner[:16], tx_hash[:16])
+    return False
+
+
+def _do_trending_push(
+    recipient_owner: str,
+    title_preview: str,
+    tx_hash: str,
+    tokens: list[tuple[str, str]],
+) -> bool:
+    owner_lc = recipient_owner.lower()
+    title = "Trending on Mirage"
+    if title_preview:
+        display_title = _truncate(title_preview, 80)
+        body = f"Lively discussion on '{display_title}'"
+    else:
+        body = "Lively discussion on a post you're missing"
+    data = {
+        "type": "trending",
+        "postId": tx_hash.lower(),
+        "rootPostId": tx_hash.lower(),
+    }
+    sent = _send_push_to_user(owner_lc, title, body, data, tokens=tokens, skip_throttle=True)
+    _check_old_receipts()
+    return sent
 
 
 def clear_push_throttle(owner: str) -> None:

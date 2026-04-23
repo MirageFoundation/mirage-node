@@ -437,9 +437,39 @@ class QuestTracker:
                     """
                     INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
                     VALUES (%s, %s, %s, %s, 0, '{}')
+                    ON CONFLICT (owner, starts_at) DO NOTHING
+                    RETURNING template_id, starts_at, ends_at
                     """,
                     (owner, template.id, ts, ends_at),
                 )
+                inserted = cur.fetchone()
+
+        if not inserted:
+            # Concurrent requests can race on (owner, starts_at) when they land in the
+            # same second. Treat it as already-assigned and return the existing row.
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT template_id, starts_at, ends_at, progress, progress_meta, last_action_at, completed_at
+                        FROM user_flash_quests
+                        WHERE owner = %s AND starts_at = %s
+                        """,
+                        (owner, ts),
+                    )
+                    row = cur.fetchone()
+            if not row:
+                raise RuntimeError(f"flash quest insert conflicted but no row found: owner={owner} starts_at={ts}")
+            logger.warning(f"flash quest insert race resolved: owner={owner} starts_at={ts}")
+            return {
+                "template_id": row[0],
+                "starts_at": row[1],
+                "ends_at": row[2],
+                "progress": row[3],
+                "progress_meta": row[4] if row[4] else {},
+                "last_action_at": row[5],
+                "completed_at": row[6],
+            }
 
         # Schedule next flash quest (random interval between MIN and MAX hours)
         min_hours = settings.QUESTS_FLASH_MIN_INTERVAL_HOURS
@@ -693,16 +723,30 @@ class QuestTracker:
 
     def _add_pending_reward(self, owner: str, reward_type: str, reward_data: dict, reason: str, ts: int) -> None:
         """Add a pending reward for a user."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """,
-                    (owner, reward_type, json.dumps(reward_data), reason, ts),
-                )
-        logger.info(f"Added pending reward for {owner}: {reward_type} - {reason}")
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
+                        RETURNING id
+                        """,
+                        (owner, reward_type, json.dumps(reward_data), reason, ts),
+                    )
+                    inserted = cur.fetchone()
+        except Exception as exc:
+            raise RuntimeError(
+                f"pending reward insert failed owner={owner} reward_type={reward_type} reason={reason} ts={ts}"
+            ) from exc
+
+        if inserted:
+            logger.info(f"Added pending reward for {owner}: {reward_type} - {reason}")
+        else:
+            logger.warning(
+                f"Skipped duplicate pending reward for {owner}: reward_type={reward_type} reason={reason} ts={ts}"
+            )
 
     def _quest_has_target(self, owner: str, quest_id: str, day_utc: int, target: str) -> bool:
         """Check if target is already counted for this quest/day."""

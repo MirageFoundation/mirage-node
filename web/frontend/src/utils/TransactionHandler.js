@@ -570,7 +570,7 @@ class TransactionHandler {
                     const target = details.target || '';
                     const dir = vote > 0 ? '+1' : (vote < 0 ? '-1' : '0');
 
-                    // Update post's points in state with server's actual value for faster UI refresh
+                    // Sync post vote metadata after indexing for accurate display
                     if (target) {
                         const tLower = String(target).toLowerCase();
                         if (targetKeyLower) {
@@ -581,21 +581,38 @@ class TransactionHandler {
                             const latestForReturned = this._latestVoteTxByTarget.get(tLower);
                             if (latestForReturned && latestForReturned !== String(txHash).toLowerCase()) return;
                         }
-                        const serverPoints = details.target_points;
-                        if (typeof serverPoints === 'number' && this.updatePost && this.getPost) {
+                        if (this.updatePost && this.getPost) {
                             let postKey = tLower;
-                            if (!this.getPost(tLower)) {
+                            let existing = this.getPost(tLower);
+                            if (!existing) {
                                 const exactKey = String(target).trim();
-                                if (this.getPost(exactKey)) postKey = exactKey;
+                                existing = this.getPost(exactKey);
+                                if (existing) postKey = exactKey;
                             }
-                            // Update points, direction, and user_weight from server
                             const serverDir = vote > 0 ? 1 : (vote < 0 ? -1 : 0);
-                            const updateData = { points: serverPoints, direction: serverDir };
-                            // Include user_weight so VoteSection formula calculates correctly
-                            if (typeof weight === 'number') {
-                                updateData.user_weight = weight;
+                            if (existing) {
+                                const updateData = {};
+                                if (existing.direction !== serverDir) {
+                                    updateData.direction = serverDir;
+                                }
+                                if (typeof details.target_points === 'number' && existing.points !== details.target_points) {
+                                    updateData.points = details.target_points;
+                                }
+                                if (typeof weight === 'number' && existing.user_weight !== weight) {
+                                    updateData.user_weight = weight;
+                                }
+                                if (Object.keys(updateData).length > 0) {
+                                    console.debug('[TransactionHandler] vote indexed → sync post state', {
+                                        target: postKey,
+                                        update: updateData,
+                                    });
+                                    this.updatePost(postKey, updateData);
+                                } else {
+                                    console.debug('[TransactionHandler] vote indexed → post already synced', {
+                                        target: postKey,
+                                    });
+                                }
                             }
-                            this.updatePost(postKey, updateData);
                         }
                         this._notifyVoteListeners();
                     }

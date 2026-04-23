@@ -352,32 +352,6 @@ const generatePostGradient = (post) => {
     return gradients[index];
 };
 
-// eslint-disable-next-line no-unused-vars
-const MobileCardTitleBar = styled.div`
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 0.5rem 0.65rem;
-    color: #fff;
-    font-weight: 700;
-    font-size: clamp(0.60rem, 3.2vw, 1.0rem);
-    line-height: 1.15;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.65);
-    pointer-events: none;
-    z-index: 2;
-    &::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        height: 200%;
-        background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.5) 50%, rgba(0,0,0,0) 100%);
-        z-index: -1;
-    }
-`
-
 const MobileCardTitleBelow = styled.div`
     display: none;
     @media (max-width: 600px) {
@@ -392,8 +366,10 @@ const MobileCardTitleBelow = styled.div`
 
 const HideOnMobileTitle = styled.div`
     margin: 0.4rem 0;
+    display: flex;
+    align-items: baseline;
     @media (max-width: 600px) {
-        display: none;
+        display: none !important;
     }
 `
 
@@ -891,13 +867,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             window.removeEventListener('nodeConfigUpdated', handler);
             window.removeEventListener('chainConfigUpdated', handler);
         };
-    }, []);
-
-    useEffect(() => {
-        if (!tx.needsChainConfigRefresh()) return;
-        Api.get('get_chain_config', undefined)
-            .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
-            .catch(() => { });
     }, []);
 
     const nodeConfig = useMemo(() => {
@@ -1702,11 +1671,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
     }
 
-    const [thumbSrc, setThumbSrc] = useState(null);
-    const [thumbBlurSrc, setThumbBlurSrc] = useState(null);
-    const [thumbOriginal, setThumbOriginal] = useState(null); // Original URL for fallback
-    const [thumbProxy, setThumbProxy] = useState('photon'); // 'photon' | 'wsrv' | 'none'
-
     // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
     // Remove after March 2026 when all old posts have been migrated or expired.
     const extractFirstUrl = (text) => {
@@ -1759,6 +1723,38 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) { return false; }
     })();
 
+    // Compute the initial thumb state synchronously so the first render already has the
+    // correct <img src>. Without this, first render would render a placeholder, the effect
+    // below would then swap in the real thumb, and the browser would abort the in-flight
+    // placeholder fetch with NS_BINDING_ABORTED.
+    const computeInitialThumbState = () => {
+        const provided = post && typeof post.thumbnail === 'string' && post.thumbnail.trim() ? post.thumbnail.trim() : '';
+        const thumbUrl = provided || (isDirectImage ? firstLinkInContent : null);
+        if (!thumbUrl) return { src: null, blurSrc: null, original: null, proxy: 'none' };
+        const isYoutubeThumbnail = thumbUrl.includes('img.youtube.com') || thumbUrl.includes('i.ytimg.com');
+        if (isYoutubeThumbnail) {
+            return { src: thumbUrl, blurSrc: thumbUrl, original: thumbUrl, proxy: 'direct' };
+        }
+        if (thumbUrl.includes('?')) {
+            return {
+                src: buildWsrvUrl(thumbUrl, { w: 240, h: 240 }),
+                blurSrc: buildBlurredWsrvUrl(thumbUrl, { w: 240, h: 240, blur: 18 }),
+                original: thumbUrl,
+                proxy: 'wsrv',
+            };
+        }
+        return {
+            src: buildPhotonUrl(thumbUrl, { w: 240, h: 240 }),
+            blurSrc: buildPhotonUrl(thumbUrl, { w: 240, h: 240 }),
+            original: thumbUrl,
+            proxy: 'photon',
+        };
+    };
+    const [thumbSrc, setThumbSrc] = useState(() => computeInitialThumbState().src);
+    const [thumbBlurSrc, setThumbBlurSrc] = useState(() => computeInitialThumbState().blurSrc);
+    const [thumbOriginal, setThumbOriginal] = useState(() => computeInitialThumbState().original);
+    const [thumbProxy, setThumbProxy] = useState(() => computeInitialThumbState().proxy);
+
     useEffect(() => {
         // Use thumbnail from database (indexed by backend), or fall back to direct image URL
         const provided = post && typeof post.thumbnail === 'string' && post.thumbnail.trim() ? post.thumbnail.trim() : '';
@@ -1767,17 +1763,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setThumbOriginal(thumbUrl);
 
         if (thumbUrl) {
-            // Check if it's a YouTube thumbnail - use direct URL (no proxy needed, CSS handles cropping)
             const isYoutubeThumbnail = thumbUrl.includes('img.youtube.com') || thumbUrl.includes('i.ytimg.com');
+            const hasQuery = thumbUrl.includes('?');
             if (isYoutubeThumbnail) {
                 setThumbProxy('direct');
                 setThumbSrc(thumbUrl);
                 setThumbBlurSrc(thumbUrl);
+            } else if (hasQuery) {
+                setThumbProxy('wsrv');
+                setThumbSrc(buildWsrvUrl(thumbUrl, { w: 240, h: 240 }));
+                setThumbBlurSrc(buildBlurredWsrvUrl(thumbUrl, { w: 240, h: 240, blur: 18 }));
+                console.debug('[CardView] thumbnail proxy wsrv for query URL', { thumbUrl });
             } else {
-                // Try Photon first (works with redgifs), wsrv as fallback on error
+                // NOTE: Photon was chosen over wsrv in the past (reason lost), but it behaved better.
+                // If thumbnail issues return, this proxy choice is the likely cause.
                 setThumbProxy('photon');
                 setThumbSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 }));
-                setThumbBlurSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 })); // Photon doesn't support blur
+                setThumbBlurSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 }));
             }
         } else {
             setThumbProxy('none');
@@ -2225,6 +2227,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     {post.feed_debug.age_hours !== undefined && ` [${post.feed_debug.age_hours}h ago]`}
                                                 </FeedDebugValue>
                                             </FeedDebugRow>
+                                            {post.feed_debug.N !== undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>N (novelty):</FeedDebugLabel>
+                                                    <FeedDebugValue>
+                                                        {post.feed_debug.N?.toFixed(4) || '1.0000'}
+                                                        {post.feed_debug.seen_count > 0 && ` [seen ${post.feed_debug.seen_count}×]`}
+                                                    </FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
                                             {/* Only show Prefs row for older debug formats (Magic shows it inline with P) */}
                                             {post.feed_debug.P === undefined && (
                                                 <FeedDebugRow>
@@ -2332,24 +2343,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </MenuContainer>
                     </MetaInfoRow>
-                    {post && post.feed_bucket && post.feed_bucket !== 'guest' && !hasMediaModeContent && (
-                        <FeedReasonLine>
-                            {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
-                            {post.feed_bucket === 'similar' && (post.feed_debug?.reason || 'Similar taste match')}
-                            {post.feed_bucket === 'liked' && (post.feed_debug?.reason || 'Liked topic/author')}
-                            {post.feed_bucket === 'discovery' && (post.feed_debug?.reason || 'Discovery')}
-                            {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
-                            {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
-                            {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
-                            {post.feed_bucket === 'fresh' && (post.feed_debug?.reason || 'Fresh pick')}
-                            {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
-                            {post.feed_debug && typeof post.feed_debug.score === 'number' && (
-                                <ScoreDisplay>
-                                    score {post.feed_debug.score}
-                                </ScoreDisplay>
-                            )}
-                        </FeedReasonLine>
-                    )}
                     {hasMediaModeContent ? (
                         <div style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
                             {title}
@@ -2365,7 +2358,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             </span>
                         </div>
                     ) : (
-                        <HideOnMobileTitle style={{ ...(compactTitleStyle || {}), display: 'flex', alignItems: 'baseline' }}>
+                        <HideOnMobileTitle style={compactTitleStyle || undefined}>
                             {title}
                             <span
                                 onClick={(e) => { e.stopPropagation(); setMediaExpanded(prev => !prev); }}

@@ -112,6 +112,13 @@ function RouteTracker({ children }) {
     const isInitialMountRef = React.useRef(true);
 
     React.useEffect(() => {
+        const navEntry = performance.getEntriesByType('navigation')[0];
+        if (navEntry && navEntry.type === 'reload') {
+            window.scrollTo(0, 0);
+        }
+    }, []);
+
+    React.useEffect(() => {
         try { Storage.touchLastSeen(); } catch (_) { }
     }, [location.pathname]);
 
@@ -414,8 +421,7 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch node config if missing, not cached, or stale (> 1h)
-        // Chain config is fetched lazily by views that need it (CreatePostView, ViewPostView, SubscriptionView).
+        // Fetch node config if missing, not cached, or stale (> 1h).
         try {
             const nowMs = Date.now();
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
@@ -434,6 +440,13 @@ class App extends Component {
                     });
             }
         } catch (_) { }
+
+        // Fetch chain config in parallel with node config and get_posts so it
+        // doesn't serialize behind the feed request (it used to be fetched
+        // lazily from CardView after mount, trailing the home waterfall).
+        // Retry up to 3 attempts with 1s, then 3s backoff; bail early if
+        // another path populates the cache between attempts.
+        try { this._bootstrapChainConfig(); } catch (_) { }
 
         // Refresh user balance on every page load for logged-in users
         try {
@@ -477,6 +490,40 @@ class App extends Component {
                 clearInterval(this._timeThemeInterval);
             }
         } catch (_) { }
+        try {
+            if (this._chainConfigRetryTimer) {
+                clearTimeout(this._chainConfigRetryTimer);
+                this._chainConfigRetryTimer = null;
+            }
+        } catch (_) { }
+    }
+
+    _bootstrapChainConfig(attempt = 0) {
+        const delays = [0, 1000, 3000];
+        if (attempt >= delays.length) return;
+        if (!tx.needsChainConfigRefresh()) return;
+
+        const run = () => {
+            if (!tx.needsChainConfigRefresh()) return;
+            console.debug('[App] get_chain_config.fetch attempt', attempt + 1);
+            Api.get('get_chain_config', undefined)
+                .then((cfg) => {
+                    if (cfg) {
+                        try { tx.cacheChainConfig(cfg); } catch (_) { }
+                    } else {
+                        this._bootstrapChainConfig(attempt + 1);
+                    }
+                })
+                .catch(() => {
+                    this._bootstrapChainConfig(attempt + 1);
+                });
+        };
+
+        if (attempt === 0) {
+            run();
+        } else {
+            this._chainConfigRetryTimer = setTimeout(run, delays[attempt]);
+        }
     }
 
     updateTheme() {
@@ -525,7 +572,8 @@ class App extends Component {
         try {
             if (publicKey) {
                 // Node config already fetched by componentDidMount; no need to re-fetch on login.
-                // Chain config fetched lazily by views that need it.
+                // Re-prime chain config after cache clear so views can read it immediately.
+                try { this._bootstrapChainConfig(); } catch (_) { }
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
                 Api.get('get_user_status', { address: publicKey, _cb: Date.now() })

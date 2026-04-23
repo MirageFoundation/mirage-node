@@ -271,6 +271,79 @@ def init_backend_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_similarity_owner_expires ON user_similarity_cache(LOWER(owner), expires_at)"
             )
 
+            # ── User upvote cache ────────────────────────────────────────
+            # Caches each owner's recent upvoted post ids so the home-feed
+            # scoring path can skip the 58k-row-per-request owner-index scan
+            # over `votes`. Shared across gunicorn workers (unlike an in-process
+            # dict) and survives container restarts.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_upvote_cache (
+                    owner TEXT PRIMARY KEY,
+                    upvoted_posts TEXT[] NOT NULL,
+                    computed_at BIGINT NOT NULL,
+                    expires_at BIGINT NOT NULL
+                )
+            """
+            )
+            # NOT VALID: skips scanning existing rows so an unexpected mixed-case
+            # row can't brick startup; still enforced for new writes.
+            # DO block with exception handler: race-safe when multiple gunicorn
+            # workers run init_backend_schema() concurrently (ALTER TABLE ADD
+            # CONSTRAINT has no IF NOT EXISTS variant, so we swallow the
+            # duplicate_object error instead).
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE user_upvote_cache
+                    ADD CONSTRAINT user_upvote_cache_owner_lower
+                    CHECK (owner = LOWER(owner)) NOT VALID;
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_upvote_cache_expires ON user_upvote_cache(expires_at)")
+            _assert_table_schema("user_upvote_cache", {"owner", "upvoted_posts", "computed_at", "expires_at"})
+
+            # ── Post vote totals cache ───────────────────────────────────
+            # Caches the unfiltered SUM(user_weight) per post so home-feed
+            # scoring can skip the 100-260ms LATERAL JOIN over `votes` for
+            # the no-blocked-users case (the vast majority of viewers).
+            # TTL is short (60s) because totals change whenever a vote lands;
+            # feed scoring tolerates ~1 min staleness.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS post_vote_totals_cache (
+                    post_id TEXT PRIMARY KEY,
+                    total_weight DOUBLE PRECISION NOT NULL,
+                    computed_at BIGINT NOT NULL,
+                    expires_at BIGINT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE post_vote_totals_cache
+                    ADD CONSTRAINT post_vote_totals_cache_post_id_lower
+                    CHECK (post_id = LOWER(post_id)) NOT VALID;
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_post_vote_totals_cache_expires "
+                "ON post_vote_totals_cache(expires_at)"
+            )
+            _assert_table_schema(
+                "post_vote_totals_cache",
+                {"post_id", "total_weight", "computed_at", "expires_at"},
+            )
+
             # ── Push notifications ───────────────────────────────────────
             cur.execute(
                 """
@@ -466,6 +539,34 @@ def init_backend_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_pending_rewards_unclaimed "
                 "ON pending_rewards(owner) WHERE claimed_at IS NULL"
             )
+            cur.execute("SELECT to_regclass(%s)", ("public.idx_pending_rewards_event_dedupe",))
+            has_pending_rewards_dedupe_index = cur.fetchone()[0] is not None
+            if not has_pending_rewards_dedupe_index:
+                # One-time cleanup for legacy rows created before dedupe existed.
+                # Keep rows with claimed_at set first (payout history), then the
+                # lowest id.
+                cur.execute(
+                    """
+                    DELETE FROM pending_rewards
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY owner, reward_type, reason, created_at
+                                       ORDER BY (claimed_at IS NULL), id
+                                   ) AS rn
+                            FROM pending_rewards
+                        ) ranked
+                        WHERE rn > 1
+                    )
+                    """
+                )
+                if cur.rowcount > 0:
+                    logger.warning("backend.schema.pending_rewards.deduped rows=%d", cur.rowcount)
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_rewards_event_dedupe "
+                    "ON pending_rewards(owner, reward_type, reason, created_at)"
+                )
             _assert_table_schema(
                 "pending_rewards",
                 {
@@ -515,6 +616,29 @@ def init_backend_schema() -> None:
                 {"owner", "suspended_until", "suspended_by", "reason", "updated_at"},
             )
 
+            # ── Seen posts (server-side feed dedup) ────────────────────
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_seen_posts (
+                    owner TEXT NOT NULL,
+                    post_id TEXT NOT NULL,
+                    seen_at BIGINT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT 'view',
+                    view_count INT NOT NULL DEFAULT 1,
+                    PRIMARY KEY (owner, post_id),
+                    CONSTRAINT user_seen_posts_owner_lower CHECK (owner = LOWER(owner))
+                )
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_seen_posts_owner_seen " "ON user_seen_posts(owner, seen_at DESC)"
+            )
+            cur.execute("ALTER TABLE user_seen_posts ADD COLUMN IF NOT EXISTS " "view_count INT NOT NULL DEFAULT 1")
+            _assert_table_schema(
+                "user_seen_posts",
+                {"owner", "post_id", "seen_at", "reason", "view_count"},
+            )
+
             # ── Inbox state (replaces profiles.inbox_last_viewed_at) ─────
             cur.execute(
                 """
@@ -523,6 +647,16 @@ def init_backend_schema() -> None:
                     inbox_last_viewed_at BIGINT NOT NULL DEFAULT 0
                 )
             """
+            )
+            cur.execute(
+                "ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_level SMALLINT NOT NULL DEFAULT 0"
+            )
+            cur.execute(
+                "ALTER TABLE user_inbox_state ADD COLUMN IF NOT EXISTS trending_last_sent_at BIGINT NOT NULL DEFAULT 0"
+            )
+            _assert_table_schema(
+                "user_inbox_state",
+                {"owner", "inbox_last_viewed_at", "trending_level", "trending_last_sent_at"},
             )
 
             # ── Inbox events (follow + donation notifications) ───────────
@@ -553,6 +687,35 @@ def init_backend_schema() -> None:
                 "inbox_events",
                 {"event_key", "recipient", "actor", "event_type", "created_at", "amount", "tx_hash"},
             )
+
+            # ── Image catalog + view tracking (Cloudflare Images GC) ─────
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS image_catalog (
+                    image_id TEXT PRIMARY KEY,
+                    created_at BIGINT NOT NULL,
+                    deleted_at BIGINT
+                )
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_image_catalog_created_at ON image_catalog(created_at)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_image_catalog_gc_candidates "
+                "ON image_catalog(created_at) WHERE deleted_at IS NULL"
+            )
+            _assert_table_schema("image_catalog", {"image_id", "created_at", "deleted_at"})
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS image_views (
+                    image_id TEXT PRIMARY KEY,
+                    view_count BIGINT NOT NULL DEFAULT 0,
+                    last_viewed_at BIGINT
+                )
+            """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_image_views_count ON image_views(view_count)")
+            _assert_table_schema("image_views", {"image_id", "view_count", "last_viewed_at"})
 
             # ── Fix SERIAL sequences after data migration ─────────────────
             # The DB-split migration inserts rows with explicit id values but

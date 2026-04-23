@@ -904,27 +904,33 @@ class Indexer:
         except Exception:
             pass
 
-        # Collect addresses touched by bank events
+        # Collect addresses touched by bank events from all event sources:
+        # - txs_results: regular transactions
+        # - end_block_events/finalize_block_events: governance execution (mints, burns, etc.)
         touched = set()
-        txs_results = result_obj.get("txs_results") or []
-        for tx_result in txs_results:
-            for ev in tx_result.get("events") or []:
-                ev_type = ev.get("type", "")
-                if ev_type in ("transfer", "coin_spent", "coin_received"):
-                    for attr in ev.get("attributes") or []:
-                        key = attr.get("key", "")
-                        val = attr.get("value", "")
-                        # Base64 decode if needed
-                        try:
-                            key = base64.b64decode(key).decode("utf-8")
-                        except Exception:
-                            pass
-                        try:
-                            val = base64.b64decode(val).decode("utf-8")
-                        except Exception:
-                            pass
-                        if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
-                            touched.add(val.lower())
+
+        all_events = []
+        for tx_result in result_obj.get("txs_results") or []:
+            all_events.extend(tx_result.get("events") or [])
+        all_events.extend(result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [])
+        all_events.extend(result_obj.get("begin_block_events") or [])
+
+        for ev in all_events:
+            ev_type = ev.get("type", "")
+            if ev_type in ("transfer", "coin_spent", "coin_received"):
+                for attr in ev.get("attributes") or []:
+                    key = attr.get("key", "")
+                    val = attr.get("value", "")
+                    try:
+                        key = base64.b64decode(key).decode("utf-8")
+                    except Exception:
+                        pass
+                    try:
+                        val = base64.b64decode(val).decode("utf-8")
+                    except Exception:
+                        pass
+                    if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
+                        touched.add(val.lower())
 
         # Refresh balances for touched addresses (bounded)
         MAX_BALANCE_REFRESH_PER_BLOCK = 200

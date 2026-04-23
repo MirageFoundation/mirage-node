@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo, useState, useEffect } from 'react';
+import React, { memo, useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import styled, { css } from 'styled-components';
 import { Link } from 'react-router-dom';
 import VoteSection from './components/VoteSection';
@@ -9,6 +9,7 @@ import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
 import { normalizeTag } from '../../utils/ContentTags';
 import { OLDREDDIT_SHELL_INSET_X, OldRedditTab } from './Layout';
+import { useSeenPosts } from '../../logic/useSeenPosts';
 
 /** Home/following: negate shell padding. Profile posts tabs: parent has no horizontal padding — do not bleed or borders stay inset.
  *  Uses display:block (not flex) so float:right sidebar works correctly. */
@@ -378,8 +379,9 @@ function truncateText(text, max) {
     return text.slice(0, max) + '…';
 }
 
-function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive }) {
+function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive, observePost, unobservePost }) {
     const [expanded, setExpanded] = useState(false);
+    const rowRef = useRef(null);
 
     const mediaArr = useMemo(() => (post && Array.isArray(post.media) && post.media.length > 0) ? post.media : null, [post]);
     const expandedTextBody = useMemo(() => {
@@ -392,6 +394,12 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
         if (/^https?:\/\//i.test(first)) return rest || null;
         return raw || null;
     }, [post?.content, mediaArr]);
+
+    useEffect(() => {
+        const el = rowRef.current;
+        if (el) observePost(el);
+        return () => { if (el) unobservePost(el); };
+    }, [observePost, unobservePost]);
 
     if (!post || !post.post_id) return null;
     const isComment = !!(post.target && String(post.target).trim());
@@ -476,7 +484,7 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
 
     return (
         <>
-            <Row>
+            <Row ref={rowRef} data-post-id={postId}>
                 <Rank>{rank}</Rank>
                 <VoteColumn>
                     <VoteSection state={state} post={post} updatePost={updatePost} showToggle={false} />
@@ -536,6 +544,8 @@ export default function ListFeedView({
     bleedShell = true,
     sidebar,
 }) {
+    const { observePost, unobservePost } = useSeenPosts();
+
     const [blurSensitive, setBlurSensitive] = useState(() => {
         const val = Storage.load('blur_sensitive_media', true);
         return val !== false;
@@ -644,6 +654,8 @@ export default function ListFeedView({
                         onHide={onHide}
                         onShare={onShare}
                         blurSensitive={blurSensitive}
+                        observePost={observePost}
+                        unobservePost={unobservePost}
                     />
                 );
             })}

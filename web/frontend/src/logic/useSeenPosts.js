@@ -1,0 +1,507 @@
+import { useRef, useEffect, useCallback } from "react";
+import Storage from "../utils/Storage";
+import { signPlainPayload } from "../utils/signPlain";
+
+const DWELL_MS = 3000;
+const GLANCE_MS = 150;
+const GLANCE_COUNT = 2;
+const MAX_BUFFER = 100;
+const POST_ID_RE = /^[0-9a-f]{64}$/;
+const VALID_REASONS = new Set(["open", "dwell", "glance", "vote", "reply", "view"]);
+// const _LOG = (...a) => console.log("%c[seen]", "color:#0af;font-weight:bold", ...a);
+const _LOG = () => { };
+
+const _SB_KEY = "_seenPending";
+const _SB_CAP = 500;
+const _BUFFER_SAVE_DEBOUNCE_MS = 500;
+
+
+function _loadPendingBuffer() {
+    try {
+        const raw = sessionStorage.getItem(_SB_KEY);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return [];
+        const entries = [];
+        for (const item of arr) {
+            if (!item || typeof item !== "object") continue;
+            const id = _normalizeId(item.id);
+            const reason = VALID_REASONS.has(item.reason) ? item.reason : "view";
+            if (id) entries.push({ id, reason });
+        }
+        return entries.slice(0, _SB_CAP);
+    } catch (e) {
+        _LOG("PENDING load failed:", e.message);
+        return [];
+    }
+}
+
+let _seenBuffer = _loadPendingBuffer();
+let _bufferSaveTimer = null;
+let _drainLock = false;
+let _listenerCount = 0;
+let _visibilityHandler = null;
+let _pageHideHandler = null;
+let _flushInterval = null;
+const FLUSH_INTERVAL_MS = 3_000;
+
+function _savePendingBufferNow() {
+    try {
+        const entries = _seenBuffer.slice(0, _SB_CAP);
+        sessionStorage.setItem(_SB_KEY, JSON.stringify(entries));
+    } catch (e) {
+        _LOG("PENDING save failed:", e.message);
+    }
+}
+
+function _schedulePendingBufferSave() {
+    if (_bufferSaveTimer) return;
+    _bufferSaveTimer = setTimeout(() => {
+        _bufferSaveTimer = null;
+        _savePendingBufferNow();
+    }, _BUFFER_SAVE_DEBOUNCE_MS);
+}
+
+function _flushPendingBufferSave() {
+    if (_bufferSaveTimer) {
+        clearTimeout(_bufferSaveTimer);
+        _bufferSaveTimer = null;
+    }
+    _savePendingBufferNow();
+}
+
+function _getAddress() {
+    try {
+        const raw = Storage.load("publicKey", "");
+        return typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    } catch (_) {
+        return "";
+    }
+}
+
+function _normalizeId(pid) {
+    const raw = String(pid || "").trim().toLowerCase();
+    return POST_ID_RE.test(raw) ? raw : "";
+}
+
+function _getApiBase() {
+    try {
+        let base = '/api';
+        const env = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_BASE)
+            ? process.env.REACT_APP_API_BASE
+            : '';
+        if (env) {
+            base = String(env).trim() || '/api';
+        }
+        if (!/\/?api\/?$/.test(base)) {
+            base = base.replace(/\/$/, '') + '/api';
+        }
+        return base.replace(/\/$/, '');
+    } catch (_) {
+        return '/api';
+    }
+}
+
+function _buildUrl(path) {
+    const base = _getApiBase();
+    const p = String(path || '').replace(/^\//, '');
+    if (base.startsWith('http://') || base.startsWith('https://')) {
+        return new URL(base + '/' + p).toString();
+    }
+    return new URL(base + '/' + p, window.location.origin).toString();
+}
+
+function _ensureFlushInterval() {
+    if (_flushInterval) return;
+    _flushInterval = setInterval(() => {
+        if (_seenBuffer.length > 0) {
+            _LOG(`TIMER  ${_seenBuffer.length} buffered → flush`);
+            void flushSeenBeacon();
+        }
+    }, FLUSH_INTERVAL_MS);
+}
+
+if (_seenBuffer.length > 0) {
+    _ensureFlushInterval();
+}
+
+function markSeen(pid, reason) {
+    const addr = _getAddress();
+    if (!addr || addr === "guest") {
+        _LOG("SKIP  no address, seen not queued");
+        return;
+    }
+    const id = _normalizeId(pid);
+    if (!id) return;
+    const finalReason = VALID_REASONS.has(reason) ? reason : "view";
+    _seenBuffer.push({ id, reason: finalReason });
+    if (_seenBuffer.length > _SB_CAP) {
+        _seenBuffer = _seenBuffer.slice(-_SB_CAP);
+    }
+    _schedulePendingBufferSave();
+    _LOG(`MARK  ${id.slice(0, 12)}…  reason=${finalReason}  buffer=${_seenBuffer.length}/${MAX_BUFFER}`);
+    _ensureFlushInterval();
+    if (_seenBuffer.length >= MAX_BUFFER) {
+        void flushSeenBeacon();
+    }
+}
+
+async function _drainSeenBatch() {
+    if (_drainLock || _seenBuffer.length === 0) return null;
+    const addr = _getAddress();
+    if (!addr || addr === "guest") return null;
+    _drainLock = true;
+    const entries = _seenBuffer.splice(0, MAX_BUFFER);
+    _schedulePendingBufferSave();
+    _LOG(`DRAIN  ${entries.length} entries`);
+    try {
+        const sig = await signPlainPayload((ts, n) => `seen_posts:${addr}:${ts}:${n}`);
+        return { address: addr, entries, sig };
+    } catch (e) {
+        _seenBuffer = entries.concat(_seenBuffer);
+        _schedulePendingBufferSave();
+        _LOG("DRAIN  sign failed, restored to buffer:", e.message);
+        return null;
+    } finally {
+        _drainLock = false;
+    }
+}
+
+function _restoreSeenBatch(batch) {
+    if (!batch || !Array.isArray(batch.entries) || batch.entries.length === 0) return;
+    const existing = new Set(_seenBuffer.map((entry) => entry.id));
+    const restored = batch.entries.filter((entry) => !existing.has(entry.id));
+    if (restored.length) {
+        _seenBuffer = restored.concat(_seenBuffer);
+        _schedulePendingBufferSave();
+        _LOG(`RESTORE  ${restored.length} entries back to buffer (total=${_seenBuffer.length})`);
+    }
+}
+
+export function markPostOpened(pid) {
+    markSeen(pid, "open");
+}
+
+export function markPostVoted(pid) {
+    markSeen(pid, "vote");
+}
+
+export function markPostReplied(pid) {
+    markSeen(pid, "reply");
+}
+
+async function flushSeenBeacon() {
+    const batch = await _drainSeenBatch();
+    if (!batch) return;
+    try {
+        const payload = JSON.stringify({
+            address: batch.address,
+            posts: batch.entries,
+            ...batch.sig,
+        });
+        const ok = navigator.sendBeacon(
+            _buildUrl("seen_posts"),
+            new Blob([payload], { type: "application/json" }),
+        );
+        _LOG(`BEACON  ${batch.entries.length} posts → ${ok ? "sent ✓" : "FAILED ✗"}`);
+        if (!ok) {
+            _restoreSeenBatch(batch);
+        }
+    } catch (e) {
+        _LOG("BEACON  error:", e.message);
+        _restoreSeenBatch(batch);
+    }
+}
+
+const DESKTOP_MIN_WIDTH = 769;
+const DESKTOP_HOVER_QUERY = "(hover: hover) and (pointer: fine)";
+
+function _isDesktop() {
+    return window.innerWidth >= DESKTOP_MIN_WIDTH && window.matchMedia(DESKTOP_HOVER_QUERY).matches;
+}
+
+export function useSeenPosts() {
+    const observerRef = useRef(null);
+    const dwellTimersRef = useRef(new Map());
+    const entryTimesRef = useRef(new Map());
+    const glanceCountsRef = useRef(new Map());
+    const observedElementsRef = useRef(new Set());
+    const mouseHandlersRef = useRef(new Map());
+    const hoverIdsRef = useRef(new Map());
+    const visibleRef = useRef(true);
+    const modeRef = useRef(_isDesktop() ? "desktop" : "mobile");
+
+    const _clearTimers = useCallback((id) => {
+        const dwell = dwellTimersRef.current.get(id);
+        if (dwell) clearTimeout(dwell);
+        dwellTimersRef.current.delete(id);
+        entryTimesRef.current.delete(id);
+        glanceCountsRef.current.delete(id);
+    }, []);
+
+    useEffect(() => {
+        _listenerCount += 1;
+        if (!_visibilityHandler) {
+            _visibilityHandler = () => {
+                visibleRef.current = document.visibilityState === "visible";
+                if (!visibleRef.current) {
+                    _flushPendingBufferSave();
+                    for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
+                    dwellTimersRef.current.clear();
+                    entryTimesRef.current.clear();
+                    void flushSeenBeacon();
+                }
+            };
+            document.addEventListener("visibilitychange", _visibilityHandler);
+        }
+        if (!_pageHideHandler) {
+            _pageHideHandler = () => {
+                _flushPendingBufferSave();
+                void flushSeenBeacon();
+            };
+            window.addEventListener("pagehide", _pageHideHandler);
+        }
+        _ensureFlushInterval();
+        return () => {
+            _listenerCount -= 1;
+            if (_listenerCount <= 0) {
+                if (_visibilityHandler) {
+                    document.removeEventListener("visibilitychange", _visibilityHandler);
+                    _visibilityHandler = null;
+                }
+                if (_pageHideHandler) {
+                    window.removeEventListener("pagehide", _pageHideHandler);
+                    _pageHideHandler = null;
+                }
+            }
+        };
+    }, []);
+
+    // ── Desktop: mouse-based tracking ──────────────────────────────
+    const _attachMouseHandlers = useCallback((el) => {
+        if (mouseHandlersRef.current.has(el)) return;
+
+        const onEnter = () => {
+            if (!visibleRef.current) return;
+            const id = _normalizeId(el.dataset?.postId);
+            if (!id) return;
+            const prevId = hoverIdsRef.current.get(el);
+            if (prevId && prevId !== id) {
+                _clearTimers(prevId);
+            }
+            hoverIdsRef.current.set(el, id);
+            entryTimesRef.current.set(id, Date.now());
+            if (!dwellTimersRef.current.get(id)) {
+                const timer = setTimeout(() => {
+                    dwellTimersRef.current.delete(id);
+                    entryTimesRef.current.delete(id);
+                    glanceCountsRef.current.delete(id);
+                    _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms hover → mark`);
+                    markSeen(id, "dwell");
+                }, DWELL_MS);
+                dwellTimersRef.current.set(id, timer);
+            }
+            _LOG(`MOUSE-ENTER  ${id.slice(0, 12)}…`);
+        };
+
+        const onLeave = () => {
+            const id = hoverIdsRef.current.get(el) || _normalizeId(el.dataset?.postId);
+            hoverIdsRef.current.delete(el);
+            if (!id) return;
+            const enterTime = entryTimesRef.current.get(id);
+            entryTimesRef.current.delete(id);
+            const dwell = dwellTimersRef.current.get(id);
+            if (dwell) clearTimeout(dwell);
+            dwellTimersRef.current.delete(id);
+
+            if (enterTime && (Date.now() - enterTime) >= GLANCE_MS) {
+                const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
+                glanceCountsRef.current.set(id, nextCount);
+                _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}  hover=${Date.now() - enterTime}ms`);
+                if (glanceCountsRef.current.size > 5000) {
+                    glanceCountsRef.current.clear();
+                }
+                if (nextCount >= GLANCE_COUNT) {
+                    glanceCountsRef.current.delete(id);
+                    markSeen(id, "glance");
+                }
+            }
+            _LOG(`MOUSE-LEAVE  ${id.slice(0, 12)}…`);
+        };
+
+        el.addEventListener("mouseenter", onEnter);
+        el.addEventListener("mouseleave", onLeave);
+        mouseHandlersRef.current.set(el, { onEnter, onLeave });
+    }, [_clearTimers]);
+
+    const _detachMouseHandlers = useCallback((el) => {
+        const handlers = mouseHandlersRef.current.get(el);
+        if (handlers) {
+            el.removeEventListener("mouseenter", handlers.onEnter);
+            el.removeEventListener("mouseleave", handlers.onLeave);
+            mouseHandlersRef.current.delete(el);
+        }
+        const hoverId = hoverIdsRef.current.get(el);
+        if (hoverId) {
+            _clearTimers(hoverId);
+        }
+        hoverIdsRef.current.delete(el);
+    }, [_clearTimers]);
+
+    const _detachAllMouseHandlers = useCallback(() => {
+        for (const [el, handlers] of mouseHandlersRef.current) {
+            el.removeEventListener("mouseenter", handlers.onEnter);
+            el.removeEventListener("mouseleave", handlers.onLeave);
+        }
+        mouseHandlersRef.current.clear();
+        hoverIdsRef.current.clear();
+    }, []);
+
+    // ── Mobile: IntersectionObserver-based tracking ────────────────
+    useEffect(() => {
+        const setup = () => {
+            const desktop = _isDesktop();
+            const mode = desktop ? "desktop" : "mobile";
+            modeRef.current = mode;
+
+            if (observerRef.current) {
+                observerRef.current.disconnect();
+                observerRef.current = null;
+            }
+            _detachAllMouseHandlers();
+
+            for (const timer of dwellTimersRef.current.values()) clearTimeout(timer);
+            dwellTimersRef.current.clear();
+            entryTimesRef.current.clear();
+            glanceCountsRef.current.clear();
+            hoverIdsRef.current.clear();
+
+            if (desktop) {
+                _LOG(`MODE  desktop (w=${window.innerWidth})  observed=${observedElementsRef.current.size}`);
+                for (const el of observedElementsRef.current) {
+                    _attachMouseHandlers(el);
+                }
+            } else {
+                const vh = window.innerHeight || document.documentElement.clientHeight;
+                const marginTop = Math.round(vh * 0.08);
+                const marginBottom = Math.round(vh * 0.15);
+                const rootMargin = `-${marginTop}px 0px -${marginBottom}px 0px`;
+
+                _LOG(`MODE  mobile  vh=${vh}  rootMargin="${rootMargin}"  observed=${observedElementsRef.current.size}`);
+
+                observerRef.current = new IntersectionObserver(
+                    (entries) => {
+                        if (!visibleRef.current) return;
+                        const now = Date.now();
+                        for (const entry of entries) {
+                            const el = entry.target;
+                            const pid = el.dataset.postId;
+                            if (!pid) continue;
+                            const id = _normalizeId(pid);
+                            if (!id) {
+                                _LOG(`SKIP  pid=${String(pid).slice(0, 12)}…  invalid id`);
+                                continue;
+                            }
+                            const ratio = entry.intersectionRatio || 0;
+                            const glanceVisible = entry.isIntersecting && ratio >= 0.3;
+                            const dwellVisible = entry.isIntersecting && ratio >= 0.4;
+                            _LOG(`IO  ${id.slice(0, 12)}…  intersecting=${entry.isIntersecting}  ratio=${ratio.toFixed(3)}  glance=${glanceVisible}  dwell=${dwellVisible}  hasDwellTimer=${dwellTimersRef.current.has(id)}`);
+
+                            if (glanceVisible) {
+                                if (!entryTimesRef.current.has(id)) {
+                                    entryTimesRef.current.set(id, now);
+                                }
+                            } else {
+                                const enterTime = entryTimesRef.current.get(id);
+                                entryTimesRef.current.delete(id);
+                                if (enterTime && (now - enterTime) >= GLANCE_MS) {
+                                    const nextCount = (glanceCountsRef.current.get(id) || 0) + 1;
+                                    glanceCountsRef.current.set(id, nextCount);
+                                    _LOG(`GLANCE ${id.slice(0, 12)}…  count=${nextCount}/${GLANCE_COUNT}  visible=${now - enterTime}ms`);
+                                    if (glanceCountsRef.current.size > 5000) {
+                                        glanceCountsRef.current.clear();
+                                    }
+                                    if (nextCount >= GLANCE_COUNT) {
+                                        glanceCountsRef.current.delete(id);
+                                        const pendingDwell = dwellTimersRef.current.get(id);
+                                        if (pendingDwell) clearTimeout(pendingDwell);
+                                        dwellTimersRef.current.delete(id);
+                                        markSeen(id, "glance");
+                                    }
+                                }
+                            }
+
+                            if (dwellVisible) {
+                                if (!dwellTimersRef.current.get(id)) {
+                                    const timer = setTimeout(() => {
+                                        dwellTimersRef.current.delete(id);
+                                        entryTimesRef.current.delete(id);
+                                        glanceCountsRef.current.delete(id);
+                                        _LOG(`DWELL  ${id.slice(0, 12)}…  ${DWELL_MS}ms elapsed → mark`);
+                                        markSeen(id, "dwell");
+                                    }, DWELL_MS);
+                                    dwellTimersRef.current.set(id, timer);
+                                }
+                            } else {
+                                const dwell = dwellTimersRef.current.get(id);
+                                if (dwell) clearTimeout(dwell);
+                                dwellTimersRef.current.delete(id);
+                            }
+                        }
+                    },
+                    {
+                        threshold: [0, 0.3, 0.4],
+                        rootMargin,
+                    }
+                );
+                for (const el of observedElementsRef.current) {
+                    observerRef.current.observe(el);
+                }
+            }
+        };
+
+        let resizeTimer = null;
+        const handleResize = () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => { resizeTimer = null; setup(); }, 500);
+        };
+        setup();
+        window.addEventListener("resize", handleResize);
+        return () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            window.removeEventListener("resize", handleResize);
+            if (observerRef.current) {
+                observerRef.current.disconnect();
+                observerRef.current = null;
+            }
+            _detachAllMouseHandlers();
+        };
+    }, [_attachMouseHandlers, _detachAllMouseHandlers]);
+
+    const observePost = useCallback((el) => {
+        if (!el) return;
+        observedElementsRef.current.add(el);
+        if (modeRef.current === "desktop") {
+            _attachMouseHandlers(el);
+        } else if (observerRef.current) {
+            observerRef.current.observe(el);
+        }
+    }, [_attachMouseHandlers]);
+
+    const unobservePost = useCallback((el) => {
+        if (!el) return;
+        observedElementsRef.current.delete(el);
+        if (modeRef.current === "desktop") {
+            _detachMouseHandlers(el);
+        } else if (observerRef.current) {
+            observerRef.current.unobserve(el);
+        }
+        const pid = el.dataset?.postId;
+        const id = _normalizeId(pid);
+        if (id) _clearTimers(id);
+    }, [_detachMouseHandlers, _clearTimers]);
+
+    return { observePost, unobservePost };
+}
+
+export default useSeenPosts;

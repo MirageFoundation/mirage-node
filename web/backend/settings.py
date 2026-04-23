@@ -33,6 +33,9 @@ PUSH_NOTIFICATIONS_ENABLED = require_bool_env("PUSH_NOTIFICATIONS_ENABLED")
 
 EXPO_ACCESS_TOKEN = os.environ.get("EXPO_ACCESS_TOKEN", "")
 
+# Trending post push notifications. When false, the trending poller does nothing.
+TRENDING_PUSH_ENABLED = require_bool_env("TRENDING_PUSH_ENABLED")
+
 ANDROID_BANNER_ENABLED = require_bool_env("ANDROID_BANNER_ENABLED")
 IOS_BANNER_ENABLED = require_bool_env("IOS_BANNER_ENABLED")
 

@@ -1042,11 +1042,30 @@ def core_set_username():
                             UPDATE invite_codes 
                             SET used_by = %s, used_at = %s 
                             WHERE UPPER(code) = %s AND used_by IS NULL
+                            RETURNING owner
                             """,
                             (user_addr.lower(), now_ts, invite_code),
                         )
-                        if cur.rowcount > 0:
+                        row = cur.fetchone()
+                        if row:
+                            owner = row[0]
                             log_event(rid, "set_username.invite_code_used", code=invite_code, user=user_addr)
+                            # Bridge invite-code redemption → referral_links so the
+                            # /api/referrals/summary endpoint (which only reads
+                            # referral_links) reflects direct-code redemptions,
+                            # not just username-based referrals. Historically
+                            # path-3 only updated invite_codes and this bridge
+                            # was missing, so direct-code referrers appeared as
+                            # zero-referral accounts.
+                            client_hash = _hash_client_ip(_get_trusted_client_ip())
+                            cur.execute(
+                                """
+                                INSERT INTO referral_links (user_address, referrer_address, referred_at, client_hash)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (user_address) DO NOTHING
+                                """,
+                                (user_addr.lower(), owner, now_ts, client_hash),
+                            )
                         else:
                             log_event(rid, "set_username.invite_code_already_used_or_invalid", code=invite_code)
             except Exception as ic_err:

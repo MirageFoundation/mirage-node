@@ -14,6 +14,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/usr/local/go/bin:$PATH
 ENV PIP_ROOT_USER_ACTION=ignore
 
+# Switch to the Azure-hosted Ubuntu mirror — the default archive.ubuntu.com
+# round-robin frequently serves out-of-sync indexes (size/hash mismatch) which
+# kill builds. Azure's mirror is consistent. Also enable apt retries.
+RUN sed -i 's@//archive.ubuntu.com@//azure.archive.ubuntu.com@g; s@//security.ubuntu.com@//azure.archive.ubuntu.com@g' /etc/apt/sources.list.d/ubuntu.sources \
+ && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -23,10 +31,15 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 from NodeSource
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get update && apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+# Install Node.js 20 from NodeSource. Verify the install actually pulled
+# v20.x (npm is bundled), so a silent fallback to Ubuntu's nodejs (which on
+# 24.04 ships without npm) fails the build instead of breaking later steps.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get update \
+ && apt-get install -y nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && node --version | grep -q '^v20\.' \
+ && npm --version
 ## Keep npm up to date to avoid update notices
 RUN npm i -g npm@latest --no-audit --no-fund
 
@@ -81,6 +94,14 @@ ENV TERM=xterm-256color
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
+
+# Switch to the Azure-hosted Ubuntu mirror (consistent indexes, no mirror-sync
+# size/hash mismatches like archive.ubuntu.com regularly serves). Also enable
+# apt retries.
+RUN sed -i 's@//archive.ubuntu.com@//azure.archive.ubuntu.com@g; s@//security.ubuntu.com@//azure.archive.ubuntu.com@g' /etc/apt/sources.list.d/ubuntu.sources \
+ && echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries \
+ && echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
