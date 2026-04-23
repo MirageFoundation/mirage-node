@@ -7,6 +7,7 @@ import CardView from "./components/CardView";
 import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
 import { MoreMenuChip, BlockChip } from "./components/PostMenu";
+import PostPlaceholderAvatar from "./components/PostPlaceholderAvatar";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
@@ -417,61 +418,10 @@ const CompactThumbLink = styled(Link)`
     }
 `;
 
-/* No-media placeholder — a neutral surface tile with a small "text post"
- * glyph (three lines). Matches the same `actionIconBg` surface used by the
- * loaded-thumbnail wrapper, so empty rows read as a calm neutral tile rather
- * than the loud indigo→purple brand gradient with a stamped-on initial.
- * Inherits `subtleText` for the glyph so it adapts to dark + light themes. */
-const CompactThumbPlaceholder = styled.div`
-    grid-row: 1 / span 3;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 84px;
-    height: 84px;
-    border-radius: 8px;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme }) => theme.colors.subtleText};
-    flex-shrink: 0;
-
-    svg {
-        width: 36px;
-        height: 36px;
-        opacity: 0.85;
-    }
-
-    @media (max-width: 600px) {
-        width: 68px;
-        height: 68px;
-        border-radius: 6px;
-
-        svg {
-            width: 28px;
-            height: 28px;
-        }
-    }
-`;
-
-/* Inline three-line "text post" glyph. Stroke uses `currentColor` so the icon
- * inherits the placeholder's themed `subtleText` color. */
-function TextPostGlyph() {
-    return (
-        <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            focusable="false"
-        >
-            <line x1="5" y1="8" x2="19" y2="8" />
-            <line x1="5" y1="13" x2="19" y2="13" />
-            <line x1="5" y1="18" x2="14" y2="18" />
-        </svg>
-    );
-}
+/* No-media placeholder lives in `./components/PostPlaceholderAvatar` — a
+ * DiceBear identicon seeded by the author's `mirage1…` bech32 address on a
+ * neutral grey tile. Kept as its own component so other surfaces can reuse
+ * the same "empty post" visual without duplicating the bg/size logic. */
 
 /* Header row mirrors CardView's HeaderMeta exactly so the two view modes
  * share a single metadata style. Font sizes + weights are copied 1:1.
@@ -970,9 +920,10 @@ function CompactRow({ post, state, updatePost }) {
                     <img src={thumbUrl} alt="" loading="lazy" />
                 </CompactThumbLink>
             ) : (
-                <CompactThumbPlaceholder aria-hidden="true">
-                    <TextPostGlyph />
-                </CompactThumbPlaceholder>
+                <PostPlaceholderAvatar
+                    address={authorAddress}
+                    username={post.username}
+                />
             )}
 
             <CompactTopRow>

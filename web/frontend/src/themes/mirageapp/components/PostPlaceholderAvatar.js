@@ -1,0 +1,105 @@
+import React from 'react';
+import styled from 'styled-components';
+
+import { dicebearAvatarUrl } from '../../../utils/avatar';
+
+/**
+ * PostPlaceholderAvatar — mirageapp
+ *
+ * Replacement for the no-media thumbnail tile shown on compact feed rows
+ * when a post has no image/video. Renders a DiceBear identicon seeded by
+ * the post author's `mirage1…` bech32 address, on a flat neutral grey
+ * tile.
+ *
+ * Why this exists:
+ *   - The previous placeholder was the loud indigo→purple brand gradient
+ *     with the author's first initial stamped on top. The brand gradient
+ *     is reserved for primary CTAs; using it here made every media-less
+ *     row compete for attention and felt template-y.
+ *   - A DiceBear identicon gives each author a stable, visually distinct
+ *     mark while staying monochrome + calm, so the post title remains
+ *     the focal point of the row.
+ *
+ * Seed policy:
+ *   - Prefer the `mirage1` wallet address (stable across username
+ *     changes). Fall back to the username, then a literal `'anonymous'`
+ *     string so rows without either still get a deterministic glyph.
+ *     Matches the seed order already used elsewhere in mirageapp
+ *     (TopBar / ProfileView).
+ *
+ * Background:
+ *   - Hard-pinned to `#232830` (dark-mode `surface3`) in BOTH light and
+ *     dark themes, matching the TopBar avatar chip + ProfileView Avatar
+ *     convention. DiceBear's identicon variant is transparent, so the
+ *     pinned grey fills the pattern's negative space identically across
+ *     themes — no mismatch between the feed avatar and the header avatar.
+ */
+
+const AVATAR_BG = '#232830';
+
+const PlaceholderRoot = styled.div`
+    grid-row: 1 / span 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: ${({ $size }) => $size}px;
+    height: ${({ $size }) => $size}px;
+    border-radius: 8px;
+    background: ${AVATAR_BG};
+    flex-shrink: 0;
+    overflow: hidden;
+
+    @media (max-width: 600px) {
+        width: ${({ $mobileSize }) => $mobileSize}px;
+        height: ${({ $mobileSize }) => $mobileSize}px;
+        border-radius: 6px;
+    }
+`;
+
+const AvatarImg = styled.img`
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    /* Match the tile bg so DiceBear's transparent margins read as one
+     * continuous grey square instead of a faint inner rectangle. */
+    background: ${AVATAR_BG};
+`;
+
+function pickSeed({ address, username }) {
+    if (typeof address === 'string' && address.trim()) return address.trim();
+    if (typeof username === 'string' && username.trim()) return username.trim();
+    return 'anonymous';
+}
+
+/**
+ * @param {object} props
+ * @param {string} [props.address]   — `mirage1…` bech32 address (preferred seed)
+ * @param {string} [props.username]  — fallback seed if address is missing
+ * @param {number} [props.size]      — desktop size in px (default 84)
+ * @param {number} [props.mobileSize]— mobile size in px (default 68)
+ * @param {string} [props.alt]       — img alt text (defaults to empty; tile is decorative)
+ */
+export default function PostPlaceholderAvatar({
+    address,
+    username,
+    size = 84,
+    mobileSize = 68,
+    alt = '',
+}) {
+    const seed = pickSeed({ address, username });
+    // Request at the larger (desktop) footprint so the identicon stays sharp
+    // on both breakpoints. `dicebearAvatarUrl` already applies a 2× retina
+    // multiplier internally.
+    const src = dicebearAvatarUrl(seed, size);
+
+    return (
+        <PlaceholderRoot
+            $size={size}
+            $mobileSize={mobileSize}
+            aria-hidden={alt ? undefined : 'true'}
+        >
+            <AvatarImg src={src} alt={alt} loading="lazy" />
+        </PlaceholderRoot>
+    );
+}
