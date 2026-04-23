@@ -41,11 +41,45 @@ import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from
 
 const SubscriptionWrap = styled.div`
     width: 90%;
+    max-width: 960px;
     margin: -0.75rem auto 0;
 
     @media (max-width: 1000px) {
         width: 100%;
+        max-width: none;
         margin-top: -0.5rem;
+    }
+
+    /* Large displays: viewport-center override. See SettingsView for
+     * the full rationale — above ~1500px the shell drops its max-width
+     * cap and pins the sidebar to the left viewport edge, so
+     * margin: auto inside Main no longer aligns with viewport center.
+     *
+     * Offset = sidebar + divider + Main left padding:
+     *   sidebar visible: 273px,  sidebar hidden: 33px */
+    @media (min-width: 1050px) {
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 480px - 33px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1600px) {
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 480px - 273px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1100px;
+
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 550px - 273px);
+        }
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 550px - 33px);
+        }
     }
 `;
 

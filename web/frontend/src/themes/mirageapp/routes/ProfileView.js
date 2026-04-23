@@ -328,6 +328,32 @@ const ProfileGrid = styled.div`
         padding: 0;
         margin-top: 0;
     }
+
+    /* Large displays: above ~1500px the shell drops its max-width cap
+     * and pins the sidebar to the left viewport edge. margin: auto
+     * then centers the grid within Main (which is offset right by the
+     * sidebar), not within the viewport. Override with a viewport-
+     * relative margin so the grid is centered against the viewport
+     * regardless of sidebar state.
+     *
+     * Offset = sidebar + divider + Main left padding:
+     *   sidebar visible: 273px,  sidebar hidden: 33px
+     *
+     * Sidebar-hidden applied from 1280px (1200 content + 33*2 ≈ 1266).
+     * Sidebar-visible needs vw >= 1746, so threshold is 1800px. */
+    @media (min-width: 1280px) {
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 600px - 33px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1800px) {
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 600px - 273px);
+            margin-right: auto;
+        }
+    }
 `;
 
 const ProfileMainColumn = styled.div`
