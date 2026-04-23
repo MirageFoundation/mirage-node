@@ -2722,18 +2722,30 @@ def _load_similar_user_upvotes(
     cached: dict[str, frozenset[str]] = {}
     fetched: dict[str, frozenset[str]] = {}
 
+    post_set = set(post_ids)
+
     def _read_and_fill_cache(bcur):
+        # Filter the cached TEXT[] to the candidate post_ids in Postgres so we
+        # don't ship every user's full 90-day upvote history over the wire
+        # just to intersect it in Python — that was costing ~60ms per request
+        # even with a 100% cache hit (30 users × ~5k TEXT[] entries = multi-MB
+        # transfer + psycopg deserialization). Post-filter rows are at most a
+        # few dozen strings per user.
         _t = _time.monotonic()
         bcur.execute(
             """
-            SELECT owner, upvoted_posts
+            SELECT owner,
+                   ARRAY(
+                       SELECT t FROM unnest(upvoted_posts) t
+                       WHERE t = ANY(%s)
+                   ) AS matches
             FROM user_upvote_cache
             WHERE owner = ANY(%s) AND expires_at > %s
             """,
-            (similar_list, now_ts),
+            (list(post_set), similar_list, now_ts),
         )
-        for owner, posts in bcur.fetchall():
-            cached[owner] = frozenset(posts or ())
+        for owner, matches in bcur.fetchall():
+            cached[owner] = frozenset(matches or ())
         timings["sim_up_cache_ms"] = _ms_since(_t)
         timings["sim_up_hits"] = len(cached)
 
@@ -2789,14 +2801,19 @@ def _load_similar_user_upvotes(
                 _read_and_fill_cache(bcur)
 
     _t = _time.monotonic()
-    post_set = set(post_ids)
     result: dict[str, list[str]] = {}
-    for per_user in (cached, fetched):
-        for addr, upvoted in per_user.items():
-            if not upvoted:
-                continue
-            for pid in upvoted & post_set:
-                result.setdefault(pid, []).append(addr)
+    # `cached` rows are already filtered to post_set in SQL; `fetched` rows
+    # still carry the full recent upvote set and need Python intersection.
+    for addr, upvoted in cached.items():
+        if not upvoted:
+            continue
+        for pid in upvoted:
+            result.setdefault(pid, []).append(addr)
+    for addr, upvoted in fetched.items():
+        if not upvoted:
+            continue
+        for pid in upvoted & post_set:
+            result.setdefault(pid, []).append(addr)
     timings["sim_up_intersect_ms"] = _ms_since(_t)
     return result, timings
 
