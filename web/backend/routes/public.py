@@ -2667,10 +2667,14 @@ def _row_to_post(
 # across viewers (the same active voter appears in many viewers' similarity
 # sets and only needs to be cached once).
 #
-# Payload is bounded by a 90-day window on votes.created_at: candidate posts
-# are dominated by recent posts, so older upvotes can't contribute anyway.
-_SIM_UPVOTES_CACHE_TTL = 600  # 10 minutes, seconds
-_SIM_UPVOTES_WINDOW_SECS = 90 * 24 * 3600
+# Payload is bounded by a 30-day window on votes.created_at: candidate posts
+# are dominated by posts from the last few days, so older upvotes can't
+# contribute to the intersection anyway.
+# TTL is 1h: a similar user's upvote history barely shifts within an hour,
+# and a short TTL was producing ~30% miss rate per request (130-290ms
+# miss-fill) on top of an already-filtered cache read.
+_SIM_UPVOTES_CACHE_TTL = 3600
+_SIM_UPVOTES_WINDOW_SECS = 30 * 24 * 3600
 
 # Vote totals cache: feed scoring uses SUM(user_weight) over all votes per post,
 # which costs 0.3-0.9ms/post via LATERAL JOIN -> 100-260ms per home feed load
