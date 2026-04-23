@@ -144,6 +144,14 @@ const Toolbar = styled.div`
     padding: 0 0.5rem 0.4rem 0.25rem;
     background: ${({ theme }) => theme.colors.bg};
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+    /* Mobile (below the 600px breakpoint) gets extra breathing room above
+     * the title — on narrow screens the toolbar sits directly under the
+     * sticky MobileHeader, which made the topic title (e.g. "#memes")
+     * look cramped against the top edge. */
+    @media (max-width: 600px) {
+        padding: 0.75rem 0.5rem 0.5rem 0.5rem;
+    }
 `;
 
 /* Optional title that can sit at the left of the toolbar (e.g. the
