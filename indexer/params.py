@@ -14,7 +14,7 @@ from typing import Any
 import grpc
 from google.protobuf.json_format import MessageToDict
 
-from shared.datatypes import QueryParamsRequest, QueryParamsResponse
+from shared.datatypes import Params, QueryParamsRequest, QueryParamsResponse
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,13 @@ _PARAMS_LEGACY_NAME_ALIASES = {
     "pow_difficulty_allowance": "pow_difficulty_grace_period",
     "pow_difficulty_step": "pow_factor",
 }
+
+_PARAMS_PROTO_FIELD_NAMES = {f.name for f in Params.DESCRIPTOR.fields}
+_MISSING_ALIAS_SOURCE_FIELDS = [k for k in _PARAMS_LEGACY_NAME_ALIASES if k not in _PARAMS_PROTO_FIELD_NAMES]
+if _MISSING_ALIAS_SOURCE_FIELDS:
+    raise RuntimeError(
+        f"Params alias source field(s) missing from shared.datatypes Params descriptor: {_MISSING_ALIAS_SOURCE_FIELDS}"
+    )
 
 
 def _query_core_params(grpc_target: str, timeout: float = 5.0) -> dict:
@@ -174,8 +181,11 @@ def expect_params() -> dict[str, Any]:
 
 
 def get_raw_params() -> dict[str, Any]:
-    """Get the raw (unprocessed) params dict from gRPC. Used for storing into chain_stats
-    so the backend can read ALL chain params, not just the indexer's processed subset."""
+    """Get the params dict loaded from gRPC for chain_stats persistence.
+
+    Note: this includes compatibility aliases injected by _query_core_params()
+    so downstream legacy consumers keep working during field-name transitions.
+    """
     if _RAW_PARAMS is None:
         raise RuntimeError("raw params not loaded - call load_params first")
     return _RAW_PARAMS

@@ -99,12 +99,14 @@ def get_current_pow_difficulty() -> int:
 def get_pow_base_bits() -> int:
     from params import expect_params
 
+    # Legacy key name preserved by indexer/params.py alias injection.
     return int(expect_params()["pow_base_bits"])
 
 
 def get_pow_factor() -> float:
     from params import expect_params
 
+    # Legacy key name preserved by indexer/params.py alias injection.
     return float(expect_params()["pow_factor"])
 
 

@@ -1431,7 +1431,12 @@ def check_node_internals() -> ServiceStatus:
         current_diff = int(diff_data.get("current_difficulty", diff_data.get("currentDifficulty", 0)))
         pow_msg_count = int(diff_data.get("pow_message_count", diff_data.get("powMessageCount", 0)))
         calm_seq = int(diff_data.get("consecutive_low_usage", diff_data.get("consecutiveLowUsage", 0)))
-        pow_base_bits = int(diff_data.get("pow_base_bits", diff_data.get("powBaseBits", 0)))
+        pow_base_bits = int(
+            diff_data.get(
+                "min_difficulty",
+                diff_data.get("minDifficulty", diff_data.get("pow_base_bits", diff_data.get("powBaseBits", 0))),
+            )
+        )
         details["pow_difficulty"] = current_diff
         details["pow_msg_count"] = pow_msg_count
         details["pow_calm_sequence"] = calm_seq

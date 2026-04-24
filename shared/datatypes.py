@@ -528,7 +528,8 @@ def _build_pool():
     # Legacy aliases (pow_base_bits, pow_increase_threshold,
     # pow_difficulty_grace_period, pow_factor) are re-added downstream in
     # indexer/params.py::_query_core_params so existing backend/frontend/agent
-    # consumers keep working unchanged.
+    # consumers keep working unchanged. QueryDifficultyResponse tag 8 is also
+    # aligned here to min_difficulty (was pow_base_bits in old Python schema).
     msg4 = file_proto.message_type.add()
     msg4.name = "Params"
     add_f(msg4, "min_difficulty", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)

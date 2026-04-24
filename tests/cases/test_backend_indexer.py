@@ -249,6 +249,39 @@ def test_indexer(backend: str):
             f"pow_base_bits={params.get('pow_base_bits') if isinstance(params, dict) else None}",
         )
 
+    # 3.7 chain_params in indexer DB contains both renamed proto keys and
+    # legacy compatibility aliases (required by backend/frontend public API).
+    if _check_local_docker():
+        db_name = _get_indexer_db_name()
+        rc_alias, out_alias = _docker_exec(
+            f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT
+((value ? 'min_difficulty')::int)::text || ',' ||
+((value ? 'pow_base_bits')::int)::text || ',' ||
+((value ? 'pow_message_limit')::int)::text || ',' ||
+((value ? 'pow_increase_threshold')::int)::text || ',' ||
+((value ? 'pow_difficulty_allowance')::int)::text || ',' ||
+((value ? 'pow_difficulty_grace_period')::int)::text || ',' ||
+((value ? 'pow_difficulty_step')::int)::text || ',' ||
+((value ? 'pow_factor')::int)::text
+FROM chain_stats
+WHERE key='chain_params'
+LIMIT 1;\\" 2>&1" """,
+            timeout=10,
+        )
+        if rc_alias != 0:
+            _fail("indexer.params_alias_contract", f"db query failed rc={rc_alias} out={out_alias}")
+        else:
+            raw = out_alias.strip()
+            parts = [p.strip() for p in raw.split(",") if p.strip() != ""]
+            if len(parts) != 8:
+                _fail("indexer.params_alias_contract", f"unexpected query output: {raw}")
+            elif all(p == "1" for p in parts):
+                _pass("indexer.params_alias_contract")
+            else:
+                _fail("indexer.params_alias_contract", f"missing expected keys: {raw}")
+    else:
+        _skip("indexer.params_alias_contract", "not running in local-docker")
+
     # ── Group 4: Recent blocks & difficulty ──────────────────────────────
 
     pdata = params if isinstance(params, dict) else None

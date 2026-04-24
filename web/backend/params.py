@@ -19,6 +19,8 @@ _PARAMS_CACHE: Optional[Dict[str, Any]] = None
 _LOCK = threading.Lock()
 
 _REQUIRED_INT_PARAMS = [
+    # Legacy key names intentionally retained for backend/public API stability.
+    # See indexer/params.py::_PARAMS_LEGACY_NAME_ALIASES.
     "pow_base_bits",
     "pow_message_window",
     "pow_increase_threshold",
