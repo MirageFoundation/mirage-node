@@ -611,13 +611,12 @@ const InviteActionButton = styled.button`
 `;
 
 const InvitePrimaryCta = styled(InviteActionButton)`
-    background: ${({ theme }) => theme.colors.gradient};
+    background: ${({ theme }) => theme.colors.followBtnBg};
     border: none;
     color: #FFFFFF;
 
     &:hover:not(:disabled) {
-        filter: brightness(1.08);
-        background: ${({ theme }) => theme.colors.gradient};
+        background: ${({ theme }) => theme.colors.followBtnBgHover};
         border: none;
     }
 
