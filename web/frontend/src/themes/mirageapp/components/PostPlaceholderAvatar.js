@@ -44,12 +44,15 @@ const PlaceholderRoot = styled.div`
     justify-content: center;
     width: ${({ $size }) => $size}px;
     height: ${({ $size }) => $size}px;
-    background: transparent;
+    border-radius: 8px;
+    background: ${AVATAR_BG};
     flex-shrink: 0;
+    overflow: hidden;
 
     @media (max-width: 600px) {
         width: ${({ $mobileSize }) => $mobileSize}px;
         height: ${({ $mobileSize }) => $mobileSize}px;
+        border-radius: 6px;
     }
 `;
 
@@ -58,14 +61,7 @@ const AvatarImg = styled.img`
     height: 50%;
     display: block;
     object-fit: contain;
-    /* Tinted chip so the identicon reads as a deliberate avatar mark,
-     * not a clipped fragment floating in the row. */
     background: ${AVATAR_BG};
-    border-radius: 8px;
-
-    @media (max-width: 600px) {
-        border-radius: 6px;
-    }
 `;
 
 function pickSeed({ address, username }) {
