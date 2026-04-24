@@ -1127,6 +1127,7 @@ const StyledReply = styled.div`
         background: transparent !important;
         border: 1px solid transparent !important;
         border-radius: 6px !important;
+        width: 24px !important;
         min-width: 24px !important;
         height: 24px !important;
         padding: 2px 4px !important;
@@ -1135,9 +1136,12 @@ const StyledReply = styled.div`
         box-shadow: none !important;
     }
     [data-mirageapp-editor] button[type='button'] svg,
+    [data-mirageapp-editor] button[type='button'] img,
     [data-mirageapp-editor] button[type='button'] .md-icon {
         max-width: 14px !important;
         max-height: 14px !important;
+        width: 14px !important;
+        height: 14px !important;
         font-size: 0.78rem !important;
     }
     /* Bold (B) and Italic (I) glyphs render as text via styled spans, so
@@ -1156,6 +1160,14 @@ const StyledReply = styled.div`
         background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
         color: ${({ theme }) => theme.colors.text} !important;
         border-color: transparent !important;
+    }
+
+    /* Normalize gap between the toolbarExtra (sticker/GIF/upload)
+     * buttons so their spacing matches the left-side formatting icons
+     * (Toolbar uses gap: 0.25rem).
+     */
+    [data-mirageapp-editor] > div:first-child > div {
+        gap: 0.25rem !important;
     }
 
     /* --- Preview toggle (custom checkmark) ----------------------------
@@ -1293,6 +1305,21 @@ const StyledReply = styled.div`
         border-color: ${({ theme }) => theme.colors.borderStrong} !important;
         transform: none !important;
     }
+`;
+
+/* Thin vertical rule used inside the reply's MarkdownEditor toolbar to
+ * separate the formatting icon group (B, I, link, quote, code, lists,
+ * spoiler) from the media icon group (sticker/emoji, GIF, upload) we
+ * render on the right side via `toolbarExtra`.
+ */
+const ToolbarDivider = styled.span`
+    display: inline-block;
+    width: 1px;
+    height: 18px;
+    background: ${({ theme }) => theme.colors.border};
+    margin: 0;
+    align-self: center;
+    flex-shrink: 0;
 `;
 
 // Mobile reply overlay - fullscreen focused reply experience (leaves room for bottom nav)
@@ -2819,50 +2846,8 @@ function ViewPostView({
                     marginTop: isEdit ? '0.2rem' : '0.4rem',
                     position: 'relative'
                 }}>
-                    <MediaRow>
-                        <StickerPicker onSelect={stickerUrl => {
-                            setReplyAttachedType(prev => ({
-                                ...prev,
-                                [post.post_id]: 'image'
-                            }));
-                            setReplyAttachedUrl(prev => ({
-                                ...prev,
-                                [post.post_id]: stickerUrl
-                            }));
-                            setReplyThumbLoading(prev => ({
-                                ...prev,
-                                [post.post_id]: true
-                            }));
-                        }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
-                        <GifPicker onSelect={gifUrl => {
-                            setReplyAttachedType(prev => ({
-                                ...prev,
-                                [post.post_id]: 'image'
-                            }));
-                            setReplyAttachedUrl(prev => ({
-                                ...prev,
-                                [post.post_id]: gifUrl
-                            }));
-                            setReplyThumbLoading(prev => ({
-                                ...prev,
-                                [post.post_id]: true
-                            }));
-                        }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
-                        <MediaIconButton type="button" tabIndex={-1} onClick={() => {
-                            try {
-                                const api = replyEditorUpload[post.post_id];
-                                if (!api || typeof api.selectFile !== 'function') return;
-                                if (replyIsUploading[post.post_id]) return;
-                                api.selectFile();
-                            } catch (_) { }
-                        }} disabled={isBusy || !!replyIsUploading[post.post_id] || !replyEditorUpload[post.post_id] || !!replyAttachedUrl[post.post_id]} aria-label="Upload" title="Upload">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="17 8 12 3 7 8" />
-                                <line x1="12" y1="3" x2="12" y2="15" />
-                            </svg>
-                        </MediaIconButton>
-                        {(replyIsUploading[post.post_id] || (replyAttachedType[post.post_id] && replyAttachedUrl[post.post_id])) && <MediaPreviewWrapper>
+                    {(replyIsUploading[post.post_id] || (replyAttachedType[post.post_id] && replyAttachedUrl[post.post_id])) && <MediaRow>
+                        <MediaPreviewWrapper>
                             {replyAttachedType[post.post_id] && replyAttachedUrl[post.post_id] && !replyIsUploading[post.post_id] && <>
                                 <MediaPreviewImage src={replyAttachedType[post.post_id] === 'image' ? replyAttachedUrl[post.post_id] : getVideoThumbnailUrl(replyAttachedUrl[post.post_id]) || replyAttachedUrl[post.post_id]} alt="" onLoad={() => {
                                     setReplyThumbLoading(prev => {
@@ -2937,12 +2922,56 @@ function ViewPostView({
                                     Cancel
                                 </Button>
                             </div>}
-                        </MediaPreviewWrapper>}
-                    </MediaRow>
+                        </MediaPreviewWrapper>
+                    </MediaRow>}
                     <div data-mirageapp-editor style={{
                         position: 'relative'
                     }}>
-                        <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} onSubmitShortcut={() => {
+                        <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} toolbarExtra={<>
+                            <ToolbarDivider />
+                            <StickerPicker onSelect={stickerUrl => {
+                                setReplyAttachedType(prev => ({
+                                    ...prev,
+                                    [post.post_id]: 'image'
+                                }));
+                                setReplyAttachedUrl(prev => ({
+                                    ...prev,
+                                    [post.post_id]: stickerUrl
+                                }));
+                                setReplyThumbLoading(prev => ({
+                                    ...prev,
+                                    [post.post_id]: true
+                                }));
+                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
+                            <GifPicker onSelect={gifUrl => {
+                                setReplyAttachedType(prev => ({
+                                    ...prev,
+                                    [post.post_id]: 'image'
+                                }));
+                                setReplyAttachedUrl(prev => ({
+                                    ...prev,
+                                    [post.post_id]: gifUrl
+                                }));
+                                setReplyThumbLoading(prev => ({
+                                    ...prev,
+                                    [post.post_id]: true
+                                }));
+                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
+                            <MediaIconButton type="button" tabIndex={-1} onClick={() => {
+                                try {
+                                    const api = replyEditorUpload[post.post_id];
+                                    if (!api || typeof api.selectFile !== 'function') return;
+                                    if (replyIsUploading[post.post_id]) return;
+                                    api.selectFile();
+                                } catch (_) { }
+                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !replyEditorUpload[post.post_id] || !!replyAttachedUrl[post.post_id]} aria-label="Upload" title="Upload">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17 8 12 3 7 8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                            </MediaIconButton>
+                        </>} onSubmitShortcut={() => {
                             if (isEdit) {
                                 handleEditSubmit(post);
                             } else {

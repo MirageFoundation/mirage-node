@@ -1124,7 +1124,7 @@ export default function MarkdownEditor({
                     </ToolButton>
                 ) : null}
                 {toolbarExtra ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
                         {toolbarExtra}
                     </div>
                 ) : null}
@@ -1239,5 +1239,4 @@ export default function MarkdownEditor({
         </EditorContainer>
     );
 }
-
 
