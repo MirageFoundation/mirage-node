@@ -1175,10 +1175,9 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
         refresh: refreshAll,
     } = useRewards();
 
-    // TEMP TEST: force-show the Rewards Claimed popup on mount.
-    const [showCelebration, setShowCelebration] = useState(true);
-    const [claimedAmount, setClaimedAmount] = useState(1_234_000_000);
-    const [claimedInviteCodes, setClaimedInviteCodes] = useState(2);
+    const [showCelebration, setShowCelebration] = useState(false);
+    const [claimedAmount, setClaimedAmount] = useState(0);
+    const [claimedInviteCodes, setClaimedInviteCodes] = useState(0);
     const [claimError, setClaimError] = useState(null);
 
     /* Local live-ticking copies of the two countdowns. The `useRewards`
