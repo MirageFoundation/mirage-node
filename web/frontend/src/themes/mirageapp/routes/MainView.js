@@ -237,15 +237,20 @@ const InviteChevron = styled(HiChevronDown)`
 `;
 const InviteContent = styled.div`
     display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    padding: 0 1rem 0.6rem;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.1rem 1rem 0.75rem;
 
     @media (max-width: 600px) {
-        padding: 0 0.85rem 0.55rem;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.6rem;
+        padding: 0.1rem 0.85rem 0.7rem;
     }
 `;
 const InviteSubtitleBody = styled.div`
+    flex: 1;
+    min-width: 0;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.64rem;
     line-height: 1.35;
@@ -255,10 +260,12 @@ const InviteBannerButton = styled.button`
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
-    width: 100%;
+    flex-shrink: 0;
+    width: auto;
     padding: 0.42rem 0.75rem;
     font-size: 0.68rem;
     font-weight: 700;
+    line-height: 1;
     font-family: inherit;
     color: #FFFFFF;
     background: ${({ theme }) => requireThemeColor(theme, 'followBtnBg')};
@@ -267,6 +274,15 @@ const InviteBannerButton = styled.button`
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+
+    & > svg {
+        width: 0.85em;
+        height: 0.85em;
+    }
+
+    @media (max-width: 600px) {
+        width: 100%;
+    }
 
     &:hover:not(:disabled) {
         background: ${({ theme }) => requireThemeColor(theme, 'followBtnBgHover')};
@@ -1781,6 +1797,7 @@ const MainView = ({
                                         onClick={handleOpenInviteModal}
                                         disabled={availableCodeCount === 0}
                                     >
+                                        {availableCodeCount > 0 && <HiShare aria-hidden="true" />}
                                         {availableCodeCount > 0
                                             ? 'Share Invite Code'
                                             : 'No Codes Left'}
