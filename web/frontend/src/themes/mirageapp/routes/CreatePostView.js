@@ -1328,10 +1328,13 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                 )}
                             </Field>
 
-                            {/* Always-mounted editor: keeps editorUpload API
-                              * registered so Upload/Add buttons on the Media
-                              * tile work even when Text tab is hidden. */}
-                            <EditorMount $hidden={activeTab !== 'text'}>
+                            {/* Content editor is shown on every tab: Text
+                              * uses it as the primary body, Images/Video and
+                              * Link surface it below their own input so the
+                              * author can still add a caption / description.
+                              * Always-mounted keeps the editorUpload API
+                              * registered for the Media tile too. */}
+                            <EditorMount>
                                 <Field>
                                     <EditorShell data-mirageapp-editor>
                                         <MarkdownEditor
@@ -1392,13 +1395,11 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                         />
                                     </EditorShell>
                                 </Field>
-                                {activeTab === 'text' && (
-                                    <ContentCounterRow>
-                                        <ContentCounter $warn={contentValue.length >= limits.maxContent}>
-                                            ({tierLabel}) {contentValue.length}/{limits.maxContent}
-                                        </ContentCounter>
-                                    </ContentCounterRow>
-                                )}
+                                <ContentCounterRow>
+                                    <ContentCounter $warn={contentValue.length >= limits.maxContent}>
+                                        ({tierLabel}) {contentValue.length}/{limits.maxContent}
+                                    </ContentCounter>
+                                </ContentCounterRow>
                             </EditorMount>
 
                             {activeTab === 'media' && (
