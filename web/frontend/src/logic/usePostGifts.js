@@ -140,6 +140,25 @@ export default function usePostGifts({ post } = {}) {
         setConfirmDonate(null);
         setConfirmGiftSub(null);
         setConfirmAward({ postId });
+
+        // If the award configs aren't loaded yet (e.g. the boot fetch in
+        // App.js failed, or the card mounted before localStorage was
+        // populated), kick off a fresh `get_chain_config` right now so the
+        // dialog doesn't get stuck on "Loading…". Mirrors the inline fetch
+        // used by `handleGiftSubscription` below.
+        try {
+            const cfg = readChainConfig();
+            const hasAwards = Array.isArray(cfg?.award_configs) && cfg.award_configs.length > 0;
+            if (!hasAwards) {
+                Api.get('get_chain_config', undefined)
+                    .then(fetched => {
+                        if (fetched && typeof fetched === 'object') {
+                            try { tx.cacheChainConfig(fetched); } catch (_) { }
+                        }
+                    })
+                    .catch(() => { });
+            }
+        } catch (_) { /* noop */ }
     }, [postId]);
 
     const handleGiftMirage = useCallback(() => {
