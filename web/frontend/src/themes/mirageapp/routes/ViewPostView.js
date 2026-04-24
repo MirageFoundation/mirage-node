@@ -1127,6 +1127,7 @@ const StyledReply = styled.div`
         background: transparent !important;
         border: 1px solid transparent !important;
         border-radius: 6px !important;
+        box-sizing: border-box !important;
         width: 24px !important;
         min-width: 24px !important;
         height: 24px !important;
@@ -1134,6 +1135,36 @@ const StyledReply = styled.div`
         color: ${({ theme }) => theme.colors.feedCtrlText} !important;
         transition: background 0.12s ease, color 0.12s ease !important;
         box-shadow: none !important;
+        vertical-align: middle !important;
+    }
+    /* Center all toolbar children on the same baseline so the right
+     * icon group (sticker/GIF/upload) lines up with the left formatting
+     * icons. Scoped to the Toolbar (first child of EditorContainer)
+     * only — must NOT touch the textarea wrapper below it.
+     */
+    [data-mirageapp-editor] > div:first-child > div:first-child {
+        align-items: center !important;
+    }
+    /* The toolbarExtra wrapper is the only plain <div> directly inside
+     * Toolbar; flatten its child spacing so it matches the Toolbar gap.
+     */
+    [data-mirageapp-editor] > div:first-child > div:first-child > div {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 0.25rem !important;
+    }
+    /* StickerPicker / GifPicker wrap their button in a PickerWrapper
+     * (inline-block). Promote it to a 24px flex row so its <button>
+     * sits on the same baseline as the sibling MediaIconButton (which
+     * is a direct button in the flex row).
+     */
+    [data-mirageapp-editor] > div:first-child > div:first-child > div > * {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        height: 24px !important;
+        line-height: 1 !important;
+        vertical-align: middle !important;
     }
     [data-mirageapp-editor] button[type='button'] svg,
     [data-mirageapp-editor] button[type='button'] img,
@@ -1143,6 +1174,19 @@ const StyledReply = styled.div`
         width: 14px !important;
         height: 14px !important;
         font-size: 0.78rem !important;
+    }
+    /* The GIF icon is a text-in-svg glyph; bump it slightly so the
+     * "GIF" label reads clearly at toolbar scale.
+     */
+    [data-mirageapp-editor] button[type='button'][aria-label='GIFs'] svg,
+    [data-mirageapp-editor] button[type='button'][aria-label='GIFs'] svg text {
+        max-width: 20px !important;
+        max-height: 20px !important;
+        width: 20px !important;
+        height: 20px !important;
+    }
+    [data-mirageapp-editor] button[type='button'][aria-label='GIFs'] {
+        padding: 0 !important;
     }
     /* Bold (B) and Italic (I) glyphs render as text via styled spans, so
      * the SVG/font-size rules above don't reach them. Shrink them here.
