@@ -29,6 +29,25 @@ export const Style = createThemeStyleRules`
     -ms-overflow-style: none;
   }
 
+  /* Ultrawide / 4K displays (>= 2100 px): nudge the root font-size up so
+   * everything rem-based (typography, spacing, paddings, feed card chrome,
+   * sidebar rows, etc.) scales up a touch on very large external monitors.
+   * Pairs with the FeedLayout / MainView min-width 1900px column-width
+   * bumps — those widen the feed track, this makes the content inside
+   * read a little larger to match. */
+  @media (min-width: 2100px) {
+    html {
+      font-size: 22px;
+    }
+    /* Scale fixed-px values (icon sizes, sidebar/rail widths, avatars,
+     * media chrome) uniformly alongside rem-based text. Using zoom on
+     * body is the simplest way to bump the whole UI ~15% without
+     * threading a scale factor through every styled component. */
+    body {
+      zoom: 1.08;
+    }
+  }
+
   /* Hide the viewport scrollbar in WebKit/Blink (Chrome, Safari, Edge). */
   html::-webkit-scrollbar,
   body::-webkit-scrollbar {
