@@ -805,6 +805,55 @@ function extractFirstUrl(content) {
     return m ? m[0] : null;
 }
 
+/* Pull a YouTube video id out of a watch / youtu.be / shorts / embed URL.
+ * Returns null for anything we can't confidently resolve. */
+function extractYoutubeId(url) {
+    try {
+        if (!url) return null;
+        const u = new URL(url);
+        const host = (u.hostname || '').toLowerCase();
+        if (host === 'youtu.be' || host === 'www.youtu.be') {
+            const id = u.pathname.split('/').filter(Boolean)[0];
+            return id && /^[\w-]{6,}$/.test(id) ? id : null;
+        }
+        if (host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com') {
+            const v = u.searchParams.get('v');
+            if (v && /^[\w-]{6,}$/.test(v)) return v;
+            const parts = u.pathname.split('/').filter(Boolean);
+            // /shorts/<id>, /embed/<id>, /v/<id>, /live/<id>
+            if (parts.length >= 2 && ['shorts', 'embed', 'v', 'live'].includes(parts[0])) {
+                const id = parts[1];
+                return id && /^[\w-]{6,}$/.test(id) ? id : null;
+            }
+        }
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function youtubeThumbUrl(id) {
+    // hqdefault is the most reliably-served variant across all videos.
+    return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+}
+
+/* Pull the linked site's favicon at a generous size. Used as a "site
+ * mark" for plain link posts (news articles, blogs, etc.) that don't
+ * carry an image. Google's S2 favicon service serves a square PNG for
+ * any host, so every link gets a recognisable mark in the thumbnail
+ * slot instead of a generic identicon. */
+function siteFaviconUrl(rawUrl) {
+    try {
+        if (!rawUrl) return null;
+        const u = new URL(rawUrl);
+        const host = (u.hostname || '').toLowerCase();
+        if (!host) return null;
+        return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`;
+    } catch (_) {
+        return null;
+    }
+}
+
 function resolveCompactContent(post) {
     const mediaList = Array.isArray(post?.media) && post.media.length > 0 ? post.media : null;
     const rawBody = String(post?.content || '');
@@ -823,8 +872,16 @@ function resolveCompactContent(post) {
 }
 
 /* Small photon-scaled thumbnail for the compact left column. Returns null
- * if we couldn't derive an image URL (the component falls back to the
- * first-letter placeholder). */
+ * if we couldn't derive an image URL. Falls back to the DiceBear
+ * identicon placeholder.
+ *
+ * Sources, in order:
+ *   1. `post.thumbnail` (if it's an image URL)
+ *   2. First entry of `post.media`
+ *   3. First URL in body that's a direct image
+ *   4. First URL in body that's a YouTube video — pull the official
+ *      `i.ytimg.com/vi/<id>/hqdefault.jpg` poster so video links get a
+ *      real preview instead of the generic identicon. */
 function getCompactThumb(post) {
     const thumb = post?.thumbnail;
     if (typeof thumb === 'string' && thumb.trim() && isLikelyImageUrl(thumb)) {
@@ -844,6 +901,22 @@ function getCompactThumb(post) {
         try { return buildPhotonUrl(firstUrl, { w: 144, h: 144 }); }
         catch (_) { /* noop */ }
     }
+    // YouTube poster — works for plain links, /shorts, /embed, youtu.be.
+    if (firstUrl) {
+        const ytId = extractYoutubeId(firstUrl);
+        if (ytId) {
+            try { return buildPhotonUrl(youtubeThumbUrl(ytId), { w: 144, h: 144 }); }
+            catch (_) { return youtubeThumbUrl(ytId); }
+        }
+    }
+    // Plain external link — show the source site's favicon. Marked with
+    // a `__favicon` flag so the renderer can apply icon-style sizing
+    // (centered, padded, contain) instead of the cover-fit treatment
+    // used for real photos.
+    if (firstUrl) {
+        const fav = siteFaviconUrl(firstUrl);
+        if (fav) return { src: fav, kind: 'favicon' };
+    }
     return null;
 }
 
@@ -854,6 +927,42 @@ function getCompactThumb(post) {
 function isCompactInteractive(target) {
     if (!(target instanceof Element)) return false;
     return !!target.closest('a, button, [data-no-card-click]');
+}
+
+/* Thumbnail tile that gracefully falls back to the DiceBear identicon when
+ * the derived image URL fails to load (404, blocked, non-image content,
+ * dead Photon proxy, etc.). Without this fallback the row shows a blank
+ * dark tile, which is what users were seeing on link posts. */
+function CompactThumb({ thumb, to, label, onClick, address, username }) {
+    const [failed, setFailed] = useState(false);
+    const src = typeof thumb === 'string' ? thumb : (thumb && thumb.src) || null;
+    const kind = thumb && typeof thumb === 'object' ? thumb.kind : 'photo';
+    useEffect(() => { setFailed(false); }, [src]);
+
+    if (failed || !src) {
+        return (
+            <PostPlaceholderAvatar address={address} username={username} />
+        );
+    }
+
+    // Favicons are tiny logo marks, not photos — center them on the dark
+    // tile with padding instead of cover-fitting them edge-to-edge.
+    const isFavicon = kind === 'favicon';
+    const imgStyle = isFavicon
+        ? { width: '60%', height: '60%', objectFit: 'contain', margin: 'auto' }
+        : undefined;
+
+    return (
+        <CompactThumbLink to={to} aria-label={label} onClick={onClick}>
+            <img
+                src={src}
+                alt=""
+                loading="lazy"
+                style={imgStyle}
+                onError={() => setFailed(true)}
+            />
+        </CompactThumbLink>
+    );
 }
 
 function CompactRow({ post, state, updatePost }) {
@@ -939,16 +1048,14 @@ function CompactRow({ post, state, updatePost }) {
             role="link"
             tabIndex={0}
         >
-            {thumbUrl ? (
-                <CompactThumbLink to={linkTarget} aria-label={post.title} onClick={stop}>
-                    <img src={thumbUrl} alt="" loading="lazy" />
-                </CompactThumbLink>
-            ) : (
-                <PostPlaceholderAvatar
-                    address={authorAddress}
-                    username={post.username}
-                />
-            )}
+            <CompactThumb
+                thumb={thumbUrl}
+                to={linkTarget}
+                label={post.title}
+                onClick={stop}
+                address={authorAddress}
+                username={post.username}
+            />
 
             <CompactTopRow>
                 <CompactHeader>
