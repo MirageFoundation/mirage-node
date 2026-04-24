@@ -44,26 +44,28 @@ const PlaceholderRoot = styled.div`
     justify-content: center;
     width: ${({ $size }) => $size}px;
     height: ${({ $size }) => $size}px;
-    border-radius: 8px;
-    background: ${AVATAR_BG};
+    background: transparent;
     flex-shrink: 0;
-    overflow: hidden;
 
     @media (max-width: 600px) {
         width: ${({ $mobileSize }) => $mobileSize}px;
         height: ${({ $mobileSize }) => $mobileSize}px;
-        border-radius: 6px;
     }
 `;
 
 const AvatarImg = styled.img`
-    width: 100%;
-    height: 100%;
+    width: 50%;
+    height: 50%;
     display: block;
-    object-fit: cover;
-    /* Match the tile bg so DiceBear's transparent margins read as one
-     * continuous grey square instead of a faint inner rectangle. */
+    object-fit: contain;
+    /* Tinted chip so the identicon reads as a deliberate avatar mark,
+     * not a clipped fragment floating in the row. */
     background: ${AVATAR_BG};
+    border-radius: 8px;
+
+    @media (max-width: 600px) {
+        border-radius: 6px;
+    }
 `;
 
 function pickSeed({ address, username }) {
