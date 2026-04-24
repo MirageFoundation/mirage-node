@@ -521,17 +521,25 @@ def _build_pool():
     add_f(msg_bridge_attest_minted_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
 
     # Params (module parameters) - ALL fields from proto/mirage/core/v1/params.proto
+    #
+    # Field NAMES here MUST match the chain proto exactly so that
+    # google.protobuf.json_format.ParseDict() can decode REST-formatted
+    # governance MsgUpdateParams payloads (which use the chain's proto names).
+    # Legacy aliases (pow_base_bits, pow_increase_threshold,
+    # pow_difficulty_grace_period, pow_factor) are re-added downstream in
+    # indexer/params.py::_query_core_params so existing backend/frontend/agent
+    # consumers keep working unchanged.
     msg4 = file_proto.message_type.add()
     msg4.name = "Params"
-    add_f(msg4, "pow_base_bits", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "min_difficulty", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_message_window", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "pow_increase_threshold", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "pow_message_limit", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_calm_period_definition", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_calm_sequence_threshold", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_interval", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_quantity", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "block_hash_window", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "pow_difficulty_grace_period", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "pow_difficulty_allowance", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_username_size", 34, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_topic_size", 35, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "min_username_size", 36, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -558,7 +566,7 @@ def _build_pool():
     f_bridge.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_bridge.type_name = ".mirage.core.v1.BridgeChainConfig"
     add_f(msg4, "bridge_attestation_threshold", 51, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    add_f(msg4, "pow_factor", 52, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "pow_difficulty_step", 52, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     # award_configs is a repeated AwardConfig (field 53)
     f_awards = msg4.field.add()
     f_awards.name = "award_configs"
@@ -601,7 +609,7 @@ def _build_pool():
     add_f(msg_diff, "consecutive_low_usage", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_diff, "latest_block_hash", 6, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_diff, "current_height", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_diff, "pow_base_bits", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_diff, "min_difficulty", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # QueryProfileRequest
     msg_profile_req = file_proto.message_type.add()

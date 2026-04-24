@@ -22,6 +22,18 @@ _PARAMS_CACHE: dict[str, Any] | None = None
 _LOCK = threading.Lock()
 
 
+_PARAMS_LEGACY_NAME_ALIASES = {
+    # new proto name (source of truth) -> legacy name still consumed by
+    # web/backend, web/frontend, agent docs, and older tests. Kept as a
+    # read-through alias so the v1.11.0 rename doesn't require a coordinated
+    # rename across the entire Python + JS surface.
+    "min_difficulty": "pow_base_bits",
+    "pow_message_limit": "pow_increase_threshold",
+    "pow_difficulty_allowance": "pow_difficulty_grace_period",
+    "pow_difficulty_step": "pow_factor",
+}
+
+
 def _query_core_params(grpc_target: str, timeout: float = 5.0) -> dict:
     """Query core module params over gRPC and return as dict."""
 
@@ -37,11 +49,15 @@ def _query_core_params(grpc_target: str, timeout: float = 5.0) -> dict:
             response_deserializer=_deserialize,
         )
         resp = method(QueryParamsRequest(), timeout=timeout)
-    return MessageToDict(
+    result = MessageToDict(
         resp.params,
         preserving_proto_field_name=True,
         always_print_fields_with_no_presence=True,
     )
+    for new_name, legacy_name in _PARAMS_LEGACY_NAME_ALIASES.items():
+        if new_name in result and legacy_name not in result:
+            result[legacy_name] = result[new_name]
+    return result
 
 
 def _build_cache_from_params(p: dict) -> dict[str, Any]:
