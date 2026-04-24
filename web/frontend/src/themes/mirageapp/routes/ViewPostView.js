@@ -3295,7 +3295,7 @@ function ViewPostView({
                             aria-label="View post on Mirage"
                             title="Sign in to view this post"
                             description="Create an account or sign in to read posts, vote, and join the conversation."
-                            notice="Currently in Private Beta — Invite Only"
+                            notice="Currently in Private Beta, Invite Only."
                             stats={getCachedWelcomeStats()}
                             links={[
                                 { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },

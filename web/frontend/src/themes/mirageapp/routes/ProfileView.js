@@ -1381,7 +1381,7 @@ export default function ProfileView({ state }) {
                             aria-label="Sign in to view your profile"
                             title="Sign in to view your profile"
                             description="Create an account or sign in to see your identity, balance, posts, and settings."
-                            notice="Currently in Private Beta — Invite Only"
+                            notice="Currently in Private Beta, Invite Only."
                             stats={getCachedWelcomeStats()}
                             links={[
                                 { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },

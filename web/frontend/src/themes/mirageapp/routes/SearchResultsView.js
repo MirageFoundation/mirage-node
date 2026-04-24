@@ -978,7 +978,7 @@ export default function SearchResultsView({ state }) {
                                 aria-label="Search on Mirage"
                                 title={query ? "Sign in to search Mirage" : "Search Mirage"}
                                 description="Create an account or sign in to search topics, users, and posts."
-                                notice="Currently in Private Beta — Invite Only"
+                                notice="Currently in Private Beta, Invite Only."
                                 stats={getCachedWelcomeStats()}
                                 links={[
                                     {

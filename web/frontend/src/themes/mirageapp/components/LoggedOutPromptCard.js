@@ -77,14 +77,11 @@ const NoticePanel = styled.div`
     display: flex;
     align-items: flex-start;
     gap: 0.55rem;
-    padding: 0.6rem 0.75rem;
-    border-radius: 0.55rem;
-    border: 0.5px solid #f59e0b;
-    background: ${({ theme }) =>
-        theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
-    color: ${({ theme }) => theme.colors.text};
+    color: #f59e0b;
     font-size: 0.7rem;
     line-height: 1.5;
+    text-align: center;
+    justify-content: center;
 `;
 
 const NoticeIcon = styled.span`
@@ -243,7 +240,6 @@ export default function LoggedOutPromptCard({
                 <Body>
                     {notice ? (
                         <NoticePanel role="note">
-                            <NoticeIcon aria-hidden="true">⚠</NoticeIcon>
                             <NoticeBody>{notice}</NoticeBody>
                         </NoticePanel>
                     ) : null}

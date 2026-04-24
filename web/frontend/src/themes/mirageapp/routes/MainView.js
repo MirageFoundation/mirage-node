@@ -1910,10 +1910,10 @@ const MainView = ({
                             role="region"
                             aria-label="Welcome to Mirage"
                             title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
-                            notice="Currently in Private Beta — Invite Only"
+                            notice="Currently in Private Beta, Invite Only."
                             description={urlTopic === 'following'
                                 ? 'Sign in to unlock your following feed and keep up with the people and topics you care about.'
-                                : 'Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.'}
+                                : 'Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain. No central authority can silence you.'}
                             stats={welcomeStats && welcomeStats.userCount > 0 ? [
                                 { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },
                                 { label: 'Active (24h)', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.active24h.toLocaleString()}` },

@@ -120,13 +120,16 @@ const WarningBody = styled.div`
 
 const PrimaryButton = styled(Button)`
   border: none !important;
-  background: ${({ theme }) => theme.colors.followBtnBg} !important;
-  color: #ffffff !important;
+  background: ${({ theme, $copied }) =>
+    $copied ? theme.colors.buttonSuccessBg : theme.colors.followBtnBg} !important;
+  color: ${({ theme, $copied }) =>
+    $copied ? theme.colors.voteUp : "#ffffff"} !important;
   box-shadow: none !important;
-  transition: background 0.15s ease !important;
+  transition: background 0.15s ease, color 0.15s ease !important;
 
   &:hover:not(:disabled) {
-    background: ${({ theme }) => theme.colors.followBtnBgHover} !important;
+    background: ${({ theme, $copied }) =>
+      $copied ? theme.colors.buttonSuccessBg : theme.colors.followBtnBgHover} !important;
   }
 
   &:disabled {
@@ -189,7 +192,7 @@ function WelcomeView({ state }) {
         <ModernPostFeed>
           <AuthPageShell
             title="Your account is ready"
-            description="Save your 12-word recovery phrase below — it's the only way to restore this account."
+            description="Save your 12-word recovery phrase below. It's the only way to restore this account."
           >
             <AuthStack>
               <IdentityRow>
@@ -224,8 +227,8 @@ function WelcomeView({ state }) {
 
               <AuthButtonRow>
                 <ActionRow>
-                  <PrimaryButton onClick={copyToClipboard} size="sm" fullWidth mobileFullWidth>
-                    {copied ? "Copied" : "Copy phrase"}
+                  <PrimaryButton onClick={copyToClipboard} size="sm" fullWidth mobileFullWidth $copied={copied}>
+                    {copied ? "Copied!" : "Copy phrase"}
                   </PrimaryButton>
                   <SecondaryButton onClick={() => navigate("/")} size="sm" fullWidth mobileFullWidth>
                     Continue
