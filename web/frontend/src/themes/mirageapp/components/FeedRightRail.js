@@ -72,11 +72,10 @@ const ROW_ONE = [
 const ROW_TWO = [
     { label: 'Blog', href: `${FOUNDATION_URL}/blog` },
     { label: 'Explorer', href: 'https://www.mirage.watch' },
-    { label: 'X', href: 'https://x.com/mirage_found' },
+    { label: 'X', href: 'https://x.com/getmirage' },
 ];
 const ROW_THREE = [
     { label: 'Download app', href: `${FOUNDATION_URL}/app` },
-    { label: 'Exit is always free', href: `${FOUNDATION_URL}/#community` },
 ];
 
 export default function FeedRightRail() {
