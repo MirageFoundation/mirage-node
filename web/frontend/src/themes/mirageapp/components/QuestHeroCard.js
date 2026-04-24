@@ -877,8 +877,11 @@ const RewardLabel = styled.div`
 `;
 
 const RewardValue = styled.div`
-    font-size: 0.95rem;
-    font-weight: 700;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", "Monaco", Consolas, monospace;
+    font-size: 0.92rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
     color: ${({ theme }) => theme.colors.text};
     line-height: 1.2;
 `;
@@ -1172,9 +1175,10 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
         refresh: refreshAll,
     } = useRewards();
 
-    const [showCelebration, setShowCelebration] = useState(false);
-    const [claimedAmount, setClaimedAmount] = useState(0);
-    const [claimedInviteCodes, setClaimedInviteCodes] = useState(0);
+    // TEMP TEST: force-show the Rewards Claimed popup on mount.
+    const [showCelebration, setShowCelebration] = useState(true);
+    const [claimedAmount, setClaimedAmount] = useState(1_234_000_000);
+    const [claimedInviteCodes, setClaimedInviteCodes] = useState(2);
     const [claimError, setClaimError] = useState(null);
 
     /* Local live-ticking copies of the two countdowns. The `useRewards`
