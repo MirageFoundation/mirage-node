@@ -15,6 +15,8 @@ import {
     TabbedContainer,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { useAgents, formatTimeAgo } from "../../../logic/useAgents";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 
@@ -38,18 +40,19 @@ import { dicebearAvatarUrl } from "../../../utils/avatar";
 
 const AgentsWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -59,6 +62,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -75,6 +82,10 @@ const IntroBlock = styled.div`
     flex-direction: column;
     gap: 0.5rem;
     padding: 0 1rem 0.75rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.75rem;
+    }
 `;
 
 const IntroParagraph = styled.p`
@@ -121,6 +132,10 @@ const SectionHeader = styled.div`
     align-items: center;
     gap: 0.4rem;
     padding: 0.65rem 1rem 0.4rem;
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0 0.4rem;
+    }
 `;
 
 const SectionLabel = styled.span`
@@ -154,6 +169,10 @@ const ReorderBar = styled.div`
         flex-shrink: 0;
         color: ${({ theme }) => theme.colors.subtleText};
     }
+
+    @media (max-width: 600px) {
+        padding: 0.45rem 0;
+    }
 `;
 
 const ReorderHint = styled.span`
@@ -183,7 +202,7 @@ const Row = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.65rem 0.85rem;
+        padding: 0.65rem 0;
     }
 `;
 
@@ -399,15 +418,18 @@ export default function AgentsView({ state }) {
             <Helmet>
                 <title>Agents | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerBody $fullWidth>
-                            <AgentsWrap>{body}</AgentsWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerBody $fullWidth>
+                                <AgentsWrap>{body}</AgentsWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

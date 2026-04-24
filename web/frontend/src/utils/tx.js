@@ -215,6 +215,14 @@ export async function cacheChainConfig(data) {
     return h.cacheChainConfig(data);
 }
 
+// Release the in-flight claim without caching a config. Used by callers
+// that fetched `get_chain_config` but got back a null/error result, so the
+// next `needsChainConfigRefresh()` check can re-enter and retry instead of
+// being permanently wedged on the claimed flag.
+export function releaseChainConfigClaim() {
+    _chainConfigFetchClaimed = false;
+}
+
 export async function cacheNodeConfig(data) {
     const h = await getHandler();
     return h.cacheNodeConfig(data);
@@ -511,4 +519,3 @@ export async function pollTxStatus(txHash, options = {}) {
 
     return null;
 }
-

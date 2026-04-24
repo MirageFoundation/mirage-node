@@ -15,6 +15,7 @@ import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import QuestHeroCard from "../components/QuestHeroCard.js";
 import FeedRightRail from "../components/FeedRightRail.js";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { FeedSortToggle, FeedViewToggle, loadViewMode, saveViewMode, VIEW_MODE_CHANGE_EVENT } from "../ListFeedView.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
@@ -31,18 +32,18 @@ import { requireThemeColor } from "../../../utils/themeColor";
 
 // Invite-only card — adapted from mirage-mobile-app `InviteCodesCard`:
 // clean panel surface, icon tile + title/subtitle + count badge + chevron header,
-// collapsed body = subtitle paragraph + gradient "Share Invite Code" CTA.
+// collapsed body = subtitle paragraph + brand-blue "Share Invite Code" CTA.
 const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: 0;
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -60,7 +61,7 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -70,7 +71,7 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
 /**
  * `FeedSkeletonColumn` mirrors the width rules applied by `ListFeedView`'s
  * `FeedList` so loading-state skeletons render at the same width as real
- * posts — 720px card / 80% compact when the sidebar is hidden — on home,
+ * posts — 820px card / 80% compact when the sidebar is hidden — on home,
  * following, and topic feeds. Keeping this parallel to `FeedHeroColumn`
  * avoids cross-file coupling and makes the wrapper explicit at the
  * skeleton render sites.
@@ -79,13 +80,13 @@ const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: 0;
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -103,7 +104,7 @@ const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -260,18 +261,16 @@ const InviteBannerButton = styled.button`
     font-weight: 700;
     font-family: inherit;
     color: #FFFFFF;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    background: ${({ theme }) => requireThemeColor(theme, 'followBtnBg')};
     border: none;
     border-radius: 7px;
     cursor: pointer;
     white-space: nowrap;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-    box-shadow: 0 1px 5px rgba(102, 126, 234, 0.22);
+    transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 
     &:hover:not(:disabled) {
+        background: ${({ theme }) => requireThemeColor(theme, 'followBtnBgHover')};
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-        opacity: 0.95;
     }
 
     &:active:not(:disabled) {
@@ -283,7 +282,6 @@ const InviteBannerButton = styled.button`
         ? 'rgba(0, 0, 0, 0.05)'
         : 'rgba(255, 255, 255, 0.06)'};
         color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-        box-shadow: none;
         cursor: not-allowed;
     }
 `;
@@ -708,6 +706,10 @@ const HomeFeedTitleBar = styled.div`
     align-self: flex-start;
     margin: 0;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 // NSFW welcome hero — mirageapp: compact, app-style card using the
@@ -721,16 +723,16 @@ const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     /* Width rules mirror FeedList (ListFeedView.js) + FeedHeroColumn so the
      * consent card tracks the post column across both feed view modes and
      * the sidebar-hidden state:
-     *   - default / sidebar visible: capped at 720px, left-aligned.
-     *   - sidebar hidden + card view:    centered 720px column.
+     *   - default / sidebar visible: capped at 820px, left-aligned.
+     *   - sidebar hidden + card view:    centered 820px column.
      *   - sidebar hidden + compact view: 80% wide, left-aligned. */
-    max-width: 720px;
+    max-width: 820px;
     margin: 4px 0;
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -748,7 +750,7 @@ const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -1185,142 +1187,6 @@ const HeaderInlineLink = styled.a`
 const MainFeedPanel = styled.div`
     width: 100%;
     background: ${({ theme }) => theme.colors.bg};
-`;
-
-/**
- * `FeedRailRow` wraps the feed column and the right-rail footer in a
- * horizontal flex row. The rail butts flush against the feed (no gap)
- * and its position is driven by two attributes — `data-sidebar-hidden`
- * (owned by `Main` in `MirageAppShell`) and `data-feed-view-mode`
- * (mirrored onto this row via `$feedViewMode`):
- *
- *   Sidebar visible, any view mode:
- *     flush-left next to the sidebar — feed 720 px, rail 260 px.
- *
- *   Sidebar hidden + card view:
- *     feed 720 px + rail 260 px centered together inside Main.
- *
- *   Sidebar hidden + compact view:
- *     feed flex-grows to fill the column, rail sits pinned to the
- *     right edge of the viewport (negative margin cancels Main's
- *     right padding).
- *
- *   <= 1000 px:
- *     shell is single-column and the rail hides itself. Feed column
- *     collapses back to viewport-filling width.
- *
- * We also reassert `width: 100%; max-width: 720px` on every feed-width-
- * aware descendant (tagged via `data-feed-view-mode`) so `ListFeedView`'s
- * "sidebar hidden + compact → 80 %" rule does not fight the row layout
- * inside FeedCol; the FeedCol itself owns the feed width instead.
- */
-const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
-    'data-feed-view-mode': $feedViewMode,
-}))`
-    display: flex;
-    flex-direction: row;
-    align-items: stretch;
-    gap: 0;
-    width: 100%;
-    box-sizing: border-box;
-
-    @media (min-width: 1001px) {
-        /* Neutralise width caps that ListFeedView / FeedHeroColumn apply
-         * based on data-feed-view-mode. !important is required because
-         * the ListFeedView "compact hidden -> 80 percent" rule has higher
-         * specificity (data-sidebar-hidden + data-feed-view-mode) than
-         * any selector we could practically chain here, and without this
-         * override the feed renders at 80 percent of FeedCol, leaving a
-         * visible gap between the feed and the rail. */
-        & [data-feed-view-mode] {
-            width: 100% !important;
-            max-width: none !important;
-            margin-left: 0 !important;
-            margin-right: 0 !important;
-        }
-
-        /* Sidebar visible (card or compact): small breathing gap between
-         * feed and rail so they do not butt together. */
-        [data-sidebar-hidden='false'] &[data-feed-view-mode] {
-            gap: 1.5rem;
-        }
-
-        /* Sidebar hidden + card view: center feed + rail as a block
-         * with the same breathing gap as the sidebar-visible states. */
-        [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
-            max-width: calc(720px + 1.5rem + 260px);
-            margin-left: auto;
-            margin-right: auto;
-            gap: 1.5rem;
-        }
-
-        /* Sidebar hidden + compact view: row fills the full Main column
-         * (feed flex-grows; rail remains 260 px on the far right) with
-         * the same breathing gap as the sidebar-visible states. */
-        [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
-            max-width: none;
-            margin-left: 0;
-            margin-right: 0;
-            gap: 1.5rem;
-        }
-    }
-
-    /* Very large screens (> average laptop): ALWAYS center the feed+rail
-     * pair inside Main with a consistent 1.5rem gap between them,
-     * regardless of sidebar visibility or view mode. Higher specificity
-     * (two attribute selectors) so these rules beat the 1001px rules
-     * above even at equal cascade order. */
-    @media (min-width: 1500px) {
-        [data-sidebar-hidden] &[data-feed-view-mode] {
-            max-width: calc(720px + 1.5rem + 260px);
-            margin-left: auto;
-            margin-right: auto;
-            gap: 1.5rem;
-        }
-    }
-`;
-
-/**
- * Feed column inside `FeedRailRow`.
- *   - Sidebar visible: 720 px fixed track.
- *   - Sidebar hidden + card: 720 px fixed (centered with the rail).
- *   - Sidebar hidden + compact: flex-grows to fill the row (the rail
- *     stays fixed width on the right so the feed expands into the
- *     previously-empty space left of it).
- *   - <= 1000 px: collapses to viewport-filling width (rail hidden).
- */
-const FeedCol = styled.div`
-    min-width: 0;
-
-    @media (min-width: 1001px) {
-        flex: 0 0 720px;
-        width: 720px;
-        max-width: 720px;
-
-        [data-sidebar-hidden='true'] [data-feed-view-mode='compact'] & {
-            flex: 1 1 auto;
-            width: auto;
-            max-width: none;
-        }
-    }
-
-    /* At the large-screen centered layout, the feed returns to a fixed
-     * 720 px track even in compact view so the feed+rail pair is a
-     * predictable size for centering. Overrides the compact-hidden
-     * flex-grow rule above via later source order (matching specificity,
-     * but cascades later). */
-    @media (min-width: 1500px) {
-        [data-feed-view-mode] & {
-            flex: 0 0 720px;
-            width: 720px;
-            max-width: 720px;
-        }
-    }
-
-    @media (max-width: 1000px) {
-        flex: 1 1 auto;
-        width: 100%;
-    }
 `;
 
 /**

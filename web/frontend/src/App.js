@@ -511,10 +511,14 @@ class App extends Component {
                     if (cfg) {
                         try { tx.cacheChainConfig(cfg); } catch (_) { }
                     } else {
+                        // Release the fetch claim so the retry (and any
+                        // consumer hooks) can re-enter `needsChainConfigRefresh`.
+                        try { tx.releaseChainConfigClaim(); } catch (_) { }
                         this._bootstrapChainConfig(attempt + 1);
                     }
                 })
                 .catch(() => {
+                    try { tx.releaseChainConfigClaim(); } catch (_) { }
                     this._bootstrapChainConfig(attempt + 1);
                 });
         };

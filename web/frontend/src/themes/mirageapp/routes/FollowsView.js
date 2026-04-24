@@ -11,6 +11,8 @@ import {
     TabbedContainer,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { useFollows, shortenAddress } from "../../../logic/useFollows";
 import { dicebearAvatarUrl } from "../../../utils/avatar";
 
@@ -39,18 +41,19 @@ function useDebugStateOverride() {
 
 const FollowsWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -60,6 +63,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -155,7 +162,7 @@ const Row = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.5rem 0.85rem;
+        padding: 0.5rem 0;
     }
 `;
 
@@ -354,15 +361,18 @@ export default function FollowsView({ state }) {
             <Helmet>
                 <title>Follows | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerBody $fullWidth>
-                            <FollowsWrap>{body}</FollowsWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerBody $fullWidth>
+                                <FollowsWrap>{body}</FollowsWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

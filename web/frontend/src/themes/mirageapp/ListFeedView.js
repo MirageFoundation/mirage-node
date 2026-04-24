@@ -7,6 +7,7 @@ import CardView from "./components/CardView";
 import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
 import { MoreMenuChip, BlockChip } from "./components/PostMenu";
+import PostPlaceholderAvatar from "./components/PostPlaceholderAvatar";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
@@ -72,14 +73,14 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: 0;
     background: ${({ theme }) => theme.colors.bg};
 
     @media (min-width: 1001px) {
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'] {
             width: 100%;
-            max-width: 720px;
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -94,11 +95,24 @@ const FeedList = styled.div.attrs(({ $viewMode }) => ({
     /* Very large screens (> average laptop): lock the feed to a fixed
      * centered column so its position stays stable regardless of sidebar
      * visibility OR feed view mode. Uses the same two-attribute specificity
-     * as the rules above (plus later source order) so it wins on overlap. */
+     * as the rules above (plus later source order) so it wins on overlap.
+     * Grows to 960 px on large desktops / external monitors. */
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
             width: 100%;
-            max-width: 720px;
+            max-width: 960px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    }
+
+    /* Ultrawide / 4K displays (> 1900 px): grow the feed column further
+     * so it fills more of the available viewport on large external
+     * monitors while remaining centered and readable. */
+    @media (min-width: 1900px) {
+        [data-sidebar-hidden] &[data-feed-view-mode] {
+            width: 100%;
+            max-width: 1200px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -150,7 +164,10 @@ const Toolbar = styled.div`
      * sticky MobileHeader, which made the topic title (e.g. "#memes")
      * look cramped against the top edge. */
     @media (max-width: 600px) {
-        padding: 0.75rem 0.5rem 0.5rem 0.5rem;
+        /* Zero horizontal padding so the toolbar's leading title
+         * aligns with the MobileHeader brand (both end up inset by the
+         * Main container's 0.75rem side padding). */
+        padding: 0.75rem 0 0.5rem;
     }
 `;
 
@@ -176,6 +193,13 @@ const ToolbarTitle = styled.h1`
      * auto left margin so the control cluster hugs the right edge. */
     & + * {
         margin-left: auto;
+    }
+
+    /* Mobile: drop the internal left padding so the feed title aligns
+     * flush with the MobileHeader brand (both inset only by Main's
+     * 0.75rem side padding). */
+    @media (max-width: 600px) {
+        padding: 0;
     }
 `;
 
@@ -384,7 +408,9 @@ const CompactRoot = styled.article`
     @media (max-width: 600px) {
         grid-template-columns: 68px minmax(0, 1fr);
         gap: 0.15rem 0.6rem;
-        padding: 0.45rem 0.85rem 0.35rem;
+        /* Zero horizontal padding on mobile — alignment comes from
+         * Main's 0.75rem side padding, matching the MobileHeader brand. */
+        padding: 0.45rem 0 0.35rem;
         border-radius: 6px;
     }
 `;
@@ -416,29 +442,10 @@ const CompactThumbLink = styled(Link)`
     }
 `;
 
-// Letter is hard-pinned to white in BOTH themes so it always reads cleanly on
-// the indigo->purple brand gradient. `sidebarItemActiveText` flips to black in
-// light mode, which disappears against the gradient — the previous behavior.
-const CompactThumbPlaceholder = styled.div`
-    grid-row: 1 / span 3;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 84px;
-    height: 84px;
-    border-radius: 8px;
-    background: ${({ theme }) => theme.colors.gradient};
-    color: #ffffff;
-    font-size: 1.1rem;
-    font-weight: 700;
-    flex-shrink: 0;
-
-    @media (max-width: 600px) {
-        width: 68px;
-        height: 68px;
-        border-radius: 6px;
-    }
-`;
+/* No-media placeholder lives in `./components/PostPlaceholderAvatar` — a
+ * DiceBear identicon seeded by the author's `mirage1…` bech32 address on a
+ * neutral grey tile. Kept as its own component so other surfaces can reuse
+ * the same "empty post" visual without duplicating the bg/size logic. */
 
 /* Header row mirrors CardView's HeaderMeta exactly so the two view modes
  * share a single metadata style. Font sizes + weights are copied 1:1.
@@ -920,13 +927,6 @@ function CompactRow({ post, state, updatePost }) {
     if (ts > 1e12) ts = Math.floor(ts / 1000);
 
     const commentCount = Number(post.comments) || 0;
-    // Placeholder letter = first character of the post author's username.
-    // Falls back to the author's wallet address, then '#' if neither is set,
-    // so anonymous / username-less rows still render a stable placeholder.
-    const placeholderSeed = (typeof post.username === 'string' && post.username.trim())
-        ? post.username.trim()
-        : (authorAddress || '');
-    const placeholderChar = (placeholderSeed[0] || '#').toUpperCase();
     const feedBucket = typeof post.feed_bucket === 'string' ? post.feed_bucket : '';
     const feedBucketLabel = feedBucket && feedBucket !== 'guest'
         ? (FEED_BUCKET_LABELS[feedBucket] || '')
@@ -944,7 +944,10 @@ function CompactRow({ post, state, updatePost }) {
                     <img src={thumbUrl} alt="" loading="lazy" />
                 </CompactThumbLink>
             ) : (
-                <CompactThumbPlaceholder aria-hidden="true">{placeholderChar}</CompactThumbPlaceholder>
+                <PostPlaceholderAvatar
+                    address={authorAddress}
+                    username={post.username}
+                />
             )}
 
             <CompactTopRow>

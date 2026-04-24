@@ -56,6 +56,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -80,6 +84,10 @@ const TabsRow = styled.div`
     grid-template-columns: repeat(${({ $count }) => $count || 5}, 1fr);
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     margin: 0 1rem;
+
+    @media (max-width: 600px) {
+        margin: 0;
+    }
 `;
 
 const TabButton = styled.button`
@@ -133,6 +141,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.35rem;
+    }
 `;
 
 const SectionHeaderTitle = styled.span`
@@ -153,6 +165,10 @@ const TilesSectionBody = styled.div`
     @media (max-width: 1000px) {
         padding: 0.35rem 0.85rem 0.75rem;
     }
+
+    @media (max-width: 600px) {
+        padding: 0.35rem 0 0.75rem;
+    }
 `;
 
 const RewardSectionBody = styled.div`
@@ -163,6 +179,10 @@ const RewardSectionBody = styled.div`
 
     @media (max-width: 1000px) {
         padding: 0.35rem 0.85rem 0.75rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.35rem 0 0.75rem;
     }
 `;
 
@@ -175,6 +195,10 @@ const SectionNote = styled.div`
 
     @media (max-width: 1000px) {
         padding: 0 0.85rem 0.35rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.35rem;
     }
 `;
 
@@ -199,6 +223,10 @@ const FieldRow = styled.div`
     @media (max-width: 1000px) {
         gap: 0.5rem;
         padding: 0.5rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 

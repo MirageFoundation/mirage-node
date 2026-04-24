@@ -13,6 +13,8 @@ import {
 import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { formatMirage } from "../../../utils/formatters";
 import { useInbox, formatAwardLabel } from "../../../logic/useInbox";
@@ -35,7 +37,7 @@ import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
  */
 
 /**
- * `InboxWrap` caps the inbox at the card-view feed width (720px) by
+ * `InboxWrap` caps the inbox at the card-view feed width (820px) by
  * default and left-aligns it in the content column. When the sidebar is
  * hidden on desktop, it expands like `ListFeedView`'s compact view
  * (width 80%, no max-width cap) but stays pinned to the LEFT — no auto
@@ -43,7 +45,7 @@ import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
  */
 const InboxWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     /* Pull the inbox up under the TopBar — cancels the top half of
      * ContainerBody's vertical padding without touching the shared
      * theme layout token (which would affect every route). */
@@ -53,11 +55,12 @@ const InboxWrap = styled.div`
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -67,6 +70,13 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    /* Mobile: drop internal horizontal padding so the inbox title aligns
+     * flush with the MobileHeader brand (both inset only by Main's
+     * 0.75rem side padding). */
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -89,6 +99,10 @@ const UnreadInfoRow = styled.div`
     gap: 0.75rem;
     padding: 0.4rem 1rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+    @media (max-width: 600px) {
+        padding: 0.4rem 0;
+    }
 `;
 
 const UnreadCountText = styled.span`
@@ -161,7 +175,9 @@ const ReplyItem = styled.a`
     }
 
     @media (max-width: 600px) {
-        padding: 0.45rem 0.85rem;
+        /* Zero horizontal padding on mobile — row alignment comes from
+         * Main's 0.75rem side padding, matching the MobileHeader brand. */
+        padding: 0.45rem 0;
     }
 `;
 
@@ -534,16 +550,19 @@ export default function InboxView({ state }) {
             <Helmet>
                 <title>{heading || 'Inbox'} | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerTab>Inbox</ContainerTab>
-                        <ContainerBody $fullWidth>
-                            <InboxWrap>{body}</InboxWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerTab>Inbox</ContainerTab>
+                            <ContainerBody $fullWidth>
+                                <InboxWrap>{body}</InboxWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiChevronRight, HiShare, HiGift, HiPencilSquare, HiClipboardDocument, HiCheck } from "react-icons/hi2";
+import { HiHashtag } from "react-icons/hi2";
 import Button from "../components/Button.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { ProfileHeaderSkeleton, FeedCardSkeletonList, FeedCardSkeleton, ListRowSkeletonList, ListRowSkeleton } from "../components/Skeleton.js";
@@ -262,6 +263,10 @@ const SubtleMono = styled(Mono)`
 /** Horizontal inset for content on posts/algo tabs — matches `SettingsWrap` row padding. */
 const ProfilePostsTabGutter = styled.div`
     padding: 0 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0;
+    }
 `;
 
 /** No per-row divider. Padding matches `SettingsView::SettingRow` (0.55rem 1rem).
@@ -294,6 +299,10 @@ const ProfileFieldRow = styled.div`
     @media (max-width: 1000px) {
         gap: 0.5rem;
         padding: 0.5rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 
@@ -328,6 +337,32 @@ const ProfileGrid = styled.div`
         padding: 0;
         margin-top: 0;
     }
+
+    /* Large displays: above ~1500px the shell drops its max-width cap
+     * and pins the sidebar to the left viewport edge. margin: auto
+     * then centers the grid within Main (which is offset right by the
+     * sidebar), not within the viewport. Override with a viewport-
+     * relative margin so the grid is centered against the viewport
+     * regardless of sidebar state.
+     *
+     * Offset = sidebar + divider + Main left padding:
+     *   sidebar visible: 273px,  sidebar hidden: 33px
+     *
+     * Sidebar-hidden applied from 1280px (1200 content + 33*2 ≈ 1266).
+     * Sidebar-visible needs vw >= 1746, so threshold is 1800px. */
+    @media (min-width: 1280px) {
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 600px - 33px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1800px) {
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 600px - 273px);
+            margin-right: auto;
+        }
+    }
 `;
 
 const ProfileMainColumn = styled.div`
@@ -343,6 +378,10 @@ const ProfileAside = styled.aside`
     @media (max-width: 1000px) {
         order: -1;
         padding: 0 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0;
     }
 `;
 
@@ -767,6 +806,10 @@ const TabsRow = styled.div`
     gap: 0.5rem;
     padding: 0.25rem 1rem 0.5rem;
     flex-wrap: wrap;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 /** Right-side slot in `TabsRow` — hosts the feed view toggle on the
@@ -831,50 +874,220 @@ const SectionHeader = styled.div`
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: -0.01em;
+
+    @media (max-width: 600px) {
+        padding: 0.85rem 0 0.35rem;
+    }
 `;
 
-/** Algo tab list primitives — borrow Settings row density. */
+/* -------------------------------------------------------------------------- */
+/* Algo tab — topic preferences, user preferences, similar users              */
+/* -------------------------------------------------------------------------- */
+
+/** Section wrapper — groups a titled header + list of rows. */
+const AlgoSection = styled.section`
+    display: flex;
+    flex-direction: column;
+    margin-top: 0.25rem;
+
+    & + & {
+        margin-top: 0.9rem;
+    }
+`;
+
+/** Section head: title + subtitle, count pill on the right. */
+const AlgoSectionHead = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem 1rem 0.55rem;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.55rem;
+    }
+`;
+
+const AlgoSectionHeadText = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    flex: 1 1 auto;
+`;
+
+const AlgoSectionTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+`;
+
+const AlgoSectionSubtitle = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
+    font-weight: 500;
+    line-height: 1.25;
+`;
+
+const AlgoSectionCount = styled.span`
+    background: ${({ theme }) => theme.colors.actionIconBg};
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.58rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+`;
+
+/** Algo list — thin divider rules between rows; mobile-app row density. */
 const AlgoList = styled.div`
     display: flex;
     flex-direction: column;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const AlgoRow = styled.a`
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.45rem 1rem;
+    gap: 0.7rem;
+    padding: 0.6rem 1rem;
     text-decoration: none;
-    color: ${({ theme }) => theme.colors.cardBodyText};
-    font-family: inherit;
-    font-size: 0.72rem;
-    font-weight: 500;
+    color: inherit;
+    background: transparent;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     cursor: pointer;
     transition: background-color 0.15s ease;
 
-    &:hover { background-color: ${({ theme }) => theme.colors.hoverBg}; }
+    &:hover { background: ${({ theme }) => theme.colors.hoverBg}; }
 
     @media (max-width: 1000px) {
-        padding: 0.45rem 0.85rem;
+        padding: 0.55rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.55rem 0;
     }
 `;
 
-const AlgoValue = styled.span`
-    font-size: 0.72rem;
+/** Circular dicebear avatar — mirrors `FollowsView::AvatarImg` exactly. */
+const AlgoAvatar = styled.img`
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface3};
+    object-fit: cover;
+    flex-shrink: 0;
+    display: block;
+`;
+
+/** "#" chip for topic rows — mirrors `FollowsView::TopicIcon` exactly so
+ *  topics read consistently with the follows / topics list screens. */
+const AlgoTopicChip = styled.span`
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface2};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.subtleText};
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+`;
+
+const AlgoIdentity = styled.div`
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+`;
+
+const AlgoIdentityTitle = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+`;
+
+const AlgoIdentityMeta = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.6rem;
     font-weight: 500;
-    color: ${({ theme, $color }) => $color || theme.colors.cardBodyText};
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+`;
+
+const AlgoIdentityMono = styled(AlgoIdentityMeta)`
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+`;
+
+/** Right-hand weight pill — tinted green for positive, red for negative,
+ *  neutral for zero. Uses the same up/down vote palette tokens so the
+ *  colour language is consistent with post voting. */
+const AlgoWeightPill = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    background: ${({ $tone, theme }) => (
+        $tone === 'up' ? theme.colors.voteUpBg
+        : $tone === 'down' ? theme.colors.voteDownBg
+        : theme.colors.actionIconBg
+    )};
+    color: ${({ $tone, theme }) => (
+        $tone === 'up' ? theme.colors.voteUp
+        : $tone === 'down' ? theme.colors.voteDown
+        : theme.colors.subtleText
+    )};
+    font-size: 0.62rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+    letter-spacing: -0.01em;
+`;
+
+const AlgoWeightStack = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.15rem;
+    flex-shrink: 0;
+`;
+
+const AlgoWeightSub = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.55rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     white-space: nowrap;
 `;
 
 const AlgoEmpty = styled.div`
-    padding: 0.45rem 1rem;
-    color: ${({ theme, $danger }) => $danger ? theme.colors.voteDown : theme.colors.cardBodyText};
-    font-size: 0.72rem;
+    padding: 1rem 1rem;
+    color: ${({ theme, $danger }) => ($danger ? theme.colors.voteDown : theme.colors.subtleText)};
+    font-size: 0.7rem;
     font-weight: 500;
+    text-align: center;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 
     @media (max-width: 1000px) {
-        padding: 0.45rem 0.85rem;
+        padding: 0.85rem;
     }
 `;
 
@@ -882,7 +1095,8 @@ const AlgoEmpty = styled.div`
 const AlgoExpandRow = styled.div`
     display: flex;
     justify-content: center;
-    padding: 0.45rem 1rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const AlgoExpandPill = styled.button`
@@ -890,7 +1104,7 @@ const AlgoExpandPill = styled.button`
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    height: 26px;
+    height: 28px;
     padding: 0 14px;
     border-radius: 9999px;
     border: 1px solid ${({ theme }) => theme.colors.border};
@@ -974,7 +1188,7 @@ const CommentRoot = styled.article`
     &:hover { background: ${({ theme }) => theme.colors.hoverBg}; }
 
     @media (max-width: 600px) {
-        padding: 0.45rem 0.85rem 0.35rem;
+        padding: 0.45rem 0 0.35rem;
         border-radius: 6px;
     }
 `;
@@ -1742,88 +1956,143 @@ function ProfileViewAuthenticated({
                         </>}
 
                         {activeTab === 'algo' && <>
-                            <SectionHeader>Topic preferences</SectionHeader>
-                            <AlgoList>
-                                {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={false} showMeta={false} />}
-                                {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
-                                {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No topic preference data yet.</AlgoEmpty>}
-                                {!prefsError && prefsTopics.length > 0 && (() => {
-                                    const CAP = 5;
-                                    const needsCollapse = prefsTopics.length > CAP * 2;
-                                    const visible = needsCollapse && !showAllTopicPrefs ? [...prefsTopics.slice(0, CAP), null, ...prefsTopics.slice(-CAP)] : prefsTopics;
-                                    return <>
-                                        {visible.map(t => {
-                                            if (t === null) {
-                                                const hidden = prefsTopics.length - CAP * 2;
-                                                return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
-                                            }
-                                            return <AlgoRow key={t.topic} href={`/t/${encodeURIComponent(t.topic)}`} onClick={e => {
+                            {/* Topic preferences — "#" chip per topic, weight pill */}
+                            <AlgoSection>
+                                <AlgoSectionHead>
+                                    <AlgoSectionHeadText>
+                                        <AlgoSectionTitle>Topic preferences</AlgoSectionTitle>
+                                        <AlgoSectionSubtitle>Topics this account engages with the most</AlgoSectionSubtitle>
+                                    </AlgoSectionHeadText>
+                                    {!prefsLoading && !prefsError && prefsTopics.length > 0 && (
+                                        <AlgoSectionCount>{prefsTopics.length}</AlgoSectionCount>
+                                    )}
+                                </AlgoSectionHead>
+                                <AlgoList>
+                                    {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={false} />}
+                                    {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
+                                    {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No topic preference data yet.</AlgoEmpty>}
+                                    {!prefsError && prefsTopics.length > 0 && (() => {
+                                        const CAP = 5;
+                                        const needsCollapse = prefsTopics.length > CAP * 2;
+                                        const visible = needsCollapse && !showAllTopicPrefs ? [...prefsTopics.slice(0, CAP), null, ...prefsTopics.slice(-CAP)] : prefsTopics;
+                                        return <>
+                                            {visible.map(t => {
+                                                if (t === null) {
+                                                    const hidden = prefsTopics.length - CAP * 2;
+                                                    return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
+                                                }
+                                                const tone = t.weight > 0 ? 'up' : t.weight < 0 ? 'down' : 'neutral';
+                                                return <AlgoRow key={t.topic} href={`/t/${encodeURIComponent(t.topic)}`} onClick={e => {
+                                                    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        navigate(`/t/${encodeURIComponent(t.topic)}`);
+                                                    }
+                                                }}>
+                                                    <AlgoTopicChip aria-hidden="true"><HiHashtag /></AlgoTopicChip>
+                                                    <AlgoIdentity>
+                                                        <AlgoIdentityTitle>{t.topic}</AlgoIdentityTitle>
+                                                    </AlgoIdentity>
+                                                    <AlgoWeightPill $tone={tone}>{formatPrefWeight(t.weight)}</AlgoWeightPill>
+                                                </AlgoRow>;
+                                            })}
+                                            {showAllTopicPrefs && prefsTopics.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                        </>;
+                                    })()}
+                                </AlgoList>
+                            </AlgoSection>
+
+                            {/* User preferences — dicebear avatar per author, weight pill */}
+                            <AlgoSection>
+                                <AlgoSectionHead>
+                                    <AlgoSectionHeadText>
+                                        <AlgoSectionTitle>User preferences</AlgoSectionTitle>
+                                        <AlgoSectionSubtitle>Authors this account engages with the most</AlgoSectionSubtitle>
+                                    </AlgoSectionHeadText>
+                                    {!prefsLoading && !prefsError && prefsAuthors.length > 0 && (
+                                        <AlgoSectionCount>{prefsAuthors.length}</AlgoSectionCount>
+                                    )}
+                                </AlgoSectionHead>
+                                <AlgoList>
+                                    {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={true} />}
+                                    {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
+                                    {!prefsLoading && !prefsError && prefsAuthors.length === 0 && <AlgoEmpty>No user preference data yet.</AlgoEmpty>}
+                                    {!prefsError && prefsAuthors.length > 0 && (() => {
+                                        const CAP = 5;
+                                        const needsCollapse = prefsAuthors.length > CAP * 2;
+                                        const visible = needsCollapse && !showAllAuthorPrefs ? [...prefsAuthors.slice(0, CAP), null, ...prefsAuthors.slice(-CAP)] : prefsAuthors;
+                                        return <>
+                                            {visible.map(u => {
+                                                if (u === null) {
+                                                    const hidden = prefsAuthors.length - CAP * 2;
+                                                    return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
+                                                }
+                                                const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
+                                                const displayName = uname && uname !== u.user ? uname : shortenAddress(u.user);
+                                                const avatarSeed = u.user || uname || 'user';
+                                                const tone = u.weight > 0 ? 'up' : u.weight < 0 ? 'down' : 'neutral';
+                                                return <AlgoRow key={u.user} href={`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`} onClick={e => {
+                                                    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`);
+                                                    }
+                                                }}>
+                                                    <AlgoAvatar src={dicebearAvatarUrl(avatarSeed, 32)} alt={`${displayName} avatar`} />
+                                                    <AlgoIdentity>
+                                                        <AlgoIdentityTitle>{uname && uname !== u.user ? uname : displayName}</AlgoIdentityTitle>
+                                                        <AlgoIdentityMono title={u.user}>{shortenAddress(u.user)}</AlgoIdentityMono>
+                                                    </AlgoIdentity>
+                                                    <AlgoWeightPill $tone={tone}>{formatPrefWeight(u.weight)}</AlgoWeightPill>
+                                                </AlgoRow>;
+                                            })}
+                                            {showAllAuthorPrefs && prefsAuthors.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                        </>;
+                                    })()}
+                                </AlgoList>
+                            </AlgoSection>
+
+                            {/* Similar users — dicebear avatar + similarity score */}
+                            <AlgoSection>
+                                <AlgoSectionHead>
+                                    <AlgoSectionHeadText>
+                                        <AlgoSectionTitle>Similar users</AlgoSectionTitle>
+                                        <AlgoSectionSubtitle>Accounts whose taste overlaps with this profile</AlgoSectionSubtitle>
+                                    </AlgoSectionHeadText>
+                                    {!similarUsersLoading && !similarUsersError && similarUsers.length > 0 && (
+                                        <AlgoSectionCount>{similarUsers.length}</AlgoSectionCount>
+                                    )}
+                                </AlgoSectionHead>
+                                <AlgoList>
+                                    {similarUsersLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={true} />}
+                                    {!similarUsersLoading && similarUsersError && <AlgoEmpty $danger>{similarUsersError}</AlgoEmpty>}
+                                    {!similarUsersLoading && !similarUsersError && similarUsers.length === 0 && <AlgoEmpty>No similar users found yet.</AlgoEmpty>}
+                                    {!similarUsersError && similarUsers.length > 0 && <>
+                                        {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map(u => {
+                                            const displayName = u.username || shortenAddress(u.address);
+                                            const avatarSeed = u.address || u.username || 'user';
+                                            const tone = u.similarity >= 0 ? 'up' : 'down';
+                                            const pct = `${u.similarity >= 0 ? '+' : ''}${Math.round(u.similarity * 100)}%`;
+                                            return <AlgoRow key={u.address} href={`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`} onClick={e => {
                                                 if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
                                                     e.preventDefault();
-                                                    navigate(`/t/${encodeURIComponent(t.topic)}`);
+                                                    navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`);
                                                 }
                                             }}>
-                                                <span>#{t.topic}</span>
-                                                <AlgoValue $color={colorForWeight(t.weight)}>{formatPrefWeight(t.weight)}</AlgoValue>
+                                                <AlgoAvatar src={dicebearAvatarUrl(avatarSeed, 32)} alt={`${displayName} avatar`} />
+                                                <AlgoIdentity>
+                                                    <AlgoIdentityTitle>{displayName}</AlgoIdentityTitle>
+                                                    <AlgoIdentityMono title={u.address}>{shortenAddress(u.address)}</AlgoIdentityMono>
+                                                </AlgoIdentity>
+                                                <AlgoWeightStack>
+                                                    <AlgoWeightPill $tone={tone}>{pct}</AlgoWeightPill>
+                                                    <AlgoWeightSub>{u.shared_dimensions} shared</AlgoWeightSub>
+                                                </AlgoWeightStack>
                                             </AlgoRow>;
                                         })}
-                                        {showAllTopicPrefs && prefsTopics.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
-                                    </>;
-                                })()}
-                            </AlgoList>
-
-                            <SectionHeader>User preferences</SectionHeader>
-                            <AlgoList>
-                                {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={false} showMeta={false} />}
-                                {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
-                                {!prefsLoading && !prefsError && prefsAuthors.length === 0 && <AlgoEmpty>No user preference data yet.</AlgoEmpty>}
-                                {!prefsError && prefsAuthors.length > 0 && (() => {
-                                    const CAP = 5;
-                                    const needsCollapse = prefsAuthors.length > CAP * 2;
-                                    const visible = needsCollapse && !showAllAuthorPrefs ? [...prefsAuthors.slice(0, CAP), null, ...prefsAuthors.slice(-CAP)] : prefsAuthors;
-                                    return <>
-                                        {visible.map(u => {
-                                            if (u === null) {
-                                                const hidden = prefsAuthors.length - CAP * 2;
-                                                return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
-                                            }
-                                            const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
-                                            return <AlgoRow key={u.user} href={`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`} onClick={e => {
-                                                if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`);
-                                                }
-                                            }}>
-                                                <span>{uname && uname !== u.user ? uname : shortenAddress(u.user)}</span>
-                                                <AlgoValue $color={colorForWeight(u.weight)}>{formatPrefWeight(u.weight)}</AlgoValue>
-                                            </AlgoRow>;
-                                        })}
-                                        {showAllAuthorPrefs && prefsAuthors.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
-                                    </>;
-                                })()}
-                            </AlgoList>
-
-                            <SectionHeader>Similar users</SectionHeader>
-                            <AlgoList>
-                                {similarUsersLoading && <ListRowSkeletonList count={5} hasAvatar={false} showMeta={false} />}
-                                {!similarUsersLoading && similarUsersError && <AlgoEmpty $danger>{similarUsersError}</AlgoEmpty>}
-                                {!similarUsersLoading && !similarUsersError && similarUsers.length === 0 && <AlgoEmpty>No similar users found yet.</AlgoEmpty>}
-                                {!similarUsersError && similarUsers.length > 0 && <>
-                                    {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map(u => <AlgoRow key={u.address} href={`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`} onClick={e => {
-                                        if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
-                                            e.preventDefault();
-                                            navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`);
-                                        }
-                                    }}>
-                                        <span>{u.username || shortenAddress(u.address)}</span>
-                                        <AlgoValue $color={u.similarity >= 0 ? theme.colors.voteUp : theme.colors.voteDown}>
-                                            {u.similarity >= 0 ? '+' : ''}{Math.round(u.similarity * 100)}% ({u.shared_dimensions} shared)
-                                        </AlgoValue>
-                                    </AlgoRow>)}
-                                    {!showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(true)}>Show {similarUsers.length - 5} more</AlgoExpandPill></AlgoExpandRow>}
-                                    {showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
-                                </>}
-                            </AlgoList>
+                                        {!showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(true)}>Show {similarUsers.length - 5} more</AlgoExpandPill></AlgoExpandRow>}
+                                        {showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                    </>}
+                                </AlgoList>
+                            </AlgoSection>
                         </>}
 
                             </TabContent>

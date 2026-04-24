@@ -1,7 +1,9 @@
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiClipboardDocument, HiCheck } from "react-icons/hi2";
-import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
+import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { Skeleton, ListRowSkeletonList } from "../components/Skeleton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
@@ -27,12 +29,20 @@ import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
 /* -------------------------------------------------------------------------- */
 
 const NetworkWrap = styled.div`
-    width: 90%;
-    margin: -0.75rem auto 0;
+    width: 100%;
+    max-width: 820px;
+    margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
-        width: 100%;
         margin-top: -0.5rem;
+    }
+
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -52,6 +62,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -76,6 +90,10 @@ const TabsRow = styled.div`
     grid-template-columns: repeat(${({ $count }) => $count || 2}, 1fr);
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     margin: 0 1rem;
+
+    @media (max-width: 600px) {
+        margin: 0;
+    }
 `;
 
 const TabButton = styled.button`
@@ -128,6 +146,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.35rem;
+    }
 `;
 
 const SectionBody = styled.div`
@@ -157,6 +179,10 @@ const FieldRow = styled.div`
     @media (max-width: 1000px) {
         gap: 0.5rem;
         padding: 0.5rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 
@@ -262,6 +288,10 @@ const ListBody = styled.div`
     @media (max-width: 1000px) {
         padding: 0 0.85rem 0.35rem;
     }
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.35rem;
+    }
 `;
 
 const PeerRow = styled.div`
@@ -337,6 +367,10 @@ const EmptyNote = styled.div`
     @media (max-width: 1000px) {
         padding: 0.4rem 0.85rem 0.35rem;
     }
+
+    @media (max-width: 600px) {
+        padding: 0.4rem 0 0.35rem;
+    }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -364,6 +398,10 @@ const ChartRow = styled.div`
     @media (max-width: 700px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 
@@ -906,11 +944,12 @@ export default function NetworkView({ state }) {
             <Helmet>
                 <title>Network | Mirage</title>
             </Helmet>
-            <ModernPostFeed>
-                <CappedPageColumn>
-                    <NetworkTabbedContainer>
-                        <NetworkShellBody>
-                            <NetworkWrap>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <NetworkTabbedContainer>
+                            <NetworkShellBody>
+                                <NetworkWrap>
                             <HeaderRow>
                                 <HeaderTitle>Network</HeaderTitle>
                             </HeaderRow>
@@ -1067,11 +1106,13 @@ export default function NetworkView({ state }) {
                                     </ChartRow>
                                 </>
                             )}
-                            </NetworkWrap>
-                        </NetworkShellBody>
-                    </NetworkTabbedContainer>
-                </CappedPageColumn>
-            </ModernPostFeed>
+                                </NetworkWrap>
+                            </NetworkShellBody>
+                        </NetworkTabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 }

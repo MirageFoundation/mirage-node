@@ -29,7 +29,7 @@ import { useReports } from "../../../logic/useReports";
 
 const ReportsWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
@@ -50,6 +50,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.5rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -81,7 +85,7 @@ const ReportRow = styled.article`
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 
     @media (max-width: 600px) {
-        padding: 0.55rem 0.85rem 0.7rem;
+        padding: 0.55rem 0 0.7rem;
     }
 `;
 

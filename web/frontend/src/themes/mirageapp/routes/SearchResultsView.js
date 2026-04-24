@@ -21,6 +21,8 @@ import {
     ContainerTab,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import {
     FeedViewToggle,
     MemoCompactRow,
@@ -56,18 +58,19 @@ const TABS = [
 
 const SearchWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -77,6 +80,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 /**
@@ -100,6 +107,10 @@ const MobileSearchForm = styled.form`
         &:focus-within {
             background: ${({ theme }) => theme.colors.focusBlue};
         }
+    }
+
+    @media (max-width: 600px) {
+        margin: 0.15rem 0 0.6rem;
     }
 `;
 
@@ -205,6 +216,10 @@ const TrendingSectionLabel = styled.div`
     text-transform: uppercase;
     color: ${({ theme }) => theme.colors.subtleText};
     padding: 0.75rem 1rem 0.35rem;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.35rem;
+    }
 `;
 
 const TrendingList = styled.div`
@@ -248,6 +263,10 @@ const HeaderSubRow = styled.div`
     gap: 0.5rem;
     min-height: 28px;
     padding: 0 1rem 0.35rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.35rem;
+    }
 `;
 
 const HeaderSub = styled.div`
@@ -361,8 +380,15 @@ const RowItem = styled(Link)`
     &:hover {
         background: ${({ theme }) => theme.colors.hoverBg};
     }
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0;
+    }
 `;
 
+/** "#" pill for topic result rows — mirrors `FollowsView::TopicIcon` /
+ *  `ProfileView::AlgoTopicChip` so topic chips read consistently across
+ *  the follows, algo, and search-results screens. */
 const RowIcon = styled.span`
     flex-shrink: 0;
     display: inline-flex;
@@ -370,11 +396,14 @@ const RowIcon = styled.span`
     justify-content: center;
     width: 28px;
     height: 28px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface2};
+    border: 1px solid ${({ theme }) => theme.colors.border};
     color: ${({ theme }) => theme.colors.subtleText};
 
     svg {
-        width: 18px;
-        height: 18px;
+        width: 14px;
+        height: 14px;
     }
 `;
 
@@ -385,7 +414,7 @@ const RowAvatar = styled.img`
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    background: #232830;
+    background: ${({ theme }) => theme.colors.surface3};
     object-fit: cover;
 `;
 
@@ -397,13 +426,14 @@ const RowMain = styled.div`
     gap: 0.12rem;
 `;
 
-/* Primary line in topic / user result rows. Matches the Inbox row text
- * style (0.7rem / weight 500) so all full-bleed list routes share one
- * typography rhythm. */
+/* Primary line in topic / user result rows. Matches
+ * `ProfileView::AlgoIdentityTitle` (0.78rem / 600) so topic + user
+ * names read the same across the algo tab and search results. */
 const RowPrimary = styled.div`
-    font-size: 0.7rem;
-    font-weight: 500;
+    font-size: 0.78rem;
+    font-weight: 600;
     color: ${({ theme }) => theme.colors.text};
+    line-height: 1.25;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -711,16 +741,19 @@ export default function SearchResultsView({ state }) {
             <Helmet>
                 <title>{query ? `Search: ${query}` : "Search"} | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerTab>Search</ContainerTab>
-                        <ContainerBody $fullWidth>
-                            <SearchWrap>{body}</SearchWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerTab>Search</ContainerTab>
+                            <ContainerBody $fullWidth>
+                                <SearchWrap>{body}</SearchWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 
@@ -730,33 +763,36 @@ export default function SearchResultsView({ state }) {
                 <Helmet>
                     <title>{query ? `Search: ${query}` : "Search"} | Mirage</title>
                 </Helmet>
-                <div>
-                    <ModernPostFeed>
-                        <LoggedOutPromptCard
-                            role="region"
-                            aria-label="Search on Mirage"
-                            title={query ? "Sign in to search Mirage" : "Search Mirage"}
-                            description="Create an account or sign in to search topics, users, and posts."
-                            notice="Currently in Private Beta — Invite Only"
-                            stats={getCachedWelcomeStats()}
-                            links={[
-                                {
-                                    label: "Watch Introduction (YouTube)",
-                                    href: "https://www.youtube.com/watch?v=TOvP32ihQ0M",
-                                    external: true,
-                                },
-                                {
-                                    label: "Learn More",
-                                    href: "https://mirage.foundation",
-                                    external: true,
-                                },
-                            ]}
-                            inviteText="Have an invite code? Join the community today."
-                            primaryLabel="Create account"
-                            secondaryLabel="Sign in"
-                        />
-                    </ModernPostFeed>
-                </div>
+                <FeedRailRow $feedViewMode="card">
+                    <FeedCol>
+                        <ModernPostFeed>
+                            <LoggedOutPromptCard
+                                role="region"
+                                aria-label="Search on Mirage"
+                                title={query ? "Sign in to search Mirage" : "Search Mirage"}
+                                description="Create an account or sign in to search topics, users, and posts."
+                                notice="Currently in Private Beta — Invite Only"
+                                stats={getCachedWelcomeStats()}
+                                links={[
+                                    {
+                                        label: "Watch Introduction (YouTube)",
+                                        href: "https://www.youtube.com/watch?v=TOvP32ihQ0M",
+                                        external: true,
+                                    },
+                                    {
+                                        label: "Learn More",
+                                        href: "https://mirage.foundation",
+                                        external: true,
+                                    },
+                                ]}
+                                inviteText="Have an invite code? Join the community today."
+                                primaryLabel="Create account"
+                                secondaryLabel="Sign in"
+                            />
+                        </ModernPostFeed>
+                    </FeedCol>
+                    <FeedRightRail />
+                </FeedRailRow>
             </ContentGrid>
         );
     }

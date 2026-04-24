@@ -8,6 +8,8 @@ import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
@@ -24,6 +26,7 @@ import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
+import { dicebearAvatarUrl } from "../../../utils/avatar";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -85,7 +88,7 @@ const PostCard = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.65rem 0.85rem 0.7rem;
+        padding: 0.65rem 0 0.7rem;
         gap: 0.4rem;
     }
 `;
@@ -93,51 +96,301 @@ const PostCard = styled.div`
 /**
  * Comment row — reddit + mobile-app hybrid.
  *
- * Full-bleed flat row with a **left thread rail** at every depth level
- * (`1px solid theme.colors.border`, R3). No card background of its own;
- * hover lifts to `hoverBg` matching the feed card rhythm. Indentation is
- * carried by `margin-left` + the rail, matching mobile `comment-item.tsx`.
+ * Full-bleed flat row with **continuous Reddit-style ancestor rails**.
+ * Each comment renders one vertical 1px rail per ancestor depth level
+ * (drawn as 1px-wide `background-image` linear-gradients, so they tile
+ * seamlessly across consecutive sibling/descendant cards and form one
+ * unbroken vertical line through the whole sub-thread). Indentation is
+ * carried by `padding-left`, matching mobile `comment-item.tsx`.
  *
- * Level-0 (direct replies to the root) get no rail since they already sit
- * against the root post divider.
- *
- * Each comment also gets a subtle bottom divider between siblings so deep
- * threads read cleanly, even when text lengths differ dramatically.
+ * Level-0 (root) uses `PostCard` instead, so this component only ever
+ * sees `$level >= 1`. We deliberately drop the per-comment bottom divider
+ * here — the rails carry the visual rhythm and a horizontal line at every
+ * comment chops the rails into disconnected stubs (which is how the old
+ * styling read).
  */
+/*
+ * Reddit-style avatar-anchored threading.
+ *
+ * Geometry per non-root comment:
+ *   avatarLeft   = BASE_LEFT + (level - 1) * INDENT
+ *   railX        = avatarLeft - INDENT + AVATAR_SIZE / 2   // parent avatar center
+ *   contentLeft  = avatarLeft + AVATAR_SIZE + CONTENT_GAP
+ *
+ * Thread guide rules:
+ *   - Each parent draws a spine (::after) from its avatar center down to
+ *     the card bottom, BUT ONLY if it actually has children.
+ *   - Each child draws a J-curve (::before) from the parent's avatar
+ *     center down to its own avatar left.
+ *   - Non-last children also draw a full-height ancestor rail at the
+ *     parent's column so the line continues through them to the next
+ *     sibling. LAST children do NOT draw this rail — the line stops
+ *     at their avatar (J-curve only).
+ *   - The same logic applies recursively for grandparent columns.
+ */
+const COMMENT_BASE_LEFT_PX = 12;
+const COMMENT_BASE_LEFT_PX_MOBILE = 8;
+const COMMENT_INDENT_PX = 26;
+const COMMENT_INDENT_PX_MOBILE = 22;
+const COMMENT_AVATAR_SIZE_PX = 24;
+const COMMENT_AVATAR_SIZE_PX_MOBILE = 22;
+const COMMENT_RAIL_WIDTH_PX = 1;
+const COMMENT_CURVE_RADIUS_PX = 10;
+const COMMENT_CURVE_RADIUS_PX_MOBILE = 9;
+const COMMENT_CONTENT_GAP_PX = 8;
+const COMMENT_CONTENT_GAP_PX_MOBILE = 6;
+/* Avatar center y — split by collapsed state because padding-top differs.
+ * Computed as: padding-top + (meta-row-height / 2).
+ *   collapsed padding-top = 0.45rem ≈  7.2px  → center ≈ 13px
+ *   expanded  padding-top = 0.55rem ≈  8.8px  → center ≈ 15px
+ * Mobile uses proportionally smaller values. */
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX = 19;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX = 21;
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE = 17;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE = 19;
+
+function commentAvatarLeftPx(level, baseLeft, indent) {
+    const lvl = Math.max(Number(level) || 0, 1);
+    return baseLeft + (lvl - 1) * indent;
+}
+
+function commentContentLeftPx(level, baseLeft, indent, avatarSize, gap) {
+    const lvl = Math.max(Number(level) || 0, 0);
+    if (lvl === 0) return null;
+    return commentAvatarLeftPx(lvl, baseLeft, indent) + avatarSize + gap;
+}
+
+function commentRailXPx(level, baseLeft, indent, avatarSize) {
+    const lvl = Math.max(Number(level) || 0, 2);
+    return commentAvatarLeftPx(lvl - 1, baseLeft, indent) + avatarSize / 2;
+}
+
+/* In a pre-order flat array, a comment is the last child of its parent
+ * if every comment after it is either a descendant or belongs to an
+ * ancestor's next sibling branch. */
+function isLastChildInPreorder(array, index) {
+    const level = array[index].level;
+    for (let j = index + 1; j < array.length; j++) {
+        if (array[j].level <= level - 1) return true;
+        if (array[j].level === level) return false;
+    }
+    return true;
+}
+
+/* Find the parent of the comment at `index` in a pre-order array. */
+function getParentIndex(array, index) {
+    const level = array[index].level;
+    for (let j = index - 1; j >= 0; j--) {
+        if (array[j].level === level - 1) return j;
+    }
+    return -1;
+}
+
+/* Return the ancestor depths (1..level-1) that should draw a full-height
+ * rail on this comment's card. A depth D rail continues through this
+ * comment only if the ancestor at depth D+1 (in this comment's chain)
+ * is NOT the last child of its parent. */
+function getAncestorRailDepths(array, index) {
+    const level = array[index].level;
+    const depths = [];
+    let currentIndex = index;
+    for (let targetLevel = level; targetLevel >= 2; targetLevel--) {
+        if (!isLastChildInPreorder(array, currentIndex)) {
+            depths.push(targetLevel - 1);
+        }
+        const parentIndex = getParentIndex(array, currentIndex);
+        if (parentIndex === -1) break;
+        currentIndex = parentIndex;
+    }
+    return depths;
+}
+
+function buildAncestorRails(level, baseLeft, indent, avatarSize, color, activeDepths) {
+    const N = Math.max(Number(level) || 0, 0);
+    if (N < 2 || !activeDepths || activeDepths.length === 0) {
+        return { image: 'none', position: '0 0', size: '0 0' };
+    }
+    const images = [];
+    const positions = [];
+    const sizes = [];
+    for (const K of activeDepths) {
+        const x = commentAvatarLeftPx(K, baseLeft, indent) + avatarSize / 2;
+        images.push(`linear-gradient(${color}, ${color})`);
+        positions.push(`${x}px 0`);
+        sizes.push(`${COMMENT_RAIL_WIDTH_PX}px 100%`);
+    }
+    return {
+        image: images.join(', '),
+        position: positions.join(', '),
+        size: sizes.join(', '),
+    };
+}
+
 const CommentCard = styled(PostCard)`
-    border-bottom: 1px solid ${({ theme }) => theme.colors.borderSubtle};
+    position: relative;
+    border-bottom: none;
+    border-left: none;
     box-shadow: none;
     background: transparent;
+    background-color: transparent;
+    background-repeat: no-repeat;
+    margin-left: 0;
     gap: 0.35rem;
 
-    /* Each level indents a clean 1.15rem; deeper levels render a rail. */
-    margin-left: ${({ $level }) => `${Math.max(Number($level) || 0, 0) * 1.15}rem`};
-    padding: ${({ $isCollapsed, $level }) => {
-        const leftInset = Number($level) > 0 ? '0.9rem' : '1rem';
-        if ($isCollapsed) return `0.45rem ${leftInset} 0.45rem`;
-        return `0.65rem ${leftInset} 0.75rem`;
-    }};
-    border-left: ${({ $level, theme }) =>
-        Number($level) > 0 ? `1px solid ${theme.colors.border}` : 'none'};
+    /* Ancestor thread guides — only drawn at depths where this comment
+     * is NOT the last child in its ancestor chain, so the line continues
+     * through non-last siblings and stops at the last sibling's avatar. */
+    ${({ $level, $activeDepths, theme }) => {
+        const r = buildAncestorRails(
+            $level,
+            COMMENT_BASE_LEFT_PX,
+            COMMENT_INDENT_PX,
+            COMMENT_AVATAR_SIZE_PX,
+            theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
+            $activeDepths,
+        );
+        return `
+            background-image: ${r.image};
+            background-position: ${r.position};
+            background-size: ${r.size};
+        `;
+    }}
 
-    &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
+    /* Own spine: drops from this comment's avatar center to the card
+     * bottom so descendants can continue the thread. Only drawn when
+     * this comment actually has children. */
+    &::after {
+        content: '';
+        position: absolute;
+        display: ${({ $level, $hasChildren, $isCollapsed }) => (Number($level) > 0 && $hasChildren && !$isCollapsed ? 'block' : 'none')};
+        top: ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+        left: ${({ $level }) =>
+            `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`};
+        width: ${COMMENT_RAIL_WIDTH_PX}px;
+        height: calc(100% - ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px);
+        background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        pointer-events: none;
     }
 
-    /* Persistent highlight for inbox-linked comments: left-rail accent +
-     * subtle tinted background so the single-canvas rule still holds. */
+    /* J-curve elbow: drops from the PARENT avatar's vertical center
+     * (one column left) down to this comment's avatar vertical center,
+     * then curves right and lands at this comment's avatar LEFT edge.
+     * Always drawn for depth >= 2 — it is the visual hook that connects
+     * this reply to its parent, regardless of whether this reply is
+     * the last child. */
+    &::before {
+        content: '';
+        position: absolute;
+        display: ${({ $level }) => (Number($level) >= 2 ? 'block' : 'none')};
+        top: 0;
+        left: ${({ $level }) =>
+            `${commentRailXPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`};
+        width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
+        height: ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
+        pointer-events: none;
+    }
+
+    padding: ${({ $isCollapsed, $level }) => {
+        const lvl = Math.max(Number($level) || 0, 0);
+        const leftPad = lvl > 0
+            ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX)}px`
+            : '1rem';
+        if ($isCollapsed) return `0.45rem 1rem 0.45rem ${leftPad}`;
+        return `0.55rem 1rem 0.7rem ${leftPad}`;
+    }};
+
+    &:hover {
+        background-color: ${({ theme }) => theme.colors.hoverBg};
+    }
+
     &.inbox-highlight {
         box-shadow: inset 3px 0 0 0 ${({ theme }) => theme.colors.inboxHighlightRail} !important;
-        background: ${({ theme }) => theme.colors.inboxHighlightBg} !important;
+        background-color: ${({ theme }) => theme.colors.inboxHighlightBg} !important;
     }
 
     @media (max-width: 1000px) {
-        margin-left: ${({ $level }) => `${Math.max(Number($level) || 0, 0) * 0.9}rem`};
+        ${({ $level, $activeDepths, theme }) => {
+            const r = buildAncestorRails(
+                $level,
+                COMMENT_BASE_LEFT_PX_MOBILE,
+                COMMENT_INDENT_PX_MOBILE,
+                COMMENT_AVATAR_SIZE_PX_MOBILE,
+                theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
+                $activeDepths,
+            );
+            return `
+                background-image: ${r.image};
+                background-position: ${r.position};
+                background-size: ${r.size};
+            `;
+        }}
+        &::after {
+            left: ${({ $level }) =>
+                `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`};
+            top: ${({ $isCollapsed }) =>
+                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+            height: calc(100% - ${({ $isCollapsed }) =>
+                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px);
+        }
+        &::before {
+            left: ${({ $level }) =>
+                `${commentRailXPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`};
+            width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
+            height: ${({ $isCollapsed }) =>
+                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+            border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
+        }
         padding: ${({ $isCollapsed, $level }) => {
-            const leftInset = Number($level) > 0 ? '0.8rem' : '0.85rem';
-            if ($isCollapsed) return `0.4rem ${leftInset}`;
-            return `0.55rem ${leftInset} 0.65rem`;
+            const lvl = Math.max(Number($level) || 0, 0);
+            const leftPad = lvl > 0
+                ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE)}px`
+                : '0.85rem';
+            if ($isCollapsed) return `0.4rem 0.85rem 0.4rem ${leftPad}`;
+            return `0.5rem 0.85rem 0.6rem ${leftPad}`;
         }};
+    }
+`;
+
+/**
+ * DiceBear identicon avatar anchored to the username row of a
+ * `CommentCard`. Vertically centered on the username row text mid-line
+ * via `transform: translateY(-50%)` against a state-aware top constant.
+ * Sits at the end of the J-curve so the rail visually "delivers" the
+ * thread connection from the parent avatar into this comment's avatar.
+ */
+const CommentAvatar = styled.img.attrs({
+    alt: '',
+    'aria-hidden': true,
+    draggable: false,
+    loading: 'lazy',
+})`
+    position: absolute;
+    top: ${({ $isCollapsed }) =>
+        ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+    transform: translateY(-50%);
+    left: ${({ $level }) =>
+        `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX)}px`};
+    width: ${COMMENT_AVATAR_SIZE_PX}px;
+    height: ${COMMENT_AVATAR_SIZE_PX}px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.surface2 || theme.colors.panelAlt || theme.colors.bg};
+    object-fit: cover;
+    pointer-events: none;
+    z-index: 2;
+
+    @media (max-width: 1000px) {
+        top: ${({ $isCollapsed }) =>
+            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+        left: ${({ $level }) =>
+            `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE)}px`};
+        width: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
+        height: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
     }
 `;
 /**
@@ -173,34 +426,121 @@ const StyledThreadReminder = styled.div`
  * the parent comment rail depth.
  */
 const ContinueThreadLink = styled(Link)`
+    position: relative;
     display: block;
     background: transparent;
+    background-color: transparent;
+    background-repeat: no-repeat;
     border: none;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    border-left: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 0;
-    padding: 0.55rem 0.85rem;
-    margin-left: ${({ $level }) => `${0.9 * Math.max(Number($level) || 0, 0) + 0.9}rem`};
+    margin-left: 0;
     margin-top: 0;
     margin-bottom: 0;
     color: ${({ theme }) => theme.colors.link};
     font-size: 0.72rem;
     font-weight: 500;
     text-decoration: none;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color 0.15s ease, background-color 0.15s ease;
+
+    /* The link inherits the parent's ancestor rails so the thread line
+     * continues seamlessly into this row. */
+    ${({ $activeDepths, theme }) => {
+        const r = buildAncestorRails(
+            0, /* level is irrelevant when activeDepths is passed directly */
+            COMMENT_BASE_LEFT_PX,
+            COMMENT_INDENT_PX,
+            COMMENT_AVATAR_SIZE_PX,
+            theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
+            $activeDepths,
+        );
+        return `
+            background-image: ${r.image};
+            background-position: ${r.position};
+            background-size: ${r.size};
+        `;
+    }}
+
+    &::after {
+        content: '';
+        position: absolute;
+        top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
+        left: ${({ $level }) => {
+            const effective = (Number($level) || 0) + 1;
+            return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`;
+        }};
+        width: ${COMMENT_RAIL_WIDTH_PX}px;
+        height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px);
+        background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        pointer-events: none;
+    }
+
+    &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: ${({ $level }) => {
+            const effective = (Number($level) || 0) + 1;
+            return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`;
+        }};
+        width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
+        height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
+        border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
+        border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
+        pointer-events: none;
+    }
+
+    padding: ${({ $level }) => {
+        const effective = (Number($level) || 0) + 1;
+        const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX);
+        return `0.55rem 1rem 0.55rem ${leftPad}px`;
+    }};
 
     &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
+        background-color: ${({ theme }) => theme.colors.hoverBg};
         color: ${({
     theme
 }) => theme.colors.linkHover};
     }
 
     @media (max-width: 1000px) {
-        margin-left: ${({
-    $level
-}) => `${0.6 * (Number($level) || 0)}rem`};
-        padding: 0.4rem 0.6rem;
+        ${({ $activeDepths, theme }) => {
+            const r = buildAncestorRails(
+                0,
+                COMMENT_BASE_LEFT_PX_MOBILE,
+                COMMENT_INDENT_PX_MOBILE,
+                COMMENT_AVATAR_SIZE_PX_MOBILE,
+                theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
+                $activeDepths,
+            );
+            return `
+                background-image: ${r.image};
+                background-position: ${r.position};
+                background-size: ${r.size};
+            `;
+        }}
+        &::after {
+            left: ${({ $level }) => {
+                const effective = (Number($level) || 0) + 1;
+                return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`;
+            }};
+            top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px;
+            height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px);
+        }
+        &::before {
+            left: ${({ $level }) => {
+                const effective = (Number($level) || 0) + 1;
+                return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`;
+            }};
+            width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
+            height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px;
+            border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
+        }
+        padding: ${({ $level }) => {
+            const effective = (Number($level) || 0) + 1;
+            const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE);
+            return `0.4rem 0.85rem 0.4rem ${leftPad}px`;
+        }};
     }
 `;
 
@@ -231,7 +571,7 @@ const TopicHeroCard = styled.div`
     @media (max-width: 600px) {
         flex-direction: column;
         gap: 0.35rem;
-        padding: 0.35rem 0.75rem 0.5rem;
+        padding: 0.35rem 0 0.5rem;
     }
 `;
 const TopicHeroTopRow = styled.div`
@@ -456,30 +796,32 @@ const MetaSeparator = styled.span`
  */
 const CollapseToggle = styled.button`
     appearance: none;
-    background: none;
-    border: none;
-    padding: 0 0.15rem;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    padding: 0;
+    box-sizing: border-box;
     margin: 0;
+    width: 14px;
+    height: 14px;
     color: ${({ theme }) => theme.colors.feedCtrlText};
     font-family: inherit;
-    font-size: 0.62rem;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 700;
     line-height: 1;
     cursor: pointer;
-    transition: color 0.12s ease;
+    transition: color 0.12s ease, border-color 0.12s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    vertical-align: middle;
+    text-align: center;
+    user-select: none;
 
-    svg {
-        width: 12px;
-        height: 12px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 2.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        transition: transform 0.15s ease;
+    & > span {
+        display: block;
+        line-height: 1;
+        transform: translateY(-0.5px);
     }
 
     &:hover {
@@ -538,6 +880,8 @@ const MobileRootMetaBottom = styled.div`
 
 // Desktop version - hide on mobile for root posts
 const DesktopMetaInfoRow = styled(MetaInfoRow)`
+    cursor: ${({ $clickable }) => ($clickable ? 'pointer' : 'default')};
+    user-select: ${({ $clickable }) => ($clickable ? 'none' : 'auto')};
     @media (max-width: 600px) {
         display: ${({
     $hideOnMobile
@@ -783,18 +1127,66 @@ const StyledReply = styled.div`
         background: transparent !important;
         border: 1px solid transparent !important;
         border-radius: 6px !important;
+        box-sizing: border-box !important;
+        width: 24px !important;
         min-width: 24px !important;
         height: 24px !important;
         padding: 2px 4px !important;
         color: ${({ theme }) => theme.colors.feedCtrlText} !important;
         transition: background 0.12s ease, color 0.12s ease !important;
         box-shadow: none !important;
+        vertical-align: middle !important;
+    }
+    /* Center all toolbar children on the same baseline so the right
+     * icon group (sticker/GIF/upload) lines up with the left formatting
+     * icons. Scoped to the Toolbar (first child of EditorContainer)
+     * only — must NOT touch the textarea wrapper below it.
+     */
+    [data-mirageapp-editor] > div:first-child > div:first-child {
+        align-items: center !important;
+    }
+    /* The toolbarExtra wrapper is the only plain <div> directly inside
+     * Toolbar; flatten its child spacing so it matches the Toolbar gap.
+     */
+    [data-mirageapp-editor] > div:first-child > div:first-child > div {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 0.25rem !important;
+    }
+    /* StickerPicker / GifPicker wrap their button in a PickerWrapper
+     * (inline-block). Promote it to a 24px flex row so its <button>
+     * sits on the same baseline as the sibling MediaIconButton (which
+     * is a direct button in the flex row).
+     */
+    [data-mirageapp-editor] > div:first-child > div:first-child > div > * {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        height: 24px !important;
+        line-height: 1 !important;
+        vertical-align: middle !important;
     }
     [data-mirageapp-editor] button[type='button'] svg,
+    [data-mirageapp-editor] button[type='button'] img,
     [data-mirageapp-editor] button[type='button'] .md-icon {
         max-width: 14px !important;
         max-height: 14px !important;
+        width: 14px !important;
+        height: 14px !important;
         font-size: 0.78rem !important;
+    }
+    /* The GIF icon is a text-in-svg glyph; bump it slightly so the
+     * "GIF" label reads clearly at toolbar scale.
+     */
+    [data-mirageapp-editor] button[type='button'][aria-label='GIFs'] svg,
+    [data-mirageapp-editor] button[type='button'][aria-label='GIFs'] svg text {
+        max-width: 20px !important;
+        max-height: 20px !important;
+        width: 20px !important;
+        height: 20px !important;
+    }
+    [data-mirageapp-editor] button[type='button'][aria-label='GIFs'] {
+        padding: 0 !important;
     }
     /* Bold (B) and Italic (I) glyphs render as text via styled spans, so
      * the SVG/font-size rules above don't reach them. Shrink them here.
@@ -812,6 +1204,14 @@ const StyledReply = styled.div`
         background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
         color: ${({ theme }) => theme.colors.text} !important;
         border-color: transparent !important;
+    }
+
+    /* Normalize gap between the toolbarExtra (sticker/GIF/upload)
+     * buttons so their spacing matches the left-side formatting icons
+     * (Toolbar uses gap: 0.25rem).
+     */
+    [data-mirageapp-editor] > div:first-child > div {
+        gap: 0.25rem !important;
     }
 
     /* --- Preview toggle (custom checkmark) ----------------------------
@@ -949,6 +1349,21 @@ const StyledReply = styled.div`
         border-color: ${({ theme }) => theme.colors.borderStrong} !important;
         transform: none !important;
     }
+`;
+
+/* Thin vertical rule used inside the reply's MarkdownEditor toolbar to
+ * separate the formatting icon group (B, I, link, quote, code, lists,
+ * spoiler) from the media icon group (sticker/emoji, GIF, upload) we
+ * render on the right side via `toolbarExtra`.
+ */
+const ToolbarDivider = styled.span`
+    display: inline-block;
+    width: 1px;
+    height: 18px;
+    background: ${({ theme }) => theme.colors.border};
+    margin: 0;
+    align-self: center;
+    flex-shrink: 0;
 `;
 
 // Mobile reply overlay - fullscreen focused reply experience (leaves room for bottom nav)
@@ -1742,81 +2157,87 @@ function ViewPostView({
     if (isPostBlocked || unblockInFlight) {
         const unblockBusy = unblockInFlight || isUnblockPostPending;
         return <ContentGrid>
-            <div>
-                <ModernPostFeed>
-                    <BackButton onClick={goBackToFeed}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                            <polyline points="12 19 5 12 12 5"></polyline>
-                        </svg>
-                        Back
-                    </BackButton>
-                    <BlockedPostState role="region" aria-label="Blocked post">
-                        <BlockedPostIcon aria-hidden="true">
-                            <HiNoSymbol />
-                        </BlockedPostIcon>
-                        <BlockedPostTitle>
-                            {unblockInFlight ? 'Unblocking post…' : 'This post is blocked'}
-                        </BlockedPostTitle>
-                        <BlockedPostMessage>
-                            {unblockInFlight
-                                ? 'Waiting for the unblock to commit on-chain. The post content will appear here shortly — hang tight.'
-                                : "You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page."}
-                        </BlockedPostMessage>
-                        <BlockedPostActions>
-                            {/* Standalone state panel — use `size="md"` (not
-                                `sm` like BlocksView rows) so the CTA has the
-                                same visual height as the primary buttons
-                                used elsewhere in the app. No radius override;
-                                Button's default `md` radius applies. */}
-                            <Button
-                                variant="danger"
-                                size="md"
-                                minWidth="5.5rem"
-                                disabled={unblockBusy}
-                                loading={unblockBusy}
-                                onClick={handleUnblockBlockedPost}
-                            >
-                                {unblockBusy ? (unblockPostStatus || 'Processing') : 'Unblock post'}
-                            </Button>
-                        </BlockedPostActions>
-                    </BlockedPostState>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <BackButton onClick={goBackToFeed}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="19" y1="12" x2="5" y2="12"></line>
+                                <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                            Back
+                        </BackButton>
+                        <BlockedPostState role="region" aria-label="Blocked post">
+                            <BlockedPostIcon aria-hidden="true">
+                                <HiNoSymbol />
+                            </BlockedPostIcon>
+                            <BlockedPostTitle>
+                                {unblockInFlight ? 'Unblocking post…' : 'This post is blocked'}
+                            </BlockedPostTitle>
+                            <BlockedPostMessage>
+                                {unblockInFlight
+                                    ? 'Waiting for the unblock to commit on-chain. The post content will appear here shortly — hang tight.'
+                                    : "You have blocked this post, so it's hidden from every feed you see. Unblock to view it — you can always re-block it later from the post menu or the Blocks page."}
+                            </BlockedPostMessage>
+                            <BlockedPostActions>
+                                {/* Standalone state panel — use `size="md"` (not
+                                    `sm` like BlocksView rows) so the CTA has the
+                                    same visual height as the primary buttons
+                                    used elsewhere in the app. No radius override;
+                                    Button's default `md` radius applies. */}
+                                <Button
+                                    variant="danger"
+                                    size="md"
+                                    minWidth="5.5rem"
+                                    disabled={unblockBusy}
+                                    loading={unblockBusy}
+                                    onClick={handleUnblockBlockedPost}
+                                >
+                                    {unblockBusy ? (unblockPostStatus || 'Processing') : 'Unblock post'}
+                                </Button>
+                            </BlockedPostActions>
+                        </BlockedPostState>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
 
     if (loading || error || depthError) {
         return <ContentGrid>
-            <div>
-                <ModernPostFeed>
-                    <BackButton onClick={goBackToFeed}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                            <polyline points="12 19 5 12 12 5"></polyline>
-                        </svg>
-                        Back
-                    </BackButton>
-                    {loading ? (
-                        <div role="status" aria-live="polite" aria-label="Loading post">
-                            <FeedCardSkeleton />
-                            <CommentSkeleton />
-                            <CommentSkeleton indent={1} />
-                            <CommentSkeleton />
-                        </div>
-                    ) : <VPStateBlock role="alert">
-                        <VPStateIcon $tone="danger">
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <BackButton onClick={goBackToFeed}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                                <line x1="12" y1="9" x2="12" y2="13" />
-                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                                <line x1="19" y1="12" x2="5" y2="12"></line>
+                                <polyline points="12 19 5 12 12 5"></polyline>
                             </svg>
-                        </VPStateIcon>
-                        <VPStateTitle>Couldn't load post</VPStateTitle>
-                        <VPStateMessage>{depthError || error}</VPStateMessage>
-                    </VPStateBlock>}
-                </ModernPostFeed>
-            </div>
+                            Back
+                        </BackButton>
+                        {loading ? (
+                            <div role="status" aria-live="polite" aria-label="Loading post">
+                                <FeedCardSkeleton />
+                                <CommentSkeleton />
+                                <CommentSkeleton indent={1} />
+                                <CommentSkeleton />
+                            </div>
+                        ) : <VPStateBlock role="alert">
+                            <VPStateIcon $tone="danger">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </VPStateIcon>
+                            <VPStateTitle>Couldn't load post</VPStateTitle>
+                            <VPStateMessage>{depthError || error}</VPStateMessage>
+                        </VPStateBlock>}
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
     const shortenAddress = address => {
@@ -2469,50 +2890,8 @@ function ViewPostView({
                     marginTop: isEdit ? '0.2rem' : '0.4rem',
                     position: 'relative'
                 }}>
-                    <MediaRow>
-                        <StickerPicker onSelect={stickerUrl => {
-                            setReplyAttachedType(prev => ({
-                                ...prev,
-                                [post.post_id]: 'image'
-                            }));
-                            setReplyAttachedUrl(prev => ({
-                                ...prev,
-                                [post.post_id]: stickerUrl
-                            }));
-                            setReplyThumbLoading(prev => ({
-                                ...prev,
-                                [post.post_id]: true
-                            }));
-                        }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
-                        <GifPicker onSelect={gifUrl => {
-                            setReplyAttachedType(prev => ({
-                                ...prev,
-                                [post.post_id]: 'image'
-                            }));
-                            setReplyAttachedUrl(prev => ({
-                                ...prev,
-                                [post.post_id]: gifUrl
-                            }));
-                            setReplyThumbLoading(prev => ({
-                                ...prev,
-                                [post.post_id]: true
-                            }));
-                        }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
-                        <MediaIconButton type="button" tabIndex={-1} onClick={() => {
-                            try {
-                                const api = replyEditorUpload[post.post_id];
-                                if (!api || typeof api.selectFile !== 'function') return;
-                                if (replyIsUploading[post.post_id]) return;
-                                api.selectFile();
-                            } catch (_) { }
-                        }} disabled={isBusy || !!replyIsUploading[post.post_id] || !replyEditorUpload[post.post_id] || !!replyAttachedUrl[post.post_id]} aria-label="Upload" title="Upload">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="17 8 12 3 7 8" />
-                                <line x1="12" y1="3" x2="12" y2="15" />
-                            </svg>
-                        </MediaIconButton>
-                        {(replyIsUploading[post.post_id] || (replyAttachedType[post.post_id] && replyAttachedUrl[post.post_id])) && <MediaPreviewWrapper>
+                    {(replyIsUploading[post.post_id] || (replyAttachedType[post.post_id] && replyAttachedUrl[post.post_id])) && <MediaRow>
+                        <MediaPreviewWrapper>
                             {replyAttachedType[post.post_id] && replyAttachedUrl[post.post_id] && !replyIsUploading[post.post_id] && <>
                                 <MediaPreviewImage src={replyAttachedType[post.post_id] === 'image' ? replyAttachedUrl[post.post_id] : getVideoThumbnailUrl(replyAttachedUrl[post.post_id]) || replyAttachedUrl[post.post_id]} alt="" onLoad={() => {
                                     setReplyThumbLoading(prev => {
@@ -2587,12 +2966,56 @@ function ViewPostView({
                                     Cancel
                                 </Button>
                             </div>}
-                        </MediaPreviewWrapper>}
-                    </MediaRow>
+                        </MediaPreviewWrapper>
+                    </MediaRow>}
                     <div data-mirageapp-editor style={{
                         position: 'relative'
                     }}>
-                        <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} onSubmitShortcut={() => {
+                        <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} toolbarExtra={<>
+                            <ToolbarDivider />
+                            <StickerPicker onSelect={stickerUrl => {
+                                setReplyAttachedType(prev => ({
+                                    ...prev,
+                                    [post.post_id]: 'image'
+                                }));
+                                setReplyAttachedUrl(prev => ({
+                                    ...prev,
+                                    [post.post_id]: stickerUrl
+                                }));
+                                setReplyThumbLoading(prev => ({
+                                    ...prev,
+                                    [post.post_id]: true
+                                }));
+                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
+                            <GifPicker onSelect={gifUrl => {
+                                setReplyAttachedType(prev => ({
+                                    ...prev,
+                                    [post.post_id]: 'image'
+                                }));
+                                setReplyAttachedUrl(prev => ({
+                                    ...prev,
+                                    [post.post_id]: gifUrl
+                                }));
+                                setReplyThumbLoading(prev => ({
+                                    ...prev,
+                                    [post.post_id]: true
+                                }));
+                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
+                            <MediaIconButton type="button" tabIndex={-1} onClick={() => {
+                                try {
+                                    const api = replyEditorUpload[post.post_id];
+                                    if (!api || typeof api.selectFile !== 'function') return;
+                                    if (replyIsUploading[post.post_id]) return;
+                                    api.selectFile();
+                                } catch (_) { }
+                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !replyEditorUpload[post.post_id] || !!replyAttachedUrl[post.post_id]} aria-label="Upload" title="Upload">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17 8 12 3 7 8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                            </MediaIconButton>
+                        </>} onSubmitShortcut={() => {
                             if (isEdit) {
                                 handleEditSubmit(post);
                             } else {
@@ -2865,25 +3288,28 @@ function ViewPostView({
 
     if (!isLoggedIn) {
         return <ContentGrid>
-            <div>
-                <ModernPostFeed>
-                    <LoggedOutPromptCard
-                        role="region"
-                        aria-label="View post on Mirage"
-                        title="Sign in to view this post"
-                        description="Create an account or sign in to read posts, vote, and join the conversation."
-                        notice="Currently in Private Beta — Invite Only"
-                        stats={getCachedWelcomeStats()}
-                        links={[
-                            { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },
-                            { label: "Learn More", href: "https://mirage.foundation", external: true },
-                        ]}
-                        inviteText="Have an invite code? Join the community today."
-                        primaryLabel="Create account"
-                        secondaryLabel="Sign in"
-                    />
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <LoggedOutPromptCard
+                            role="region"
+                            aria-label="View post on Mirage"
+                            title="Sign in to view this post"
+                            description="Create an account or sign in to read posts, vote, and join the conversation."
+                            notice="Currently in Private Beta — Invite Only"
+                            stats={getCachedWelcomeStats()}
+                            links={[
+                                { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },
+                                { label: "Learn More", href: "https://mirage.foundation", external: true },
+                            ]}
+                            inviteText="Have an invite code? Join the community today."
+                            primaryLabel="Create account"
+                            secondaryLabel="Sign in"
+                        />
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
     if (root) {
@@ -2893,8 +3319,10 @@ function ViewPostView({
         const postDescription = mergedRoot && mergedRoot.content ? String(mergedRoot.content).trim().substring(0, 200) : root && root.content ? String(root.content).trim().substring(0, 200) : 'Decentralized social network';
         const imageUrl = `${origin}/images/logo.webp`;
         return <ContentGrid>
-            <MainContentWrapper>
-                <Helmet>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <MainContentWrapper>
+                        <Helmet>
                     <title>{postTitle} | Mirage</title>
                     <meta name="description" content={postDescription} />
                     <meta property="og:type" content="article" />
@@ -2988,18 +3416,30 @@ function ViewPostView({
                             </TopicHeroCard>
                         </TopicHeroWrapper>;
                     })()}
-                    {annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id)).map(post => {
-                        const normalizedPostId = String(post.post_id).toLowerCase();
-                        const isRoot = post.level === 0;
-                        const isCollapsed = !!(post.level > 0 && post.collapsed);
-                        const CardComponent = isRoot ? PostCard : CommentCard;
-                        // Flash: root uses rootFlash state, comments use post.flash
-                        const shouldFlash = isRoot ? rootFlash : !!post.flash;
-                        const displayLevel = post.level;
-                        // Persistent highlight for inbox-linked comments
-                        const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
-                        return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
-                            <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize}>
+                    {(() => {
+                        const visibleAnnotated = annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id));
+                        const ancestorDepthsMap = visibleAnnotated.map((_, idx) => getAncestorRailDepths(visibleAnnotated, idx));
+                        return visibleAnnotated.map((post, idx) => {
+                            const normalizedPostId = String(post.post_id).toLowerCase();
+                            const isRoot = post.level === 0;
+                            const isCollapsed = !!(post.level > 0 && post.collapsed);
+                            const CardComponent = isRoot ? PostCard : CommentCard;
+                            const shouldFlash = isRoot ? rootFlash : !!post.flash;
+                            const displayLevel = post.level;
+                            const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
+                            const hasChildren = (post.comments || 0) > 0;
+                            const activeDepths = ancestorDepthsMap[idx];
+                            return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
+                                <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
+                                    {!isRoot && (() => {
+                                        const seed = (post.username && String(post.username).trim())
+                                            || (post.user_id ? String(post.user_id) : 'anon');
+                                        return <CommentAvatar
+                                            $level={displayLevel}
+                                            $isCollapsed={isCollapsed}
+                                            src={dicebearAvatarUrl(seed, COMMENT_AVATAR_SIZE_PX)}
+                                        />;
+                                    })()}
                                 <ColumnFlex>
                                     {/* Mobile root post meta - two rows */}
                                     {isRoot && <MobileRootMeta>
@@ -3046,7 +3486,16 @@ function ViewPostView({
                                         </MobileRootMetaBottom>
                                     </MobileRootMeta>}
                                     {/* Desktop meta info row (hidden on mobile for root posts) */}
-                                    <DesktopMetaInfoRow $hideOnMobile={isRoot}>
+                                    <DesktopMetaInfoRow
+                                        $hideOnMobile={isRoot}
+                                        $clickable={!isRoot}
+                                        onClick={!isRoot ? (e) => {
+                                            // Ignore clicks that landed on interactive children
+                                            // (author/topic links, menu button, tooltips with handlers).
+                                            if (e.target.closest && e.target.closest('a,button')) return;
+                                            toggleCollapsed(post.post_id, !!post.collapsed);
+                                        } : undefined}
+                                    >
                                         <MetaInfoRowLeft>
                                             {renderAuthorLink(post)}
                                             <MetaSeparator>·</MetaSeparator>
@@ -3078,9 +3527,7 @@ function ViewPostView({
                                                     onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
                                                     aria-label={post.collapsed ? 'Expand' : 'Collapse'}
                                                 >
-                                                    <svg viewBox="0 0 24 24" style={{ transform: post.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
-                                                        <polyline points="6 9 12 15 18 9" />
-                                                    </svg>
+                                                    <span aria-hidden="true">{post.collapsed ? '+' : '\u2212'}</span>
                                                 </CollapseToggle>
                                             </>}
                                             {post.edited && <>
@@ -3280,14 +3727,18 @@ function ViewPostView({
                                 const stateChildren = state.posts?.[post.post_id]?.children;
                                 const hasLoadedChildren = (post.children && post.children.length > 0) || (stateChildren && stateChildren.length > 0);
                                 if (hasLoadedChildren) return null;
-                                return <ContinueThreadLink to={`/p/${post.post_id}`} $level={displayLevel}>
+                                return <ContinueThreadLink to={`/p/${post.post_id}`} $level={displayLevel} $activeDepths={activeDepths}>
                                     Continue this thread →
                                 </ContinueThreadLink>;
                             })()}
                         </div>;
-                    })}
+                    });
+                })()}
                 </ModernPostFeed>
-            </MainContentWrapper>
+                    </MainContentWrapper>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
             {renderMobileReplyOverlay()}
             {/**
               * Destructive-action dialogs (block post/user/topic + report).
@@ -3437,28 +3888,33 @@ function ViewPostView({
         </ContentGrid>;
     } else {
         return <ContentGrid>
-            <MainContentWrapper>
-                <ModernPostFeed>
-                    <BackButton onClick={goBackToFeed}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                            <polyline points="12 19 5 12 12 5"></polyline>
-                        </svg>
-                        Back
-                    </BackButton>
-                    <VPStateBlock role="alert">
-                        <VPStateIcon $tone="danger">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                                <line x1="12" y1="9" x2="12" y2="13" />
-                                <line x1="12" y1="17" x2="12.01" y2="17" />
-                            </svg>
-                        </VPStateIcon>
-                        <VPStateTitle>Unable to load post</VPStateTitle>
-                        <VPStateMessage>Something went wrong. Try going back and opening the post again.</VPStateMessage>
-                    </VPStateBlock>
-                </ModernPostFeed>
-            </MainContentWrapper>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <MainContentWrapper>
+                        <ModernPostFeed>
+                            <BackButton onClick={goBackToFeed}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                </svg>
+                                Back
+                            </BackButton>
+                            <VPStateBlock role="alert">
+                                <VPStateIcon $tone="danger">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                        <line x1="12" y1="9" x2="12" y2="13" />
+                                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                </VPStateIcon>
+                                <VPStateTitle>Unable to load post</VPStateTitle>
+                                <VPStateMessage>Something went wrong. Try going back and opening the post again.</VPStateMessage>
+                            </VPStateBlock>
+                        </ModernPostFeed>
+                    </MainContentWrapper>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>;
     }
 }

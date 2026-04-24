@@ -646,14 +646,12 @@ const CtaButton = styled.button`
     color: #FFFFFF;
     border: none;
     cursor: pointer;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    box-shadow: 0 1px 5px rgba(102, 126, 234, 0.22);
-    transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    background: ${({ theme }) => requireThemeColor(theme, 'followBtnBg')};
+    transition: background 0.15s ease, transform 0.15s ease;
 
     &:hover:not(:disabled) {
-        opacity: 0.92;
+        background: ${({ theme }) => requireThemeColor(theme, 'followBtnBgHover')};
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
     }
 
     &:active:not(:disabled) {
@@ -663,7 +661,6 @@ const CtaButton = styled.button`
     &:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-        box-shadow: none;
     }
 `;
 

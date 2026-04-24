@@ -14,6 +14,8 @@ import {
     TabbedContainer,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { useDiscover, tagColors } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
 
@@ -38,18 +40,19 @@ import { normalizeTag } from "../../../utils/ContentTags";
 
 const DiscoverWrap = styled.div`
     width: 100%;
-    max-width: 720px;
+    max-width: 820px;
     margin: -0.75rem 0 0;
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -59,6 +62,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -70,6 +77,10 @@ const HeaderTitle = styled.div`
 
 const SearchRow = styled.div`
     padding: 0 1rem 0.6rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.6rem;
+    }
 `;
 
 const SearchField = styled.label`
@@ -162,6 +173,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0 0.35rem;
+    }
 `;
 
 const CountBadge = styled.span`
@@ -194,7 +209,7 @@ const Row = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.6rem 0.85rem;
+        padding: 0.6rem 0;
     }
 `;
 
@@ -327,6 +342,10 @@ const FootHint = styled.div`
     font-weight: 500;
     text-align: center;
     padding: 0.85rem 1rem 0.25rem;
+
+    @media (max-width: 600px) {
+        padding: 0.85rem 0 0.25rem;
+    }
 `;
 
 function formatCountMeta(t) {
@@ -363,15 +382,18 @@ export default function DiscoverView({ state }) {
             <Helmet>
                 <title>Topics | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerBody $fullWidth>
-                            <DiscoverWrap>{body}</DiscoverWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerBody $fullWidth>
+                                <DiscoverWrap>{body}</DiscoverWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 
@@ -453,7 +475,7 @@ export default function DiscoverView({ state }) {
                 </RowIconWrap>
                 <RowMain>
                     <TopicLine>
-                        <TopicLink to={`/t/${t.topic}`}>#{t.topic}</TopicLink>
+                        <TopicLink to={`/t/${t.topic}`}>{t.topic}</TopicLink>
                         {tag && <TagBadge $tag={tag}>{tag}</TagBadge>}
                     </TopicLine>
                     <RowMeta>{formatCountMeta(t)}</RowMeta>

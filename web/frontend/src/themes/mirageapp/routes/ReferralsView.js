@@ -44,11 +44,45 @@ import { dicebearAvatarUrl } from "../../../utils/avatar";
 
 const ReferralsWrap = styled.div`
     width: 90%;
+    max-width: 960px;
     margin: -0.75rem auto 0;
 
     @media (max-width: 1000px) {
         width: 100%;
+        max-width: none;
         margin-top: -0.5rem;
+    }
+
+    /* Large displays: viewport-center override. See SettingsView for
+     * the full rationale — above ~1500px the shell drops its max-width
+     * cap and pins the sidebar to the left viewport edge, so
+     * margin: auto inside Main no longer aligns with viewport center.
+     *
+     * Offset = sidebar + divider + Main left padding:
+     *   sidebar visible: 273px,  sidebar hidden: 33px */
+    @media (min-width: 1050px) {
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 480px - 33px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1600px) {
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 480px - 273px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1100px;
+
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 550px - 273px);
+        }
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 550px - 33px);
+        }
     }
 `;
 
@@ -68,6 +102,10 @@ const HeaderRow = styled.div`
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -113,6 +151,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+
+    @media (max-width: 600px) {
+        padding: 1rem 0 0.5rem;
+    }
 `;
 
 const SectionHeaderLabel = styled.span`
@@ -129,6 +171,10 @@ const SectionBody = styled.div`
 
     @media (max-width: 1000px) {
         padding: 0 0.85rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.85rem;
     }
 `;
 
@@ -910,7 +956,7 @@ const Row = styled.div`
     &:last-child { border-bottom: none; }
 
     @media (max-width: 600px) {
-        padding: 0.6rem 0.85rem;
+        padding: 0.6rem 0;
         gap: 0.6rem;
     }
 `;

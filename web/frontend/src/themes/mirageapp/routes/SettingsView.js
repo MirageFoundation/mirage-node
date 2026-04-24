@@ -10,11 +10,60 @@ import { useSettings, RadioInput } from "../../../logic/useSettings";
 
 const SettingsWrap = styled.div`
     width: 90%;
+    max-width: 960px;
     margin: -0.75rem auto 0;
 
     @media (max-width: 1000px) {
         width: 100%;
+        max-width: none;
         margin-top: -0.5rem;
+    }
+
+    /* Large displays: above ~1500px the shell drops its centered
+     * max-width cap and pins the sidebar to the left viewport edge.
+     * margin: auto then centers the column within Main (which is
+     * offset right by the sidebar), not within the viewport — content
+     * visually sits ~128px right of the true viewport center.
+     *
+     * Override with a viewport-relative margin so the column is
+     * centered against the viewport regardless of sidebar state.
+     *
+     * Offset = sidebar column + divider + Main left padding:
+     *   sidebar visible:  240 + 17 + 16 = 273px
+     *   sidebar hidden:    0 + 17 + 16 =  33px
+     *
+     * Applied only at breakpoints where the calc stays non-negative
+     * (content fits viewport-centered). Below these widths we fall
+     * back to margin: auto. */
+    /* Sidebar HIDDEN: 960px content + 33 offset needs vw >= ~1026px.
+     * Apply from 1050px so the column is truly viewport-centered
+     * across the full desktop range, not just 1600px+. */
+    @media (min-width: 1050px) {
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 480px - 33px);
+            margin-right: auto;
+        }
+    }
+
+    /* Sidebar VISIBLE: 960px content + 273 offset needs vw >= ~1506px.
+     * Below this the column can't be viewport-centered without
+     * overlapping the sidebar, so margin: auto (Main-centered) stays. */
+    @media (min-width: 1600px) {
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 480px - 273px);
+            margin-right: auto;
+        }
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1100px;
+
+        [data-sidebar-hidden='false'] & {
+            margin-left: calc(50vw - 550px - 273px);
+        }
+        [data-sidebar-hidden='true'] & {
+            margin-left: calc(50vw - 550px - 33px);
+        }
     }
 `;
 
@@ -24,6 +73,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -43,6 +96,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0 0.35rem;
+    }
 `;
 
 const SectionDivider = styled.div`
@@ -60,7 +117,7 @@ const SettingRow = styled.div`
     @media (max-width: 600px) {
         flex-direction: column;
         gap: 0.4rem;
-        padding: 0.5rem 0.85rem;
+        padding: 0.5rem 0;
     }
 `;
 
@@ -104,6 +161,10 @@ const SecurityBanner = styled.div`
     font-size: 0.65rem;
     line-height: 1.4;
     color: ${({ theme }) => theme.colors.text};
+
+    @media (max-width: 600px) {
+        margin: 0.25rem 0 0.35rem;
+    }
 `;
 
 const RadioGroup = styled.div`
@@ -291,7 +352,7 @@ const ClickableSettingRow = styled.button`
     }
 
     @media (max-width: 600px) {
-        padding: 0.5rem 0.85rem;
+        padding: 0.5rem 0;
     }
 `;
 
