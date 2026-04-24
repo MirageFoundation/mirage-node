@@ -206,8 +206,7 @@ function getAncestorRailDepths(array, index) {
 }
 
 function buildAncestorRails(level, baseLeft, indent, avatarSize, color, activeDepths) {
-    const N = Math.max(Number(level) || 0, 0);
-    if (N < 2 || !activeDepths || activeDepths.length === 0) {
+    if (!activeDepths || activeDepths.length === 0) {
         return { image: 'none', position: '0 0', size: '0 0' };
     }
     const images = [];
