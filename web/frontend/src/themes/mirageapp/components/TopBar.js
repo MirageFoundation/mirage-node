@@ -78,6 +78,7 @@ const BrandLink = styled(Link)`
     font-weight: 800;
     font-size: 1.15rem;
     letter-spacing: 0.02em;
+    text-transform: uppercase;
     flex-shrink: 0;
 
     &:hover { text-decoration: none; }
