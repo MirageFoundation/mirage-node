@@ -62,6 +62,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -73,6 +77,10 @@ const HeaderTitle = styled.div`
 
 const SearchRow = styled.div`
     padding: 0 1rem 0.6rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.6rem;
+    }
 `;
 
 const SearchField = styled.label`
@@ -165,6 +173,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0 0.35rem;
+    }
 `;
 
 const CountBadge = styled.span`
@@ -197,7 +209,7 @@ const Row = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.6rem 0.85rem;
+        padding: 0.6rem 0;
     }
 `;
 
@@ -330,6 +342,10 @@ const FootHint = styled.div`
     font-weight: 500;
     text-align: center;
     padding: 0.85rem 1rem 0.25rem;
+
+    @media (max-width: 600px) {
+        padding: 0.85rem 0 0.25rem;
+    }
 `;
 
 function formatCountMeta(t) {

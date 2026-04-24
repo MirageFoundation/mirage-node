@@ -73,6 +73,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -92,6 +96,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0 0.35rem;
+    }
 `;
 
 const SectionDivider = styled.div`
@@ -109,7 +117,7 @@ const SettingRow = styled.div`
     @media (max-width: 600px) {
         flex-direction: column;
         gap: 0.4rem;
-        padding: 0.5rem 0.85rem;
+        padding: 0.5rem 0;
     }
 `;
 
@@ -153,6 +161,10 @@ const SecurityBanner = styled.div`
     font-size: 0.65rem;
     line-height: 1.4;
     color: ${({ theme }) => theme.colors.text};
+
+    @media (max-width: 600px) {
+        margin: 0.25rem 0 0.35rem;
+    }
 `;
 
 const RadioGroup = styled.div`
@@ -340,7 +352,7 @@ const ClickableSettingRow = styled.button`
     }
 
     @media (max-width: 600px) {
-        padding: 0.5rem 0.85rem;
+        padding: 0.5rem 0;
     }
 `;
 

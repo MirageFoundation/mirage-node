@@ -164,7 +164,10 @@ const Toolbar = styled.div`
      * sticky MobileHeader, which made the topic title (e.g. "#memes")
      * look cramped against the top edge. */
     @media (max-width: 600px) {
-        padding: 0.75rem 0.5rem 0.5rem 0.5rem;
+        /* Zero horizontal padding so the toolbar's leading title
+         * aligns with the MobileHeader brand (both end up inset by the
+         * Main container's 0.75rem side padding). */
+        padding: 0.75rem 0 0.5rem;
     }
 `;
 
@@ -190,6 +193,13 @@ const ToolbarTitle = styled.h1`
      * auto left margin so the control cluster hugs the right edge. */
     & + * {
         margin-left: auto;
+    }
+
+    /* Mobile: drop the internal left padding so the feed title aligns
+     * flush with the MobileHeader brand (both inset only by Main's
+     * 0.75rem side padding). */
+    @media (max-width: 600px) {
+        padding: 0;
     }
 `;
 
@@ -398,7 +408,9 @@ const CompactRoot = styled.article`
     @media (max-width: 600px) {
         grid-template-columns: 68px minmax(0, 1fr);
         gap: 0.15rem 0.6rem;
-        padding: 0.45rem 0.85rem 0.35rem;
+        /* Zero horizontal padding on mobile — alignment comes from
+         * Main's 0.75rem side padding, matching the MobileHeader brand. */
+        padding: 0.45rem 0 0.35rem;
         border-radius: 6px;
     }
 `;

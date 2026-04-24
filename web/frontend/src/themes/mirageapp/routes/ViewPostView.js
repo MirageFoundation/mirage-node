@@ -88,7 +88,7 @@ const PostCard = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.65rem 0.85rem 0.7rem;
+        padding: 0.65rem 0 0.7rem;
         gap: 0.4rem;
     }
 `;
@@ -571,7 +571,7 @@ const TopicHeroCard = styled.div`
     @media (max-width: 600px) {
         flex-direction: column;
         gap: 0.35rem;
-        padding: 0.35rem 0.75rem 0.5rem;
+        padding: 0.35rem 0 0.5rem;
     }
 `;
 const TopicHeroTopRow = styled.div`

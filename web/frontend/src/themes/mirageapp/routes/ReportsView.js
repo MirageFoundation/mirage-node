@@ -50,6 +50,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.5rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -81,7 +85,7 @@ const ReportRow = styled.article`
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 
     @media (max-width: 600px) {
-        padding: 0.55rem 0.85rem 0.7rem;
+        padding: 0.55rem 0 0.7rem;
     }
 `;
 

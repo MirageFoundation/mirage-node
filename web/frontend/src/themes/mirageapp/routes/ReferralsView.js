@@ -102,6 +102,10 @@ const HeaderRow = styled.div`
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -147,6 +151,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+
+    @media (max-width: 600px) {
+        padding: 1rem 0 0.5rem;
+    }
 `;
 
 const SectionHeaderLabel = styled.span`
@@ -163,6 +171,10 @@ const SectionBody = styled.div`
 
     @media (max-width: 1000px) {
         padding: 0 0.85rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.85rem;
     }
 `;
 
@@ -944,7 +956,7 @@ const Row = styled.div`
     &:last-child { border-bottom: none; }
 
     @media (max-width: 600px) {
-        padding: 0.6rem 0.85rem;
+        padding: 0.6rem 0;
         gap: 0.6rem;
     }
 `;

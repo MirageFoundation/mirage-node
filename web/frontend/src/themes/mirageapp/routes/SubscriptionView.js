@@ -99,6 +99,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -133,6 +137,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.45rem;
+    }
 `;
 
 const SectionBody = styled.div`
@@ -143,6 +151,10 @@ const SectionBody = styled.div`
 
     @media (max-width: 1000px) {
         padding: 0 0.85rem 0.75rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.75rem;
     }
 `;
 
@@ -158,6 +170,10 @@ const InfoText = styled.div`
     @media (max-width: 1000px) {
         padding: 0.85rem 0.85rem 0.25rem;
     }
+
+    @media (max-width: 600px) {
+        padding: 0.85rem 0 0.25rem;
+    }
 `;
 
 const ErrorMessage = styled.div`
@@ -172,6 +188,10 @@ const ErrorMessage = styled.div`
 
     @media (max-width: 1000px) {
         margin: 0.75rem 0.85rem 0;
+    }
+
+    @media (max-width: 600px) {
+        margin: 0.75rem 0 0;
     }
 `;
 

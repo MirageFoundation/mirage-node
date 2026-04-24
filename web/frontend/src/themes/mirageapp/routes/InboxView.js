@@ -70,6 +70,13 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    /* Mobile: drop internal horizontal padding so the inbox title aligns
+     * flush with the MobileHeader brand (both inset only by Main's
+     * 0.75rem side padding). */
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -92,6 +99,10 @@ const UnreadInfoRow = styled.div`
     gap: 0.75rem;
     padding: 0.4rem 1rem;
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+    @media (max-width: 600px) {
+        padding: 0.4rem 0;
+    }
 `;
 
 const UnreadCountText = styled.span`
@@ -164,7 +175,9 @@ const ReplyItem = styled.a`
     }
 
     @media (max-width: 600px) {
-        padding: 0.45rem 0.85rem;
+        /* Zero horizontal padding on mobile — row alignment comes from
+         * Main's 0.75rem side padding, matching the MobileHeader brand. */
+        padding: 0.45rem 0;
     }
 `;
 

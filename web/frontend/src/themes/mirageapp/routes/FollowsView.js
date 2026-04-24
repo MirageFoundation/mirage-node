@@ -63,6 +63,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -158,7 +162,7 @@ const Row = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.5rem 0.85rem;
+        padding: 0.5rem 0;
     }
 `;
 

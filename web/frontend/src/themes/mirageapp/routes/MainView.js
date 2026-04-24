@@ -706,6 +706,10 @@ const HomeFeedTitleBar = styled.div`
     align-self: flex-start;
     margin: 0;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 // NSFW welcome hero — mirageapp: compact, app-style card using the

@@ -80,6 +80,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 /**
@@ -103,6 +107,10 @@ const MobileSearchForm = styled.form`
         &:focus-within {
             background: ${({ theme }) => theme.colors.focusBlue};
         }
+    }
+
+    @media (max-width: 600px) {
+        margin: 0.15rem 0 0.6rem;
     }
 `;
 
@@ -208,6 +216,10 @@ const TrendingSectionLabel = styled.div`
     text-transform: uppercase;
     color: ${({ theme }) => theme.colors.subtleText};
     padding: 0.75rem 1rem 0.35rem;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.35rem;
+    }
 `;
 
 const TrendingList = styled.div`
@@ -251,6 +263,10 @@ const HeaderSubRow = styled.div`
     gap: 0.5rem;
     min-height: 28px;
     padding: 0 1rem 0.35rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.35rem;
+    }
 `;
 
 const HeaderSub = styled.div`
@@ -363,6 +379,10 @@ const RowItem = styled(Link)`
 
     &:hover {
         background: ${({ theme }) => theme.colors.hoverBg};
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0;
     }
 `;
 

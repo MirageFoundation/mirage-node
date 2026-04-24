@@ -62,6 +62,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -78,6 +82,10 @@ const IntroBlock = styled.div`
     flex-direction: column;
     gap: 0.5rem;
     padding: 0 1rem 0.75rem;
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.75rem;
+    }
 `;
 
 const IntroParagraph = styled.p`
@@ -124,6 +132,10 @@ const SectionHeader = styled.div`
     align-items: center;
     gap: 0.4rem;
     padding: 0.65rem 1rem 0.4rem;
+
+    @media (max-width: 600px) {
+        padding: 0.65rem 0 0.4rem;
+    }
 `;
 
 const SectionLabel = styled.span`
@@ -157,6 +169,10 @@ const ReorderBar = styled.div`
         flex-shrink: 0;
         color: ${({ theme }) => theme.colors.subtleText};
     }
+
+    @media (max-width: 600px) {
+        padding: 0.45rem 0;
+    }
 `;
 
 const ReorderHint = styled.span`
@@ -186,7 +202,7 @@ const Row = styled.div`
     }
 
     @media (max-width: 600px) {
-        padding: 0.65rem 0.85rem;
+        padding: 0.65rem 0;
     }
 `;
 

@@ -88,7 +88,11 @@ const Card = styled.article`
     }
 
     @media (max-width: 600px) {
-        padding: 0.65rem 0.85rem 0.55rem;
+        /* Align card horizontal inset with MobileHeader: rely on the
+         * Main container's 0.75rem side padding and zero out the card's
+         * own horizontal padding on mobile so content hugs the same
+         * edge as the sticky "Mirage" header. */
+        padding: 0.65rem 0 0.55rem;
         gap: 0.4rem;
         border-radius: 6px;
     }

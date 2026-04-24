@@ -62,6 +62,10 @@ const HeaderRow = styled.div`
     justify-content: flex-start;
     gap: 0.75rem;
     padding: 0.5rem 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -86,6 +90,10 @@ const TabsRow = styled.div`
     grid-template-columns: repeat(${({ $count }) => $count || 2}, 1fr);
     border-bottom: 1px solid ${({ theme }) => theme.colors.border};
     margin: 0 1rem;
+
+    @media (max-width: 600px) {
+        margin: 0;
+    }
 `;
 
 const TabButton = styled.button`
@@ -138,6 +146,10 @@ const SectionHeader = styled.div`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.35rem;
+    }
 `;
 
 const SectionBody = styled.div`
@@ -167,6 +179,10 @@ const FieldRow = styled.div`
     @media (max-width: 1000px) {
         gap: 0.5rem;
         padding: 0.5rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 
@@ -272,6 +288,10 @@ const ListBody = styled.div`
     @media (max-width: 1000px) {
         padding: 0 0.85rem 0.35rem;
     }
+
+    @media (max-width: 600px) {
+        padding: 0 0 0.35rem;
+    }
 `;
 
 const PeerRow = styled.div`
@@ -347,6 +367,10 @@ const EmptyNote = styled.div`
     @media (max-width: 1000px) {
         padding: 0.4rem 0.85rem 0.35rem;
     }
+
+    @media (max-width: 600px) {
+        padding: 0.4rem 0 0.35rem;
+    }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -374,6 +398,10 @@ const ChartRow = styled.div`
     @media (max-width: 700px) {
         grid-template-columns: 1fr;
         gap: 0.35rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 

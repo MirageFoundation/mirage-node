@@ -46,6 +46,10 @@ const HeaderRow = styled.div`
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 const HeaderTitle = styled.div`
@@ -75,6 +79,10 @@ const Stack = styled.form`
 
     @media (max-width: 1000px) {
         padding: 0 0.85rem 1.5rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0 0 1.5rem;
     }
 `;
 

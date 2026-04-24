@@ -263,6 +263,10 @@ const SubtleMono = styled(Mono)`
 /** Horizontal inset for content on posts/algo tabs — matches `SettingsWrap` row padding. */
 const ProfilePostsTabGutter = styled.div`
     padding: 0 1rem;
+
+    @media (max-width: 600px) {
+        padding: 0;
+    }
 `;
 
 /** No per-row divider. Padding matches `SettingsView::SettingRow` (0.55rem 1rem).
@@ -295,6 +299,10 @@ const ProfileFieldRow = styled.div`
     @media (max-width: 1000px) {
         gap: 0.5rem;
         padding: 0.5rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0;
     }
 `;
 
@@ -370,6 +378,10 @@ const ProfileAside = styled.aside`
     @media (max-width: 1000px) {
         order: -1;
         padding: 0 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0;
     }
 `;
 
@@ -794,6 +806,10 @@ const TabsRow = styled.div`
     gap: 0.5rem;
     padding: 0.25rem 1rem 0.5rem;
     flex-wrap: wrap;
+
+    @media (max-width: 600px) {
+        padding: 0.25rem 0 0.5rem;
+    }
 `;
 
 /** Right-side slot in `TabsRow` — hosts the feed view toggle on the
@@ -858,6 +874,10 @@ const SectionHeader = styled.div`
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: -0.01em;
+
+    @media (max-width: 600px) {
+        padding: 0.85rem 0 0.35rem;
+    }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -881,6 +901,10 @@ const AlgoSectionHead = styled.div`
     align-items: center;
     gap: 0.65rem;
     padding: 0.75rem 1rem 0.55rem;
+
+    @media (max-width: 600px) {
+        padding: 0.75rem 0 0.55rem;
+    }
 `;
 
 const AlgoSectionHeadText = styled.div`
@@ -940,6 +964,10 @@ const AlgoRow = styled.a`
 
     @media (max-width: 1000px) {
         padding: 0.55rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.55rem 0;
     }
 `;
 
@@ -1160,7 +1188,7 @@ const CommentRoot = styled.article`
     &:hover { background: ${({ theme }) => theme.colors.hoverBg}; }
 
     @media (max-width: 600px) {
-        padding: 0.45rem 0.85rem 0.35rem;
+        padding: 0.45rem 0 0.35rem;
         border-radius: 6px;
     }
 `;
