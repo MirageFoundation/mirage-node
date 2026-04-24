@@ -29,13 +29,13 @@ export const Style = createThemeStyleRules`
     -ms-overflow-style: none;
   }
 
-  /* Ultrawide / 4K displays (>= 2100 px): nudge the root font-size up so
+  /* Ultrawide / 4K displays (>= 1900 px): nudge the root font-size up so
    * everything rem-based (typography, spacing, paddings, feed card chrome,
    * sidebar rows, etc.) scales up a touch on very large external monitors.
    * Pairs with the FeedLayout / MainView min-width 1900px column-width
    * bumps — those widen the feed track, this makes the content inside
    * read a little larger to match. */
-  @media (min-width: 2100px) {
+  @media (min-width: 1900px) {
     html {
       font-size: 22px;
     }
