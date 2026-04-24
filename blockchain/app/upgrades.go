@@ -1918,6 +1918,46 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.24.0: Security hardening (never-halt invariant + mint/ante/params tweaks) ──
+	// All changes here are code-level behavior changes with no new store keys
+	// and no new on-chain state. The handler is intentionally a no-op beyond
+	// RunMigrations so the coordinated binary switch happens atomically at
+	// the upgrade height. See docs/security/blockchain/review-2026-04-24.md
+	// for the full change list; highlights:
+	//   - BeginBlock, EndBlock, MintIfNeeded and GetParams never halt the
+	//     chain on internal failures — they log and continue (or fall back
+	//     to DefaultParams). Before: any such failure panicked.
+	//   - MintIfNeeded distributes per-validator: invalid validator operator
+	//     addresses are skipped (their share is NOT minted), failed sends
+	//     burn the skipped amount to keep supply neutral, and burn failures
+	//     are accounted as stuckInModule.
+	//   - Params.Validate enforces MaxAwardConfigCost = 1,000,000 MIRAGE.
+	//     Defaults are well below that; governance proposals that exceed it
+	//     will now fail validation on the way in.
+	//   - DisableDelegatorStakingDecorator rejects MsgCancelUnbondingDelegation
+	//     from non-self accounts (same rule as MsgUndelegate). This is a
+	//     tx-acceptance change and is the primary reason this is a
+	//     coordinated upgrade rather than a point release.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.24.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.24.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.24.0: RunMigrations failed",
+					"from_vm", fmt.Sprintf("%v", fromVM),
+					"err", err,
+				)
+				return nil, fmt.Errorf("v1.24.0: RunMigrations failed (fromVM=%v): %w", fromVM, err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.24.0 complete")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

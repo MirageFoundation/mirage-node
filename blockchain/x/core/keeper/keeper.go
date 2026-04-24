@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -1070,23 +1071,40 @@ func (k Keeper) ResetAllRelayCredits(ctx sdk.Context) error {
 	return nil
 }
 
-// Params helpers
+// GetParams returns the current chain parameters.
+//
+// INVARIANT: this function MUST NEVER panic. GetParams is called from
+// BeginBlock, EndBlock, and many message handlers — a panic from any of
+// those paths halts the chain. On corrupt or invalid stored params we log
+// loudly and fall back to DefaultParams so the chain stays live. Operators
+// will see the error immediately and can restore correct params via
+// governance. A single-node disk corruption that yields non-consensus bytes
+// will still fail that node's apphash check (same outcome as if we panicked
+// here), so the fallback does not create a new divergence vector.
 func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get([]byte("params"))
-	if err != nil || len(bz) == 0 {
+	if err != nil {
+		ctx.Logger().Error("core/GetParams: store.Get failed; falling back to defaults to avoid halting the chain",
+			"err", err)
+		return types.DefaultParams()
+	}
+	if len(bz) == 0 {
 		// Store empty (first boot / genesis) — use defaults.
+		// InitGenesis writes SetParams before any block handler runs, so after
+		// genesis this branch should never fire in production. Keep for test
+		// harnesses and genesis ordering safety.
 		ctx.Logger().Debug("core/GetParams: using default params", "reason", "empty_store")
 		return types.DefaultParams()
 	}
 	if err := k.cdc.Unmarshal(bz, &p); err != nil {
-		ctx.Logger().Error("core/GetParams: corrupted params in store; using defaults", "err", err)
-		ctx.Logger().Debug("core/GetParams: using default params", "reason", "unmarshal_failed")
+		ctx.Logger().Error("core/GetParams: stored params failed to unmarshal; falling back to defaults to avoid halting the chain",
+			"err", err, "bytes_len", len(bz))
 		return types.DefaultParams()
 	}
 	if err := p.Validate(); err != nil {
-		ctx.Logger().Error("core/GetParams: invalid params in store; using defaults", "err", err)
-		ctx.Logger().Debug("core/GetParams: using default params", "reason", "validation_failed")
+		ctx.Logger().Error("core/GetParams: stored params failed validation; falling back to defaults to avoid halting the chain",
+			"err", err)
 		return types.DefaultParams()
 	}
 	return p
@@ -1175,7 +1193,134 @@ func (k Keeper) MintToAccount(ctx sdk.Context, recipient string, amount uint64) 
 	return k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, to, sdk.NewCoins(coin))
 }
 
-// MintIfNeeded mints params.MintQuantity umirage every params.MintInterval blocks and distributes proportionally to validator accounts
+type mintRecipient struct {
+	operatorAddress string
+	accountAddress  sdk.AccAddress
+	amount          sdkmath.Int
+}
+
+// buildMintRecipients filters reward recipients before MintCoins runs. Invalid
+// validator operator addresses are skipped, and their reward share is not
+// included in the amount minted for this interval. If operatorAddrs and
+// amounts have mismatched lengths (a programmer bug), the function returns
+// empty results rather than panicking; the caller will then simply skip
+// minting for this interval. MintIfNeeded must never halt the chain.
+func buildMintRecipients(operatorAddrs []string, amounts []sdkmath.Int) (recipients []mintRecipient, skippedInvalid []string, totalMint sdkmath.Int, mismatch bool) {
+	if len(operatorAddrs) != len(amounts) {
+		return nil, nil, sdkmath.ZeroInt(), true
+	}
+	recipients = make([]mintRecipient, 0, len(operatorAddrs))
+	skippedInvalid = make([]string, 0)
+	totalMint = sdkmath.ZeroInt()
+	for i, amount := range amounts {
+		if !amount.IsPositive() {
+			continue
+		}
+		valAddr, err := sdk.ValAddressFromBech32(operatorAddrs[i])
+		if err != nil {
+			skippedInvalid = append(skippedInvalid, operatorAddrs[i])
+			continue
+		}
+		recipients = append(recipients, mintRecipient{
+			operatorAddress: operatorAddrs[i],
+			accountAddress:  sdk.AccAddress(valAddr),
+			amount:          amount,
+		})
+		totalMint = totalMint.Add(amount)
+	}
+	return recipients, skippedInvalid, totalMint, false
+}
+
+// mintBankIface is the narrow subset of bankkeeper.Keeper that the mint
+// distribution path consumes. It exists so mintAndDistribute can be unit-
+// tested with injected bank-failure behavior without standing up the full
+// SDK bank keeper. bankkeeper.Keeper satisfies this interface at compile
+// time (verified implicitly at the MintIfNeeded call site).
+type mintBankIface interface {
+	MintCoins(ctx context.Context, moduleName string, amt sdk.Coins) error
+	SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
+	BurnCoins(ctx context.Context, moduleName string, amt sdk.Coins) error
+}
+
+// mintResult captures the accounting outcome of a single mint interval's
+// mint+distribute cycle.
+//
+//   - minted: coins that were successfully minted into the module account.
+//   - sent:   coins delivered to validator accounts.
+//   - burnedSkipped: coins that could not be sent to their recipient but
+//     were successfully burned from the module account (supply neutral).
+//   - stuckInModule: coins that could neither be sent nor burned and remain
+//     in the module account; operators must reconcile these out-of-band.
+//     This is an accounting drift the chain accepts rather than halting.
+type mintResult struct {
+	minted        sdkmath.Int
+	sent          sdkmath.Int
+	burnedSkipped sdkmath.Int
+	stuckInModule sdkmath.Int
+}
+
+// mintAndDistribute mints totalMint into moduleName and distributes it across
+// recipients. On per-recipient send failure it attempts to burn the skipped
+// portion so the total supply delta for this interval equals `sent`. If the
+// burn itself fails the coins stay in the module account and are accounted
+// as `stuckInModule`. This function returns no error: BeginBlock must never
+// halt on bank subsystem failures.
+func mintAndDistribute(
+	ctx sdk.Context,
+	bank mintBankIface,
+	moduleName, denom string,
+	recipients []mintRecipient,
+	totalMint sdkmath.Int,
+) mintResult {
+	result := mintResult{
+		minted:        sdkmath.ZeroInt(),
+		sent:          sdkmath.ZeroInt(),
+		burnedSkipped: sdkmath.ZeroInt(),
+		stuckInModule: sdkmath.ZeroInt(),
+	}
+	if !totalMint.IsPositive() || len(recipients) == 0 {
+		return result
+	}
+	mintCoins := sdk.NewCoins(sdk.NewCoin(denom, totalMint))
+	if err := bank.MintCoins(ctx, moduleName, mintCoins); err != nil {
+		ctx.Logger().Error("mint distribution: MintCoins failed; skipping interval distribution",
+			"amount", totalMint.String(), "err", err)
+		return result
+	}
+	result.minted = totalMint
+	for _, r := range recipients {
+		rewardCoins := sdk.NewCoins(sdk.NewCoin(denom, r.amount))
+		if err := bank.SendCoinsFromModuleToAccount(ctx, moduleName, r.accountAddress, rewardCoins); err != nil {
+			ctx.Logger().Error("mint distribution: send failed; attempting to burn skipped reward",
+				"valoper", r.operatorAddress, "amount", r.amount.String(), "err", err)
+			if burnErr := bank.BurnCoins(ctx, moduleName, rewardCoins); burnErr != nil {
+				ctx.Logger().Error("mint distribution: burn of skipped reward also failed; coins stuck in module account",
+					"valoper", r.operatorAddress, "amount", r.amount.String(),
+					"send_err", err.Error(), "burn_err", burnErr.Error())
+				result.stuckInModule = result.stuckInModule.Add(r.amount)
+				continue
+			}
+			result.burnedSkipped = result.burnedSkipped.Add(r.amount)
+			continue
+		}
+		result.sent = result.sent.Add(r.amount)
+		ctx.Logger().Info("mint distribution",
+			"valoper", r.operatorAddress,
+			"total", r.amount.String(),
+		)
+	}
+	return result
+}
+
+// MintIfNeeded mints params.MintQuantity umirage every params.MintInterval
+// blocks and distributes proportionally to validator accounts.
+//
+// INVARIANT: this function MUST NEVER return a non-nil error. BeginBlock is
+// consensus-critical and halting on a minting subsystem failure is worse than
+// accepting a missed interval. Every internal failure is logged and either
+// skips the interval or degrades gracefully (e.g. burning unpayable rewards,
+// or tracking `stuck_in_module` coins when burn also fails). The error return
+// is retained only for callers that still check it; it is always nil.
 func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 	current := ctx.BlockHeight()
 	params := k.GetParams(ctx)
@@ -1198,7 +1343,7 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 	// Get total stake and validators, excluding jailed and non-bonded
 	total_stake := sdkmath.ZeroInt()
 	var vals []stakingtypes.Validator
-	err := k.staking.IterateValidators(ctx, func(_ int64, valI stakingtypes.ValidatorI) (stop bool) {
+	if err := k.staking.IterateValidators(ctx, func(_ int64, valI stakingtypes.ValidatorI) (stop bool) {
 		val := valI.(stakingtypes.Validator)
 		if val.Jailed {
 			return false
@@ -1209,9 +1354,9 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		vals = append(vals, val)
 		total_stake = total_stake.Add(val.Tokens)
 		return false
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		ctx.Logger().Error("mint distribution: IterateValidators failed; skipping interval", "err", err)
+		return nil
 	}
 	if total_stake.IsZero() {
 		return nil
@@ -1240,7 +1385,9 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 	}
 	dynDec, errDec := sdkmath.LegacyNewDecFromStr(fmt.Sprintf("%.18f", split))
 	if errDec != nil {
-		return fmt.Errorf("invalid MintDynamicSplit value %.18f: %w", split, errDec)
+		ctx.Logger().Error("mint distribution: invalid MintDynamicSplit; skipping interval",
+			"value", fmt.Sprintf("%.18f", split), "err", errDec)
+		return nil
 	}
 	dynamicPool := dynDec.MulInt(amt).TruncateInt()
 	if dynamicPool.IsNegative() || dynamicPool.GT(amt) {
@@ -1383,52 +1530,47 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		}
 	}
 
-	// Mint total amount and distribute (baseline + dynamic)
-	coins := sdk.NewCoins(sdk.NewCoin(k.mintDenom(), amt))
-	if err := k.bank.MintCoins(ctx, types.ModuleName, coins); err != nil {
-		return err
+	// Build payable recipients BEFORE minting so invalid validators simply do
+	// not receive a reward and their share is not minted.
+	operatorAddrs := make([]string, len(rewards))
+	amounts := make([]sdkmath.Int, len(rewards))
+	for i, r := range rewards {
+		operatorAddrs[i] = r.validator.OperatorAddress
+		amounts[i] = r.baseline.Add(r.dynamic)
+	}
+	recipients, skippedInvalid, totalMint, mismatch := buildMintRecipients(operatorAddrs, amounts)
+	if mismatch {
+		// Programmer bug: slices are always built from the same rewards loop.
+		// Log, skip the interval, never halt.
+		ctx.Logger().Error("mint distribution: recipient slice length mismatch; skipping interval",
+			"operator_addrs", len(operatorAddrs), "amounts", len(amounts))
+		return nil
+	}
+	if len(skippedInvalid) > 0 {
+		ctx.Logger().Error("mint distribution: skipped invalid validator addresses",
+			"count", len(skippedInvalid), "valopers", strings.Join(skippedInvalid, ","))
 	}
 
-	failedValopers := make([]string, 0)
-	for _, r := range rewards {
-		total := r.baseline.Add(r.dynamic)
-		if !total.IsPositive() {
-			continue
-		}
-		val_coins := sdk.NewCoins(sdk.NewCoin(k.mintDenom(), total))
-		valAddr, err := sdk.ValAddressFromBech32(r.validator.OperatorAddress)
-		if err != nil {
-			ctx.Logger().Error("mint distribution: invalid validator address",
-				"valoper", r.validator.OperatorAddress, "err", err)
-			failedValopers = append(failedValopers, r.validator.OperatorAddress)
-			continue
-		}
-		accAddr := sdk.AccAddress(valAddr)
-		if err := k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, accAddr, val_coins); err != nil {
-			ctx.Logger().Error("mint distribution: failed to send to validator",
-				"valoper", r.validator.OperatorAddress, "amount", total.String(), "err", err)
-			failedValopers = append(failedValopers, r.validator.OperatorAddress)
-			continue
-		}
-		ctx.Logger().Info("mint distribution",
-			"valoper", r.validator.OperatorAddress,
-			"baseline", r.baseline.String(),
-			"dynamic", r.dynamic.String(),
-			"total", total.String(),
-		)
-	}
-	if len(failedValopers) > 0 {
-		ctx.Logger().Error("mint distribution: failed for validators", "count", len(failedValopers), "valopers", strings.Join(failedValopers, ","))
-	}
+	result := mintAndDistribute(ctx, k.bank, types.ModuleName, k.mintDenom(), recipients, totalMint)
 
-	// Reset relay credits for next interval
+	// Always reset relay credits at end of interval so the next interval
+	// starts fresh, even if no reward was distributed. A failure here is
+	// logged but does not halt the chain; credits may carry over, giving
+	// affected validators extra weight next interval.
 	if err := k.ResetAllRelayCredits(ctx); err != nil {
-		return fmt.Errorf("failed to reset relay credits: %w", err)
+		ctx.Logger().Error("mint distribution: ResetAllRelayCredits failed; credits may carry over",
+			"err", err)
 	}
 
-	ctx.Logger().Info("minted tokens (baseline+dynamic) and distributed to validators",
-		"amount", amt.String(),
-		"validators", len(rewards),
+	ctx.Logger().Info("mint interval complete",
+		"height", current,
+		"attempted_mint", totalMint.String(),
+		"minted", result.minted.String(),
+		"sent", result.sent.String(),
+		"burned_skipped", result.burnedSkipped.String(),
+		"stuck_in_module", result.stuckInModule.String(),
+		"validators", len(recipients),
+		"skipped_invalid_validators", len(skippedInvalid),
 		"total_stake", total_stake.String(),
 		"baseline_pool", baselinePool.String(),
 		"dynamic_pool", dynamicPool.String(),

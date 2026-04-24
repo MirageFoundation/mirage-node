@@ -1,15 +1,22 @@
 {
-  "messages": [
-    {
-      "@type": "/mirage.core.v1.MsgSetLevel",
-      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-      "target": "mirage1dtvawv0xd028vntj9s4nq30fym0rdv90dhxvsp",
-      "level": 100
-    }
-  ],
-  "metadata": "",
-  "deposit": "1000000000000umirage",
-  "title": "Make AlgorithmWalker Admin",
-  "summary": "Set mirage1dtvawv0xd028vntj9s4nq30fym0rdv90dhxvsp (AlgorithmWalker) to level 100 (Admin).",
-  "expedited": true
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgSetLevel",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "target": "mirage1kml4sd2qp7n7sv0yqp7836a9ezus74ftqe5d5h",
+            "level": 100
+        },
+        {
+            "@type": "/mirage.core.v1.MsgMintTokens",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "target": "mirage1kml4sd2qp7n7sv0yqp7836a9ezus74ftqe5d5h",
+            "amount": "5000000000000",
+            "reason": "Grant 5M MIRAGE to panda alongside admin promotion"
+        }
+    ],
+    "metadata": "",
+    "deposit": "1000000000000umirage",
+    "title": "Make panda Admin and Grant 5M MIRAGE",
+    "summary": "Set mirage1kml4sd2qp7n7sv0yqp7836a9ezus74ftqe5d5h (panda) to level 100 (Admin) and mint 5,000,000 MIRAGE to the same address.",
+    "expedited": true
 }

@@ -245,7 +245,11 @@ type Params struct {
 	MintDynamicSplit float64 `protobuf:"fixed64,39,opt,name=mint_dynamic_split,json=mintDynamicSplit,proto3" json:"mint_dynamic_split,omitempty"`
 	// subscription_period is the renewal period in minutes; 0 = one-time payment, 43200 = 30 days
 	SubscriptionPeriod uint64 `protobuf:"varint,40,opt,name=subscription_period,json=subscriptionPeriod,proto3" json:"subscription_period,omitempty"`
-	// tiers defines the tier configurations; index 0 = free, 1 = subscriber, 2 = agent
+	// tiers defines the tier configurations, indexed by user-level-to-tier mapping.
+	// The exact level -> tier-index mapping is defined by LevelToTierIndex in
+	// x/core/types/params.go: level 0 (Free) -> 0, level 1 (Subscriber) -> 1,
+	// level 10 (Agent) -> 2, level >= 100 (Admin) -> 2 (inherits Agent tier).
+	// Levels 2-9 are reserved for future subscription tiers and currently invalid.
 	Tiers []*TierConfig `protobuf:"bytes,41,rep,name=tiers,proto3" json:"tiers,omitempty"`
 	// subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
 	// Default: 0.80 (80% of period fee goes to reserve, 20% burned)

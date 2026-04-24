@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	cosmoslog "cosmossdk.io/log"
 	sdkmath "cosmossdk.io/math"
 	"github.com/stretchr/testify/require"
 
@@ -199,9 +200,9 @@ type mockTx struct {
 	msgs []sdk.Msg
 }
 
-func (m mockTx) GetMsgs() []sdk.Msg { return m.msgs }
+func (m mockTx) GetMsgs() []sdk.Msg                    { return m.msgs }
 func (m mockTx) GetMsgsV2() ([]protov2.Message, error) { return nil, nil }
-func (m mockTx) ValidateBasic() error { return nil }
+func (m mockTx) ValidateBasic() error                  { return nil }
 
 func TestDisableDelegatorStakingDecorator(t *testing.T) {
 	decorator := DisableDelegatorStakingDecorator{}
@@ -237,6 +238,145 @@ func TestDisableDelegatorStakingDecorator(t *testing.T) {
 	}
 	_, err = decorator.AnteHandle(sdk.Context{}, mockTx{msgs: []sdk.Msg{redelegate}}, false, next)
 	require.ErrorIs(t, err, ErrDelegationDisabled)
+
+	// Self-cancel of an unbond by the validator's own account: allowed.
+	selfCancelUnbond := &stakingtypes.MsgCancelUnbondingDelegation{
+		DelegatorAddress: addr.String(),
+		ValidatorAddress: valAddr.String(),
+		Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		CreationHeight:   1,
+	}
+	_, err = decorator.AnteHandle(sdk.Context{}, mockTx{msgs: []sdk.Msg{selfCancelUnbond}}, false, next)
+	require.NoError(t, err)
+
+	// Third-party cancel of an unbond: rejected. Without this case the
+	// decorator would previously let a non-self delegator cancel an unbond
+	// despite delegation being disabled.
+	thirdPartyCancelUnbond := &stakingtypes.MsgCancelUnbondingDelegation{
+		DelegatorAddress: otherAddr.String(),
+		ValidatorAddress: valAddr.String(),
+		Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		CreationHeight:   1,
+	}
+	_, err = decorator.AnteHandle(sdk.Context{}, mockTx{msgs: []sdk.Msg{thirdPartyCancelUnbond}}, false, next)
+	require.ErrorIs(t, err, ErrDelegationDisabled)
+
+	// The shared rejection helper is used by the app's global ante router and
+	// must enforce the same policy even outside this decorator.
+	require.NoError(t, rejectDelegatorStakingMsgs(mockTx{msgs: []sdk.Msg{selfCancelUnbond}}))
+	require.ErrorIs(t, rejectDelegatorStakingMsgs(mockTx{msgs: []sdk.Msg{thirdPartyCancelUnbond}}), ErrDelegationDisabled)
+}
+
+// TestMirageAnteRouterRejectsThirdPartyStakingBeforeRouting verifies that the
+// top-level ante router installed on baseapp applies the staking-disable
+// policy to BOTH the stdAnte and relayAnte paths. The historical bug this
+// test pins: a pure non-relay MsgCancelUnbondingDelegation was classified as
+// non-relay and routed to stdAnte, which did NOT include
+// DisableDelegatorStakingDecorator, so a third-party cancel bypassed the rule
+// entirely. The fix moves rejectDelegatorStakingMsgs to the front of the
+// router so neither downstream ante chain is reached.
+func TestMirageAnteRouterRejectsThirdPartyStakingBeforeRouting(t *testing.T) {
+	ctx := sdk.Context{}.
+		WithExecMode(sdk.ExecModeCheck).
+		WithLogger(cosmoslog.NewNopLogger())
+
+	addr := sdk.AccAddress(bytes.Repeat([]byte{0x1}, 20))
+	otherAddr := sdk.AccAddress(bytes.Repeat([]byte{0x2}, 20))
+	valAddr := sdk.ValAddress(addr)
+
+	// Instrumented downstream handlers. If either is invoked, the ordering
+	// guarantee of the router is broken.
+	var stdCalled, relayCalled bool
+	stdAnte := func(c sdk.Context, _ sdk.Tx, _ bool) (sdk.Context, error) {
+		stdCalled = true
+		return c, nil
+	}
+	relayAnte := func(c sdk.Context, _ sdk.Tx, _ bool) (sdk.Context, error) {
+		relayCalled = true
+		return c, nil
+	}
+	govDec := GovAuthorityDecorator{}
+
+	thirdPartyCancelUnbond := &stakingtypes.MsgCancelUnbondingDelegation{
+		DelegatorAddress: otherAddr.String(),
+		ValidatorAddress: valAddr.String(),
+		Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		CreationHeight:   1,
+	}
+
+	_, err := mirageAnteRouter(
+		ctx,
+		mockTx{msgs: []sdk.Msg{thirdPartyCancelUnbond}},
+		false,
+		govDec,
+		stdAnte,
+		relayAnte,
+	)
+	require.ErrorIs(t, err, ErrDelegationDisabled,
+		"third-party MsgCancelUnbondingDelegation must be rejected at the top-level router")
+	require.False(t, stdCalled, "stdAnte must NOT be reached when staking-disable rejects the tx")
+	require.False(t, relayCalled, "relayAnte must NOT be reached when staking-disable rejects the tx")
+
+	// Sanity check: a self-cancel (validator's own address) passes the staking
+	// filter and reaches the downstream chain (stdAnte for non-relay msgs).
+	stdCalled, relayCalled = false, false
+	selfCancelUnbond := &stakingtypes.MsgCancelUnbondingDelegation{
+		DelegatorAddress: addr.String(),
+		ValidatorAddress: valAddr.String(),
+		Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		CreationHeight:   1,
+	}
+	_, err = mirageAnteRouter(
+		ctx,
+		mockTx{msgs: []sdk.Msg{selfCancelUnbond}},
+		false,
+		govDec,
+		stdAnte,
+		relayAnte,
+	)
+	require.NoError(t, err, "self-cancel must not be rejected by staking-disable")
+	require.True(t, stdCalled, "self-cancel (non-relay) must route to stdAnte")
+	require.False(t, relayCalled, "self-cancel must not hit relayAnte")
+
+	// Symmetric check for the three pre-existing staking messages: verifying
+	// the router now catches them too even when submitted as pure non-relay
+	// CLI txs.
+	for _, tc := range []struct {
+		name string
+		msg  sdk.Msg
+	}{
+		{"MsgDelegate third-party", &stakingtypes.MsgDelegate{
+			DelegatorAddress: otherAddr.String(),
+			ValidatorAddress: valAddr.String(),
+			Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		}},
+		{"MsgUndelegate third-party", &stakingtypes.MsgUndelegate{
+			DelegatorAddress: otherAddr.String(),
+			ValidatorAddress: valAddr.String(),
+			Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		}},
+		{"MsgBeginRedelegate any", &stakingtypes.MsgBeginRedelegate{
+			DelegatorAddress:    addr.String(),
+			ValidatorSrcAddress: valAddr.String(),
+			ValidatorDstAddress: valAddr.String(),
+			Amount:              sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdCalled, relayCalled = false, false
+			_, err := mirageAnteRouter(
+				ctx,
+				mockTx{msgs: []sdk.Msg{tc.msg}},
+				false,
+				govDec,
+				stdAnte,
+				relayAnte,
+			)
+			require.ErrorIs(t, err, ErrDelegationDisabled)
+			require.False(t, stdCalled)
+			require.False(t, relayCalled)
+		})
+	}
 }
 
 func TestBuildCanonForBlockTopic(t *testing.T) {

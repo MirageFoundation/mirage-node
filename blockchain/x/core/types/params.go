@@ -15,10 +15,11 @@ const (
 
 // Governance-safe upper bounds for key economics parameters.
 const (
-	MaxMintQuantity    = 10_000_000_000_000 // 10M MIRAGE per interval
-	MaxVoteWeight      = 100.0              // no single tier gets >100x weight
-	MaxRelayMinGasPrice = 1_000_000_000     // 1000 MIRAGE per gas unit
-	MaxRelayMaxGasFee  = 100_000_000_000    // 100k MIRAGE per tx
+	MaxMintQuantity     = 10_000_000_000_000 // 10M MIRAGE per interval
+	MaxVoteWeight       = 100.0              // no single tier gets >100x weight
+	MaxRelayMinGasPrice = 1_000_000_000      // 1000 MIRAGE per gas unit
+	MaxRelayMaxGasFee   = 100_000_000_000    // 100k MIRAGE per tx
+	MaxAwardConfigCost  = 1_000_000_000_000  // 1M MIRAGE per award
 )
 
 // ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
@@ -294,6 +295,9 @@ func (p Params) Validate() error {
 			return fmt.Errorf("award_configs[%d]: duplicate name %q", i, ac.Name)
 		}
 		awardNames[ac.Name] = true
+		if ac.Cost > MaxAwardConfigCost {
+			return fmt.Errorf("award_configs[%d]: cost %d exceeds max allowed %d", i, ac.Cost, MaxAwardConfigCost)
+		}
 	}
 	return nil
 }

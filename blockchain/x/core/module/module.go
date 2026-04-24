@@ -614,29 +614,32 @@ func (am AppModule) ExportGenesis(sdkCtx sdk.Context, _ codec.JSONCodec) json.Ra
 // ConsensusVersion returns module consensus version.
 func (AppModule) ConsensusVersion() uint64 { return 1 }
 
-// BeginBlock burns any funds sitting in the core module account and mints daily issuance to the fee collector once per UTC day.
+// BeginBlock runs consensus-critical housekeeping: burn fee collector,
+// maybe-mint + distribute rewards, initialize difficulty on first run,
+// reconcile reserved module profiles, and periodically clean up counters.
+//
+// INVARIANT: this function MUST NEVER return a non-nil error. A non-nil
+// return from BeginBlock halts the chain on every honest validator. All
+// internal failures are logged and the block proceeds; the error return
+// is retained for API compatibility only and is always nil.
 func (am AppModule) BeginBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	// Fail-fast here if this node is not a validator so the operator sees the error after init
-	// Check local consensus pubkey is among bonded validators
-	consAddr := sdkCtx.ConsensusParams() // placeholder to use sdkCtx
-	_ = consAddr
-	// Emit clear log; actual detection is in app init, but we ensure visibility here
-	// If needed, a keeper-based query could assert bonded set contains us.
-	// Burn any fees collected by the fee collector before distribution runs
+
 	if err := am.k.BurnAllFromModuleName(sdkCtx, authtypes.FeeCollectorName); err != nil {
-		return err
+		sdkCtx.Logger().Error("BeginBlock: BurnAllFromModuleName(fee_collector) failed; fees left in collector", "err", err)
 	}
 	// NOTE: Do NOT burn the core module account balance here. It holds user reserve funds.
+	// MintIfNeeded is defined to always return nil; the check is defensive.
 	if err := am.k.MintIfNeeded(sdkCtx); err != nil {
-		return err
+		sdkCtx.Logger().Error("BeginBlock: MintIfNeeded returned error (should be impossible)", "err", err)
 	}
 
-	// Initialize difficulty if not set (base step = 0)
+	// Initialize difficulty if not set (base step = 0). If this fails the
+	// next block will retry; do not halt.
 	params := am.k.GetParams(sdkCtx)
 	if !am.k.HasCurrentDifficulty(sdkCtx) {
 		if err := am.k.SetCurrentDifficulty(sdkCtx, keeper.BaseDifficultySteps); err != nil {
-			return err
+			sdkCtx.Logger().Error("BeginBlock: SetCurrentDifficulty(base) failed; will retry next block", "err", err)
 		}
 	}
 
@@ -654,17 +657,22 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 
 	// Faucet username is set during network bootstrap via a direct tx.
 
-	// Cleanup old counters periodically (every 100 blocks)
+	// Cleanup old counters periodically (every 100 blocks). If this fails,
+	// stale counter rows linger until the next successful sweep; never halt.
 	if sdkCtx.BlockHeight()%100 == 0 {
 		if err := am.k.CleanupOldCounters(sdkCtx, params); err != nil {
-			return err
+			sdkCtx.Logger().Error("BeginBlock: CleanupOldCounters failed; will retry next sweep", "err", err)
 		}
 	}
 
 	return nil
 }
 
-// EndBlock adjusts PoW difficulty based on message volume and processes subscription renewals
+// EndBlock adjusts PoW difficulty based on message volume and processes subscription renewals.
+//
+// INVARIANT: this function MUST NEVER return a non-nil error. All internal
+// failures are logged; affected state simply does not update this block and
+// is retried on subsequent blocks. Never halt the chain from EndBlock.
 func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
@@ -701,13 +709,21 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		}
 		if newDifficulty != currentDifficulty {
 			if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
-				return err
+				sdkCtx.Logger().Error("EndBlock: SetCurrentDifficulty (busy increase) failed; will retry next block",
+					"old", currentDifficulty, "new", newDifficulty, "err", err)
+			} else {
+				if err := am.k.ClearPoWWindow(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("EndBlock: ClearPoWWindow (busy increase) failed; counts may carry over",
+						"err", err)
+				}
+				sdkCtx.Logger().Info("Increased PoW difficulty due to busy window",
+					"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty)
 			}
-			_ = am.k.ClearPoWWindow(sdkCtx, params)
-			sdkCtx.Logger().Info("Increased PoW difficulty due to busy window",
-				"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty)
 		}
-		_ = am.k.SetConsecutiveLowUsage(sdkCtx, 0)
+		if err := am.k.SetConsecutiveLowUsage(sdkCtx, 0); err != nil {
+			sdkCtx.Logger().Error("EndBlock: SetConsecutiveLowUsage reset failed after busy window",
+				"err", err)
+		}
 		return nil
 	}
 
@@ -715,7 +731,9 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	if messageCount < params.PowCalmPeriodDefinition {
 		calmSeq++
 		if err := am.k.SetConsecutiveLowUsage(sdkCtx, calmSeq); err != nil {
-			return err
+			sdkCtx.Logger().Error("EndBlock: SetConsecutiveLowUsage (calm increment) failed; sequence will not advance this block",
+				"calm_seq", calmSeq, "err", err)
+			return nil
 		}
 		if calmSeq >= params.PowCalmSequenceThreshold {
 			newDifficulty := currentDifficulty
@@ -724,15 +742,23 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 			}
 			if newDifficulty != currentDifficulty {
 				if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
-					return err
+					sdkCtx.Logger().Error("EndBlock: SetCurrentDifficulty (calm decrease) failed; will retry next qualifying block",
+						"old", currentDifficulty, "new", newDifficulty, "err", err)
+				} else {
+					if err := am.k.ClearPoWWindow(sdkCtx, params); err != nil {
+						sdkCtx.Logger().Error("EndBlock: ClearPoWWindow (calm decrease) failed; counts may carry over",
+							"err", err)
+					}
+					sdkCtx.Logger().Info("Decreased PoW difficulty due to calm sequence",
+						"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty,
+						"calm_sequence", calmSeq)
 				}
-				_ = am.k.ClearPoWWindow(sdkCtx, params)
-				sdkCtx.Logger().Info("Decreased PoW difficulty due to calm sequence",
-					"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty,
-					"calm_sequence", calmSeq)
 			}
 			// reset sequence after decreasing
-			_ = am.k.SetConsecutiveLowUsage(sdkCtx, 0)
+			if err := am.k.SetConsecutiveLowUsage(sdkCtx, 0); err != nil {
+				sdkCtx.Logger().Error("EndBlock: SetConsecutiveLowUsage reset failed after calm decrease",
+					"err", err)
+			}
 		}
 		return nil
 	}
@@ -1035,9 +1061,11 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 	}
 
 	var profiles []*types.QueryProfileResponse
+	var skippedCorrupt int
 	for _, data := range profilesData {
 		var core types.ProfileCore
 		if err := json.Unmarshal(data, &core); err != nil {
+			skippedCorrupt++
 			continue // Skip invalid profiles
 		}
 
@@ -1068,6 +1096,10 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			BlockedPosts:       blockedPosts,
 			BlockedTopics:      blockedTopics,
 		})
+	}
+
+	if skippedCorrupt > 0 {
+		sdkCtx.Logger().Error("GetProfiles: skipped corrupt profile rows", "count", skippedCorrupt)
 	}
 
 	// Build pagination response

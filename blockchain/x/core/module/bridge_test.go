@@ -23,9 +23,17 @@ import (
 	"mirage/x/core/types"
 )
 
-// mockStoreService implements store.KVStoreService for testing
+// mockStoreService implements store.KVStoreService for testing.
+//
+// Error-injection knobs are optional (nil maps → clean passthrough, default
+// behavior unchanged for existing callers). They let never-halt tests force
+// specific store operations to fail so we can exercise log-and-continue
+// paths in GetParams, BeginBlock, EndBlock, etc.
 type mockStoreService struct {
-	store map[string][]byte
+	store     map[string][]byte
+	getErrors map[string]error // per-key Get failures
+	setErrors map[string]error // per-key Set failures
+	iterError error            // global Iterator failure
 }
 
 func newMockStoreService() *mockStoreService {
@@ -33,14 +41,25 @@ func newMockStoreService() *mockStoreService {
 }
 
 func (m *mockStoreService) OpenKVStore(ctx context.Context) store.KVStore {
-	return &mockKVStore{store: m.store}
+	return &mockKVStore{
+		store:     m.store,
+		getErrors: m.getErrors,
+		setErrors: m.setErrors,
+		iterError: m.iterError,
+	}
 }
 
 type mockKVStore struct {
-	store map[string][]byte
+	store     map[string][]byte
+	getErrors map[string]error
+	setErrors map[string]error
+	iterError error
 }
 
 func (m *mockKVStore) Get(key []byte) ([]byte, error) {
+	if err, ok := m.getErrors[string(key)]; ok {
+		return nil, err
+	}
 	return m.store[string(key)], nil
 }
 
@@ -50,6 +69,9 @@ func (m *mockKVStore) Has(key []byte) (bool, error) {
 }
 
 func (m *mockKVStore) Set(key, value []byte) error {
+	if err, ok := m.setErrors[string(key)]; ok {
+		return err
+	}
 	m.store[string(key)] = value
 	return nil
 }
@@ -60,10 +82,16 @@ func (m *mockKVStore) Delete(key []byte) error {
 }
 
 func (m *mockKVStore) Iterator(start, end []byte) (store.Iterator, error) {
+	if m.iterError != nil {
+		return nil, m.iterError
+	}
 	return newSortedMockIterator(m.store, start, end, false), nil
 }
 
 func (m *mockKVStore) ReverseIterator(start, end []byte) (store.Iterator, error) {
+	if m.iterError != nil {
+		return nil, m.iterError
+	}
 	return newSortedMockIterator(m.store, start, end, true), nil
 }
 

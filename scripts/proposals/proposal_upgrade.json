@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.23.0 (Pruning Fix + Content Tag Normalization)",
-    "summary": "Fixes state-sync pruning bug where pruneSnapshotHeights[0]=0 prevented IAVL pruning from advancing past snapshotInterval-1. Adds content tag normalization (porn -> adult alias). Includes startup PebbleDB compaction for disk reclamation, reduced log retention (90 -> 30 days), and removal of obsolete GoLevelDB converter. No on-chain state migration required.",
+    "title": "Upgrade to v1.24.0 (Security hardening: never-halt invariant, validator mint isolation, award cost cap, cancel-unbonding ante rule)",
+    "summary": "Hardens BeginBlock / EndBlock / MintIfNeeded / GetParams so runtime state-write or read failures are logged and the chain continues instead of halting. Isolates per-validator mint distribution so an invalid validator operator address or a failed send/burn on one recipient never blocks minting for the rest (supply is kept neutral via burn of the skipped share, with stuck-in-module accounting if burn also fails). Adds an upper bound of 1,000,000 MIRAGE to AwardConfig.Cost in params validation. Extends DisableDelegatorStakingDecorator to reject MsgCancelUnbondingDelegation from non-self accounts (same rule as MsgUndelegate). No on-chain state migration and no new store keys.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.23.0",
+                "name": "v1.24.0",
                 "height": "T+50",
                 "info": ""
             }

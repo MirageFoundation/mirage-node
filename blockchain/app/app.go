@@ -134,6 +134,70 @@ func init() {
 	DefaultNodeHome = filepath.Join(os.Getenv("HOME"), ".mirage", "node")
 }
 
+// mirageAnteRouter is the ante handler installed on baseapp. It enforces
+// cross-cutting policies that must apply to EVERY tx regardless of whether
+// the tx eventually routes to the standard SDK ante chain or to the relay
+// ante chain.
+//
+// Order matters here:
+//  1. rejectDelegatorStakingMsgs runs FIRST so staking-disable policy is
+//     enforced on both paths. Historical bug: this used to live inside the
+//     relay chain only, which meant a pure non-relay `MsgUndelegate` /
+//     `MsgCancelUnbondingDelegation` submitted via CLI bypassed it entirely.
+//  2. Mixed relay + non-relay txs are rejected to prevent signature bypass.
+//  3. Pure non-relay txs go to stdAnte (wrapped by govDec).
+//  4. Pure relay txs go to relayAnte.
+func mirageAnteRouter(
+	ctx sdk.Context,
+	tx sdk.Tx,
+	simulate bool,
+	govDec GovAuthorityDecorator,
+	stdAnte sdk.AnteHandler,
+	relayAnte sdk.AnteHandler,
+) (sdk.Context, error) {
+	if err := rejectDelegatorStakingMsgs(tx); err != nil {
+		return ctx, err
+	}
+
+	isRelayTx := false
+	hasNonRelay := false
+	msgTypes := make([]string, 0, len(tx.GetMsgs()))
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	for _, m := range tx.GetMsgs() {
+		msgTypes = append(msgTypes, sdk.MsgTypeURL(m))
+		if am, ok := m.(interface{ GetAuthority() string }); ok {
+			if strings.TrimSpace(am.GetAuthority()) == govAuthority {
+				isRelayTx = false
+				hasNonRelay = false
+				break
+			}
+		}
+		if isRelayMessage(m) {
+			isRelayTx = true
+		} else {
+			hasNonRelay = true
+		}
+	}
+
+	if isRelayTx && hasNonRelay {
+		ctx.Logger().Error("ante: rejected mixed relay + non-relay tx", "msg_types", msgTypes)
+		return ctx, fmt.Errorf("transactions cannot mix relay and non-relay messages")
+	}
+
+	if !isRelayTx {
+		ctx.Logger().Debug("Relay ante: using standard ante", "msg_types", msgTypes)
+		ctxStd, err := govDec.AnteHandle(ctx, tx, simulate, stdAnte)
+		if err != nil {
+			codespace, code, log := errorsmod.ABCIInfo(err, false)
+			ctx.Logger().Warn("StdAnte rejected tx", "code", code, "codespace", codespace, "log", log)
+		}
+		return ctxStd, err
+	}
+
+	ctx.Logger().Debug("Relay ante: using relay ante", "msg_types", msgTypes)
+	return relayAnte(ctx, tx, simulate)
+}
+
 // isRelayMessage returns true if the message is a relay-routed core message
 // (uses envelope PoW + signature instead of standard SDK signatures).
 func isRelayMessage(m sdk.Msg) bool {
@@ -254,7 +318,6 @@ func New(
 			metaFees := RelayGasFeeDecorator{BankKeeper: app.BankKeeper}
 			accDec := RelayAccountingDecorator{Keeper: app.CoreKeeper}
 			logDec := LoggingDecorator{}
-			disableDel := DisableDelegatorStakingDecorator{}
 			validateBasic := authante.NewValidateBasicDecorator()
 			govDec := GovAuthorityDecorator{}
 
@@ -266,7 +329,10 @@ func New(
 				FeegrantKeeper:  nil,
 				SigGasConsumer:  authante.DefaultSigVerificationGasConsumer,
 			}
-			stdAnte, _ := authante.NewAnteHandler(stdOpts)
+			stdAnte, err := authante.NewAnteHandler(stdOpts)
+			if err != nil {
+				panic(fmt.Errorf("app: NewAnteHandler failed: %w", err))
+			}
 
 			// Relay ante chain (must start with SetUpContextDecorator)
 			relayAnte := sdk.ChainAnteDecorators(
@@ -280,56 +346,11 @@ func New(
 				ensure,
 				metaFees,
 				accDec,
-				disableDel,
 				meta,
 			)
 
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
-				// Classify each message as relay or non-relay.
-				isRelayTx := false
-				hasNonRelay := false
-				msgTypes := make([]string, 0, len(tx.GetMsgs()))
-				govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-				for _, m := range tx.GetMsgs() {
-					msgTypes = append(msgTypes, sdk.MsgTypeURL(m))
-					// Governance messages must NEVER flow through the signature-less relay ante chain.
-					if am, ok := m.(interface{ GetAuthority() string }); ok {
-						if strings.TrimSpace(am.GetAuthority()) == govAuthority {
-							isRelayTx = false
-							hasNonRelay = false
-							break
-						}
-					}
-					if isRelayMessage(m) {
-						isRelayTx = true
-					} else {
-						hasNonRelay = true
-					}
-				}
-
-				// Reject transactions that mix relay and non-relay messages.
-				// Without this, a non-relay message `(e.g. bank.MsgSend) would bypass
-				// SDK signature verification entirely since the relay ante chain does
-				// not include SigVerificationDecorator.
-				if isRelayTx && hasNonRelay {
-					ctx.Logger().Error("ante: rejected mixed relay + non-relay tx", "msg_types", msgTypes)
-					return ctx, fmt.Errorf("transactions cannot mix relay and non-relay messages")
-				}
-
-				if !isRelayTx {
-					ctx.Logger().Debug("Relay ante: using standard ante", "msg_types", msgTypes)
-					ctxStd, err := govDec.AnteHandle(ctx, tx, simulate, stdAnte)
-					if err != nil {
-						codespace, code, log := errorsmod.ABCIInfo(err, false)
-						ctx.Logger().Warn("StdAnte rejected tx", "code", code, "codespace", codespace, "log", log)
-					}
-					return ctxStd, err
-				}
-
-				ctx.Logger().Debug("Relay ante: using relay ante", "msg_types", msgTypes)
-
-				// Relay flow for core messages
-				return relayAnte(ctx, tx, simulate)
+				return mirageAnteRouter(ctx, tx, simulate, govDec, stdAnte, relayAnte)
 			})
 
 			// Always propose all txs and accept proposals to avoid filtering in proposal phases

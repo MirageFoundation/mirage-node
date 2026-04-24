@@ -135,6 +135,17 @@ func TestParamsValidateUpperBounds(t *testing.T) {
 	require.Error(t, p.Validate())
 	require.Contains(t, p.Validate().Error(), "relay_max_gas_fee")
 
+	// Reset and test AwardConfig.Cost upper bound (boundary + overshoot)
+	p = DefaultParams()
+	p.AwardConfigs = append([]*AwardConfig{}, DefaultAwardConfigs()...)
+	p.AwardConfigs[0].Cost = MaxAwardConfigCost
+	require.NoError(t, p.Validate(), "cost at max should be accepted")
+
+	p.AwardConfigs[0].Cost = MaxAwardConfigCost + 1
+	require.Error(t, p.Validate())
+	require.Contains(t, p.Validate().Error(), "cost")
+	require.Contains(t, p.Validate().Error(), "exceeds max allowed")
+
 	// Default params should pass
 	p = DefaultParams()
 	require.NoError(t, p.Validate())
