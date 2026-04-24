@@ -442,6 +442,12 @@ const RowPrimary = styled.div`
 const TierName = styled.span`
     color: ${({ $tierColor, theme }) => $tierColor || theme.colors.text};
     position: relative;
+    /* Keep the username text in lockstep with topic names — inherit the
+     * RowPrimary typography (0.78rem / 600) so the users tab reads at
+     * the same size as the topics tab in search results. */
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
 
     &::after {
         content: attr(data-tooltip);
