@@ -100,3 +100,4 @@ cursor.md
 .cursor/
 .otto
 .npmrc
+/package-lock.json
