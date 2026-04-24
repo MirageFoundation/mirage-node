@@ -846,25 +846,24 @@ def test_validation(backend: str):
 
     for tag, label, expected in invalid_tags:
         try:
-            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
-            pub = free_wallet.public_key().public_key_bytes
+            # Use subscriber wallet and skip PoW so this check validates
+            # tag rules deterministically (independent of dynamic PoW shifts).
+            lb, _, _, _, _ = _fetch_params(backend, sub_addr)
+            pub = sub_wallet.public_key().public_key_bytes
             ts = _now_ms()
             nonce = _fresh_nonce()
             topic = f"topic{_rand_str(4)}"
-            base = _canon_base_post_raw(
-                pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0, None, nonce
-            )
-            proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-            signed = canon_signed_with_pow(base, int(proof))
-            sig = sign_canonical(free_wallet, signed)
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub_wallet, signed)
             payload = {
                 "pubkey": _b64(pub),
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
                 "envelope_nonce": str(nonce),
-                "pow_difficulty": diff,
-                "pow": int(proof),
+                "pow_difficulty": 0,
+                "pow": 0,
                 "target": "",
                 "topic": topic,
                 "title": "Tag test",

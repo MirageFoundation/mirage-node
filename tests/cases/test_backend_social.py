@@ -147,7 +147,13 @@ def test_social_graph(backend: str):
     else:
         _fail("social.unfollow_user succeeds", f"resp={resp}")
 
-    time.sleep(2)
+    # Ensure sub_addr is fully removed from followed_users before the
+    # topic-only leak check below; otherwise eventual indexing can make
+    # that check nondeterministic.
+    if _wait_followed_user(backend, addr, sub_addr, False):
+        _pass("social.unfollow_user reflected before topic-only check")
+    else:
+        _fail("social.unfollow_user reflected before topic-only check", f"user={sub_addr}")
 
     # 5.3a follow->block user removes follow
     resp = _do_follow_user(backend, wallet, sub2_addr, follow=True)

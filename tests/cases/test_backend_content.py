@@ -1173,23 +1173,33 @@ def test_seen_posts(backend: str) -> None:
         _fail("seen_posts.beacon_ingest", f"code={code_b} resp={resp_b}")
         return
 
-    # Post is still visible (downranked, not filtered) and feed_debug shows novelty
-    time.sleep(1)
-    code, feed3 = _get(
-        f"{backend}/api/get_posts",
-        {
-            "feed": "home",
-            "by": "newest",
-            "limit": 50,
-            "address": viewer_addr,
-        },
-    )
-    posts3 = (feed3 or {}).get("posts") or []
+    # Post is still visible (downranked, not filtered) and feed_debug shows novelty.
+    # Wait briefly for seen beacon ingestion to propagate into feed scoring.
     target = None
-    for p in posts3:
-        if str(p.get("post_id", "")).lower() == txh:
-            target = p
+    for _ in range(5):
+        code, feed3 = _get(
+            f"{backend}/api/get_posts",
+            {
+                "feed": "home",
+                "by": "newest",
+                "limit": 50,
+                "address": viewer_addr,
+            },
+        )
+        posts3 = (feed3 or {}).get("posts") or []
+        target = None
+        for p in posts3:
+            if str(p.get("post_id", "")).lower() == txh:
+                target = p
+                break
+        if not target:
             break
+        debug = target.get("feed_debug") or {}
+        n_val = debug.get("N", 1.0)
+        sc = debug.get("seen_count", 0)
+        if n_val < 1.0 and sc > 0:
+            break
+        time.sleep(1)
     if target:
         debug = target.get("feed_debug") or {}
         n_val = debug.get("N", 1.0)

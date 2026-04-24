@@ -157,12 +157,49 @@ def find_latest_log(log_dir: Path) -> Path:
     return logs[0]
 
 
-def check_upgrade_handler_ran() -> None:
+def resolve_node_log_dir() -> Path:
+    """Resolve node log directory across local + container layouts.
+
+    Supported overrides/layouts:
+    - NODE_LOG_DIR (explicit)
+    - NODE_HOME/logs/node
+    - NODE_HOME/logs
+    - ~/.mirage/node/logs/node
+    - ~/.mirage/logs/node
+    - /root/.mirage/node/logs/node
+    - /root/.mirage/logs/node
+    """
+    explicit = os.environ.get("NODE_LOG_DIR", "").strip()
+    if explicit:
+        p = Path(explicit).expanduser()
+        if p.exists():
+            return p
+        raise RuntimeError(f"NODE_LOG_DIR set but path does not exist: {p}")
+
     node_home_raw = os.environ.get("NODE_HOME", "").strip()
     node_home = Path(node_home_raw).expanduser() if node_home_raw else Path.home() / ".mirage" / "node"
-    log_dir = node_home / "logs" / "node"
-    if not log_dir.exists():
-        fail(f"node log dir not found: {log_dir}")
+
+    candidates = [
+        node_home / "logs" / "node",
+        node_home / "logs",
+        Path.home() / ".mirage" / "node" / "logs" / "node",
+        Path.home() / ".mirage" / "logs" / "node",
+        Path("/root/.mirage/node/logs/node"),
+        Path("/root/.mirage/logs/node"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+
+    tried = ", ".join(str(c) for c in candidates)
+    raise RuntimeError(f"node log dir not found; tried: {tried}")
+
+
+def check_upgrade_handler_ran() -> None:
+    try:
+        log_dir = resolve_node_log_dir()
+    except Exception as exc:
+        fail(str(exc))
         return
     try:
         log_path = find_latest_log(log_dir)
@@ -191,11 +228,10 @@ def check_never_halt_invariant() -> None:
     NOT as a "chain continued on defaults" log line (those are expected and
     loud-but-benign). We scan for panic lines first, then for the benign
     fallback indicators as info."""
-    node_home_raw = os.environ.get("NODE_HOME", "").strip()
-    node_home = Path(node_home_raw).expanduser() if node_home_raw else Path.home() / ".mirage" / "node"
-    log_dir = node_home / "logs" / "node"
-    if not log_dir.exists():
-        fail(f"node log dir not found: {log_dir}")
+    try:
+        log_dir = resolve_node_log_dir()
+    except Exception as exc:
+        fail(str(exc))
         return
     try:
         log_path = find_latest_log(log_dir)
