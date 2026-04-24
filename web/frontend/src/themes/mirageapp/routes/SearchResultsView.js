@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import styled from "styled-components";
+import styled, { css } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
 import {
     HiOutlineDocumentText,
@@ -14,6 +14,7 @@ import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import CardView from "../components/CardView.js";
 import { FeedCardSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
+import Button from "../components/Button.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -35,6 +36,18 @@ import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { useSearchResults } from "../../../logic/useSearchResults";
 import { useSearchDropdown } from "../../../logic/useSearchDropdown";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
+import Storage from "../../../utils/Storage";
+import {
+    follow as followUser,
+    unfollow as unfollowUser,
+    fetchFollowedUsers,
+} from "../../../utils/FollowUsers";
+import {
+    subscribe as subscribeTopic,
+    unsubscribe as unsubscribeTopic,
+    fetchFollowedTopics,
+} from "../../../utils/Subscriptions";
+import { usePendingFollows } from "../../../logic/useFollowState.js";
 
 /**
  * `/search?q=...` — mirageapp full results view.
@@ -483,6 +496,58 @@ const RowMeta = styled.div`
     text-overflow: ellipsis;
 `;
 
+/* Right-side action cluster on each result row. Clicks here must not
+ * bubble up to the surrounding `RowItem` (which is a react-router Link),
+ * so every event handler on the button stops propagation + prevents
+ * the default navigation. */
+const RowActions = styled.div`
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+`;
+
+/**
+ * Follow / Following button used on topic + user result rows. Mirrors
+ * the FollowsView affordance:
+ *  - Not followed → `primary` filled "Follow" pill.
+ *  - Followed     → `subtle` tinted "Following" pill that flips to a
+ *                   danger "Unfollow" state on hover / focus.
+ * `!important` on the hover swap survives flatMode's !important overrides
+ * in the shared Button component (same trick as FollowsView).
+ */
+const dangerHover = css`
+    background: ${({ theme }) => theme.colors.buttonDangerBg} !important;
+    color: ${({ theme }) => theme.colors.voteDown} !important;
+    border-color: ${({ theme }) => theme.colors.buttonDangerBorder} !important;
+`;
+
+const FollowingButton = styled(Button)`
+    [data-follow-label='hover'] { display: none; }
+    [data-follow-label='default'] { display: inline; }
+
+    &:hover:not(:disabled) {
+        ${dangerHover}
+        [data-follow-label='default'] { display: none; }
+        [data-follow-label='hover'] { display: inline; }
+    }
+    &:focus-visible:not(:disabled) {
+        ${dangerHover}
+        [data-follow-label='default'] { display: none; }
+        [data-follow-label='hover'] { display: inline; }
+    }
+`;
+
+function FollowingLabel({ status }) {
+    if (status) return status;
+    return (
+        <>
+            <span data-follow-label="default">Following</span>
+            <span data-follow-label="hover">Unfollow</span>
+        </>
+    );
+}
+
 const StateBlock = styled.div`
     display: flex;
     flex-direction: column;
@@ -563,6 +628,142 @@ export default function SearchResultsView({ state }) {
     const activeTabIndex = useMemo(
         () => TABS.findIndex((t) => t.id === activeTab),
         [activeTab]
+    );
+
+    /* --- Follow state (topics + users) ------------------------------------
+     * Mirrors `useDiscover` / `useFollows`: load the viewer's followed
+     * topics + users once, keep them as lowercased `Set`s for O(1) checks,
+     * and optimistically update them on toggle. `usePendingFollows` drives
+     * the in-flight spinner / queue-position label so the UI matches the
+     * Follows tab.
+     */
+    const viewerAddress = useMemo(
+        () => (state && state.publicKey) || Storage.load("publicKey", "") || "",
+        [state]
+    );
+    const viewerAddressLower = useMemo(
+        () => String(viewerAddress || "").trim().toLowerCase(),
+        [viewerAddress]
+    );
+    const [followedTopicsSet, setFollowedTopicsSet] = useState(() => new Set());
+    const [followedUsersSet, setFollowedUsersSet] = useState(() => new Set());
+    const {
+        isTopicPending: isFollowTopicPending,
+        isUserPending: isFollowUserPending,
+        formatTopicStatus: formatFollowTopicStatus,
+        formatUserStatus: formatFollowUserStatus,
+    } = usePendingFollows();
+
+    useEffect(() => {
+        if (!isLoggedIn || !viewerAddressLower) {
+            setFollowedTopicsSet(new Set());
+            setFollowedUsersSet(new Set());
+            return undefined;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const [topicsList, usersList] = await Promise.all([
+                    fetchFollowedTopics(viewerAddressLower),
+                    fetchFollowedUsers(viewerAddressLower),
+                ]);
+                if (cancelled) return;
+                setFollowedTopicsSet(
+                    new Set(
+                        (topicsList || [])
+                            .map((t) => String(t || "").trim().toLowerCase())
+                            .filter(Boolean)
+                    )
+                );
+                setFollowedUsersSet(
+                    new Set(
+                        (usersList || [])
+                            .map((u) => String(u || "").trim().toLowerCase())
+                            .filter(Boolean)
+                    )
+                );
+            } catch (_) { /* silent — button just shows "Follow" */ }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [isLoggedIn, viewerAddressLower]);
+
+    const isTopicFollowed = useCallback(
+        (topic) => followedTopicsSet.has(String(topic || "").trim().toLowerCase()),
+        [followedTopicsSet]
+    );
+    const isUserFollowed = useCallback(
+        (addr) => followedUsersSet.has(String(addr || "").trim().toLowerCase()),
+        [followedUsersSet]
+    );
+
+    const handleTopicFollowToggle = useCallback(
+        async (e, topic) => {
+            if (e) {
+                if (typeof e.preventDefault === "function") e.preventDefault();
+                if (typeof e.stopPropagation === "function") e.stopPropagation();
+            }
+            const t = String(topic || "").trim();
+            if (!t || !isLoggedIn || !viewerAddressLower) return;
+            const lower = t.toLowerCase();
+            if (isFollowTopicPending(lower)) return;
+            const wasFollowing = isTopicFollowed(t);
+            try {
+                if (wasFollowing) {
+                    await unsubscribeTopic(viewerAddressLower, t);
+                    setFollowedTopicsSet((prev) => {
+                        const next = new Set(prev);
+                        next.delete(lower);
+                        return next;
+                    });
+                } else {
+                    await subscribeTopic(viewerAddressLower, t);
+                    setFollowedTopicsSet((prev) => new Set([...prev, lower]));
+                }
+            } catch (err) {
+                alert(
+                    `Error ${wasFollowing ? "unfollowing" : "following"} topic: ${
+                        err?.message || err
+                    }`
+                );
+            }
+        },
+        [isLoggedIn, viewerAddressLower, isFollowTopicPending, isTopicFollowed]
+    );
+
+    const handleUserFollowToggle = useCallback(
+        async (e, userAddr) => {
+            if (e) {
+                if (typeof e.preventDefault === "function") e.preventDefault();
+                if (typeof e.stopPropagation === "function") e.stopPropagation();
+            }
+            const addr = String(userAddr || "").trim().toLowerCase();
+            if (!addr || !isLoggedIn || !viewerAddressLower) return;
+            if (addr === viewerAddressLower) return;
+            if (isFollowUserPending(addr)) return;
+            const wasFollowing = isUserFollowed(addr);
+            try {
+                if (wasFollowing) {
+                    await unfollowUser(viewerAddressLower, addr);
+                    setFollowedUsersSet((prev) => {
+                        const next = new Set(prev);
+                        next.delete(addr);
+                        return next;
+                    });
+                } else {
+                    await followUser(viewerAddressLower, addr);
+                    setFollowedUsersSet((prev) => new Set([...prev, addr]));
+                }
+            } catch (err) {
+                alert(
+                    `Error ${wasFollowing ? "unfollowing" : "following"} user: ${
+                        err?.message || err
+                    }`
+                );
+            }
+        },
+        [isLoggedIn, viewerAddressLower, isFollowUserPending, isUserFollowed]
     );
 
     // Local input state for the small-screen inline search form (visible
@@ -951,22 +1152,64 @@ export default function SearchResultsView({ state }) {
         }
         return (
             <List>
-                {topics.map((topic) => (
-                    <RowItem
-                        key={`topic-${topic.topic}`}
-                        to={`/t/${encodeURIComponent(topic.topic)}`}
-                    >
-                        <RowIcon>
-                            <HiOutlineHashtag />
-                        </RowIcon>
-                        <RowMain>
-                            <RowPrimary>{topic.topic}</RowPrimary>
-                            <RowMeta>
-                                {formatPostCount(topic.post_count) || "No posts yet"}
-                            </RowMeta>
-                        </RowMain>
-                    </RowItem>
-                ))}
+                {topics.map((topic) => {
+                    const topicName = topic.topic;
+                    const followed = isTopicFollowed(topicName);
+                    const pending = isFollowTopicPending(topicName);
+                    const status = formatFollowTopicStatus(topicName);
+                    return (
+                        <RowItem
+                            key={`topic-${topicName}`}
+                            to={`/t/${encodeURIComponent(topicName)}`}
+                        >
+                            <RowIcon>
+                                <HiOutlineHashtag />
+                            </RowIcon>
+                            <RowMain>
+                                <RowPrimary>{topicName}</RowPrimary>
+                                <RowMeta>
+                                    {formatPostCount(topic.post_count) || "No posts yet"}
+                                </RowMeta>
+                            </RowMain>
+                            {isLoggedIn && (
+                                <RowActions
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                    }}
+                                >
+                                    {followed ? (
+                                        <FollowingButton
+                                            variant="subtle"
+                                            size="sm"
+                                            minWidth="5.5rem"
+                                            disabled={pending}
+                                            loading={pending}
+                                            onClick={(e) =>
+                                                handleTopicFollowToggle(e, topicName)
+                                            }
+                                        >
+                                            <FollowingLabel status={status} />
+                                        </FollowingButton>
+                                    ) : (
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            minWidth="5.5rem"
+                                            disabled={pending}
+                                            loading={pending}
+                                            onClick={(e) =>
+                                                handleTopicFollowToggle(e, topicName)
+                                            }
+                                        >
+                                            {status || "Follow"}
+                                        </Button>
+                                    )}
+                                </RowActions>
+                            )}
+                        </RowItem>
+                    );
+                })}
                 {hasMoreTopics && (
                     <ShowMoreButton onClick={loadMoreTopics} loading={loadingMoreTopics} spacing="loose">
                         Show more
@@ -997,15 +1240,21 @@ export default function SearchResultsView({ state }) {
                         ? ` · joined ${formatDate(user.created_at)}`
                         : "";
                     const postCount = user.post_count || 0;
+                    const userAddr = user.address;
+                    const userAddrLower = String(userAddr || "").trim().toLowerCase();
+                    const isSelf = !!userAddrLower && userAddrLower === viewerAddressLower;
+                    const followed = isUserFollowed(userAddr);
+                    const pending = isFollowUserPending(userAddrLower);
+                    const status = formatFollowUserStatus(userAddrLower);
                     return (
                         <RowItem
-                            key={`user-${user.address}`}
+                            key={`user-${userAddr}`}
                             to={`/u/${encodeURIComponent(
-                                user.username || user.address
+                                user.username || userAddr
                             )}`}
                         >
                             <RowAvatar
-                                src={dicebearAvatarUrl(user.username || user.address, 56)}
+                                src={dicebearAvatarUrl(user.username || userAddr, 56)}
                                 alt=""
                                 loading="lazy"
                             />
@@ -1015,13 +1264,49 @@ export default function SearchResultsView({ state }) {
                                         $tierColor={tierColor}
                                         data-tooltip={tooltip}
                                     >
-                                        @{user.username || shortAddress(user.address)}
+                                        @{user.username || shortAddress(userAddr)}
                                     </TierName>
                                 </RowPrimary>
                                 <RowMeta>
                                     {`${postCount} post${postCount === 1 ? "" : "s"}${joined}`}
                                 </RowMeta>
                             </RowMain>
+                            {isLoggedIn && !isSelf && (
+                                <RowActions
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                    }}
+                                >
+                                    {followed ? (
+                                        <FollowingButton
+                                            variant="subtle"
+                                            size="sm"
+                                            minWidth="5.5rem"
+                                            disabled={pending}
+                                            loading={pending}
+                                            onClick={(e) =>
+                                                handleUserFollowToggle(e, userAddr)
+                                            }
+                                        >
+                                            <FollowingLabel status={status} />
+                                        </FollowingButton>
+                                    ) : (
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            minWidth="5.5rem"
+                                            disabled={pending}
+                                            loading={pending}
+                                            onClick={(e) =>
+                                                handleUserFollowToggle(e, userAddr)
+                                            }
+                                        >
+                                            {status || "Follow"}
+                                        </Button>
+                                    )}
+                                </RowActions>
+                            )}
                         </RowItem>
                     );
                 })}
