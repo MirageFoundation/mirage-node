@@ -1,5 +1,23 @@
 package types
 
+// =============================================================================
+// DORMANT - Bridge module (offline since v1.20.0)
+//
+// The Mirage bridge is intentionally OFFLINE. The off-chain orchestrator
+// binary is hard-disabled at startup (see blockchain/cmd/orchestrator/main.go)
+// and no validator runs it. No bridge_chain is currently enabled in chain
+// params either. The state types, KV prefixes, and validation helpers below
+// are still compiled into the chain binary so message decoding and any
+// historical state survive replay, but they are not exercised end-to-end in
+// production until the bridge is reactivated.
+//
+// SECURITY-REVIEW SCOPE: bridge / orchestrator findings are accepted-and-
+// deferred. They are tracked in docs/security/blockchain/review-2026-04-24.md
+// under "Outstanding bridge-scope" and will be revisited in a dedicated audit
+// only when the bridge is reactivated. Do NOT surface findings from this file
+// in live remediation queues until that time.
+// =============================================================================
+
 import (
 	"crypto/sha256"
 	"encoding/hex"

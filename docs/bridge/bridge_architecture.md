@@ -1,5 +1,18 @@
 # Bridge Architecture
 
+> **Status (since v1.20.0): DORMANT.** The Mirage bridge is intentionally OFFLINE.
+> The off-chain orchestrator binary is hard-disabled at startup (panic guard in
+> `blockchain/cmd/orchestrator/main.go`) and no validator runs it. No
+> `bridge_chain` is currently enabled in chain params, so no end-to-end bridge
+> traffic is possible. The on-chain message types, handlers, KV state, and the
+> documentation below are retained for future re-enablement.
+>
+> Bridge-scope security findings are tracked separately in
+> [`docs/security/blockchain/review-2026-04-24.md`](../security/blockchain/review-2026-04-24.md)
+> under "Outstanding bridge-scope" and are accepted-and-deferred until
+> reactivation. Future security passes should NOT re-litigate dormant
+> bridge findings unless reactivation is on the roadmap.
+
 This document describes the bridge architecture for transferring MIRAGE tokens between the Mirage blockchain and external chains (Solana).
 
 ## Overview

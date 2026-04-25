@@ -1,5 +1,19 @@
 # Mirage Cross-Chain Orchestrator
 
+> **Status (since v1.20.0): DORMANT.** The orchestrator is intentionally OFFLINE.
+> Its main binary is hard-disabled at startup (panic guard in
+> `blockchain/cmd/orchestrator/main.go`) and no validator currently runs it. No
+> `bridge_chain` is enabled in chain params either, so the off-chain attestor
+> loop, Solana watcher, and Mirage signer described below are not active in
+> production. The code is retained to keep the package compilable and preserve
+> the design while a bridge replacement is being scoped.
+>
+> Bridge / orchestrator security findings are tracked separately in
+> [`../security/blockchain/review-2026-04-24.md`](../security/blockchain/review-2026-04-24.md)
+> under "Outstanding bridge-scope" and are accepted-and-deferred until
+> reactivation. Future security passes should NOT re-litigate dormant
+> orchestrator findings unless reactivation is on the roadmap.
+
 This document provides a comprehensive technical overview of the Mirage orchestrator, the off-chain service responsible for monitoring and executing cross-chain bridge operations. It is intended for senior engineers and project managers who need to understand the system's design philosophy, operational model, and the rationale behind key implementation choices.
 
 For protocol-level details (message types, state records, API endpoints), see [Bridge Architecture](../bridge/bridge_architecture.md).

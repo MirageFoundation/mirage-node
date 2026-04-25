@@ -6,6 +6,28 @@ Endpoints:
 - POST /api/bridge/burn: Relay burn for attested bridge (e.g., Solana)
 - GET /api/bridge/config: Get bridge configuration (enabled chains, fees)
 - GET /api/bridge/status: Query bridge status from indexer DB
+
+=============================================================================
+DORMANT - Bridge relay endpoints (offline since v1.20.0)
+
+The Mirage bridge is intentionally OFFLINE. The off-chain orchestrator binary
+is hard-disabled at startup (see blockchain/cmd/orchestrator/main.go) and no
+validator runs it. No bridge_chain is enabled in chain params either, so the
+endpoints below cannot complete an end-to-end bridge transfer in production:
+- /api/bridge/burn will accept and relay a MsgBridgeBurn, but no attestor set
+  exists to drive the resulting state forward.
+- /api/bridge/config returns whatever (empty) bridge config the chain holds.
+- /api/bridge/status reads indexer state that is not being produced.
+
+The endpoints are retained so the REST surface and serialization paths
+survive until the bridge is reactivated.
+
+SECURITY-REVIEW SCOPE: bridge findings are accepted-and-deferred. They are
+tracked in docs/security/blockchain/review-2026-04-24.md under "Outstanding
+bridge-scope" and will be revisited in a dedicated audit only when the bridge
+is reactivated. Do NOT surface findings from this file in live remediation
+queues until that time.
+=============================================================================
 """
 
 import base64

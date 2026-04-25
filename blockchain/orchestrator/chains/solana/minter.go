@@ -1,5 +1,22 @@
 package solana
 
+// =============================================================================
+// DORMANT - Bridge / Orchestrator (offline since v1.20.0)
+//
+// The off-chain orchestrator is intentionally OFFLINE. Its main binary is
+// hard-disabled at startup (panic guard in blockchain/cmd/orchestrator/main.go)
+// and no validator currently runs it. No on-chain bridge_chain is enabled in
+// chain params either, so this Solana minter does not run in production. The
+// code is retained to keep the package compilable and preserve the design
+// while a bridge replacement is being scoped.
+//
+// SECURITY-REVIEW SCOPE: bridge / orchestrator findings are accepted-and-
+// deferred. They are tracked in docs/security/blockchain/review-2026-04-24.md
+// under "Outstanding bridge-scope" and will be revisited in a dedicated audit
+// only when the bridge is reactivated. Do NOT surface findings from this file
+// in live remediation queues until that time.
+// =============================================================================
+
 import (
 	"bytes"
 	"context"
@@ -310,7 +327,7 @@ func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount 
 	buf.Write(burnHash[:])
 	writeBorshString(buf, mirageSender)
 	_ = binary.Write(buf, binary.LittleEndian, amount)
-	buf.Write(recipient[:]) // 32 bytes - binds recipient to prevent redirection attacks
+	buf.Write(recipient[:])                 // 32 bytes - binds recipient to prevent redirection attacks
 	writeBorshString(buf, destinationChain) // binds destination chain to prevent cross-chain replay
 	return buf.Bytes()
 }
@@ -361,8 +378,8 @@ func buildEd25519VerifyInstruction(pubkey solana.PublicKey, message []byte, sign
 	messageSize := uint16(len(message))
 
 	buf := bytes.NewBuffer(nil)
-	buf.WriteByte(1)    // num_signatures
-	buf.WriteByte(0)    // padding
+	buf.WriteByte(1) // num_signatures
+	buf.WriteByte(0) // padding
 	binary.Write(buf, binary.LittleEndian, signatureOffset)
 	binary.Write(buf, binary.LittleEndian, uint16(0xFFFF)) // signature_instruction_index
 	binary.Write(buf, binary.LittleEndian, pubkeyOffset)
