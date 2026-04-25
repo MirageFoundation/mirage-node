@@ -597,12 +597,15 @@ const InviteActionButton = styled.button`
     font-size: 0.72rem;
     font-weight: 600;
     line-height: 1;
-    color: ${({ theme }) => theme.colors.text};
-    background: ${({ theme }) => theme.colors.surface2};
-    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme, $copied }) =>
+        $copied ? theme.colors.voteUp : theme.colors.text};
+    background: ${({ theme, $copied }) =>
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.surface2};
+    border: 1px solid ${({ theme, $copied }) =>
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.border};
     border-radius: 9px;
     cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 
     svg {
         width: 15px;
@@ -610,8 +613,10 @@ const InviteActionButton = styled.button`
     }
 
     &:hover:not(:disabled) {
-        background: ${({ theme }) => theme.colors.hoverBg};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
+        background: ${({ theme, $copied }) =>
+            $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
+        border-color: ${({ theme, $copied }) =>
+            $copied ? theme.colors.buttonSuccessBg : theme.colors.borderStrong};
     }
 
     &:disabled {
@@ -2040,6 +2045,7 @@ const MainView = ({
                                         <InviteActionButton
                                             type="button"
                                             onClick={handleCopyInviteCode}
+                                            $copied={inviteCodeCopied}
                                             title="Copy share link"
                                         >
                                             {inviteCodeCopied ? <HiCheck /> : <HiLink />}
