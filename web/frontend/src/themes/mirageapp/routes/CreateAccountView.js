@@ -124,13 +124,13 @@ const HandleInput = styled.input`
 
 const PrimaryButton = styled(Button)`
   border: none !important;
-  background: ${({ theme }) => theme.colors.gradient} !important;
+  background: ${({ theme }) => theme.colors.followBtnBg} !important;
   color: #ffffff !important;
   box-shadow: none !important;
-  transition: filter 0.15s ease !important;
+  transition: background 0.15s ease !important;
 
   &:hover:not(:disabled) {
-    filter: brightness(1.08);
+    background: ${({ theme }) => theme.colors.followBtnBgHover} !important;
   }
 
   &:disabled {

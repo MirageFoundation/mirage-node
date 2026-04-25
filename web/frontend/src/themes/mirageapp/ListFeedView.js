@@ -1,4 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import styled, { css, keyframes, useTheme } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
 import { HiChevronDown } from "react-icons/hi2";
@@ -8,10 +9,12 @@ import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
 import { MoreMenuChip, BlockChip } from "./components/PostMenu";
 import PostPlaceholderAvatar from "./components/PostPlaceholderAvatar";
+import Tooltip from "./components/Tooltip";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
 import Storage from "../../utils/Storage";
+import { formatTimeStamp } from "../../logic/useViewPost";
 
 /**
  * ListFeedView (mirageapp) — mobile-app inspired feed list.
@@ -509,17 +512,69 @@ const CompactHeaderDot = styled.span`
     line-height: 1;
 `;
 
-const CompactTime = styled.span`
-    color: ${({ theme }) => theme.colors.feedCtrlText};
-    font-size: 0.62rem;
-    font-weight: 400;
-`;
-
 const CompactFeedReasonInline = styled.span`
     color: ${({ theme }) => theme.colors.feedCtrlText};
     font-size: 0.62rem;
     font-weight: 400;
     font-style: italic;
+`;
+
+/* Wrapper that anchors the portal-based feed-debug tooltip (compact row). */
+const CompactFeedReasonWrapper = styled.span`
+    display: inline;
+    position: relative;
+`;
+
+/* Portal-rendered feed debug tooltip — mirrors CardView's implementation. */
+const CompactFeedDebugTooltip = styled.div`
+    position: fixed;
+    z-index: 10000;
+    background: ${({ theme }) => theme.colors.menuBg};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 8px;
+    padding: 0.75rem;
+    min-width: 360px;
+    max-width: 520px;
+    font-style: normal;
+    font-weight: 400;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: ${({ theme }) => theme.colors.text};
+    text-align: left;
+    box-shadow: ${({ theme }) =>
+        theme.name === 'light'
+            ? '0 8px 24px rgba(15, 23, 42, 0.10)'
+            : '0 12px 28px rgba(0, 0, 0, 0.38)'};
+    white-space: normal;
+    word-break: break-word;
+`;
+
+const CompactFeedDebugRow = styled.div`
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+`;
+
+const CompactFeedDebugLabel = styled.span`
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+`;
+
+const CompactFeedDebugValue = styled.span`
+    color: ${({ theme }) => theme.colors.text};
+    font-weight: 600;
+`;
+
+const CompactFeedDebugExplanation = styled.div`
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    white-space: normal;
 `;
 
 /* Title is smaller than CardView's title so the compact row stays short
@@ -805,6 +860,55 @@ function extractFirstUrl(content) {
     return m ? m[0] : null;
 }
 
+/* Pull a YouTube video id out of a watch / youtu.be / shorts / embed URL.
+ * Returns null for anything we can't confidently resolve. */
+function extractYoutubeId(url) {
+    try {
+        if (!url) return null;
+        const u = new URL(url);
+        const host = (u.hostname || '').toLowerCase();
+        if (host === 'youtu.be' || host === 'www.youtu.be') {
+            const id = u.pathname.split('/').filter(Boolean)[0];
+            return id && /^[\w-]{6,}$/.test(id) ? id : null;
+        }
+        if (host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com') {
+            const v = u.searchParams.get('v');
+            if (v && /^[\w-]{6,}$/.test(v)) return v;
+            const parts = u.pathname.split('/').filter(Boolean);
+            // /shorts/<id>, /embed/<id>, /v/<id>, /live/<id>
+            if (parts.length >= 2 && ['shorts', 'embed', 'v', 'live'].includes(parts[0])) {
+                const id = parts[1];
+                return id && /^[\w-]{6,}$/.test(id) ? id : null;
+            }
+        }
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function youtubeThumbUrl(id) {
+    // hqdefault is the most reliably-served variant across all videos.
+    return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+}
+
+/* Pull the linked site's favicon at a generous size. Used as a "site
+ * mark" for plain link posts (news articles, blogs, etc.) that don't
+ * carry an image. Google's S2 favicon service serves a square PNG for
+ * any host, so every link gets a recognisable mark in the thumbnail
+ * slot instead of a generic identicon. */
+function siteFaviconUrl(rawUrl) {
+    try {
+        if (!rawUrl) return null;
+        const u = new URL(rawUrl);
+        const host = (u.hostname || '').toLowerCase();
+        if (!host) return null;
+        return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`;
+    } catch (_) {
+        return null;
+    }
+}
+
 function resolveCompactContent(post) {
     const mediaList = Array.isArray(post?.media) && post.media.length > 0 ? post.media : null;
     const rawBody = String(post?.content || '');
@@ -823,8 +927,16 @@ function resolveCompactContent(post) {
 }
 
 /* Small photon-scaled thumbnail for the compact left column. Returns null
- * if we couldn't derive an image URL (the component falls back to the
- * first-letter placeholder). */
+ * if we couldn't derive an image URL. Falls back to the DiceBear
+ * identicon placeholder.
+ *
+ * Sources, in order:
+ *   1. `post.thumbnail` (if it's an image URL)
+ *   2. First entry of `post.media`
+ *   3. First URL in body that's a direct image
+ *   4. First URL in body that's a YouTube video — pull the official
+ *      `i.ytimg.com/vi/<id>/hqdefault.jpg` poster so video links get a
+ *      real preview instead of the generic identicon. */
 function getCompactThumb(post) {
     const thumb = post?.thumbnail;
     if (typeof thumb === 'string' && thumb.trim() && isLikelyImageUrl(thumb)) {
@@ -844,6 +956,22 @@ function getCompactThumb(post) {
         try { return buildPhotonUrl(firstUrl, { w: 144, h: 144 }); }
         catch (_) { /* noop */ }
     }
+    // YouTube poster — works for plain links, /shorts, /embed, youtu.be.
+    if (firstUrl) {
+        const ytId = extractYoutubeId(firstUrl);
+        if (ytId) {
+            try { return buildPhotonUrl(youtubeThumbUrl(ytId), { w: 144, h: 144 }); }
+            catch (_) { return youtubeThumbUrl(ytId); }
+        }
+    }
+    // Plain external link — show the source site's favicon. Marked with
+    // a `__favicon` flag so the renderer can apply icon-style sizing
+    // (centered, padded, contain) instead of the cover-fit treatment
+    // used for real photos.
+    if (firstUrl) {
+        const fav = siteFaviconUrl(firstUrl);
+        if (fav) return { src: fav, kind: 'favicon' };
+    }
     return null;
 }
 
@@ -856,6 +984,42 @@ function isCompactInteractive(target) {
     return !!target.closest('a, button, [data-no-card-click]');
 }
 
+/* Thumbnail tile that gracefully falls back to the DiceBear identicon when
+ * the derived image URL fails to load (404, blocked, non-image content,
+ * dead Photon proxy, etc.). Without this fallback the row shows a blank
+ * dark tile, which is what users were seeing on link posts. */
+function CompactThumb({ thumb, to, label, onClick, address, username }) {
+    const [failed, setFailed] = useState(false);
+    const src = typeof thumb === 'string' ? thumb : (thumb && thumb.src) || null;
+    const kind = thumb && typeof thumb === 'object' ? thumb.kind : 'photo';
+    useEffect(() => { setFailed(false); }, [src]);
+
+    if (failed || !src) {
+        return (
+            <PostPlaceholderAvatar address={address} username={username} />
+        );
+    }
+
+    // Favicons are tiny logo marks, not photos — center them on the dark
+    // tile with padding instead of cover-fitting them edge-to-edge.
+    const isFavicon = kind === 'favicon';
+    const imgStyle = isFavicon
+        ? { width: '60%', height: '60%', objectFit: 'contain', margin: 'auto' }
+        : undefined;
+
+    return (
+        <CompactThumbLink to={to} aria-label={label} onClick={onClick}>
+            <img
+                src={src}
+                alt=""
+                loading="lazy"
+                style={imgStyle}
+                onError={() => setFailed(true)}
+            />
+        </CompactThumbLink>
+    );
+}
+
 function CompactRow({ post, state, updatePost }) {
     const theme = useTheme();
     const navigate = useNavigate();
@@ -866,6 +1030,9 @@ function CompactRow({ post, state, updatePost }) {
 
     const [shareCopied, setShareCopied] = useState(false);
     const [expanded, setExpanded] = useState(false);
+    const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
+    const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
+    const feedReasonRef = useRef(null);
 
     const postId = post && post.post_id ? String(post.post_id) : '';
     const linkTarget = postId ? `/p/${postId}` : '#';
@@ -939,16 +1106,14 @@ function CompactRow({ post, state, updatePost }) {
             role="link"
             tabIndex={0}
         >
-            {thumbUrl ? (
-                <CompactThumbLink to={linkTarget} aria-label={post.title} onClick={stop}>
-                    <img src={thumbUrl} alt="" loading="lazy" />
-                </CompactThumbLink>
-            ) : (
-                <PostPlaceholderAvatar
-                    address={authorAddress}
-                    username={post.username}
-                />
-            )}
+            <CompactThumb
+                thumb={thumbUrl}
+                to={linkTarget}
+                label={post.title}
+                onClick={stop}
+                address={authorAddress}
+                username={post.username}
+            />
 
             <CompactTopRow>
                 <CompactHeader>
@@ -964,11 +1129,137 @@ function CompactRow({ post, state, updatePost }) {
                         @{displayAuthor}
                     </CompactUserLink>
                     <CompactHeaderDot>·</CompactHeaderDot>
-                    <CompactTime>{formatAge(ts)}</CompactTime>
+                    <Tooltip
+                        $dotted
+                        data-tooltip={formatTimeStamp(ts)}
+                        onClick={stop}
+                        style={{ fontSize: '0.62rem', fontWeight: 400, color: theme.colors.feedCtrlText }}
+                    >
+                        {formatAge(ts)}
+                    </Tooltip>
                     {feedBucketLabel && (
                         <>
                             <CompactHeaderDot>·</CompactHeaderDot>
-                            <CompactFeedReasonInline>{feedBucketLabel}</CompactFeedReasonInline>
+                            <CompactFeedReasonWrapper
+                                ref={feedReasonRef}
+                                onClick={stop}
+                                onMouseEnter={() => {
+                                    if (post.feed_debug && feedReasonRef.current) {
+                                        const rect = feedReasonRef.current.getBoundingClientRect();
+                                        const tooltipHeight = 320;
+                                        const openDown = rect.top - tooltipHeight - 8 < 0;
+                                        setFeedTooltipPosition({
+                                            top: openDown ? rect.bottom + 8 : rect.top - 8,
+                                            left: Math.max(10, rect.left),
+                                            openDown,
+                                        });
+                                        setFeedTooltipOpen(true);
+                                    }
+                                }}
+                                onMouseLeave={() => setFeedTooltipOpen(false)}
+                            >
+                                <CompactFeedReasonInline>{feedBucketLabel}</CompactFeedReasonInline>
+                            </CompactFeedReasonWrapper>
+                            {feedTooltipOpen && post.feed_debug && typeof document !== 'undefined' && ReactDOM.createPortal(
+                                <CompactFeedDebugTooltip
+                                    style={{
+                                        top: feedTooltipPosition.top,
+                                        left: feedTooltipPosition.left,
+                                        transform: feedTooltipPosition.openDown ? 'none' : 'translateY(-100%)',
+                                    }}
+                                    onMouseEnter={() => setFeedTooltipOpen(true)}
+                                    onMouseLeave={() => setFeedTooltipOpen(false)}
+                                >
+                                    {post.feed_debug.score !== undefined && (
+                                        <>
+                                            <CompactFeedDebugRow style={{ marginBottom: '0.3rem' }}>
+                                                <CompactFeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.8em', opacity: 0.7 }}>
+                                                    {post.feed_debug.equation ||
+                                                        (post.feed_debug.P !== undefined
+                                                            ? '(√S + √V + √U + √P + √A) × R'
+                                                            : post.feed_debug.C !== undefined
+                                                                ? '(V + C) × R'
+                                                                : '(S + V + U) × R')}
+                                                </CompactFeedDebugValue>
+                                            </CompactFeedDebugRow>
+                                            <CompactFeedDebugRow style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${theme.colors.border}` }}>
+                                                <CompactFeedDebugLabel style={{ fontWeight: 'bold' }}>Score:</CompactFeedDebugLabel>
+                                                <CompactFeedDebugValue style={{ fontSize: '1.1em' }}>{post.feed_debug.score?.toFixed(4) || '0'}</CompactFeedDebugValue>
+                                            </CompactFeedDebugRow>
+                                        </>
+                                    )}
+                                    {post.feed_debug.formula && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>Formula:</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>
+                                                {post.feed_debug.formula}
+                                            </CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    <CompactFeedDebugRow>
+                                        <CompactFeedDebugLabel>S (similar users):</CompactFeedDebugLabel>
+                                        <CompactFeedDebugValue>{post.feed_debug.S?.toFixed(3) || '0.000'}</CompactFeedDebugValue>
+                                    </CompactFeedDebugRow>
+                                    <CompactFeedDebugRow>
+                                        <CompactFeedDebugLabel>V (votes):</CompactFeedDebugLabel>
+                                        <CompactFeedDebugValue>{post.feed_debug.V?.toFixed(3) || '0.000'}</CompactFeedDebugValue>
+                                    </CompactFeedDebugRow>
+                                    {post.feed_debug.U !== undefined && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>U (unique commenters):</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue>{post.feed_debug.U ?? 0}</CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    {post.feed_debug.P !== undefined && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>P (your prefs):</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue>{post.feed_debug.P?.toFixed(3) || '0.000'} [t={post.feed_debug.t_pref ?? 0}+a={post.feed_debug.a_pref ?? 0}]</CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    {post.feed_debug.A !== undefined && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>A (awards):</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue>{post.feed_debug.A ?? 0}</CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    {post.feed_debug.C !== undefined && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>C (comments):</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue>{post.feed_debug.C?.toFixed(3) || '0.000'} [{post.feed_debug.comments || 0}]</CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    <CompactFeedDebugRow>
+                                        <CompactFeedDebugLabel>R (recency):</CompactFeedDebugLabel>
+                                        <CompactFeedDebugValue>
+                                            {post.feed_debug.R?.toFixed(4) || '0.0000'}
+                                            {post.feed_debug.age_hours !== undefined && ` [${post.feed_debug.age_hours}h ago]`}
+                                        </CompactFeedDebugValue>
+                                    </CompactFeedDebugRow>
+                                    {post.feed_debug.N !== undefined && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>N (novelty):</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue>
+                                                {post.feed_debug.N?.toFixed(4) || '1.0000'}
+                                                {post.feed_debug.seen_count > 0 && ` [seen ${post.feed_debug.seen_count}×]`}
+                                            </CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    {post.feed_debug.P === undefined && (
+                                        <CompactFeedDebugRow>
+                                            <CompactFeedDebugLabel>Prefs:</CompactFeedDebugLabel>
+                                            <CompactFeedDebugValue>
+                                                t={post.feed_debug.t_pref ?? 0} + a={post.feed_debug.a_pref ?? 0}
+                                            </CompactFeedDebugValue>
+                                        </CompactFeedDebugRow>
+                                    )}
+                                    {post.feed_debug.reason && (
+                                        <CompactFeedDebugExplanation>
+                                            {post.feed_debug.reason}
+                                        </CompactFeedDebugExplanation>
+                                    )}
+                                </CompactFeedDebugTooltip>,
+                                document.body
+                            )}
                         </>
                     )}
                 </CompactHeader>

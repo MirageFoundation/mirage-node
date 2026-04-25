@@ -33,6 +33,7 @@
     "scripts": {
         "start": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export REACT_APP_VERSION=\"${GIT_BRANCH} (${GIT_HASH})\"; BROWSER=none react-app-rewired start'",
         "build": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export REACT_APP_VERSION=\"${GIT_BRANCH} (${GIT_HASH})\"; react-app-rewired build'",
+        "lint": "eslint src --ext .js,.jsx",
         "eject": "react-scripts eject"
     },
     "eslintConfig": {

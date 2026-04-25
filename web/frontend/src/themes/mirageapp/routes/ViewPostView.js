@@ -1032,14 +1032,24 @@ const StyledContentArea = styled.div`
     word-break: break-word;
     white-space: normal;
     max-width: 100%;
+    /* Let drag-resized media break out of the narrow FeedCol column. */
+    overflow: visible;
 
     p { margin: 0 0 0.5rem; }
     p:last-child { margin-bottom: 0; }
     a { color: ${({ theme }) => theme.colors.link}; }
 
+    /* Let drag-resized images escape the post column. The initial size
+     * is still capped via InlineMedia's internal max (600px height for
+     * root posts, 225px for comments). When the user drags the image
+     * wider, InlineMedia sets maxWidth: 'none' inline, allowing the
+     * image to grow up to the viewport width — matching bluemoon. */
     img, video {
-        max-width: 100%;
         max-height: 600px;
+    }
+    img[style*="max-width: none"],
+    video[style*="max-width: none"] {
+        max-height: none;
     }
 
     @media (max-width: 1000px) {
@@ -1059,8 +1069,21 @@ const MainContentWrapper = styled.div`
     width: 100%;
     min-width: 0;
     min-height: 120vh;
-    overflow-x: hidden;
+    /* Allow drag-resized images to visually escape the 820px FeedCol
+     * on desktop and extend toward the viewport edge (matching the
+     * bluemoon theme's behaviour). The image itself is capped at
+     * window.innerWidth - 16 by InlineMedia so it never triggers a
+     * page-level horizontal scrollbar. */
+    overflow-x: visible;
     box-sizing: border-box;
+
+    /* On tablet/mobile the feed column collapses to full-bleed, so the
+     * previous hidden behaviour is fine — re-enable it to keep the old
+     * defensive guard against any stray horizontal overflow (long code
+     * blocks, iframes, etc.). */
+    @media (max-width: 1000px) {
+        overflow-x: hidden;
+    }
 `;
 /**
  * Inline reply composer block. Flat wrapper that sits under the active
@@ -2584,7 +2607,6 @@ function ViewPostView({
                 {(() => {
                     const isRootPost = !!(post.title && String(post.title).trim() !== '');
                     const itemLabel = isRootPost ? 'post' : 'comment';
-                    const itemLabelCap = isRootPost ? 'Post' : 'Comment';
                     const topicLower = (post && typeof post.topic === 'string') ? post.topic.trim().toLowerCase() : '';
                     const followingTopic = topicLower ? isSubscribedTopic(topicLower) : false;
                     const postLinkPath = isRootPost
@@ -3295,7 +3317,7 @@ function ViewPostView({
                             aria-label="View post on Mirage"
                             title="Sign in to view this post"
                             description="Create an account or sign in to read posts, vote, and join the conversation."
-                            notice="Currently in Private Beta — Invite Only"
+                            notice="Currently in Private Beta, Invite Only."
                             stats={getCachedWelcomeStats()}
                             links={[
                                 { label: "Watch Introduction (YouTube)", href: "https://www.youtube.com/watch?v=TOvP32ihQ0M", external: true },

@@ -9,7 +9,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import styled, { css, keyframes } from 'styled-components';
-import { HiChevronDown } from 'react-icons/hi2';
+import { HiChevronDown, HiSparkles, HiTicket } from 'react-icons/hi2';
 import { useRewards } from '../../../logic/useQuests';
 import Api from '../../../utils/api';
 import Storage from '../../../utils/Storage';
@@ -483,13 +483,6 @@ const QuestRowProgress = styled.span`
     font-weight: 500;
 `;
 
-const QuestRowDescription = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    line-height: 1.25;
-    margin-top: 0;
-`;
-
 /* Bullet-point list for per-quest requirements / details.
  * Mirrors mobile `QuestRequirements` rendering (dots + gray text). */
 const QuestDetailsList = styled.ul`
@@ -616,22 +609,6 @@ const ClaimFooter = styled.div`
     gap: 0.45rem;
 `;
 
-const LoyaltyRow = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.3rem;
-    font-size: 0.65rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-
-    &::before {
-        content: '⚡';
-        font-size: 0.75rem;
-    }
-`;
-
 const CtaButton = styled.button`
     display: inline-flex;
     align-items: center;
@@ -721,66 +698,188 @@ const confettiAnimation = keyframes`
     100% { transform: translateY(400px) rotate(720deg); opacity: 0; }
 `;
 
-const celebrationFadeIn = keyframes`
-    0% { opacity: 0; transform: scale(0.8); }
-    100% { opacity: 1; transform: scale(1); }
+const overlayFadeIn = keyframes`
+    0% { opacity: 0; }
+    100% { opacity: 1; }
 `;
 
-const countUpAnimation = keyframes`
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
+const cardPopIn = keyframes`
+    0%   { opacity: 0; transform: translateY(12px) scale(0.94); }
+    60%  { opacity: 1; transform: translateY(-2px) scale(1.01); }
+    100% { opacity: 1; transform: translateY(0)    scale(1); }
+`;
+
+const emojiBob = keyframes`
+    0%, 100% { transform: translateY(0) rotate(-4deg); }
+    50%      { transform: translateY(-6px) rotate(4deg); }
 `;
 
 const CelebrationOverlay = styled.div`
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 10000;
-    animation: ${celebrationFadeIn} 0.3s ease;
+    padding: 1.25rem;
+    animation: ${overlayFadeIn} 0.25s ease;
 `;
 
 const CelebrationContent = styled.div`
+    position: relative;
+    width: min(94vw, 480px);
+    background: ${({ theme }) => theme.colors.panel};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 18px;
+    padding: 1.6rem 1.75rem 1.25rem;
     text-align: center;
-    padding: 2rem;
+    overflow: hidden;
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+    animation: ${cardPopIn} 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+
+    /* Top accent rail using mirage blue */
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 3px;
+        background: linear-gradient(
+            90deg,
+            transparent 0%,
+            ${({ theme }) =>
+                theme.name === 'dark' ? theme.colors.followBtnBg : theme.colors.link} 30%,
+            ${({ theme }) =>
+                theme.name === 'dark' ? theme.colors.followBtnBgHover : theme.colors.linkHover} 70%,
+            transparent 100%
+        );
+    }
+`;
+
+const CelebrationEmojiWrap = styled.div`
+    margin: 0 auto 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 `;
 
 const CelebrationEmoji = styled.div`
-    font-size: 4rem;
-    margin-bottom: 1rem;
-    animation: ${countUpAnimation} 0.5s ease infinite;
+    font-size: 2.4rem;
+    line-height: 1;
+    animation: ${emojiBob} 1.6s ease-in-out infinite;
+`;
+
+const CelebrationEyebrow = styled.div`
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: ${({ theme }) => theme.colors.followBtnBg};
+    margin-bottom: 0.3rem;
 `;
 
 const CelebrationTitle = styled.div`
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #f59e0b;
-    margin-bottom: 0.5rem;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: ${({ theme }) => theme.colors.text};
+    margin-bottom: 0.2rem;
+    letter-spacing: -0.01em;
 `;
 
-const CelebrationAmount = styled.div`
-    font-size: 2.5rem;
-    font-weight: 800;
-    color: white;
+const CelebrationSubtitle = styled.div`
+    font-size: 0.75rem;
+    color: ${({ theme }) => theme.colors.subtleText};
     margin-bottom: 1rem;
 `;
 
-const CelebrationClose = styled.button`
-    padding: 0.75rem 2rem;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: 999px;
-    font-size: 1rem;
-    font-weight: 700;
-    cursor: pointer;
-    box-shadow: 0 4px 14px rgba(102, 126, 234, 0.45);
-    transition: transform 0.15s ease;
+const RewardsList = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1.1rem;
+`;
 
-    &:hover { transform: translateY(-1px); }
+const RewardRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0.8rem;
+    background: ${({ theme }) => theme.colors.panelAlt};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 10px;
+    text-align: left;
+`;
+
+const RewardIcon = styled.div`
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: ${({ theme }) =>
+        theme.name === 'dark' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(245, 158, 11, 0.06)'};
+    border: 0.5px solid #f59e0b;
+    color: #f59e0b;
+
+    svg {
+        width: 16px;
+        height: 16px;
+    }
+`;
+
+const RewardMeta = styled.div`
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+`;
+
+const RewardLabel = styled.div`
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.subtleText};
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+`;
+
+const RewardValue = styled.div`
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", "Monaco", Consolas, monospace;
+    font-size: 0.92rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    color: ${({ theme }) => theme.colors.text};
+    line-height: 1.2;
+`;
+
+const CelebrationClose = styled.button`
+    width: 100%;
+    padding: 0.6rem 1.25rem;
+    background: ${({ theme }) => theme.colors.followBtnBg};
+    color: #ffffff;
+    border: 1px solid ${({ theme }) => theme.colors.followBtnBg};
+    border-radius: 9px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.followBtnBgHover};
+        border-color: ${({ theme }) => theme.colors.followBtnBgHover};
+        transform: translateY(-1px);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
 `;
 
 const ConfettiPiece = styled.div`
@@ -790,6 +889,8 @@ const ConfettiPiece = styled.div`
     background: ${({ $color }) => $color};
     top: -10px;
     left: ${({ $left }) => $left}%;
+    z-index: 2;
+    pointer-events: none;
     animation: ${confettiAnimation} ${({ $duration }) => $duration}s linear forwards;
     animation-delay: ${({ $delay }) => $delay}s;
 `;
@@ -1265,7 +1366,6 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
     /* Normal state */
     const completedCount = dailyQuests.filter(q => q.completed).length;
     const totalCount = dailyQuests.length;
-    const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
     const allComplete = totalCount > 0 && completedCount === totalCount;
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
 
@@ -1607,20 +1707,40 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
                         />
                     ))}
                     <CelebrationContent onClick={e => e.stopPropagation()}>
-                        <CelebrationEmoji>🎉</CelebrationEmoji>
-                        <CelebrationTitle>Rewards Claimed!</CelebrationTitle>
-                        {claimedAmount > 0 && (
-                            <CelebrationAmount>
-                                +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
-                            </CelebrationAmount>
-                        )}
-                        {claimedInviteCodes > 0 && (
-                            <CelebrationAmount style={{ fontSize: claimedAmount > 0 ? '1.5rem' : '2.5rem' }}>
-                                +{claimedInviteCodes} Invite Code{claimedInviteCodes > 1 ? 's' : ''}
-                            </CelebrationAmount>
-                        )}
+                        <CelebrationEmojiWrap>
+                            <CelebrationEmoji>🎉</CelebrationEmoji>
+                        </CelebrationEmojiWrap>
+                        <CelebrationEyebrow>Rewards Claimed</CelebrationEyebrow>
+                        <CelebrationTitle>Nice work!</CelebrationTitle>
+                        <CelebrationSubtitle>
+                            Your rewards have been added to your account.
+                        </CelebrationSubtitle>
+                        <RewardsList>
+                            {claimedAmount > 0 && (
+                                <RewardRow>
+                                    <RewardIcon><HiSparkles /></RewardIcon>
+                                    <RewardMeta>
+                                        <RewardLabel>Mirage</RewardLabel>
+                                        <RewardValue>
+                                            +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
+                                        </RewardValue>
+                                    </RewardMeta>
+                                </RewardRow>
+                            )}
+                            {claimedInviteCodes > 0 && (
+                                <RewardRow>
+                                    <RewardIcon><HiTicket /></RewardIcon>
+                                    <RewardMeta>
+                                        <RewardLabel>Invite Codes</RewardLabel>
+                                        <RewardValue>
+                                            +{claimedInviteCodes} Invite Code{claimedInviteCodes > 1 ? 's' : ''}
+                                        </RewardValue>
+                                    </RewardMeta>
+                                </RewardRow>
+                            )}
+                        </RewardsList>
                         <CelebrationClose onClick={closeCelebration}>
-                            Awesome!
+                            Awesome
                         </CelebrationClose>
                     </CelebrationContent>
                 </CelebrationOverlay>

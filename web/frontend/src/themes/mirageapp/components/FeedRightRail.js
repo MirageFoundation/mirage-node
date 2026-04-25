@@ -62,19 +62,13 @@ const RailLink = styled.a`
 
 const FOUNDATION_URL = 'https://mirage.foundation';
 
-// Two balanced rows: row 1 = four short labels, row 2 = three labels
-// (one of them longer). Keeps the visual rhythm even without wrap.
 const ROW_ONE = [
     { label: 'About Mirage', href: `${FOUNDATION_URL}/#about` },
     { label: 'Docs', href: `${FOUNDATION_URL}/docs` },
     { label: 'FAQ', href: `${FOUNDATION_URL}/faq` },
 ];
 const ROW_TWO = [
-    { label: 'Blog', href: `${FOUNDATION_URL}/blog` },
-    { label: 'Explorer', href: 'https://www.mirage.watch' },
-    { label: 'X', href: 'https://x.com/getmirage' },
-];
-const ROW_THREE = [
+    { label: 'X.com', href: 'https://x.com/getmirage' },
     { label: 'Download app', href: `${FOUNDATION_URL}/app` },
 ];
 
@@ -88,11 +82,6 @@ export default function FeedRightRail() {
             </LinksRow>
             <LinksRow>
                 {ROW_TWO.map(({ label, href }) => (
-                    <RailLink key={label} href={href} target="_blank" rel="noopener noreferrer">{label}</RailLink>
-                ))}
-            </LinksRow>
-            <LinksRow>
-                {ROW_THREE.map(({ label, href }) => (
                     <RailLink key={label} href={href} target="_blank" rel="noopener noreferrer">{label}</RailLink>
                 ))}
             </LinksRow>

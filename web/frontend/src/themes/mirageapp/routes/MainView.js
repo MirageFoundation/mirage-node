@@ -237,15 +237,20 @@ const InviteChevron = styled(HiChevronDown)`
 `;
 const InviteContent = styled.div`
     display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    padding: 0 1rem 0.6rem;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.1rem 1rem 0.75rem;
 
     @media (max-width: 600px) {
-        padding: 0 0.85rem 0.55rem;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.6rem;
+        padding: 0.1rem 0.85rem 0.7rem;
     }
 `;
 const InviteSubtitleBody = styled.div`
+    flex: 1;
+    min-width: 0;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.64rem;
     line-height: 1.35;
@@ -255,10 +260,12 @@ const InviteBannerButton = styled.button`
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
-    width: 100%;
+    flex-shrink: 0;
+    width: auto;
     padding: 0.42rem 0.75rem;
     font-size: 0.68rem;
     font-weight: 700;
+    line-height: 1;
     font-family: inherit;
     color: #FFFFFF;
     background: ${({ theme }) => requireThemeColor(theme, 'followBtnBg')};
@@ -267,6 +274,15 @@ const InviteBannerButton = styled.button`
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+
+    & > svg {
+        width: 0.85em;
+        height: 0.85em;
+    }
+
+    @media (max-width: 600px) {
+        width: 100%;
+    }
 
     &:hover:not(:disabled) {
         background: ${({ theme }) => requireThemeColor(theme, 'followBtnBgHover')};
@@ -285,14 +301,6 @@ const InviteBannerButton = styled.button`
         cursor: not-allowed;
     }
 `;
-const InviteBannerButtonArrow = styled.span`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.9rem;
-    line-height: 1;
-    transform: translateY(-1px);
-`;
 /* Vertical breathing room between the invite banner and the quest card
  * so they don't visually collide. */
 const HomeSectionSpacer = styled.div`
@@ -300,42 +308,6 @@ const HomeSectionSpacer = styled.div`
 
     @media (max-width: 768px) {
         height: 0.5rem;
-    }
-`;
-// Legacy alias kept so any stray references (e.g. older inline layouts) keep compiling.
-// Newer JSX uses the explicit `InviteContent` + `InviteSubtitleBody` components.
-const InviteBannerContentWrapper = InviteContent;
-const InviteBannerTextContent = InviteSubtitleBody;
-const InviteBannerCount = styled.span`
-    font-size: 0.62rem;
-    color: rgba(255, 255, 255, 0.85);
-    font-weight: 500;
-`;
-
-// Collapse button for hero cards
-const CollapseButton = styled.button`
-    background: transparent;
-    border: none;
-    color: ${({
-    theme
-}) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.65rem;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 12px;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    &:hover {
-        color: ${({
-    theme
-}) => requireThemeColor(theme, 'text')};
-        background: ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
 
@@ -581,12 +553,15 @@ const InviteActionButton = styled.button`
     font-size: 0.72rem;
     font-weight: 600;
     line-height: 1;
-    color: ${({ theme }) => theme.colors.text};
-    background: ${({ theme }) => theme.colors.surface2};
-    border: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme, $copied }) =>
+        $copied ? theme.colors.voteUp : theme.colors.text};
+    background: ${({ theme, $copied }) =>
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.surface2};
+    border: 1px solid ${({ theme, $copied }) =>
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.border};
     border-radius: 9px;
     cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 
     svg {
         width: 15px;
@@ -594,8 +569,10 @@ const InviteActionButton = styled.button`
     }
 
     &:hover:not(:disabled) {
-        background: ${({ theme }) => theme.colors.hoverBg};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
+        background: ${({ theme, $copied }) =>
+            $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
+        border-color: ${({ theme, $copied }) =>
+            $copied ? theme.colors.buttonSuccessBg : theme.colors.borderStrong};
     }
 
     &:disabled {
@@ -611,13 +588,12 @@ const InviteActionButton = styled.button`
 `;
 
 const InvitePrimaryCta = styled(InviteActionButton)`
-    background: ${({ theme }) => theme.colors.gradient};
+    background: ${({ theme }) => theme.colors.followBtnBg};
     border: none;
     color: #FFFFFF;
 
     &:hover:not(:disabled) {
-        filter: brightness(1.08);
-        background: ${({ theme }) => theme.colors.gradient};
+        background: ${({ theme }) => theme.colors.followBtnBgHover};
         border: none;
     }
 
@@ -893,12 +869,7 @@ const NsfwHeroNote = styled.div`
 // Visuals match the QuestHeroCard language: flat panel on `bg`,
 // 1px `border`, 8px radius, icon tile + title/subtitle header,
 // gradient CTA button, neutral dismiss pill.
-// Platform color accents (Google green / Apple blue) are kept for
-// the icon tile + CTA so the cards still read as store-specific.
 // ============================================================
-const ANDROID_ACCENT = '#34A853';
-const IPHONE_ACCENT = '#007AFF';
-
 const AndroidAppHero = styled.div`
     box-sizing: border-box;
     width: 100%;
@@ -1782,6 +1753,7 @@ const MainView = ({
                                         onClick={handleOpenInviteModal}
                                         disabled={availableCodeCount === 0}
                                     >
+                                        {availableCodeCount > 0 && <HiShare aria-hidden="true" />}
                                         {availableCodeCount > 0
                                             ? 'Share Invite Code'
                                             : 'No Codes Left'}
@@ -1911,10 +1883,10 @@ const MainView = ({
                             role="region"
                             aria-label="Welcome to Mirage"
                             title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
-                            notice="Currently in Private Beta — Invite Only"
+                            notice="Currently in Private Beta, Invite Only."
                             description={urlTopic === 'following'
                                 ? 'Sign in to unlock your following feed and keep up with the people and topics you care about.'
-                                : 'Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.'}
+                                : 'Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain. No central authority can silence you.'}
                             stats={welcomeStats && welcomeStats.userCount > 0 ? [
                                 { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },
                                 { label: 'Active (24h)', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.active24h.toLocaleString()}` },
@@ -2024,6 +1996,7 @@ const MainView = ({
                                         <InviteActionButton
                                             type="button"
                                             onClick={handleCopyInviteCode}
+                                            $copied={inviteCodeCopied}
                                             title="Copy share link"
                                         >
                                             {inviteCodeCopied ? <HiCheck /> : <HiLink />}

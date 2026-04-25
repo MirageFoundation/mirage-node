@@ -57,12 +57,10 @@ const PlaceholderRoot = styled.div`
 `;
 
 const AvatarImg = styled.img`
-    width: 100%;
-    height: 100%;
+    width: 50%;
+    height: 50%;
     display: block;
-    object-fit: cover;
-    /* Match the tile bg so DiceBear's transparent margins read as one
-     * continuous grey square instead of a faint inner rectangle. */
+    object-fit: contain;
     background: ${AVATAR_BG};
 `;
 

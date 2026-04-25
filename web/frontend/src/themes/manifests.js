@@ -16,7 +16,7 @@ import onyxManifest from './onyx/index';
 import oldredditManifest from './oldreddit/index';
 import mirageappManifest from './mirageapp/index';
 
-export const THEME_MANIFESTS = [bluemoonManifest, onyxManifest, oldredditManifest, mirageappManifest];
+export const THEME_MANIFESTS = [bluemoonManifest, mirageappManifest, onyxManifest, oldredditManifest];
 
 /** Map old persisted theme_id values → current manifest id (renames only). */
 export const LEGACY_THEME_IDS = Object.freeze({

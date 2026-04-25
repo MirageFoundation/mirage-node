@@ -78,6 +78,7 @@ const BrandLink = styled(Link)`
     font-weight: 800;
     font-size: 1.15rem;
     letter-spacing: 0.02em;
+    text-transform: uppercase;
     flex-shrink: 0;
 
     &:hover { text-decoration: none; }
@@ -456,7 +457,7 @@ const LoginPillLink = styled(Link)`
     align-items: center;
     padding: 0.42rem 0.95rem;
     border-radius: 999px;
-    background: ${({ theme }) => theme.colors.gradient};
+    background: ${({ theme }) => theme.colors.followBtnBg};
     color: #fff;
     font-weight: 500;
     font-size: 0.76rem;
@@ -464,10 +465,10 @@ const LoginPillLink = styled(Link)`
     line-height: 1;
     border: none;
     box-shadow: none;
-    transition: filter 0.16s ease;
+    transition: background 0.16s ease;
 
     &:hover {
-        filter: brightness(1.08);
+        background: ${({ theme }) => theme.colors.followBtnBgHover};
         text-decoration: none;
         box-shadow: none;
     }

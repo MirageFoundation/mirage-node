@@ -76,29 +76,46 @@ function isProgressMessage(msg) {
         lower.includes('submitting') ||
         lower.includes('performing') ||
         lower.includes('fetching') ||
-        lower.includes('preparing');
+        lower.includes('preparing') ||
+        lower.includes('processing');
 }
 
 function Toast() {
     const [toast, setToast] = useState(null);
-    const timeoutRef = useRef(null);
+    const dismissTimerRef = useRef(null);
+    const removeTimerRef = useRef(null);
 
     const showToast = useCallback((message, timeout = 0.5, alert = false) => {
-        // Clear any pending timeout
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
+        // Clear any pending timers (both the dismiss and the post-dismiss remove)
+        if (dismissTimerRef.current) {
+            clearTimeout(dismissTimerRef.current);
+            dismissTimerRef.current = null;
+        }
+        if (removeTimerRef.current) {
+            clearTimeout(removeTimerRef.current);
+            removeTimerRef.current = null;
         }
 
         const showSpinner = isProgressMessage(message);
 
-        // Update or create toast (only one at a time)
-        setToast({ message, alert, showSpinner, exiting: false });
+        // If a toast is already visible and not exiting, just update its content
+        // so the slide-in animation doesn't replay on every progress tick.
+        // If it was exiting or absent, start a fresh entry.
+        setToast(prev => {
+            if (prev && !prev.exiting) {
+                return { ...prev, message, alert, showSpinner };
+            }
+            return { message, alert, showSpinner, exiting: false };
+        });
 
         if (timeout > 0) {
-            timeoutRef.current = setTimeout(() => {
-                setToast(prev => prev ? { ...prev, exiting: true } : null);
-                setTimeout(() => setToast(null), 200);
+            dismissTimerRef.current = setTimeout(() => {
+                dismissTimerRef.current = null;
+                setToast(prev => (prev ? { ...prev, exiting: true } : null));
+                removeTimerRef.current = setTimeout(() => {
+                    removeTimerRef.current = null;
+                    setToast(null);
+                }, 200);
             }, timeout * 1000);
         }
     }, []);
@@ -107,7 +124,8 @@ function Toast() {
         setNotifier(showToast);
         return () => {
             setNotifier(null);
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+            if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
+            if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
         };
     }, [showToast]);
 
@@ -124,4 +142,3 @@ function Toast() {
 }
 
 export default Toast;
-

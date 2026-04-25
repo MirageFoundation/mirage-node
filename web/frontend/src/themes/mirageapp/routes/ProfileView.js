@@ -864,22 +864,6 @@ const TabContent = styled.div`
     padding-top: ${({ $flush }) => ($flush ? '0' : '0.4rem')};
 `;
 
-/** Section header — primary `text` color (was `subtleText`). No inline rule. */
-const SectionHeader = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.85rem 1rem 0.35rem;
-    color: ${({ theme }) => theme.colors.text};
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-
-    @media (max-width: 600px) {
-        padding: 0.85rem 0 0.35rem;
-    }
-`;
-
 /* -------------------------------------------------------------------------- */
 /* Algo tab — topic preferences, user preferences, similar users              */
 /* -------------------------------------------------------------------------- */
@@ -1381,7 +1365,7 @@ export default function ProfileView({ state }) {
                             aria-label="Sign in to view your profile"
                             title="Sign in to view your profile"
                             description="Create an account or sign in to see your identity, balance, posts, and settings."
-                            notice="Currently in Private Beta — Invite Only"
+                            notice="Currently in Private Beta, Invite Only."
                             stats={getCachedWelcomeStats()}
                             links={[
                                 { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
@@ -1531,7 +1515,6 @@ function ProfileViewAuthenticated({
         confirmGiftSubAction,
         cancelGiftSub,
         formatPrefWeight,
-        colorForWeight,
         hasValidAccount,
         effectivePostsFilter,
         shortenAddress,

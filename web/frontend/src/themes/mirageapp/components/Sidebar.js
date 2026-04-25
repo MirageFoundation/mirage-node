@@ -25,7 +25,7 @@ import { resolveUsernames } from '../../../utils/UsernameCache';
  * Hidden below 1000px via CSS (the shell also collapses the column).
  *
  * Structure:
- *   - Primary nav (Home, Following, Topics, Create post, Search)
+ *   - Primary nav (Home, Following, Topics, Create post)
  *   - Topics you follow (collapsible)
  *   - Users you follow (collapsible)
  */
@@ -408,7 +408,6 @@ function Sidebar({ state }) {
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
                 <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
-                <SidebarItem to="/search" icon={icons.search} label="Search" pathname={pathname} />
             </Section>
 
             <SectionDivider />

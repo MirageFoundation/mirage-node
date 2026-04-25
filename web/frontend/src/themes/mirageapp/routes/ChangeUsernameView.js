@@ -198,13 +198,13 @@ const SuccessSubtext = styled.div`
 
 const PrimaryButton = styled(Button)`
   border: none !important;
-  background: ${({ theme }) => theme.colors.gradient} !important;
+  background: ${({ theme }) => theme.colors.followBtnBg} !important;
   color: #ffffff !important;
   box-shadow: none !important;
-  transition: filter 0.16s ease, box-shadow 0.16s ease !important;
+  transition: background 0.16s ease, box-shadow 0.16s ease !important;
 
   &:hover:not(:disabled) {
-    filter: brightness(1.08);
+    background: ${({ theme }) => theme.colors.followBtnBgHover} !important;
     box-shadow: none !important;
   }
 `;

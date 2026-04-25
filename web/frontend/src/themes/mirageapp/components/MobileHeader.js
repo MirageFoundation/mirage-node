@@ -73,6 +73,7 @@ const BrandLink = styled(Link)`
     font-weight: 800;
     font-size: 1.02rem;
     letter-spacing: 0.02em;
+    text-transform: uppercase;
     min-width: 0;
 `;
 

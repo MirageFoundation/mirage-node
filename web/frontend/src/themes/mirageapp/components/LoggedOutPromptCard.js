@@ -77,21 +77,11 @@ const NoticePanel = styled.div`
     display: flex;
     align-items: flex-start;
     gap: 0.55rem;
-    padding: 0.6rem 0.75rem;
-    border-radius: 0.55rem;
-    border: 0.5px solid #f59e0b;
-    background: ${({ theme }) =>
-        theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
-    color: ${({ theme }) => theme.colors.text};
+    color: #f59e0b;
     font-size: 0.7rem;
     line-height: 1.5;
-`;
-
-const NoticeIcon = styled.span`
-    flex: 0 0 auto;
-    color: #f59e0b;
-    font-size: 0.85rem;
-    line-height: 1.2;
+    text-align: center;
+    justify-content: center;
 `;
 
 const NoticeBody = styled.div`
@@ -180,13 +170,13 @@ const ActionRow = styled.div`
 
 const PrimaryButton = styled(Button)`
     border: none !important;
-    background: ${({ theme }) => theme.colors.gradient} !important;
+    background: ${({ theme }) => theme.colors.followBtnBg} !important;
     color: #ffffff !important;
     box-shadow: none !important;
-    transition: filter 0.15s ease !important;
+    transition: background 0.15s ease !important;
 
     &:hover:not(:disabled) {
-        filter: brightness(1.08);
+        background: ${({ theme }) => theme.colors.followBtnBgHover} !important;
     }
 
     &:disabled {
@@ -243,7 +233,6 @@ export default function LoggedOutPromptCard({
                 <Body>
                     {notice ? (
                         <NoticePanel role="note">
-                            <NoticeIcon aria-hidden="true">⚠</NoticeIcon>
                             <NoticeBody>{notice}</NoticeBody>
                         </NoticePanel>
                     ) : null}
