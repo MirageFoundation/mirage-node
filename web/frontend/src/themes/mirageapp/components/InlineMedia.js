@@ -149,8 +149,28 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const expDx = sign * Math.pow(Math.abs(dx), 1.05);
         let newWidth = dragStartWidthRef.current + expDx;
         const minWidth = 50;
-        let maxWidth = containerMaxWidth || (typeof window !== 'undefined' ? window.innerWidth : 1000);
-        if (capMaxVideoWidth && maxWidth > capMaxVideoWidth) maxWidth = capMaxVideoWidth;
+        // Allow drag-to-zoom to grow up to the viewport's right edge
+        // rather than being capped by the narrow post/feed column
+        // (FeedCol is 820px on desktop in mirageapp). We measure the
+        // image's current left offset so the image can fill the space
+        // from wherever it starts to the right edge of the viewport —
+        // matching bluemoon's behaviour.
+        let viewportMax;
+        if (typeof window !== 'undefined') {
+            let leftOffset = 0;
+            try {
+                const rect = wrapperRef.current?.getBoundingClientRect();
+                if (rect) leftOffset = Math.max(0, rect.left);
+            } catch (_) { }
+            viewportMax = Math.max(0, window.innerWidth - leftOffset - 16);
+        } else {
+            viewportMax = 1000;
+        }
+        let maxWidth = viewportMax;
+        // NOTE: intentionally do NOT clamp drag-to-zoom to
+        // `theme.layout.maxVideoWidth` — that token sets the INITIAL
+        // render width cap only. Once the user starts drag-zooming we
+        // want the full viewport available (matches bluemoon).
         if (newWidth < minWidth) newWidth = minWidth;
         if (newWidth > maxWidth) newWidth = maxWidth;
         setDisplayWidth(newWidth);
@@ -366,7 +386,10 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const dimensionsKnown = naturalWidth && naturalHeight;
         const mediaStyle = {
             width: dimensionsKnown ? `${currentWidth}px` : 'auto',
-            maxWidth: '100%',
+            // When the user has drag-resized, let the image break out of
+            // the narrow post column (the global `img { max-width: 100% }`
+            // rule would otherwise cap it to the FeedCol width).
+            maxWidth: userResized ? 'none' : '100%',
             maxHeight: userResized ? undefined : `${maxHeight}px`,
             aspectRatio: dimensionsKnown ? `${naturalWidth} / ${naturalHeight}` : undefined,
             objectFit: userResized ? 'contain' : 'cover',

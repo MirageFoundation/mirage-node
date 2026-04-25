@@ -1,4 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import styled, { useTheme, css } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -28,9 +29,11 @@ import Storage from "../../../utils/Storage";
 import InlineMedia from "./InlineMedia";
 import MarkdownRenderer from "./MarkdownRenderer";
 import ConfirmDialog from "./ConfirmDialog";
+import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
+import { formatTimeStamp } from "../../../logic/useViewPost";
 
 /**
  * CardView — Mirage-app inspired post card.
@@ -137,12 +140,6 @@ const HeaderDot = styled.span`
     line-height: 1;
 `;
 
-const TimeText = styled.span`
-    color: ${({ theme }) => theme.colors.feedCtrlText};
-    font-size: 0.62rem;
-    font-weight: 400;
-`;
-
 const UserLink = styled(Link)`
     color: ${({ theme, $tierColor }) => $tierColor || theme.colors.feedCtrlText};
     font-weight: 500;
@@ -157,6 +154,67 @@ const FeedReasonInline = styled.span`
     font-size: 0.62rem;
     font-weight: 400;
     font-style: italic;
+`;
+
+/* Wrapper around FeedReasonInline — anchors the portal-based debug
+ * tooltip that appears on hover (desktop only). */
+const FeedReasonWrapper = styled.span`
+    display: inline;
+    position: relative;
+`;
+
+/* Portal-rendered feed debug tooltip that breaks down the ranking
+ * formula for the post (S / V / U / P / A / R / N …). Mirrors the
+ * bluemoon implementation but themed for mirageapp. */
+const FeedDebugTooltip = styled.div`
+    position: fixed;
+    z-index: 10000;
+    background: ${({ theme }) => theme.colors.menuBg};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 8px;
+    padding: 0.75rem;
+    min-width: 360px;
+    max-width: 520px;
+    font-style: normal;
+    font-weight: 400;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: ${({ theme }) => theme.colors.text};
+    text-align: left;
+    box-shadow: ${({ theme }) =>
+        theme.name === 'light'
+            ? '0 8px 24px rgba(15, 23, 42, 0.10)'
+            : '0 12px 28px rgba(0, 0, 0, 0.38)'};
+    white-space: normal;
+    word-break: break-word;
+`;
+
+const FeedDebugRow = styled.div`
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+`;
+
+const FeedDebugLabel = styled.span`
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+`;
+
+const FeedDebugValue = styled.span`
+    color: ${({ theme }) => theme.colors.text};
+    font-weight: 600;
+`;
+
+const FeedDebugExplanation = styled.div`
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid ${({ theme }) => theme.colors.border};
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    white-space: normal;
 `;
 
 // Post content-tag badge (adult / violence / sensitive) — sits next to the
@@ -585,10 +643,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [blurOverride, setBlurOverride] = useState(false);
     const [followOverride, setFollowOverride] = useState(null);
     const [topicFollowOverride, setTopicFollowOverride] = useState(null);
+    const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
+    const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
 
     const menuRef = useRef(null);
     const followRef = useRef(null);
     const blockRef = useRef(null);
+    const feedReasonRef = useRef(null);
 
     const [blurSensitive, setBlurSensitive] = useState(() => {
         try { return Storage.load('blur_sensitive_media', true) !== false; }
@@ -1037,11 +1098,137 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         @{authorDisplay}
                     </UserLink>
                     <HeaderDot>·</HeaderDot>
-                    <TimeText title={new Date(ts * 1000).toLocaleString()}>{formatAge(ts)}</TimeText>
+                    <Tooltip
+                        $dotted
+                        data-tooltip={formatTimeStamp(ts)}
+                        onClick={stop}
+                        style={{ fontSize: '0.62rem', fontWeight: 400, color: theme.colors.feedCtrlText }}
+                    >
+                        {formatAge(ts)}
+                    </Tooltip>
                     {feedBucketLabel && (
                         <>
                             <HeaderDot>·</HeaderDot>
-                            <FeedReasonInline>{feedBucketLabel}</FeedReasonInline>
+                            <FeedReasonWrapper
+                                ref={feedReasonRef}
+                                onClick={stop}
+                                onMouseEnter={() => {
+                                    if (safePost.feed_debug && feedReasonRef.current) {
+                                        const rect = feedReasonRef.current.getBoundingClientRect();
+                                        const tooltipHeight = 320;
+                                        const openDown = rect.top - tooltipHeight - 8 < 0;
+                                        setFeedTooltipPosition({
+                                            top: openDown ? rect.bottom + 8 : rect.top - 8,
+                                            left: Math.max(10, rect.left),
+                                            openDown,
+                                        });
+                                        setFeedTooltipOpen(true);
+                                    }
+                                }}
+                                onMouseLeave={() => setFeedTooltipOpen(false)}
+                            >
+                                <FeedReasonInline>{feedBucketLabel}</FeedReasonInline>
+                            </FeedReasonWrapper>
+                            {feedTooltipOpen && safePost.feed_debug && typeof document !== 'undefined' && ReactDOM.createPortal(
+                                <FeedDebugTooltip
+                                    style={{
+                                        top: feedTooltipPosition.top,
+                                        left: feedTooltipPosition.left,
+                                        transform: feedTooltipPosition.openDown ? 'none' : 'translateY(-100%)',
+                                    }}
+                                    onMouseEnter={() => setFeedTooltipOpen(true)}
+                                    onMouseLeave={() => setFeedTooltipOpen(false)}
+                                >
+                                    {safePost.feed_debug.score !== undefined && (
+                                        <>
+                                            <FeedDebugRow style={{ marginBottom: '0.3rem' }}>
+                                                <FeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.8em', opacity: 0.7 }}>
+                                                    {safePost.feed_debug.equation ||
+                                                        (safePost.feed_debug.P !== undefined
+                                                            ? '(√S + √V + √U + √P + √A) × R'
+                                                            : safePost.feed_debug.C !== undefined
+                                                                ? '(V + C) × R'
+                                                                : '(S + V + U) × R')}
+                                                </FeedDebugValue>
+                                            </FeedDebugRow>
+                                            <FeedDebugRow style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${theme.colors.border}` }}>
+                                                <FeedDebugLabel style={{ fontWeight: 'bold' }}>Score:</FeedDebugLabel>
+                                                <FeedDebugValue style={{ fontSize: '1.1em' }}>{safePost.feed_debug.score?.toFixed(4) || '0'}</FeedDebugValue>
+                                            </FeedDebugRow>
+                                        </>
+                                    )}
+                                    {safePost.feed_debug.formula && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>Formula:</FeedDebugLabel>
+                                            <FeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>
+                                                {safePost.feed_debug.formula}
+                                            </FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    <FeedDebugRow>
+                                        <FeedDebugLabel>S (similar users):</FeedDebugLabel>
+                                        <FeedDebugValue>{safePost.feed_debug.S?.toFixed(3) || '0.000'}</FeedDebugValue>
+                                    </FeedDebugRow>
+                                    <FeedDebugRow>
+                                        <FeedDebugLabel>V (votes):</FeedDebugLabel>
+                                        <FeedDebugValue>{safePost.feed_debug.V?.toFixed(3) || '0.000'}</FeedDebugValue>
+                                    </FeedDebugRow>
+                                    {safePost.feed_debug.U !== undefined && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>U (unique commenters):</FeedDebugLabel>
+                                            <FeedDebugValue>{safePost.feed_debug.U ?? 0}</FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    {safePost.feed_debug.P !== undefined && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>P (your prefs):</FeedDebugLabel>
+                                            <FeedDebugValue>{safePost.feed_debug.P?.toFixed(3) || '0.000'} [t={safePost.feed_debug.t_pref ?? 0}+a={safePost.feed_debug.a_pref ?? 0}]</FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    {safePost.feed_debug.A !== undefined && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>A (awards):</FeedDebugLabel>
+                                            <FeedDebugValue>{safePost.feed_debug.A ?? 0}</FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    {safePost.feed_debug.C !== undefined && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>C (comments):</FeedDebugLabel>
+                                            <FeedDebugValue>{safePost.feed_debug.C?.toFixed(3) || '0.000'} [{safePost.feed_debug.comments || 0}]</FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    <FeedDebugRow>
+                                        <FeedDebugLabel>R (recency):</FeedDebugLabel>
+                                        <FeedDebugValue>
+                                            {safePost.feed_debug.R?.toFixed(4) || '0.0000'}
+                                            {safePost.feed_debug.age_hours !== undefined && ` [${safePost.feed_debug.age_hours}h ago]`}
+                                        </FeedDebugValue>
+                                    </FeedDebugRow>
+                                    {safePost.feed_debug.N !== undefined && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>N (novelty):</FeedDebugLabel>
+                                            <FeedDebugValue>
+                                                {safePost.feed_debug.N?.toFixed(4) || '1.0000'}
+                                                {safePost.feed_debug.seen_count > 0 && ` [seen ${safePost.feed_debug.seen_count}×]`}
+                                            </FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    {safePost.feed_debug.P === undefined && (
+                                        <FeedDebugRow>
+                                            <FeedDebugLabel>Prefs:</FeedDebugLabel>
+                                            <FeedDebugValue>
+                                                t={safePost.feed_debug.t_pref ?? 0} + a={safePost.feed_debug.a_pref ?? 0}
+                                            </FeedDebugValue>
+                                        </FeedDebugRow>
+                                    )}
+                                    {safePost.feed_debug.reason && (
+                                        <FeedDebugExplanation>
+                                            {safePost.feed_debug.reason}
+                                        </FeedDebugExplanation>
+                                    )}
+                                </FeedDebugTooltip>,
+                                document.body
+                            )}
                         </>
                     )}
                     {hasTag && (
