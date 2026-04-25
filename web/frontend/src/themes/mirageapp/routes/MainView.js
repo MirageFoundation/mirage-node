@@ -301,14 +301,6 @@ const InviteBannerButton = styled.button`
         cursor: not-allowed;
     }
 `;
-const InviteBannerButtonArrow = styled.span`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.9rem;
-    line-height: 1;
-    transform: translateY(-1px);
-`;
 /* Vertical breathing room between the invite banner and the quest card
  * so they don't visually collide. */
 const HomeSectionSpacer = styled.div`
@@ -316,42 +308,6 @@ const HomeSectionSpacer = styled.div`
 
     @media (max-width: 768px) {
         height: 0.5rem;
-    }
-`;
-// Legacy alias kept so any stray references (e.g. older inline layouts) keep compiling.
-// Newer JSX uses the explicit `InviteContent` + `InviteSubtitleBody` components.
-const InviteBannerContentWrapper = InviteContent;
-const InviteBannerTextContent = InviteSubtitleBody;
-const InviteBannerCount = styled.span`
-    font-size: 0.62rem;
-    color: rgba(255, 255, 255, 0.85);
-    font-weight: 500;
-`;
-
-// Collapse button for hero cards
-const CollapseButton = styled.button`
-    background: transparent;
-    border: none;
-    color: ${({
-    theme
-}) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.65rem;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 12px;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    &:hover {
-        color: ${({
-    theme
-}) => requireThemeColor(theme, 'text')};
-        background: ${({
-    theme
-}) => theme.name === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
 
@@ -913,12 +869,7 @@ const NsfwHeroNote = styled.div`
 // Visuals match the QuestHeroCard language: flat panel on `bg`,
 // 1px `border`, 8px radius, icon tile + title/subtitle header,
 // gradient CTA button, neutral dismiss pill.
-// Platform color accents (Google green / Apple blue) are kept for
-// the icon tile + CTA so the cards still read as store-specific.
 // ============================================================
-const ANDROID_ACCENT = '#34A853';
-const IPHONE_ACCENT = '#007AFF';
-
 const AndroidAppHero = styled.div`
     box-sizing: border-box;
     width: 100%;

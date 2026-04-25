@@ -84,13 +84,6 @@ const NoticePanel = styled.div`
     justify-content: center;
 `;
 
-const NoticeIcon = styled.span`
-    flex: 0 0 auto;
-    color: #f59e0b;
-    font-size: 0.85rem;
-    line-height: 1.2;
-`;
-
 const NoticeBody = styled.div`
     min-width: 0;
 `;

@@ -2607,7 +2607,6 @@ function ViewPostView({
                 {(() => {
                     const isRootPost = !!(post.title && String(post.title).trim() !== '');
                     const itemLabel = isRootPost ? 'post' : 'comment';
-                    const itemLabelCap = isRootPost ? 'Post' : 'Comment';
                     const topicLower = (post && typeof post.topic === 'string') ? post.topic.trim().toLowerCase() : '';
                     const followingTopic = topicLower ? isSubscribedTopic(topicLower) : false;
                     const postLinkPath = isRootPost

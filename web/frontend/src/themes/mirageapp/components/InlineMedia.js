@@ -116,13 +116,14 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const r = naturalWidth / naturalHeight;
         // Root posts get 600px max height, comments get 225px
         const maxHeight = variant === 'root_post' ? MAX_INITIAL_HEIGHT_ROOT : MAX_INITIAL_HEIGHT_COMMENT;
+        const initialMaxWidth = capMaxVideoWidth || MAX_INITIAL_WIDTH;
         let w = maxHeight * r;
         // Never upscale beyond natural size
         if (w > naturalWidth) w = naturalWidth;
-        if (w > MAX_INITIAL_WIDTH) w = MAX_INITIAL_WIDTH;
+        if (w > initialMaxWidth) w = initialMaxWidth;
         if (containerMaxWidth && w > containerMaxWidth) w = containerMaxWidth;
         return w;
-    }, [naturalWidth, naturalHeight, containerMaxWidth, variant]);
+    }, [naturalWidth, naturalHeight, containerMaxWidth, variant, capMaxVideoWidth]);
 
     React.useEffect(() => {
         if (naturalWidth && naturalHeight && displayWidth === null) {

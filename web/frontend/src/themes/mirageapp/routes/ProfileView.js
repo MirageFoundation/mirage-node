@@ -864,22 +864,6 @@ const TabContent = styled.div`
     padding-top: ${({ $flush }) => ($flush ? '0' : '0.4rem')};
 `;
 
-/** Section header — primary `text` color (was `subtleText`). No inline rule. */
-const SectionHeader = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.85rem 1rem 0.35rem;
-    color: ${({ theme }) => theme.colors.text};
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-
-    @media (max-width: 600px) {
-        padding: 0.85rem 0 0.35rem;
-    }
-`;
-
 /* -------------------------------------------------------------------------- */
 /* Algo tab — topic preferences, user preferences, similar users              */
 /* -------------------------------------------------------------------------- */
@@ -1531,7 +1515,6 @@ function ProfileViewAuthenticated({
         confirmGiftSubAction,
         cancelGiftSub,
         formatPrefWeight,
-        colorForWeight,
         hasValidAccount,
         effectivePostsFilter,
         shortenAddress,

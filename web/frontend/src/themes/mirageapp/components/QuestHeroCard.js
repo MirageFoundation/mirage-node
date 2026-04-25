@@ -9,7 +9,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import styled, { css, keyframes } from 'styled-components';
-import { HiChevronDown, HiSparkles, HiTicket, HiCheckBadge } from 'react-icons/hi2';
+import { HiChevronDown, HiSparkles, HiTicket } from 'react-icons/hi2';
 import { useRewards } from '../../../logic/useQuests';
 import Api from '../../../utils/api';
 import Storage from '../../../utils/Storage';
@@ -483,13 +483,6 @@ const QuestRowProgress = styled.span`
     font-weight: 500;
 `;
 
-const QuestRowDescription = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    line-height: 1.25;
-    margin-top: 0;
-`;
-
 /* Bullet-point list for per-quest requirements / details.
  * Mirrors mobile `QuestRequirements` rendering (dots + gray text). */
 const QuestDetailsList = styled.ul`
@@ -616,22 +609,6 @@ const ClaimFooter = styled.div`
     gap: 0.45rem;
 `;
 
-const LoyaltyRow = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.3rem;
-    font-size: 0.65rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-
-    &::before {
-        content: '⚡';
-        font-size: 0.75rem;
-    }
-`;
-
 const CtaButton = styled.button`
     display: inline-flex;
     align-items: center;
@@ -735,11 +712,6 @@ const cardPopIn = keyframes`
 const emojiBob = keyframes`
     0%, 100% { transform: translateY(0) rotate(-4deg); }
     50%      { transform: translateY(-6px) rotate(4deg); }
-`;
-
-const sheen = keyframes`
-    0%   { transform: translateX(-120%) skewX(-20deg); }
-    100% { transform: translateX(220%)  skewX(-20deg); }
 `;
 
 const CelebrationOverlay = styled.div`
@@ -1394,7 +1366,6 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
     /* Normal state */
     const completedCount = dailyQuests.filter(q => q.completed).length;
     const totalCount = dailyQuests.length;
-    const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
     const allComplete = totalCount > 0 && completedCount === totalCount;
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
 
