@@ -97,7 +97,11 @@ export function useVoteHandler({ state, updatePost }) {
 
         const userLevel = Number(Storage.load('user_level', '0') || 0);
         if (userLevel === 0) {
-            updateNotification("Processing");
+            // Keep this toast alive long enough to bridge the gap until the
+            // TransactionHandler (lazy-loaded) starts emitting its own progress
+            // ticks every 100ms. Using a short default would cause the toast
+            // to fade out and back in (flicker) on slower devices.
+            updateNotification("Processing", 10);
         }
 
         try {
