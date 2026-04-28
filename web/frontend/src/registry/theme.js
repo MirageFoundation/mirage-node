@@ -4,7 +4,7 @@
  * @see ../themes/manifests.js — import manifests there only; this file builds lookups + helpers.
  */
 
-import { THEME_MANIFESTS } from '../themes/manifests';
+import { THEME_MANIFESTS, LEGACY_THEME_IDS } from '../themes/manifests';
 
 export const THEMES = {};
 THEME_MANIFESTS.forEach((m) => { THEMES[m.id] = m; });
@@ -76,21 +76,21 @@ if (!THEMES.mirageapp) {
 export const DEFAULT_THEME_ID = 'mirageapp';
 
 /**
- * Force-resolve any persisted or runtime theme id to the global default.
- *
- * As of 2026-04-25 every user gets `mirageapp` regardless of:
- *   - what's in localStorage `theme_id`
- *   - what they pick in Settings (the dropdown is cosmetic now)
- *   - what value other code passes in
- *
- * The function intentionally ignores `id` and `LEGACY_THEME_IDS` mappings.
- * If we ever want per-user theming back, restore the previous lookup logic
- * (see git history for the 2026-04-24 version).
- *
- * @param {unknown} _id  ignored on purpose
- * @returns {string} always `DEFAULT_THEME_ID`
+ * Map legacy ids and unknown values to a registered theme id.
+ * Falls back to DEFAULT_THEME_ID for missing/unknown values.
+ * @param {unknown} id
+ * @returns {string}
  */
-export function normalizeThemeId(_id) {
+export function normalizeThemeId(id) {
+    // Uncomment the line below to lock every user to the mirageapp theme
+    // (ignores persisted theme_id and any selection from Settings).
+    // return DEFAULT_THEME_ID;
+    if (id == null || typeof id !== 'string') return DEFAULT_THEME_ID;
+    const t = id.trim();
+    if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_IDS, t)) {
+        return LEGACY_THEME_IDS[t];
+    }
+    if (THEMES[t]) return t;
     return DEFAULT_THEME_ID;
 }
 
