@@ -12,6 +12,8 @@ import {
     HiOutlinePlusCircle,
     HiMagnifyingGlass,
     HiOutlineMagnifyingGlass,
+    HiUserGroup,
+    HiOutlineUserGroup,
     HiChevronDown,
 } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
@@ -256,6 +258,7 @@ const icons = {
     topics: { outline: HiOutlineHashtag, filled: HiHashtag },
     create: { outline: HiOutlinePlusCircle, filled: HiPlusCircle },
     search: { outline: HiOutlineMagnifyingGlass, filled: HiMagnifyingGlass },
+    agents: { outline: HiOutlineUserGroup, filled: HiUserGroup },
 };
 
 function isActivePath(pathname, target) {
@@ -407,6 +410,7 @@ function Sidebar({ state }) {
                 <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} />
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
+                <SidebarItem to="/agents" icon={icons.agents} label="Agents" pathname={pathname} />
                 <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
             </Section>
 
