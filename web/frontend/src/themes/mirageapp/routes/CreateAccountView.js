@@ -40,35 +40,6 @@ const CenteredStatusLine = styled(StatusLine)`
   }
 `;
 
-const WarningPanel = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.55rem;
-  border: 0.5px solid #f59e0b;
-  background: ${({ theme }) =>
-    theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
-  color: ${({ theme }) => theme.colors.text};
-  font-size: 0.7rem;
-  line-height: 1.5;
-`;
-
-const WarningIcon = styled.span`
-  flex: 0 0 auto;
-  color: #f59e0b;
-  font-size: 0.85rem;
-  line-height: 1.2;
-`;
-
-const WarningBody = styled.div`
-  min-width: 0;
-
-  b {
-    font-weight: 600;
-  }
-`;
-
 const HandleField = styled.div`
   display: flex;
   align-items: stretch;
@@ -92,8 +63,8 @@ const HandleField = styled.div`
 const HandlePrefix = styled.span`
   display: inline-flex;
   align-items: center;
-  padding: 0 0.55rem 0 0.7rem;
-  color: ${({ theme }) => theme.colors.subtleText};
+  padding: 0 0 0 0.7rem;
+  color: ${({ theme, $active }) => ($active ? theme.colors.text : theme.colors.subtleText)};
   font-size: 0.75rem;
   font-weight: 500;
   user-select: none;
@@ -165,7 +136,7 @@ function CreateAccountView({ state, setCredentials }) {
   const pageTitle = fromRecovery ? "Finish your account" : "Create your account";
   const pageDescription = fromRecovery
     ? "No account exists for that recovery phrase yet. Pick a username to claim it."
-    : "Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant.";
+    : "Free accounts are prefixed with Anon- to prevent spam. You can upgrade with MIRAGE later to drop the prefix and unlock premium features.";
 
   const continueDisabled =
     submitting
@@ -316,10 +287,10 @@ function CreateAccountView({ state, setCredentials }) {
                   <AuthFieldRow>
                     <AuthLabel htmlFor="display-name-entry">Username</AuthLabel>
                     <HandleField>
-                      <HandlePrefix aria-hidden="true">Anon-</HandlePrefix>
+                      <HandlePrefix aria-hidden="true" $active={usernameInput.length > 0}>Anon-</HandlePrefix>
                       <HandleInput
                         id="display-name-entry"
-                        placeholder="your-name"
+                        placeholder="name"
                         value={usernameInput}
                         onChange={(event) => {
                           const raw = event.target.value;
@@ -345,15 +316,6 @@ function CreateAccountView({ state, setCredentials }) {
                       Letters, numbers, and hyphens only.
                     </AuthHelperText>
                   </AuthFieldRow>
-
-                  {!fromRecovery ? (
-                    <WarningPanel role="note">
-                      <WarningIcon aria-hidden="true">⚠</WarningIcon>
-                      <WarningBody>
-                        Free accounts are prefixed with <b>Anon-</b> to prevent spam. You can upgrade with <b>MIRAGE</b> later to drop the prefix and unlock premium features.
-                      </WarningBody>
-                    </WarningPanel>
-                  ) : null}
 
                   {submitError ? (
                     <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>
