@@ -414,85 +414,81 @@ function Sidebar({ state }) {
                 <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
             </Section>
 
-            <SectionDivider />
+            {isLoggedIn && (
+                <>
+                    <SectionDivider />
 
-            <Section>
-                <SectionHeader
-                    type="button"
-                    onClick={() => setTopicsOpen(v => !v)}
-                    aria-expanded={topicsOpen}
-                >
-                    <span>Topics</span>
-                    <ChevronIcon expanded={topicsOpen} />
-                </SectionHeader>
-                {topicsOpen && (
-                    <div>
-                        {!isLoggedIn ? (
-                            <EmptyPrompt>
-                                <Link to="/login">Sign in</Link> or <Link to="/signup">create an account</Link> to follow topics.
-                            </EmptyPrompt>
-                        ) : topicsToShow.length === 0 ? (
-                            <EmptyRow>None followed</EmptyRow>
-                        ) : (
-                            topicsToShow.map((topic) => (
-                                <TopicLink key={topic} to={`/t/${topic}`}>
-                                    #{topic}
-                                </TopicLink>
-                            ))
+                    <Section>
+                        <SectionHeader
+                            type="button"
+                            onClick={() => setTopicsOpen(v => !v)}
+                            aria-expanded={topicsOpen}
+                        >
+                            <span>Topics</span>
+                            <ChevronIcon expanded={topicsOpen} />
+                        </SectionHeader>
+                        {topicsOpen && (
+                            <div>
+                                {topicsToShow.length === 0 ? (
+                                    <EmptyRow>None followed</EmptyRow>
+                                ) : (
+                                    topicsToShow.map((topic) => (
+                                        <TopicLink key={topic} to={`/t/${topic}`}>
+                                            #{topic}
+                                        </TopicLink>
+                                    ))
+                                )}
+                                {topics.length > topicsLimit && (
+                                    <ToggleMore type="button" onClick={() => setShowAllTopics(v => !v)}>
+                                        {showAllTopics ? 'Show less' : `+${topics.length - topicsLimit} more`}
+                                        <ChevronIcon expanded={showAllTopics} />
+                                    </ToggleMore>
+                                )}
+                            </div>
                         )}
-                        {isLoggedIn && topics.length > topicsLimit && (
-                            <ToggleMore type="button" onClick={() => setShowAllTopics(v => !v)}>
-                                {showAllTopics ? 'Show less' : `+${topics.length - topicsLimit} more`}
-                                <ChevronIcon expanded={showAllTopics} />
-                            </ToggleMore>
-                        )}
-                    </div>
-                )}
-            </Section>
+                    </Section>
 
-            <SectionDivider />
+                    <SectionDivider />
 
-            <Section>
-                <SectionHeader
-                    type="button"
-                    onClick={() => setUsersOpen(v => !v)}
-                    aria-expanded={usersOpen}
-                >
-                    <span>Users</span>
-                    <ChevronIcon expanded={usersOpen} />
-                </SectionHeader>
-                {usersOpen && (
-                    <div>
-                        {!isLoggedIn ? (
-                            <EmptyPrompt>
-                                <Link to="/login">Sign in</Link> or <Link to="/signup">create an account</Link> to follow users.
-                            </EmptyPrompt>
-                        ) : usersToShow.length === 0 ? (
-                            <EmptyRow>None followed</EmptyRow>
-                        ) : (
-                            usersToShow.map((addr) => {
-                                const lower = String(addr || '').toLowerCase();
-                                const uname = usernamesMap?.[lower];
-                                const identity = (uname && typeof uname === 'string' && uname.trim().length > 0) ? uname.trim() : addr;
-                                return (
-                                    <UserLink
-                                        key={addr}
-                                        to={`/u/${encodeURIComponent(identity)}?tab=posts`}
-                                    >
-                                        {renderUserLabel(addr)}
-                                    </UserLink>
-                                );
-                            })
+                    <Section>
+                        <SectionHeader
+                            type="button"
+                            onClick={() => setUsersOpen(v => !v)}
+                            aria-expanded={usersOpen}
+                        >
+                            <span>Users</span>
+                            <ChevronIcon expanded={usersOpen} />
+                        </SectionHeader>
+                        {usersOpen && (
+                            <div>
+                                {usersToShow.length === 0 ? (
+                                    <EmptyRow>None followed</EmptyRow>
+                                ) : (
+                                    usersToShow.map((addr) => {
+                                        const lower = String(addr || '').toLowerCase();
+                                        const uname = usernamesMap?.[lower];
+                                        const identity = (uname && typeof uname === 'string' && uname.trim().length > 0) ? uname.trim() : addr;
+                                        return (
+                                            <UserLink
+                                                key={addr}
+                                                to={`/u/${encodeURIComponent(identity)}?tab=posts`}
+                                            >
+                                                {renderUserLabel(addr)}
+                                            </UserLink>
+                                        );
+                                    })
+                                )}
+                                {people.length > peopleLimit && (
+                                    <ToggleMore type="button" onClick={() => setShowAllUsers(v => !v)}>
+                                        {showAllUsers ? 'Show less' : `+${people.length - peopleLimit} more`}
+                                        <ChevronIcon expanded={showAllUsers} />
+                                    </ToggleMore>
+                                )}
+                            </div>
                         )}
-                        {isLoggedIn && people.length > peopleLimit && (
-                            <ToggleMore type="button" onClick={() => setShowAllUsers(v => !v)}>
-                                {showAllUsers ? 'Show less' : `+${people.length - peopleLimit} more`}
-                                <ChevronIcon expanded={showAllUsers} />
-                            </ToggleMore>
-                        )}
-                    </div>
-                )}
-            </Section>
+                    </Section>
+                </>
+            )}
 
         </Aside>
     );
