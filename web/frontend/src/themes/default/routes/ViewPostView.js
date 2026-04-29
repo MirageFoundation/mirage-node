@@ -140,15 +140,25 @@ const COMMENT_CURVE_RADIUS_PX = 10;
 const COMMENT_CURVE_RADIUS_PX_MOBILE = 9;
 const COMMENT_CONTENT_GAP_PX = 8;
 const COMMENT_CONTENT_GAP_PX_MOBILE = 6;
-/* Avatar center y — split by collapsed state because padding-top differs.
- * Computed as: padding-top + (meta-row-height / 2).
- *   collapsed padding-top = 0.45rem ≈  7.2px  → center ≈ 13px
- *   expanded  padding-top = 0.55rem ≈  8.8px  → center ≈ 15px
- * Mobile uses proportionally smaller values. */
-const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX = 19;
-const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX = 21;
-const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE = 17;
-const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE = 19;
+/* Avatar center y — used by the J-curve elbow (::before) and the
+ * descendant spine (::after) on `CommentCard` so the rail visually lands
+ * on the avatar's center. The avatar itself is rendered inline inside
+ * the meta row using `align-items: center`, so it auto-centers with the
+ * username text regardless of font metrics. These constants only need
+ * to mirror where the meta row's vertical center actually sits relative
+ * to the card's top edge.
+ *
+ * Center = padding-top + (avatar-size / 2), because the avatar (24px)
+ * is the tallest item on the meta row and therefore sets the row
+ * height when `align-items: center` is in effect.
+ *
+ *   collapsed padding-top = 0.45rem = 9px  → center =  9 + 12 = 21px
+ *   expanded  padding-top = 0.55rem = 11px → center = 11 + 12 = 23px
+ * Mobile (< 1000px) — avatar 22px, padding 0.4rem / 0.5rem → 19 / 21px. */
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX = 21;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX = 23;
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE = 19;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE = 21;
 
 function commentAvatarLeftPx(level, baseLeft, indent) {
     const lvl = Math.max(Number(level) || 0, 1);
@@ -359,30 +369,39 @@ const CommentCard = styled(PostCard)`
 
 /**
  * DiceBear identicon avatar anchored to the username row of a
- * `CommentCard`. Vertically centered on the username row text mid-line
- * via `transform: translateY(-50%)` against a state-aware top constant.
- * Sits at the end of the J-curve so the rail visually "delivers" the
- * thread connection from the parent avatar into this comment's avatar.
+ * `CommentCard`. Rendered INLINE as the first item inside the meta
+ * row's `MetaInfoRowLeft` flex container so it auto-centers vertically
+ * with the username text via `align-items: center` — no fragile
+ * pixel-tuned `top` offset needed.
+ *
+ * Horizontal placement: the meta row's left edge sits at the card's
+ * `padding-left` (= `commentContentLeftPx`). The avatar pulls itself
+ * back into the avatar gutter with a negative `margin-left` equal to
+ * its own width plus the content gap, so its left edge lands exactly
+ * at `commentAvatarLeftPx` for the row's level. The J-curve elbow
+ * (drawn as a `::before` on `CommentCard`) terminates at that same x,
+ * visually "delivering" the thread connection into the avatar.
  *
  * Wraps the shared `UserAvatar` component so the dicebear bg color and
  * 20% inner padding around the identicon glyph are consistent with
  * every other avatar surface in the app.
  */
 const CommentAvatar = styled(UserAvatar)`
-    position: absolute;
-    top: ${({ $isCollapsed }) =>
-        ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
-    transform: translateY(-50%);
-    left: ${({ $level }) =>
-        `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX)}px`};
+    flex-shrink: 0;
+    align-self: center;
+    margin-left: ${-(COMMENT_AVATAR_SIZE_PX + COMMENT_CONTENT_GAP_PX)}px;
+    /* The meta row's flex column-gap (0.3rem ≈ 6px) gives most of the
+     * gap to the next item; this margin-right tops it up to the
+     * full content gap so the username text starts at the same x as
+     * the body content below. */
+    margin-right: ${Math.max(0, COMMENT_CONTENT_GAP_PX - 6)}px;
     pointer-events: none;
+    position: relative;
     z-index: 2;
 
     @media (max-width: 1000px) {
-        top: ${({ $isCollapsed }) =>
-            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
-        left: ${({ $level }) =>
-            `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE)}px`};
+        margin-left: ${-(COMMENT_AVATAR_SIZE_PX_MOBILE + COMMENT_CONTENT_GAP_PX_MOBILE)}px;
+        margin-right: ${Math.max(0, COMMENT_CONTENT_GAP_PX_MOBILE - 6)}px;
         width: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
         height: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
     }
@@ -3428,22 +3447,6 @@ function ViewPostView({
                             const activeDepths = ancestorDepthsMap[idx];
                             return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
                                 <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
-                                    {!isRoot && (() => {
-                                        // Seed dicebear on the bech32 address
-                                        // (`user_id`) — stable across username
-                                        // changes and consistent with every
-                                        // other avatar surface in the app.
-                                        const seed = (post.user_id ? String(post.user_id) : '')
-                                            || (post.username && String(post.username).trim())
-                                            || 'anon';
-                                        return <CommentAvatar
-                                            $level={displayLevel}
-                                            $isCollapsed={isCollapsed}
-                                            seed={seed}
-                                            size={COMMENT_AVATAR_SIZE_PX}
-                                            alt=""
-                                        />;
-                                    })()}
                                 <ColumnFlex>
                                     {/* Mobile root post meta - two rows */}
                                     {isRoot && <MobileRootMeta>
@@ -3501,6 +3504,20 @@ function ViewPostView({
                                         } : undefined}
                                     >
                                         <MetaInfoRowLeft>
+                                            {!isRoot && (() => {
+                                                // Seed dicebear on the bech32 address
+                                                // (`user_id`) — stable across username
+                                                // changes and consistent with every
+                                                // other avatar surface in the app.
+                                                const seed = (post.user_id ? String(post.user_id) : '')
+                                                    || (post.username && String(post.username).trim())
+                                                    || 'anon';
+                                                return <CommentAvatar
+                                                    seed={seed}
+                                                    size={COMMENT_AVATAR_SIZE_PX}
+                                                    alt=""
+                                                />;
+                                            })()}
                                             {renderAuthorLink(post)}
                                             <MetaSeparator>·</MetaSeparator>
                                             <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
