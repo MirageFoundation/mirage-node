@@ -35,6 +35,7 @@ import ContentTagBadge from "./ContentTagBadge";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
+import { useAdminQuestActions } from "./AdminQuestActions";
 
 /**
  * CardView — Mirage-app inspired post card.
@@ -755,6 +756,33 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setBlockOpen(false);
     }, []);
 
+    /**
+     * Sub-plan 06.11 E — feed-row admin parity. Adds Mark deleted /
+     * Suspend / Unsuspend rows to the more-menu for admins viewing
+     * other people's posts on a quests-enabled node. Suspension status
+     * is fetched lazily the first time the menu opens.
+     */
+    const {
+        isAdminVisible,
+        adminMenuItems,
+        dialogs: adminDialogs,
+        fetchUserSuspensionStatus: fetchAdminSuspensionStatus,
+    } = useAdminQuestActions({
+        post: safePost,
+        state,
+        updatePost,
+        onCloseMenu: closeAllMenus,
+    });
+    const adminSuspensionFetchedRef = useRef(false);
+    useEffect(() => {
+        if (!menuOpen) return;
+        if (adminSuspensionFetchedRef.current) return;
+        if (!isAdminVisible) return;
+        adminSuspensionFetchedRef.current = true;
+        try { fetchAdminSuspensionStatus(safePost && safePost.user_id); }
+        catch (_) { /* noop */ }
+    }, [menuOpen, isAdminVisible, fetchAdminSuspensionStatus, safePost]);
+
     const handleCardClick = useCallback((e) => {
         if (isInteractiveTarget(e.target)) return;
         if (linkTarget && linkTarget !== '#') navigate(linkTarget);
@@ -1319,6 +1347,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         </MenuItemBtn>
                                     </>
                                 )}
+                                {isAdminVisible && adminMenuItems.map(item => (
+                                    <MenuItemBtn
+                                        key={item.key}
+                                        type="button"
+                                        $danger={item.danger || undefined}
+                                        onClick={(e) => { stop(e); item.onClick(); }}
+                                    >
+                                        {item.icon}
+                                        <span>{item.label}</span>
+                                    </MenuItemBtn>
+                                ))}
                             </Menu>
                         )}
                     </PopoverRoot>
@@ -1523,6 +1562,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 }}
                 onCancel={cancelAward}
             />
+            {/**
+              * Sub-plan 06.11 E — Mark deleted / Suspend / Unsuspend
+              * dialogs for admin viewers. Rendered at the card root so
+              * the modal overlay sits above feed siblings.
+              */}
+            {adminDialogs}
         </Card>
     );
 }

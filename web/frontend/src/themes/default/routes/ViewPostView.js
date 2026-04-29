@@ -26,6 +26,7 @@ import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
+import { updateNotification } from "../../../utils/notifications";
 import UserAvatar from "../components/UserAvatar.js";
 import ContentTagBadge from "../components/ContentTagBadge";
 import {
@@ -43,6 +44,8 @@ import {
     HiOutlineFlag,
     HiOutlineHashtag,
     HiOutlineShieldExclamation,
+    HiChevronDown,
+    HiCheck,
 } from "react-icons/hi2";
 /**
  * Post Details — root post container.
@@ -1762,32 +1765,268 @@ const BlockSuccessMessage = styled.div`
     align-items: center;
     gap: 0.5rem;
 `;
-const BlockConfirmMessage = styled.div`
-    background: ${({ theme }) => theme.colors.inboxHighlightBg};
-    border: 1px solid ${({ theme }) => theme.colors.inboxHighlightRail};
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    margin: 0.35rem 0;
-    color: ${({ theme }) => theme.colors.inboxHighlightRail};
-    font-size: 0.65rem;
+// `BlockConfirmMessage` + `ConfirmButtons` removed in 06.11 D1 — every
+// confirm flow on this route now renders through the canonical
+// `ConfirmDialog` modal at the route root.
+/**
+ * Suspend duration field rendered inside the admin Suspend `ConfirmDialog`
+ * (sub-plan 06.11 D1). The native `<select>` was replaced with a fully
+ * custom dropdown so the option list matches the rest of the default
+ * theme — same `MenuDropdown` shell + `MenuItem` rows used by every
+ * other popover on this route. Trigger sits on `surface2` (matching the
+ * canonical `ReasonField` textarea inside `ConfirmDialog`); R5 borders
+ * (`border` rest, `borderStrong` hover/focus); R6 chevron icon.
+ */
+const SuspendField = styled.label`
     display: flex;
-    flex-direction: column;          /* message on top, buttons below */
-    align-items: flex-start;         /* left align content */
-    gap: 0.75rem;
-    width: 100%;                     /* fill the column on mobile like Block Post */
-    & > span:first-child {
-        display: block;              /* ensure full-width message */
-        width: 100%;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+`;
+const SuspendFieldLabel = styled.span`
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: ${({ theme }) => theme.colors.subtleText};
+`;
+const SuspendTrigger = styled.button.attrs({ type: 'button' })`
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    background-color: ${({ theme }) => theme.colors.surface2};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+    color: ${({ theme }) => theme.colors.text};
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+
+    &:hover:not(:disabled) {
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+    }
+    &:focus {
+        outline: none;
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        box-shadow: none;
+    }
+    &:disabled { cursor: not-allowed; opacity: 0.55; }
+
+    & > svg {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        color: ${({ theme }) => theme.colors.subtleText};
+        transition: transform 0.15s ease;
+    }
+    &[data-open="true"] > svg {
+        transform: rotate(180deg);
     }
 `;
-const ConfirmButtons = styled.div`
+/**
+ * Sheet visuals are aligned with `components/SearchDropdown.js` so the
+ * dropdown reads as the same surface the user already knows from the
+ * TopBar search — `menuBg` canvas, 12px radius, soft drop shadow,
+ * scrollbar tokens, and the same row hover treatment
+ * (`menuSelectedBg` tile + `menuItemHoverText` lift).
+ */
+const SuspendMenuPanel = styled.div`
+    position: fixed;
+    min-width: max-content;
+    max-height: min(60vh, 320px);
+    overflow-y: auto;
+    background: ${({ theme }) => theme.colors.menuBg};
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+    z-index: 100000;
     display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    flex-wrap: nowrap;
-    width: 100%;
-    justify-content: flex-end;
+    flex-direction: column;
+    padding: 0.25rem 0;
+
+    scrollbar-width: thin;
+    scrollbar-color: ${({ theme }) => theme.colors.scrollbar} transparent;
+
+    &::-webkit-scrollbar {
+        width: 8px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background: ${({ theme }) => theme.colors.scrollbar};
+        border-radius: 4px;
+    }
 `;
+const SuspendMenuItem = styled.button.attrs({ type: 'button' })`
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.5rem 0.9rem;
+    white-space: nowrap;
+    background: transparent;
+    border: none;
+    color: ${({ theme }) => theme.colors.sidebarItemText};
+    font-family: inherit;
+    font-size: 0.66rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    line-height: 1.2;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    & > span:first-child {
+        flex: 1;
+        min-width: 0;
+    }
+
+    &[data-selected="true"] {
+        color: ${({ theme }) => theme.colors.voteUp};
+        font-weight: 600;
+    }
+
+    &:hover {
+        background: ${({ theme }) => theme.colors.menuSelectedBg};
+        color: ${({ theme }) => theme.colors.menuItemHoverText};
+    }
+
+    &[data-selected="true"]:hover {
+        color: ${({ theme }) => theme.colors.voteUp};
+    }
+`;
+const SuspendMenuItemIcon = styled.span`
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    color: ${({ theme }) => theme.colors.subtleText};
+
+    svg {
+        width: 15px;
+        height: 15px;
+        stroke-width: 2.4;
+        opacity: ${({ $visible }) => ($visible ? 1 : 0)};
+    }
+
+    ${SuspendMenuItem}:hover & {
+        color: ${({ theme }) => theme.colors.menuItemHoverText};
+    }
+    ${SuspendMenuItem}[data-selected="true"] & {
+        color: ${({ theme }) => theme.colors.voteUp};
+    }
+`;
+const SUSPEND_DURATION_OPTIONS = [
+    { value: 1, label: '1 day' },
+    { value: 3, label: '3 days' },
+    { value: 7, label: '7 days' },
+    { value: 30, label: '30 days' },
+    { value: 0, label: 'Permanent' },
+];
+/**
+ * Custom duration dropdown — replaces the native <select> so the option
+ * list reads with `MenuDropdown` styling (panel bg, R6 chevron, hover
+ * tile, R7 type) instead of the OS chrome.
+ */
+function SuspendDurationDropdown({ value, onChange, disabled }) {
+    const [open, setOpen] = useState(false);
+    const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
+    const triggerRef = useRef(null);
+    const panelRef = useRef(null);
+
+    const selected = SUSPEND_DURATION_OPTIONS.find(o => o.value === value)
+        || SUSPEND_DURATION_OPTIONS[2];
+
+    useEffect(() => {
+        if (!open) return undefined;
+        const updatePosition = () => {
+            const btn = triggerRef.current;
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            setPosition({
+                top: rect.bottom + 4,
+                left: rect.left,
+                width: rect.width,
+            });
+        };
+        updatePosition();
+        const onClickOutside = (e) => {
+            const panel = panelRef.current;
+            const btn = triggerRef.current;
+            if (panel && panel.contains(e.target)) return;
+            if (btn && btn.contains(e.target)) return;
+            setOpen(false);
+        };
+        const onKey = (e) => {
+            if (e.key === 'Escape') setOpen(false);
+        };
+        window.addEventListener('resize', updatePosition);
+        window.addEventListener('scroll', updatePosition, true);
+        document.addEventListener('mousedown', onClickOutside);
+        window.addEventListener('keydown', onKey);
+        return () => {
+            window.removeEventListener('resize', updatePosition);
+            window.removeEventListener('scroll', updatePosition, true);
+            document.removeEventListener('mousedown', onClickOutside);
+            window.removeEventListener('keydown', onKey);
+        };
+    }, [open]);
+
+    const panel = open && typeof document !== 'undefined'
+        ? ReactDOM.createPortal(
+            <SuspendMenuPanel
+                ref={panelRef}
+                style={{
+                    top: position.top,
+                    left: position.left,
+                    width: position.width,
+                }}
+                role="listbox"
+            >
+                {SUSPEND_DURATION_OPTIONS.map(option => (
+                    <SuspendMenuItem
+                        key={option.value}
+                        data-selected={option.value === value ? 'true' : 'false'}
+                        role="option"
+                        aria-selected={option.value === value}
+                        onClick={() => {
+                            onChange(option.value);
+                            setOpen(false);
+                        }}
+                    >
+                        <span>{option.label}</span>
+                        <SuspendMenuItemIcon $visible={option.value === value}>
+                            <HiCheck aria-hidden="true" />
+                        </SuspendMenuItemIcon>
+                    </SuspendMenuItem>
+                ))}
+            </SuspendMenuPanel>,
+            document.body,
+        )
+        : null;
+
+    return (
+        <>
+            <SuspendTrigger
+                ref={triggerRef}
+                disabled={disabled}
+                data-open={open ? 'true' : 'false'}
+                aria-haspopup="listbox"
+                aria-expanded={open}
+                onClick={() => setOpen(prev => !prev)}
+            >
+                <span>{selected.label}</span>
+                <HiChevronDown aria-hidden="true" />
+            </SuspendTrigger>
+            {panel}
+        </>
+    );
+}
 // `ReportInput` removed (06.3) — replaced by the `ConfirmDialog`
 // textarea at the route root.
 
@@ -1950,6 +2189,28 @@ function ViewPostView({
         state,
         updatePost
     });
+
+    /**
+     * Sub-plan 06.11 D1 — surface admin suspend/unsuspend success messages
+     * via the global default `Toast` instead of the legacy inline hex banner.
+     * `useViewPost` writes to `suspendSuccess[postId]` and clears it after
+     * 4 seconds, so we only need to fire `updateNotification` for newly-seen
+     * postIds and forget them as the hook drops them. No hook changes.
+     */
+    const seenSuspendToastsRef = useRef(new Set());
+    useEffect(() => {
+        const seen = seenSuspendToastsRef.current;
+        Object.entries(suspendSuccess || {}).forEach(([pid, message]) => {
+            if (!message || seen.has(pid)) return;
+            seen.add(pid);
+            try { updateNotification(message, 4, false); } catch (_) { /* noop */ }
+        });
+        // Drop ids the hook has cleared so a subsequent suspension on the
+        // same post can re-toast.
+        seen.forEach(pid => {
+            if (!suspendSuccess?.[pid]) seen.delete(pid);
+        });
+    }, [suspendSuccess]);
 
     // Inline block/report popover (parity with feed CardView's block chip).
     // Anchored next to the share button in the action bar for each post /
@@ -2388,92 +2649,19 @@ function ViewPostView({
         }
     };
     const displayConfirmation = post => {
-        // Block / report confirmations moved to a root-level `ConfirmDialog`
-        // modal (06.3 polish). The inline banners for the other flows
-        // (delete, suspend, donate, gift sub, award) still render below.
+        // Block / report / delete / admin-suspend confirmations all moved to
+        // root-level `ConfirmDialog` modals (06.3 + 06.11 D1). The inline
+        // banners for the remaining flows (donate, gift sub, award) still
+        // render below.
         if (confirmBlockPost === post.post_id) return null;
         if (confirmBlockUser?.postId === post.post_id) return null;
         if (confirmBlockTopic?.postId === post.post_id) return null;
         if (confirmDeletePost === post.post_id) return null;
-        if (confirmSuspendQuests?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>🛡️ Suspend this user from quests:</span>
-                    <select value={suspendDuration} onChange={e => setSuspendDuration(Number(e.target.value))} style={{
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        border: '1px solid #d97706',
-                        background: '#fef3c7',
-                        color: '#92400e',
-                        fontWeight: 500
-                    }}>
-                        <option value={1}>1 day</option>
-                        <option value={3}>3 days</option>
-                        <option value={7}>7 days</option>
-                        <option value={30}>30 days</option>
-                        <option value={0}>Permanent</option>
-                    </select>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
-                            {isSuspending ? 'Suspending...' : 'Suspend'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelSuspendFromQuests}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
-        if (confirmUnsuspendQuests?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>🛡️ Unsuspend this user from quests?</span>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
-                            {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
-        if (suspendSuccess[post.post_id]) {
-            return <div style={{
-                background: 'rgba(22, 163, 74, 0.18)',
-                border: '1px solid #16A34A',
-                borderRadius: '3px',
-                padding: '0.75rem 1rem',
-                margin: '0.5rem 0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                color: '#16A34A',
-                fontSize: '0.8rem'
-            }}>
-                <span>✓</span>
-                {suspendSuccess[post.post_id]}
-            </div>;
-        }
+        // Admin Suspend / Unsuspend confirm + success surfaces moved to a
+        // root-level `ConfirmDialog` + global `Toast` in sub-plan 06.11 D1.
+        if (confirmSuspendQuests?.postId === post.post_id) return null;
+        if (confirmUnsuspendQuests?.postId === post.post_id) return null;
+        if (suspendSuccess[post.post_id]) return null;
         // Report popup moved to a root-level `ConfirmDialog` (06.3 polish).
         if (confirmReportPost === post.post_id) return null;
         // Gift Mirage / Gift Subscription / Give Award popups now render
@@ -2703,14 +2891,14 @@ function ViewPostView({
                                 </MenuItem>
                                 {questsEnabled && userSuspendedStatus !== true && <MenuItem data-danger="true" onClick={() => {
                                     setOpenMenuId(null);
-                                    handleSuspendFromQuests(post.user_id, post.post_id);
+                                    handleSuspendFromQuests(post.user_id, post.post_id, post.username);
                                 }}>
                                     <HiOutlineShieldExclamation />
                                     <span>Suspend from quests</span>
                                 </MenuItem>}
                                 {questsEnabled && userSuspendedStatus === true && <MenuItem onClick={() => {
                                     setOpenMenuId(null);
-                                    handleUnsuspendFromQuests(post.user_id, post.post_id);
+                                    handleUnsuspendFromQuests(post.user_id, post.post_id, post.username);
                                 }}>
                                     <HiOutlineShieldExclamation />
                                     <span>Unsuspend from quests</span>
@@ -3794,6 +3982,34 @@ function ViewPostView({
                 const giftSubFeeUmirage = confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage;
                 const donateBusy = isSendPending(confirmDonate?.userId);
                 const giftSubBusy = isSubscribePending(confirmGiftSub?.userId);
+                // Sub-plan 06.11 D1 — admin Suspend / Unsuspend confirm
+                // moved from inline `BlockConfirmMessage` strips (with raw
+                // hex + shield emoji) to the canonical `ConfirmDialog`.
+                // Title uses the friendly @username when available. The
+                // hook (`useViewPost`) now stashes `username` on the
+                // confirm state via `handleSuspendFromQuests` /
+                // `handleUnsuspendFromQuests`, so we prefer that first
+                // and fall back to the post in `state.posts`, then to a
+                // truncated wallet address as a last resort.
+                const resolveSuspendLabel = (confirmState) => {
+                    const stashed = confirmState?.username
+                        ? String(confirmState.username).trim()
+                        : '';
+                    if (stashed) return `@${stashed}`;
+                    const postObj = confirmState?.postId
+                        ? state.posts?.[confirmState.postId]
+                        : null;
+                    const fromPost = postObj?.username
+                        ? String(postObj.username).trim()
+                        : '';
+                    if (fromPost) return `@${fromPost}`;
+                    if (confirmState?.userId) {
+                        return `${String(confirmState.userId).slice(0, 10)}…`;
+                    }
+                    return 'this user';
+                };
+                const suspendLabel = resolveSuspendLabel(confirmSuspendQuests);
+                const unsuspendLabel = resolveSuspendLabel(confirmUnsuspendQuests);
                 return <>
                     <ConfirmDialog
                         open={!!confirmBlockPost}
@@ -3827,15 +4043,28 @@ function ViewPostView({
                     />
                     {(() => {
                         const deletePostId = confirmDeletePost;
-                        const deletePostObj = deletePostId ? state.posts?.[deletePostId] : null;
-                        const isComment = !!(deletePostObj && deletePostObj.target && deletePostObj.target !== '');
+                        // A delete-confirm targets a comment whenever the
+                        // selected id is anything other than the root post
+                        // currently being viewed. `state.posts[id]` only
+                        // holds UI state (replyOpen, flash, …) so we can
+                        // not rely on `target` there. Comparing to the
+                        // loaded `root.post_id` matches the same heuristic
+                        // used for the comment menu items above.
+                        const rootId = root && root.post_id
+                            ? String(root.post_id).toLowerCase()
+                            : '';
+                        const isComment = !!(
+                            deletePostId
+                            && rootId
+                            && String(deletePostId).toLowerCase() !== rootId
+                        );
                         return (
                             <ConfirmDialog
                                 open={!!confirmDeletePost}
-                                title={isComment ? 'Delete this comment?' : 'Delete this post?'}
+                                title={isComment ? 'Mark comment as deleted?' : 'Mark post as deleted?'}
                                 message={isComment
-                                    ? 'This will permanently remove your comment. This action cannot be undone.'
-                                    : 'This will permanently remove your post from every feed. This action cannot be undone.'}
+                                    ? 'This will permanently remove this comment from every feed. This action cannot be undone.'
+                                    : 'This will permanently remove this post from every feed. This action cannot be undone.'}
                                 confirmLabel={isComment ? 'Delete comment' : 'Delete post'}
                                 confirmVariant="danger"
                                 pending={isDeleting}
@@ -3862,6 +4091,67 @@ function ViewPostView({
                             setTimeout(() => { try { confirmReportAction(); } catch (_) { /* noop */ } }, 0);
                         }}
                         onCancel={cancelReport}
+                    />
+                    {/**
+                      * Admin Suspend-from-quests dialog (06.11 D1).
+                      * Replaces the inline `BlockConfirmMessage` strip that
+                      * painted itself with raw amber hex tokens and a
+                      * shield emoji. Body hosts the duration
+                      * `<select>` styled per R5; primary action is the
+                      * canonical danger `Button` via `ConfirmDialog`.
+                      */}
+                    <ConfirmDialog
+                        open={!!confirmSuspendQuests}
+                        title={(
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.55rem' }}>
+                                <HiOutlineShieldExclamation
+                                    aria-hidden="true"
+                                    style={{ flexShrink: 0, fontSize: '1rem' }}
+                                />
+                                <span>Suspend {suspendLabel} from quests?</span>
+                            </span>
+                        )}
+                        message="The user will be blocked from quest rewards for the selected duration."
+                        confirmLabel={isSuspending ? 'Suspending…' : 'Suspend'}
+                        cancelLabel="Cancel"
+                        confirmVariant="danger"
+                        pending={isSuspending}
+                        onConfirm={confirmSuspendFromQuests}
+                        onCancel={cancelSuspendFromQuests}
+                    >
+                        <SuspendField>
+                            <SuspendFieldLabel>Duration</SuspendFieldLabel>
+                            <SuspendDurationDropdown
+                                value={suspendDuration}
+                                onChange={(next) => setSuspendDuration(Number(next))}
+                                disabled={isSuspending}
+                            />
+                        </SuspendField>
+                    </ConfirmDialog>
+                    {/**
+                      * Admin Unsuspend-from-quests dialog (06.11 D1).
+                      * Same swap as the suspend dialog above — drops the
+                      * shield emoji + warning Button for the canonical
+                      * `ConfirmDialog` + danger `Button`.
+                      */}
+                    <ConfirmDialog
+                        open={!!confirmUnsuspendQuests}
+                        title={(
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.55rem' }}>
+                                <HiOutlineShieldExclamation
+                                    aria-hidden="true"
+                                    style={{ flexShrink: 0, fontSize: '1rem' }}
+                                />
+                                <span>Unsuspend {unsuspendLabel} from quests?</span>
+                            </span>
+                        )}
+                        message="The user will resume earning quest rewards immediately."
+                        confirmLabel={isUnsuspending ? 'Unsuspending…' : 'Unsuspend'}
+                        cancelLabel="Cancel"
+                        confirmVariant="danger"
+                        pending={isUnsuspending}
+                        onConfirm={confirmUnsuspendFromQuests}
+                        onCancel={cancelUnsuspendFromQuests}
                     />
                     <GiftMirageDialog
                         open={!!confirmDonate}

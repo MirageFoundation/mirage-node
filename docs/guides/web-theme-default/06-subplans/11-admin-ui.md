@@ -13,7 +13,7 @@
 - `themes/default/routes/ViewPostView.js` (`renderPostMenu` admin items ~L2696–L2718, `displayConfirmation` suspend/unsuspend banners ~L2398–L2476)
 - `themes/default/tokens.js` (new admin token, see R2 update)
 
-**Status:** ⏳ Not started
+**Status:** 🚧 In progress — A/B/C ✅ done, D/E/F remain
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 **Depends on:** 06.1 (Profile), 06.2 (Components — `Button`, `ConfirmDialog`), 06.4 (Stats), 06.5 (Subscription) — all ✅ done.
 
@@ -88,7 +88,7 @@ Bring every admin-only surface in `default` up to `RULES.md` (R1–R7) parity wi
 
 ## Requirements
 
-### A. Tokenize the admin red (R2)
+### A. Tokenize the admin red (R2) — ✅ Done
 
 Add a new token pair to `themes/default/tokens.js` and document it in the R2 table inside `RULES.md`:
 
@@ -100,7 +100,7 @@ Replacement scope inside `themes/default/**`:
 - Anywhere `getTierColor(userLevel)` is rendered when the user is an admin (e.g. `ProfileView` `Mono` fields, `SubscriptionView` `ActivePlanName`), prefer reading `theme.colors.tierAdmin` over the value returned by the shared helper. The helper itself stays in `logic/useSubscription.js` for cross-theme parity.
 - Replace any inline `#EF4444` inside `themes/default/**` with `tierAdmin`.
 
-### B. Profile menu — admin group polish (TopBar + MobileBottomNav)
+### B. Profile menu — admin group polish (TopBar + MobileBottomNav) — ✅ Done
 
 In `themes/default/components/TopBar.js` `ProfileMenuContent` (the same component is rendered by `MobileBottomNav.js`):
 - Wrap the admin block in a labelled section. Add a small uppercase eyebrow row (`MenuHeader` style — `0.55rem/500 menuHeaderText`) reading `Admin` above the divider.
@@ -108,14 +108,14 @@ In `themes/default/components/TopBar.js` `ProfileMenuContent` (the same componen
 - Add an `Admin` pill (small `tierAdmin` border, `0.55rem/600` text) next to `@username` in `DropdownHeader` when `isAdmin`. Mirrors the bluemoon affordance.
 - All chevrons stay `HiChevronDown` per R6.
 
-### C. Subscription admin branch (`SubscriptionView.js` L886–L912)
+### C. Subscription admin branch (`SubscriptionView.js` L886–L912) — ✅ Done
 
 - Replace the bare "Active plan" `Section` with the same `ActivePlanCard` pattern used by the non-admin branch. Tier name uses `theme.colors.tierAdmin`.
 - Move the descriptive copy ("Admin accounts have full access…") into a muted `InfoText` block sitting on `bg` (R1) with a 1px `border` divider above it.
 - Confirm `ActivePlanLabel` + `ActivePlanName` follow R7: label `0.62rem/500 subtleText`, name `1.1rem/700 tierAdmin`.
 - Verify `userLevel > 0 && userLevel < 100` still gates the auto-renew banner so admins keep seeing nothing for it.
 
-### D. Post-detail admin menu + confirm banners (`ViewPostView.js`)
+### D. Post-detail admin menu + confirm banners (`ViewPostView.js`) — ✅ Done
 
 Two passes — one structural, one visual:
 
@@ -133,7 +133,7 @@ Two passes — one structural, one visual:
 - "Mark post/comment deleted", "Suspend from quests", "Unsuspend from quests" already use `MenuItem data-danger="true"`. Verify `data-danger` rule in `MenuDropdown` resolves to `menuDangerText` per RULES R2.
 - Order: `Mark deleted` → `Suspend` → `Unsuspend` (current order is fine; just confirm).
 
-### E. Feed-row admin parity (CardView + PostMenu) — closes the parity gap
+### E. Feed-row admin parity (CardView + PostMenu) — closes the parity gap — ⏳ Pending
 
 In `themes/default/components/CardView.js`:
 - Add the admin computation at the top of the component (mirror bluemoon's `userLevel` + `isAdmin = hasValidAccount && userLevel >= 100` block).
@@ -146,7 +146,7 @@ In `themes/default/components/PostMenu.js` `MoreMenuChip`:
 - The suspend / unsuspend flows reuse the same `ConfirmDialog` + `Toast` pattern from D1. Hoist the dialog state into `MoreMenuChip` so every feed-row can fire its own dialog without bleeding into siblings.
 - `fetchUserSuspensionStatus(post.user_id)` fires only when the menu opens **and** `isAdmin && questsEnabled` (mirror bluemoon).
 
-### F. Visual cleanup
+### F. Visual cleanup — ⏳ Pending
 
 - No raw hex / rgba in any admin path inside `themes/default/**` after this sub-plan.
 - All admin-related buttons funnel through `themes/default/components/Button.js` (`variant="danger"` / `variant="ghost"`).

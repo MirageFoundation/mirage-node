@@ -17,10 +17,10 @@ Plan 06 is too broad to ship in one PR. This folder splits it into focused one-P
 | 5 | Subscription + Referrals | Plan/tier summary + invite share block | ✅ Done | [`05-subscription-referrals.md`](./05-subscription-referrals.md) |
 | 6 | Bridge | Restyle containers only; keep logic | ⏭️ Skipped (no nav entry) | [`06-bridge.md`](./06-bridge.md) |
 | 7 | Agents + Discover + NotFound | List + empty-state styling | ✅ Done | [`07-agents-discover-notfound.md`](./07-agents-discover-notfound.md) |
-| 8 | MobileBottomNav | Full restyle (deferred from Plan 02) | ⏳ Not started | [`08-mobile-bottom-nav.md`](./08-mobile-bottom-nav.md) |
-| 9 | Polish + QA | Spacing / typography / state / responsive / a11y + QA + optional default-theme switch | ⏳ Not started | [`09-polish-and-qa.md`](./09-polish-and-qa.md) |
-| 10 | Loading states + skeletons | Tokenized `Skeleton` primitive + per-route skeleton loaders; remove `Loading…` strings | ⏳ Not started | [`10-loading-states-skeletons.md`](./10-loading-states-skeletons.md) |
-| 11 | Admin UI pass | TopBar / MobileBottomNav admin group, Subscription admin branch, post-detail confirm banners, feed-row admin parity (CardView + PostMenu), `tierAdmin` R2 token | ⏳ Not started | [`11-admin-ui.md`](./11-admin-ui.md) |
+| 8 | MobileBottomNav | Full restyle (deferred from Plan 02) | ✅ Done | [`08-mobile-bottom-nav.md`](./08-mobile-bottom-nav.md) |
+| 9 | Polish + QA | Spacing / typography / state / responsive / a11y + QA + optional default-theme switch | ✅ Done | [`09-polish-and-qa.md`](./09-polish-and-qa.md) |
+| 10 | Loading states + skeletons | Tokenized `Skeleton` primitive + per-route skeleton loaders; remove `Loading…` strings | ✅ Done | [`10-loading-states-skeletons.md`](./10-loading-states-skeletons.md) |
+| 11 | Admin UI pass | TopBar / MobileBottomNav admin group, Subscription admin branch, post-detail confirm banners, feed-row admin parity (CardView + PostMenu), `tierAdmin` R2 token | 🚧 In progress (A/B/C done; D/E/F remain) | [`11-admin-ui.md`](./11-admin-ui.md) |
 
 Each sub-plan is one PR. Recommended order is **2 → 1 → 3 → 4 → 5 → 7 → 6 → 8 → 10 → 11 → 9** because:
 

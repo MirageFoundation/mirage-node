@@ -5,7 +5,7 @@
 **Depends on:** Plans 01–05.
 **Unblocks:** making `default` the default theme (optional — can happen later).
 
-**Status:** ⏳ Not started. Split into sub-plans under [`06-subplans/`](./06-subplans/README.md).
+**Status:** 🚧 In progress — sub-plans 06.1–06.5 and 06.7–06.10 ✅ done, 06.6 ⏭️ skipped; only 06.11 (Admin UI pass) is open (sections A/B/C done, D/E/F remain). Split into sub-plans under [`06-subplans/`](./06-subplans/README.md).
 
 ---
 
