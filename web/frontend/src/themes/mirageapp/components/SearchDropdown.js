@@ -9,7 +9,7 @@ import {
     HiOutlineMagnifyingGlass,
 } from "react-icons/hi2";
 import { getAuthorColor } from "../../../utils/tierColors";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
+import UserAvatar from "./UserAvatar.js";
 
 /**
  * Dropdown sheet rendered below the TopBar search input. Mirrors the
@@ -150,17 +150,13 @@ const RowIcon = styled.span`
 
 /**
  * Dicebear avatar used for search-result user rows. Same 22x22 footprint
- * as `RowIcon` so columns remain aligned with the topic/post rows. The
- * transparent identicon sits over `surface3` (matches profile avatar).
+ * as `RowIcon` so columns remain aligned with the topic/post rows. Thin
+ * alias around the shared `UserAvatar` so the bg color and 20% inner
+ * padding stay in sync with the rest of the app's avatar surfaces.
  */
-const RowAvatar = styled.img`
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: #232830;
-    object-fit: cover;
-`;
+const RowAvatar = ({ src: _src, ...rest }) => (
+    <UserAvatar size={22} {...rest} />
+);
 
 /**
  * Post-row thumbnail slot: shows the post image if one is available,
@@ -519,11 +515,7 @@ export default function SearchDropdown({
                                         onResultNavigate && onResultNavigate()
                                     }
                                 >
-                                    <RowAvatar
-                                        src={dicebearAvatarUrl(user.username || user.address, 44)}
-                                        alt=""
-                                        loading="lazy"
-                                    />
+                                    <RowAvatar seed={user.address} alt="" />
                                     <RowMain>
                                         <RowPrimary>
                                             <TierUsername $tierColor={tierColor}>

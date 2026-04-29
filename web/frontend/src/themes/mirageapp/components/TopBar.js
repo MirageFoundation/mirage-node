@@ -8,6 +8,7 @@ import SearchDropdown from './SearchDropdown.js';
 import { useSearchDropdown } from '../../../logic/useSearchDropdown';
 import { dicebearAvatarUrl } from '../../../utils/avatar';
 import ConfirmDialog from './ConfirmDialog.js';
+import UserAvatar from './UserAvatar.js';
 
 /**
  * Reddit-style TopBar for the mirageapp theme.
@@ -372,21 +373,14 @@ const AvatarGlow = styled.img`
     }
 `;
 
-// Hard-pinned to the dark-mode chip color (#232830) in BOTH modes so the
-// top-bar avatar matches the profile-page avatar exactly. DiceBear's
-// identicon variant is transparent, so this fills the pattern's negative
-// space identically in light and dark themes.
-const AvatarImg = styled.img`
+// Visible top-bar avatar chip. Sourced from the shared `UserAvatar`
+// component so the dicebear bg color + 20% inner padding stay in lockstep
+// with every other avatar surface in the app. We `styled(UserAvatar)`
+// only to add the `position: relative` / `z-index` rules required to
+// stack it above `AvatarGlow`, plus the ≤1000px shrink override.
+const AvatarChip = styled(UserAvatar)`
     position: relative;
     z-index: 1;
-    width: 32px;
-    height: 32px;
-    border-radius: 9999px;
-    background: #232830;
-    display: block;
-    flex-shrink: 0;
-    object-fit: cover;
-    overflow: hidden;
 
     @media (max-width: 1000px) {
         width: 28px;
@@ -1154,7 +1148,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                             aria-label="Account menu"
                         >
                             <AvatarGlow src={avatarSrc} alt="" aria-hidden="true" loading="lazy" />
-                            <AvatarImg src={avatarSrc} alt="" loading="lazy" />
+                            <AvatarChip seed={avatarSeed} size={32} alt="" />
                         </UserMenuTrigger>
                         {menuOpen && (
                             <Dropdown role="menu">

@@ -19,7 +19,7 @@ import {
 import ShowMoreButton from "../components/ShowMoreButton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { useReferrals, compareISOWeeks, shiftISOWeek, formatWeekRange } from "../../../logic/useReferrals";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
+import UserAvatar from "../components/UserAvatar.js";
 
 /**
  * ReferralsView — `mirageapp` Plan 06 sub-plan 05 (Referrals half).
@@ -988,17 +988,22 @@ const AvatarWrap = styled.div`
     height: 40px;
 `;
 
-const AvatarImg = styled.img`
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface3};
-    object-fit: cover;
-    display: block;
-    border: 2px solid ${({ $active, theme }) =>
-        $active ? theme.colors.voteUp : 'transparent'};
-    box-sizing: border-box;
-`;
+/**
+ * Referral leaderboard avatar — wraps the shared `UserAvatar` so the
+ * dicebear bg color + 20% inner padding are consistent with the rest
+ * of the app. Active rows get the green `voteUp` ring via the
+ * `activeBorderColor` prop on `UserAvatar`.
+ */
+const AvatarImg = ({ $active, src: _src, ...rest }) => {
+    const theme = useTheme();
+    return (
+        <UserAvatar
+            size={40}
+            activeBorderColor={$active ? theme.colors.voteUp : undefined}
+            {...rest}
+        />
+    );
+};
 
 const AvatarFallback = styled.span`
     width: 40px;
@@ -1587,7 +1592,11 @@ function ReferralsView({ state }) {
                                         navigate(userUrl);
                                     }
                                     : undefined;
-                                const avatarSeed = r.username || r.address;
+                                // Seed dicebear on the bech32 address —
+                                // stable across username changes and
+                                // consistent with every other avatar
+                                // surface in the app.
+                                const avatarSeed = r.address;
                                 const rank = idx + 1;
                                 return (
                                     <Row
@@ -1601,9 +1610,8 @@ function ReferralsView({ state }) {
                                         <AvatarWrap>
                                             {avatarSeed ? (
                                                 <AvatarImg
-                                                    src={dicebearAvatarUrl(avatarSeed, 40)}
+                                                    seed={avatarSeed}
                                                     alt=""
-                                                    loading="lazy"
                                                     $active={isActive}
                                                 />
                                             ) : (

@@ -14,7 +14,7 @@ import {
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import FeedRightRail from "../components/FeedRightRail.js";
 import { useFollows, shortenAddress } from "../../../logic/useFollows";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
+import UserAvatar from "../components/UserAvatar.js";
 
 /**
  * Dev-only state override for QA. Append `?_state=loading|error|empty` to
@@ -166,15 +166,12 @@ const Row = styled.div`
     }
 `;
 
-const AvatarImg = styled.img`
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface3};
-    object-fit: cover;
-    flex-shrink: 0;
-    display: block;
-`;
+/** Followed-user avatar — thin alias around the shared `UserAvatar`
+ *  so every dicebear chip in the app shares the same bg color and
+ *  20% inner padding around the identicon glyph. */
+const AvatarImg = ({ src: _src, ...rest }) => (
+    <UserAvatar size={32} {...rest} />
+);
 
 const TopicIcon = styled.span`
     width: 32px;
@@ -524,7 +521,10 @@ export default function FollowsView({ state }) {
                         const status = formatFollowUserStatus(userAddr);
                         const username = followedUsernames[userAddr];
                         const hasUsername = username && username !== userAddr;
-                        const identitySeed = hasUsername ? username : userAddr;
+                        // Seed dicebear on the bech32 address (stable across
+                        // username changes) — matches the policy used on
+                        // every other avatar surface in the app.
+                        const identitySeed = userAddr;
                         const profileUrl = `/u/${encodeURIComponent(hasUsername ? username : userAddr)}?tab=posts`;
                         return (
                             <Row
@@ -536,11 +536,7 @@ export default function FollowsView({ state }) {
                                     if (e.key === 'Enter') navigate(profileUrl);
                                 }}
                             >
-                                <AvatarImg
-                                    src={dicebearAvatarUrl(identitySeed, 32)}
-                                    alt=""
-                                    loading="lazy"
-                                />
+                                <AvatarImg seed={identitySeed} alt="" />
                                 <Identity>
                                     <IdentityTitle>
                                         {hasUsername ? `@${username}` : shortenAddress(userAddr)}

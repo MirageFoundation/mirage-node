@@ -12,8 +12,8 @@ import { useProfile } from "../../../logic/useProfile";
 import { useBlocks } from "../../../logic/useBlocks";
 import useBalance from "../../../logic/useBalance.js";
 import { formatMirageCompact } from "../../../utils/formatters";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
 import { FeedViewToggle, loadViewMode, saveViewMode } from "../ListFeedView.js";
+import UserAvatar from "../components/UserAvatar.js";
 import { getAuthorColor } from "../../../utils/tierColors";
 import { Link, useParams } from "react-router-dom";
 import MarkdownRenderer from "../components/MarkdownRenderer";
@@ -418,20 +418,20 @@ const ProfileIdentityActions = styled.div`
     flex-shrink: 0;
 `;
 
-// DiceBear identicon avatar (seeded). DiceBear's identicon variant returns a
-// transparent background, so the styled bg shows through the pattern's
-// negative space. We hard-pin the bg to the dark-mode surface3 value
-// (#232830) in BOTH modes so the avatar circle looks identical in light
-// and dark — matches the dark-mode chip you approved.
-const Avatar = styled.img`
-    width: ${({ $size }) => $size || 64}px;
-    height: ${({ $size }) => $size || 64}px;
-    border-radius: 50%;
-    background: #232830;
-    object-fit: cover;
-    flex-shrink: 0;
-    display: block;
-`;
+// Profile-header / aside-card dicebear avatar — thin alias around the
+// shared `UserAvatar` so the bg color, retina seed, and 20% inner
+// padding match every other avatar surface in the app. Renders as a
+// rounded-square tile (vs the circular default used elsewhere) to
+// give the main profile chips a slightly more \"identity card\" feel
+// on both own- and other-user profile views.
+const Avatar = ({ $size, src: _src, ...rest }) => (
+    <UserAvatar
+        size={$size || 64}
+        shape="rounded"
+        paddingRatio={0.15}
+        {...rest}
+    />
+);
 
 const IdentityBlock = styled.div`
     display: flex;
@@ -502,7 +502,10 @@ const AsideIdentityRow = styled.div`
 
 const AsideAvatarWrap = styled.div`
     padding: 3px;
-    border-radius: 50%;
+    /* Match the rounded-square avatar shape. UserAvatar shape=rounded
+     * uses a 12px radius; the wrapper sits 3px outside the avatar tile
+     * so we bump to 15px to keep the curve visually parallel. */
+    border-radius: 15px;
     background: ${({ theme }) => theme.colors.panel};
     flex-shrink: 0;
 `;
@@ -955,16 +958,12 @@ const AlgoRow = styled.a`
     }
 `;
 
-/** Circular dicebear avatar — mirrors `FollowsView::AvatarImg` exactly. */
-const AlgoAvatar = styled.img`
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface3};
-    object-fit: cover;
-    flex-shrink: 0;
-    display: block;
-`;
+/** Circular dicebear avatar — thin alias around the shared `UserAvatar`
+ *  so the algo-tab list rows pick up the same 20% inner padding /
+ *  bg-color as every other dicebear surface in the app. */
+const AlgoAvatar = ({ src: _src, ...rest }) => (
+    <UserAvatar size={32} {...rest} />
+);
 
 /** "#" chip for topic rows — mirrors `FollowsView::TopicIcon` exactly so
  *  topics read consistently with the follows / topics list screens. */
@@ -1622,7 +1621,7 @@ function ProfileViewAuthenticated({
                             <ProfileMainColumn>
                                 <ProfileIdentity>
                                     <ProfileIdentityMain>
-                                        <Avatar $size={64} src={dicebearAvatarUrl(profileAddress || profileUsername || routeIdentity, 64)} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
+                                        <Avatar $size={64} seed={profileAddress || profileUsername || routeIdentity} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                         <IdentityBlock>
                                             <DisplayName title={profileUsername}>{usernameDisplay}</DisplayName>
                                             <Handle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</Handle>
@@ -2019,7 +2018,7 @@ function ProfileViewAuthenticated({
                                                         navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`);
                                                     }
                                                 }}>
-                                                    <AlgoAvatar src={dicebearAvatarUrl(avatarSeed, 32)} alt={`${displayName} avatar`} />
+                                                    <AlgoAvatar seed={avatarSeed} alt={`${displayName} avatar`} />
                                                     <AlgoIdentity>
                                                         <AlgoIdentityTitle>{uname && uname !== u.user ? uname : displayName}</AlgoIdentityTitle>
                                                         <AlgoIdentityMono title={u.user}>{shortenAddress(u.user)}</AlgoIdentityMono>
@@ -2060,7 +2059,7 @@ function ProfileViewAuthenticated({
                                                     navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`);
                                                 }
                                             }}>
-                                                <AlgoAvatar src={dicebearAvatarUrl(avatarSeed, 32)} alt={`${displayName} avatar`} />
+                                                <AlgoAvatar seed={avatarSeed} alt={`${displayName} avatar`} />
                                                 <AlgoIdentity>
                                                     <AlgoIdentityTitle>{displayName}</AlgoIdentityTitle>
                                                     <AlgoIdentityMono title={u.address}>{shortenAddress(u.address)}</AlgoIdentityMono>
@@ -2086,7 +2085,7 @@ function ProfileViewAuthenticated({
                                     <AsideInner>
                                         <AsideIdentityRow>
                                             <AsideAvatarWrap>
-                                                <Avatar $size={60} src={dicebearAvatarUrl(profileAddress || profileUsername || routeIdentity, 60)} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
+                                                <Avatar $size={60} seed={profileAddress || profileUsername || routeIdentity} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                             </AsideAvatarWrap>
                                             <AsideNameBlock>
                                                 <AsideName title={profileUsername}>{usernameDisplay}</AsideName>

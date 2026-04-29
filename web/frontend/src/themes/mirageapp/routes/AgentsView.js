@@ -18,7 +18,7 @@ import {
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import FeedRightRail from "../components/FeedRightRail.js";
 import { useAgents, formatTimeAgo } from "../../../logic/useAgents";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
+import UserAvatar from "../components/UserAvatar.js";
 
 /**
  * AgentsView — `mirageapp` Plan 06 sub-plan 07.
@@ -212,15 +212,12 @@ const RowHeader = styled.div`
     gap: 0.65rem;
 `;
 
-const AvatarImg = styled.img`
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface3};
-    object-fit: cover;
-    flex-shrink: 0;
-    display: block;
-`;
+/** Agent row avatar — thin alias around the shared `UserAvatar` so
+ *  the dicebear bg color and 20% inner padding match the rest of the
+ *  app's avatar surfaces. */
+const AvatarImg = ({ src: _src, ...rest }) => (
+    <UserAvatar size={36} {...rest} />
+);
 
 const Identity = styled.div`
     flex: 1;
@@ -519,18 +516,16 @@ export default function AgentsView({ state }) {
         const canMoveUp = enabled && orderIdx > 0;
         const canMoveDown =
             enabled && orderIdx >= 0 && orderIdx < displayOrder.length - 1;
-        const avatarSeed = agent.username || agent.address || addrLower;
+        // Seed dicebear on the bech32 address — stable across username
+        // changes and consistent with every other avatar surface.
+        const avatarSeed = agent.address || addrLower;
         const profileUrl = `/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`;
         const hovering = hoverAgent === addrLower;
 
         return (
             <Row key={agent.address}>
                 <RowHeader>
-                    <AvatarImg
-                        src={dicebearAvatarUrl(avatarSeed, 36)}
-                        alt=""
-                        loading="lazy"
-                    />
+                    <AvatarImg seed={avatarSeed} alt="" />
                     <Identity>
                         <NameRow>
                             <NameLink to={profileUrl}>{displayName}</NameLink>

@@ -26,7 +26,7 @@ import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
+import UserAvatar from "../components/UserAvatar.js";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -362,24 +362,18 @@ const CommentCard = styled(PostCard)`
  * via `transform: translateY(-50%)` against a state-aware top constant.
  * Sits at the end of the J-curve so the rail visually "delivers" the
  * thread connection from the parent avatar into this comment's avatar.
+ *
+ * Wraps the shared `UserAvatar` component so the dicebear bg color and
+ * 20% inner padding around the identicon glyph are consistent with
+ * every other avatar surface in the app.
  */
-const CommentAvatar = styled.img.attrs({
-    alt: '',
-    'aria-hidden': true,
-    draggable: false,
-    loading: 'lazy',
-})`
+const CommentAvatar = styled(UserAvatar)`
     position: absolute;
     top: ${({ $isCollapsed }) =>
         ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
     transform: translateY(-50%);
     left: ${({ $level }) =>
         `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX)}px`};
-    width: ${COMMENT_AVATAR_SIZE_PX}px;
-    height: ${COMMENT_AVATAR_SIZE_PX}px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface2 || theme.colors.panelAlt || theme.colors.bg};
-    object-fit: cover;
     pointer-events: none;
     z-index: 2;
 
@@ -3453,12 +3447,19 @@ function ViewPostView({
                             return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
                                 <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
                                     {!isRoot && (() => {
-                                        const seed = (post.username && String(post.username).trim())
-                                            || (post.user_id ? String(post.user_id) : 'anon');
+                                        // Seed dicebear on the bech32 address
+                                        // (`user_id`) — stable across username
+                                        // changes and consistent with every
+                                        // other avatar surface in the app.
+                                        const seed = (post.user_id ? String(post.user_id) : '')
+                                            || (post.username && String(post.username).trim())
+                                            || 'anon';
                                         return <CommentAvatar
                                             $level={displayLevel}
                                             $isCollapsed={isCollapsed}
-                                            src={dicebearAvatarUrl(seed, COMMENT_AVATAR_SIZE_PX)}
+                                            seed={seed}
+                                            size={COMMENT_AVATAR_SIZE_PX}
+                                            alt=""
                                         />;
                                     })()}
                                 <ColumnFlex>

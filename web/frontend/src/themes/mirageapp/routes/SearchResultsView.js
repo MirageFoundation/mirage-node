@@ -32,7 +32,7 @@ import {
     saveViewMode,
 } from "../ListFeedView";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
-import { dicebearAvatarUrl } from "../../../utils/avatar";
+import UserAvatar from "../components/UserAvatar.js";
 import { useSearchResults } from "../../../logic/useSearchResults";
 import { useSearchDropdown } from "../../../logic/useSearchDropdown";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
@@ -421,15 +421,12 @@ const RowIcon = styled.span`
 `;
 
 /** Dicebear avatar used for user result rows. Same 28x28 footprint as
- *  `RowIcon` so the user list aligns with the topic list. */
-const RowAvatar = styled.img`
-    flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface3};
-    object-fit: cover;
-`;
+ *  `RowIcon` so the user list aligns with the topic list. Wraps the
+ *  shared `UserAvatar` so the bg color + 20% inner padding stay in
+ *  sync with the rest of the app. */
+const RowAvatar = ({ src: _src, ...rest }) => (
+    <UserAvatar size={28} {...rest} />
+);
 
 const RowMain = styled.div`
     flex: 1;
@@ -1253,11 +1250,7 @@ export default function SearchResultsView({ state }) {
                                 user.username || userAddr
                             )}`}
                         >
-                            <RowAvatar
-                                src={dicebearAvatarUrl(user.username || userAddr, 56)}
-                                alt=""
-                                loading="lazy"
-                            />
+                            <RowAvatar seed={userAddr} alt="" />
                             <RowMain>
                                 <RowPrimary>
                                     <TierName
