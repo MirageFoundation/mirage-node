@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import styled from "styled-components";
 import {
     LuLink,
@@ -8,8 +9,10 @@ import {
     LuListOrdered,
     LuEyeOff,
 } from "react-icons/lu";
+import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import { getUploadUrl, downscaleImage } from "../../../utils/ImageUpload";
 import Api from "../../../utils/api";
+import UserAvatar from "./UserAvatar.js";
 
 // Lazy import to keep initial bundle small
 async function uploadVideoLazy(file, onProgress, xhrRef) {
@@ -139,6 +142,57 @@ const CodeIcon = () => <LuCode className="md-icon" aria-hidden="true" />;
 const UlIcon = () => <LuList className="md-icon" aria-hidden="true" />;
 const OlIcon = () => <LuListOrdered className="md-icon" aria-hidden="true" />;
 const SpoilerIcon = () => <LuEyeOff className="md-icon" aria-hidden="true" />;
+
+/**
+ * Measure where the caret sits inside a `<textarea>` by mirroring its
+ * computed text styles into a hidden <div>, inserting the substring
+ * before the caret + a marker span, and reading the marker's offset.
+ *
+ * Returns `{ top, left, lineHeight }` in textarea content coordinates
+ * (i.e. before scroll subtraction). Used to anchor the @-mention
+ * dropdown to the line being typed instead of the textarea bbox.
+ */
+function measureCaretInTextarea(textarea, caretIndex) {
+    const style = window.getComputedStyle(textarea);
+    const div = document.createElement("div");
+    const props = [
+        "boxSizing", "width", "height",
+        "overflowX", "overflowY",
+        "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+        "borderStyle",
+        "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+        "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize",
+        "fontSizeAdjust", "lineHeight", "fontFamily",
+        "textAlign", "textTransform", "textIndent", "textDecoration",
+        "letterSpacing", "wordSpacing", "tabSize", "MozTabSize",
+        "whiteSpace", "wordBreak", "overflowWrap",
+    ];
+    props.forEach((p) => { div.style[p] = style[p]; });
+    div.style.position = "absolute";
+    div.style.visibility = "hidden";
+    div.style.top = "0";
+    div.style.left = "-9999px";
+    div.style.whiteSpace = "pre-wrap";
+    div.style.wordWrap = "break-word";
+
+    const value = textarea.value || "";
+    const before = value.substring(0, caretIndex);
+    div.textContent = before;
+    const span = document.createElement("span");
+    // Non-empty marker so it has measurable layout.
+    span.textContent = value.substring(caretIndex) || ".";
+    div.appendChild(span);
+
+    document.body.appendChild(div);
+    const top = span.offsetTop;
+    const left = span.offsetLeft;
+    let lineHeight = parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight)) {
+        lineHeight = parseFloat(style.fontSize) * 1.2;
+    }
+    document.body.removeChild(div);
+    return { top, left, lineHeight };
+}
 
 const EditorContainer = styled.div`
 	display: flex;
@@ -341,62 +395,120 @@ const SmallText = styled.span`
 `;
 
 const MentionDropdown = styled.div`
-	position: absolute;
-	bottom: 100%;
-	left: 0;
-	right: 0;
-	margin-bottom: 4px;
-	background: ${({ theme }) => theme.colors.surface3 };
-	border: 1px solid ${({ theme }) => theme.colors.borderSubtle };
-	border-radius: 6px;
-	box-shadow: ${({ theme }) =>
-        theme.name === "dark"
-            ? "0 4px 16px rgba(0, 0, 0, 0.5)"
-            : "0 4px 16px rgba(0, 0, 0, 0.15)"};
-	z-index: 100;
-	max-height: 220px;
+	position: fixed;
+	${({ $top }) => ($top != null ? `top: ${$top}px;` : "")}
+	${({ $bottom }) => ($bottom != null ? `bottom: ${$bottom}px;` : "")}
+	left: ${({ $left }) => $left}px;
+	width: ${({ $width }) => $width}px;
+	background: ${({ theme }) => theme.colors.menuBg};
+	border: 1px solid ${({ theme }) => theme.colors.border};
+	border-radius: 12px;
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+	z-index: 1000;
+	max-height: min(60vh, 320px);
 	overflow-y: auto;
-	font-size: 0.8rem;
+	scrollbar-width: thin;
+	scrollbar-color: ${({ theme }) => theme.colors.scrollbar} transparent;
+
+	&::-webkit-scrollbar {
+		width: 8px;
+	}
+	&::-webkit-scrollbar-thumb {
+		background: ${({ theme }) => theme.colors.scrollbar};
+		border-radius: 4px;
+	}
 `;
 
-const MentionItem = styled.div`
-	padding: 0.35rem 0.6rem;
-	cursor: pointer;
+const MentionHeader = styled.div`
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
-	color: ${({ theme }) => theme.colors.text};
+	padding: 0.5rem 0.75rem;
+	border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const MentionHeaderLabel = styled.span`
+	font-size: 0.55rem;
+	font-weight: 500;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: ${({ theme }) => theme.colors.menuHeaderText};
+`;
+
+const MentionQueryBadge = styled.span`
+	display: inline-flex;
+	align-items: center;
+	padding: 0.1rem 0.4rem;
+	border-radius: 9999px;
+	background: ${({ theme }) => theme.colors.accent};
+	color: ${({ theme }) => theme.colors.focusBlue};
+	font-size: 0.6rem;
+	font-weight: 600;
+	max-width: 12rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+`;
+
+const MentionItem = styled.div`
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.5rem 0.75rem;
+	cursor: pointer;
+	color: ${({ theme }) => theme.colors.sidebarItemText};
 	background: ${({ $active, theme }) =>
-        $active ? (theme.colors.accentSubtle ) : "transparent"};
+				$active ? theme.colors.menuSelectedBg : "transparent"};
+	transition: background 0.15s ease, color 0.15s ease;
+
 	&:hover {
-		background: ${({ theme }) => theme.colors.accentSubtle };
+		background: ${({ theme }) => theme.colors.menuSelectedBg};
+		color: ${({ theme }) => theme.colors.menuItemHoverText};
 	}
-	&:first-child {
-		border-radius: 6px 6px 0 0;
-	}
-	&:last-child {
-		border-radius: 0 0 6px 6px;
-	}
+`;
+
+
+const MentionTextCol = styled.div`
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.08rem;
+	overflow: hidden;
 `;
 
 const MentionUsername = styled.span`
+	font-size: 0.7rem;
 	font-weight: 600;
-	color: ${({ theme }) => theme.colors.text};
+	color: inherit;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 `;
 
 const MentionAddress = styled.span`
-	font-size: 0.65rem;
-	color: ${({ theme }) => theme.colors.textSecondary };
+	font-size: 0.6rem;
+	font-weight: 500;
+	color: ${({ theme }) => theme.colors.subtleText};
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 `;
 
 const MentionHint = styled.div`
-	padding: 0.35rem 0.6rem;
-	color: ${({ theme }) => theme.colors.textSecondary };
-	font-size: 0.7rem;
-	font-style: italic;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.7rem 0.9rem;
+	color: ${({ theme }) => theme.colors.subtleText};
+	font-size: 0.65rem;
+	font-weight: 500;
+
+	svg {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+	}
 `;
 
 const HiddenInput = styled.input`
@@ -553,6 +665,16 @@ export default function MarkdownEditor({
     const [mentionIndex, setMentionIndex] = useState(0); // highlighted index
     const [mentionOpen, setMentionOpen] = useState(false); // dropdown visible
     const [mentionLoading, setMentionLoading] = useState(false);
+    // Computed position for the mention dropdown (rendered via portal
+    // so it escapes any `overflow: hidden` ancestor like CreatePostView's
+    // EditorShell). Either `top` or `bottom` is set depending on whether
+    // the dropdown opens below or above the cursor caret.
+    const [mentionPos, setMentionPos] = useState({
+        top: null,
+        bottom: null,
+        left: 0,
+        width: 0,
+    });
     const mentionTimerRef = useRef(null); // debounce timer
     const mentionAbortRef = useRef(null); // abort controller for in-flight request
     // Position in the text where the @ trigger started
@@ -669,6 +791,66 @@ export default function MarkdownEditor({
         setMentionResults([]);
         setMentionIndex(0);
     }, []);
+
+    // Compute fixed-position coordinates for the mention dropdown anchored
+    // to the caret line of the textarea (NOT the textarea bounding box).
+    // Uses the standard "mirror div" technique: copy the textarea's
+    // computed text styles to an offscreen div, insert the text up to the
+    // @-trigger, and measure where a marker span lands. Anchors the
+    // dropdown right above or right below that line so it visually hugs
+    // what the user is typing.
+    useEffect(() => {
+        if (!mentionOpen) return;
+        const compute = () => {
+            const ta = areaRef.current;
+            if (!ta) return;
+            const rect = ta.getBoundingClientRect();
+            const viewportH = window.innerHeight || document.documentElement.clientHeight;
+
+            // Caret y relative to the textarea's content area.
+            const atPos = mentionStartRef.current >= 0
+                ? mentionStartRef.current
+                : (ta.selectionStart ?? 0);
+            const caret = measureCaretInTextarea(ta, atPos);
+
+            // The caret's top in viewport coords = textarea top + caret y
+            // in content - scroll. lineH gives the caret line height so
+            // we can place the dropdown directly above/below the line.
+            const caretTop = rect.top + caret.top - ta.scrollTop;
+            const caretBottom = caretTop + caret.lineHeight;
+
+            const GAP = 6;
+            const NEEDED = 340;
+            const spaceAbove = caretTop;
+            const spaceBelow = viewportH - caretBottom;
+            const openUpward = spaceAbove >= NEEDED || spaceAbove > spaceBelow;
+
+            if (openUpward) {
+                // Anchor the dropdown's bottom edge right above the caret line.
+                setMentionPos({
+                    top: null,
+                    bottom: viewportH - caretTop + GAP,
+                    left: rect.left,
+                    width: rect.width,
+                });
+            } else {
+                // Anchor the dropdown's top edge right below the caret line.
+                setMentionPos({
+                    top: caretBottom + GAP,
+                    bottom: null,
+                    left: rect.left,
+                    width: rect.width,
+                });
+            }
+        };
+        compute();
+        window.addEventListener("scroll", compute, true);
+        window.addEventListener("resize", compute);
+        return () => {
+            window.removeEventListener("scroll", compute, true);
+            window.removeEventListener("resize", compute);
+        };
+    }, [mentionOpen, mentionResults.length, mentionLoading, mentionQuery]);
 
     // Preview toggle with localStorage persistence
     const [previewEnabled, setPreviewEnabled] = useState(() => {
@@ -1140,16 +1322,28 @@ export default function MarkdownEditor({
                 </PreviewToggle>
             </Toolbar>
             <div style={{ position: "relative", pointerEvents: "auto" }}>
-                {mentionOpen && (
-                    <MentionDropdown>
+                {mentionOpen && mentionPos.width > 0 && createPortal(
+                    <MentionDropdown
+                        $top={mentionPos.top}
+                        $bottom={mentionPos.bottom}
+                        $left={mentionPos.left}
+                        $width={mentionPos.width}
+                    >
+                        <MentionHeader>
+                            <MentionHeaderLabel>Results for</MentionHeaderLabel>
+                            <MentionQueryBadge>@{mentionQuery || ""}</MentionQueryBadge>
+                        </MentionHeader>
+                        {!mentionQuery && (
+                            <MentionHint>
+                                <HiOutlineMagnifyingGlass />
+                                Type a username after @
+                            </MentionHint>
+                        )}
                         {mentionLoading && mentionResults.length === 0 && mentionQuery.length > 0 && (
-                            <MentionHint>Searching...</MentionHint>
+                            <MentionHint>Searching…</MentionHint>
                         )}
                         {!mentionLoading && mentionResults.length === 0 && mentionQuery.length > 0 && (
                             <MentionHint>No users found</MentionHint>
-                        )}
-                        {!mentionQuery && (
-                            <MentionHint>Type a username...</MentionHint>
                         )}
                         {mentionResults.map((item, i) => (
                             <MentionItem
@@ -1161,11 +1355,19 @@ export default function MarkdownEditor({
                                 }}
                                 onMouseEnter={() => setMentionIndex(i)}
                             >
-                                <MentionUsername>@{item.username}</MentionUsername>
-                                <MentionAddress>{item.address ? `${item.address.slice(0, 12)}…${item.address.slice(-4)}` : ""}</MentionAddress>
+                                <UserAvatar seed={item.username} size={28} />
+                                <MentionTextCol>
+                                    <MentionUsername>@{item.username}</MentionUsername>
+                                    {item.address ? (
+                                        <MentionAddress>
+                                            {`${item.address.slice(0, 8)}…${item.address.slice(-4)}`}
+                                        </MentionAddress>
+                                    ) : null}
+                                </MentionTextCol>
                             </MentionItem>
                         ))}
-                    </MentionDropdown>
+                    </MentionDropdown>,
+                    document.body
                 )}
                 <Area
                     ref={areaRef}
@@ -1239,4 +1441,3 @@ export default function MarkdownEditor({
         </EditorContainer>
     );
 }
-
