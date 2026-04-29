@@ -2,9 +2,11 @@ import React from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
+import { HiChevronDown } from "react-icons/hi2";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip.js";
-import { InfoPanelSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
+import { Skeleton, SkeletonCircle } from "../components/Skeleton.js";
+import UserAvatar from "../components/UserAvatar.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useStats, TIER_NAMES, TIER_COLORS } from "../../../logic/useStats";
@@ -208,8 +210,8 @@ const SectionNote = styled.div`
 
 const FieldRow = styled.div`
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
-    gap: 1.5rem;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 2.5rem;
     align-items: center;
     padding: 0.55rem 1rem;
     box-sizing: border-box;
@@ -217,15 +219,19 @@ const FieldRow = styled.div`
     min-width: 0;
 
     @media (max-width: 1100px) {
-        gap: 0.5rem;
+        grid-template-columns: 200px minmax(0, 1fr);
+        gap: 1.5rem;
     }
 
     @media (max-width: 1000px) {
-        gap: 0.5rem;
+        grid-template-columns: 180px minmax(0, 1fr);
+        gap: 1rem;
         padding: 0.5rem 0.85rem;
     }
 
     @media (max-width: 600px) {
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 0.85rem;
         padding: 0.5rem 0;
     }
 `;
@@ -256,17 +262,17 @@ const FieldValue = styled.div`
     line-height: 1.3;
 `;
 
-const SubRow = styled(FieldRow)`
-    padding-left: 2rem;
-
-    @media (max-width: 1000px) {
-        padding-left: 1.75rem;
-    }
-`;
+/* SubRow keeps the same outer padding + grid as FieldRow so the value
+ * column stays vertically aligned with the parent rows above it. The
+ * visual indent is applied via padding-left on `SubLabel` only — never
+ * on the row container — otherwise the value column would shift right
+ * and break vertical alignment of all sibling values. */
+const SubRow = styled(FieldRow)``;
 
 const SubLabel = styled(FieldLabel)`
     color: ${({ theme, $color }) => $color || theme.colors.subtleText};
     font-size: 0.7rem;
+    padding-left: 1rem;
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -354,28 +360,19 @@ const UserCell = styled.div`
     gap: 0.5rem;
 `;
 
-const Avatar = styled.img`
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    object-fit: cover;
-    background: ${({ theme }) => theme.colors.surface3};
-    flex-shrink: 0;
-`;
-
-const AvatarPlaceholder = styled.div`
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface3};
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.6rem;
-    font-weight: 600;
-    color: ${({ theme }) => theme.colors.subtleText};
-    flex-shrink: 0;
-`;
+/* Stats user-row avatar — thin alias around the shared `UserAvatar`
+ * dicebear chip so every user row in /stats matches the chip style
+ * used by TopBar / ProfileView / FollowsView / BlocksView. We seed
+ * dicebear on the bech32 address (or username fallback) so the
+ * identicon is stable across username changes. Replaces the previous
+ * `?` placeholder tile. */
+const StatsAvatar = ({ user, size = 24 }) => (
+    <UserAvatar
+        seed={(user && (user.address || user.username)) || 'unknown'}
+        size={size}
+        alt=""
+    />
+);
 
 const UserLink = styled(Link)`
     color: ${({ theme }) => theme.colors.link};
@@ -433,6 +430,19 @@ const TierCount = styled.span`
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.66rem;
     font-weight: 500;
+`;
+
+/* Per-user breakdown expand chevron — matches the `HiChevronDown`
+ * pattern used elsewhere in the default theme (SubscriptionView,
+ * ListFeedView, AgentsView). Rotates 0deg → -90deg between expanded
+ * and collapsed so it reads as ▼ / ▶ without falling back to raw
+ * unicode glyphs. */
+const RewardChevron = styled(HiChevronDown)`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.95rem;
+    transition: transform 0.15s ease;
+    transform: rotate(${({ $expanded }) => ($expanded ? '0deg' : '-90deg')});
+    flex-shrink: 0;
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -616,9 +626,7 @@ export default function StatsView() {
         return (
             <Td>
                 <UserCell>
-                    {user.avatar
-                        ? <Avatar src={user.avatar} alt="" />
-                        : <AvatarPlaceholder>?</AvatarPlaceholder>}
+                    <StatsAvatar user={user} />
                     <div>
                         {address
                             ? <UserLink to={`/u/${user.username || address}`}>
@@ -641,9 +649,7 @@ export default function StatsView() {
         return (
             <Td>
                 <UserCell>
-                    {user.avatar
-                        ? <Avatar src={user.avatar} alt="" />
-                        : <AvatarPlaceholder>?</AvatarPlaceholder>}
+                    <StatsAvatar user={user} />
                     <div>
                         {user.address
                             ? <UserLink to={`/u/${user.username || user.address}`}>
@@ -691,7 +697,7 @@ export default function StatsView() {
         );
     };
 
-    const renderShell = (body, loadingHeader = false) => (
+    const renderShell = (body) => (
         <ContentGrid>
             <Helmet>
                 <title>Stats | Mirage</title>
@@ -701,31 +707,29 @@ export default function StatsView() {
                     <StatsTabbedContainer>
                         <StatsShellBody>
                             <StatsWrap>
-                            {loadingHeader ? (
-                                <PageHeaderSkeleton showSubtitle={false} titleWidth="25%" />
-                            ) : (
-                                <>
-                                    <HeaderRow>
-                                        <HeaderTitle>Stats</HeaderTitle>
-                                    </HeaderRow>
-                                    <SectionDivider />
-                                    <TabsRow role="tablist" aria-label="Stats sections" $count={TABS.length}>
-                                        {TABS.map(tab => (
-                                            <TabButton
-                                                key={tab.id}
-                                                type="button"
-                                                role="tab"
-                                                aria-selected={activeTab === tab.id}
-                                                $active={activeTab === tab.id}
-                                                onClick={() => setActiveTab(tab.id)}
-                                            >
-                                                {tab.label}
-                                            </TabButton>
-                                        ))}
-                                        <TabIndicator $count={TABS.length} $index={activeTabIndex} aria-hidden="true" />
-                                    </TabsRow>
-                                </>
-                            )}
+                            {/* Header + tabs are always visible — even during the
+                              * loading skeleton — so the tab strip doesn't pop in
+                              * after data resolves and the active tab stays anchored
+                              * to the URL. */}
+                            <HeaderRow>
+                                <HeaderTitle>Stats</HeaderTitle>
+                            </HeaderRow>
+                            <SectionDivider />
+                            <TabsRow role="tablist" aria-label="Stats sections" $count={TABS.length}>
+                                {TABS.map(tab => (
+                                    <TabButton
+                                        key={tab.id}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={activeTab === tab.id}
+                                        $active={activeTab === tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                    >
+                                        {tab.label}
+                                    </TabButton>
+                                ))}
+                                <TabIndicator $count={TABS.length} $index={activeTabIndex} aria-hidden="true" />
+                            </TabsRow>
                             {body}
                             </StatsWrap>
                         </StatsShellBody>
@@ -735,19 +739,157 @@ export default function StatsView() {
         </ContentGrid>
     );
 
+    /* ---------- Skeletons (tab-aware) ----------------------------------- *
+     * Each skeleton mirrors the actual section / tile / table / row shape
+     * of the content rendered by its tab so the layout doesn't pop on
+     * hydration. R7 — heights match the real type scale used below.       */
+
+    const renderSkFieldRow = i => (
+        <FieldRow key={i}>
+            <Skeleton width="65%" height="0.72rem" />
+            <Skeleton width="35%" height="0.72rem" />
+        </FieldRow>
+    );
+
+    const renderSkSection = (titleWidth, rows) => (
+        <Section>
+            <SectionHeader>
+                <SectionHeaderTitle>
+                    <Skeleton width={titleWidth} height="0.6rem" />
+                </SectionHeaderTitle>
+            </SectionHeader>
+            <SectionBody>
+                {Array.from({ length: rows }).map((_, i) => renderSkFieldRow(i))}
+            </SectionBody>
+        </Section>
+    );
+
+    const renderSkTiles = (count, titleWidth = '120px') => (
+        <Section>
+            <SectionHeader>
+                <SectionHeaderTitle>
+                    <Skeleton width={titleWidth} height="0.6rem" />
+                </SectionHeaderTitle>
+            </SectionHeader>
+            <TilesSectionBody>
+                <SummaryGrid>
+                    {Array.from({ length: count }).map((_, i) => (
+                        <SummaryTile key={i}>
+                            <Skeleton width="60%" height="1.1rem" style={{ margin: '0 auto' }} />
+                            <Skeleton
+                                width="50%"
+                                height="0.62rem"
+                                style={{ margin: '0.45rem auto 0' }}
+                            />
+                        </SummaryTile>
+                    ))}
+                </SummaryGrid>
+            </TilesSectionBody>
+        </Section>
+    );
+
+    const renderSkUserRow = (i, cols = 3) => (
+        <tr key={i}>
+            <Td>
+                <UserCell>
+                    <SkeletonCircle size={24} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <Skeleton width="100px" height="0.72rem" />
+                        <Skeleton width="70px" height="0.6rem" />
+                    </div>
+                </UserCell>
+            </Td>
+            {Array.from({ length: cols }).map((_, c) => (
+                <Td key={c} style={{ textAlign: 'right' }}>
+                    <Skeleton width="56px" height="0.72rem" inline />
+                </Td>
+            ))}
+        </tr>
+    );
+
+    const renderSkTable = (titleWidth, rows = 6, cols = 3) => (
+        <Section>
+            <SectionHeader>
+                <SectionHeaderTitle>
+                    <Skeleton width={titleWidth} height="0.6rem" />
+                </SectionHeaderTitle>
+            </SectionHeader>
+            <TableWrap>
+                <Table>
+                    <tbody>
+                        {Array.from({ length: rows }).map((_, i) => renderSkUserRow(i, cols))}
+                    </tbody>
+                </Table>
+            </TableWrap>
+        </Section>
+    );
+
+    const renderSkRewardList = (rows = 4) => (
+        <Section>
+            <SectionHeader>
+                <SectionHeaderTitle>
+                    <Skeleton width="120px" height="0.6rem" />
+                </SectionHeaderTitle>
+            </SectionHeader>
+            <RewardSectionBody>
+                {Array.from({ length: rows }).map((_, i) => (
+                    <RewardRow key={i}>
+                        <Skeleton width="60px" height="0.76rem" />
+                        <RewardBody>
+                            <Skeleton width="40%" height="0.72rem" />
+                            <Skeleton width="65%" height="0.6rem" />
+                        </RewardBody>
+                        <Skeleton width="48px" height="0.6rem" />
+                    </RewardRow>
+                ))}
+            </RewardSectionBody>
+        </Section>
+    );
+
+    const skeletonByTab = {
+        overview: (
+            <>
+                {renderSkSection('60px', 7)}
+                {renderSkSection('70px', 3)}
+                {renderSkSection('100px', 6)}
+            </>
+        ),
+        signups: (
+            <>
+                {renderSkTiles(3, '140px')}
+                {renderSkTable('100px', 5, 1)}
+                {renderSkTable('120px', 6, 3)}
+            </>
+        ),
+        subscribers: (
+            <>
+                {renderSkTiles(3, '140px')}
+                {renderSkTable('80px', 4, 5)}
+                {renderSkTable('80px', 4, 5)}
+            </>
+        ),
+        accounts: (
+            <>
+                {renderSkTiles(1, '160px')}
+                {renderSkTable('110px', 8, 3)}
+            </>
+        ),
+        rewards: (
+            <>
+                {renderSkTiles(3, '130px')}
+                {renderSkTiles(4, '120px')}
+                {renderSkTable('130px', 5, 2)}
+                {renderSkRewardList(4)}
+            </>
+        ),
+    };
+
     if (loading || error) {
         return renderShell(
             <>
                 {error && !loading && <ErrorMessage>{error}</ErrorMessage>}
-                {loading && !error && (
-                    <>
-                        <InfoPanelSkeleton rows={5} />
-                        <InfoPanelSkeleton rows={4} />
-                        <InfoPanelSkeleton rows={3} />
-                    </>
-                )}
-            </>,
-            !error
+                {loading && !error && (skeletonByTab[activeTab] || skeletonByTab.overview)}
+            </>
         );
     }
 
@@ -1195,11 +1337,14 @@ export default function StatsView() {
                                             style={{ cursor: 'pointer' }}
                                         >
                                             <Td style={{ width: '30px', textAlign: 'center' }}>
-                                                <CellText>{expandedUsers[user.address] ? '▼' : '▶'}</CellText>
+                                                <RewardChevron
+                                                    $expanded={!!expandedUsers[user.address]}
+                                                    aria-hidden="true"
+                                                />
                                             </Td>
                                             <Td>
                                                 <UserCell>
-                                                    <AvatarPlaceholder>?</AvatarPlaceholder>
+                                                    <StatsAvatar user={user} />
                                                     <div>
                                                         <UserLink
                                                             to={`/u/${user.username || user.address}`}
@@ -1304,7 +1449,18 @@ export default function StatsView() {
                             )}
                         </>
                     ) : payoutsLoading ? (
-                        <InfoPanelSkeleton rows={4} />
+                        <>
+                            {Array.from({ length: 4 }).map((_, i) => (
+                                <RewardRow key={i}>
+                                    <Skeleton width="60px" height="0.76rem" />
+                                    <RewardBody>
+                                        <Skeleton width="40%" height="0.72rem" />
+                                        <Skeleton width="65%" height="0.6rem" />
+                                    </RewardBody>
+                                    <Skeleton width="48px" height="0.6rem" />
+                                </RewardRow>
+                            ))}
+                        </>
                     ) : (
                         <SectionEmpty>No rewards recorded yet.</SectionEmpty>
                     )}
