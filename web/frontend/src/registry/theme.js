@@ -36,21 +36,21 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
  * HARD FAIL RULE — READ THIS BEFORE CHANGING ANYTHING BELOW.
  * ============================================================================
  *
- * 1. The default theme is ALWAYS `mirageapp`. No exceptions. No "pick the
+ * 1. The default theme is ALWAYS `default`. No exceptions. No "pick the
  *    first manifest", no env-var override, no A/B flag, no user-id-based
  *    gating. If you think you need to change this, talk to nik first.
  *
  *    History: the default was `bluemoon` until 2026-04-25. Per nik's call,
- *    `mirageapp` is now the single shipped theme experience for every user,
+ *    `default` is now the single shipped theme experience for every user,
  *    and `normalizeThemeId` below force-overrides any persisted selection
  *    (see point 4). The other theme manifests (`bluemoon`, `onyx`,
  *    `oldreddit`) are kept in the registry only so that legacy `theme_id`
  *    values don't blow up `getThemeFamily` calls during migration; they are
  *    intentionally NOT reachable as a runtime visual.
  *
- * 2. If `mirageapp` is not registered in `THEME_MANIFESTS`, THIS MODULE MUST
+ * 2. If `default` is not registered in `THEME_MANIFESTS`, THIS MODULE MUST
  *    THROW at import time. Do NOT fall back to another theme. Do NOT default
- *    to `THEME_MANIFESTS[0]`. A missing `mirageapp` manifest is a build-time
+ *    to `THEME_MANIFESTS[0]`. A missing `default` manifest is a build-time
  *    bug and must surface immediately — silent fallbacks hide regressions and
  *    have burned us before.
  *
@@ -63,17 +63,17 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
  *    persisted value. This deliberately overrides any user-selected theme
  *    that was saved in localStorage before this rule landed. The settings
  *    UI's theme dropdown is now visual-only: any change there is mapped
- *    back to `mirageapp` on the next normalization pass and the storage
+ *    back to `default` on the next normalization pass and the storage
  *    value is rewritten by the App / bootstrap rewrite logic.
  *
  * If you are adding a new theme, add it to `themes/manifests.js` and leave
  * THIS line alone. The default does not change when new themes ship.
  * ============================================================================
  */
-if (!THEMES.mirageapp) {
-    throw new Error('DEFAULT_THEME_ID: "mirageapp" manifest is missing from THEME_MANIFESTS — the default theme must always be mirageapp; no fallback is permitted.');
+if (!THEMES.default) {
+    throw new Error('DEFAULT_THEME_ID: "default" manifest is missing from THEME_MANIFESTS — the default theme must always be default; no fallback is permitted.');
 }
-export const DEFAULT_THEME_ID = 'mirageapp';
+export const DEFAULT_THEME_ID = 'default';
 
 /**
  * Map legacy ids and unknown values to a registered theme id.
@@ -82,7 +82,7 @@ export const DEFAULT_THEME_ID = 'mirageapp';
  * @returns {string}
  */
 export function normalizeThemeId(id) {
-    // Uncomment the line below to lock every user to the mirageapp theme
+    // Uncomment the line below to lock every user to the default theme
     // (ignores persisted theme_id and any selection from Settings).
     // return DEFAULT_THEME_ID;
     if (id == null || typeof id !== 'string') return DEFAULT_THEME_ID;
