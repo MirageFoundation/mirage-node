@@ -5,6 +5,9 @@ import {
     HiExclamationTriangle,
     HiFlag,
     HiLockClosed,
+    HiTrash,
+    HiNoSymbol,
+    HiCheck,
 } from "react-icons/hi2";
 import Button from "../components/Button.js";
 import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
@@ -311,6 +314,7 @@ export default function ReportsView({ state }) {
         error,
         userLevel,
         processing,
+        processingAction,
         onDelete,
         onDeleteAndBlock,
         onIgnore,
@@ -404,6 +408,15 @@ export default function ReportsView({ state }) {
         <List>
             {reports.map(r => {
                 const isProcessing = processing.has(r.id);
+                // Which specific action is in flight for this row, so the
+                // spinner only appears on the button that was clicked
+                // instead of all three. Falls back to `null` when idle.
+                const activeAction = (processingAction && processingAction.get)
+                    ? (processingAction.get(r.id) || null)
+                    : null;
+                const isDeleting = activeAction === 'delete';
+                const isDeletingAndBlocking = activeAction === 'deleteBlock';
+                const isIgnoring = activeAction === 'ignore';
                 const targetId = String(r.target || '');
                 const reporterLabel = r.reporter_username || shortenReporter(r.reporter_owner);
                 const ownerLabel = r.post_username || (r.post_owner ? shortenReporter(r.post_owner) : '');
@@ -451,19 +464,21 @@ export default function ReportsView({ state }) {
                                 size="sm"
                                 onClick={() => onDelete(r)}
                                 disabled={isProcessing}
-                                loading={isProcessing}
+                                loading={isDeleting}
                                 mobileFullWidth
                             >
+                                {!isDeleting && <HiTrash aria-hidden="true" />}
                                 Delete post
                             </Button>
                             <Button
-                                variant="danger"
+                                variant="primaryDanger"
                                 size="sm"
                                 onClick={() => onDeleteAndBlock(r)}
                                 disabled={isProcessing}
-                                loading={isProcessing}
+                                loading={isDeletingAndBlocking}
                                 mobileFullWidth
                             >
+                                {!isDeletingAndBlocking && <HiNoSymbol aria-hidden="true" />}
                                 Delete + block user
                             </Button>
                             <Button
@@ -471,9 +486,10 @@ export default function ReportsView({ state }) {
                                 size="sm"
                                 onClick={() => onIgnore(r)}
                                 disabled={isProcessing}
-                                loading={isProcessing}
+                                loading={isIgnoring}
                                 mobileFullWidth
                             >
+                                {!isIgnoring && <HiCheck aria-hidden="true" />}
                                 Ignore
                             </Button>
                         </Actions>

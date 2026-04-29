@@ -60,8 +60,33 @@ export function useReports({
     }
   };
   const [processing, setProcessing] = React.useState(new Set());
+  // Per-button action tracking so consumers (e.g. the default-theme
+  // ReportsView) can show the spinner only on the button that was
+  // actually clicked, instead of all three actions for the same row.
+  // Maps `report.id` → `'delete' | 'deleteBlock' | 'ignore'`.
+  const [processingAction, setProcessingAction] = React.useState(new Map());
+  const beginAction = (id, action) => {
+    setProcessing(prev => new Set(prev).add(id));
+    setProcessingAction(prev => {
+      const next = new Map(prev);
+      next.set(id, action);
+      return next;
+    });
+  };
+  const endAction = id => {
+    setProcessing(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setProcessingAction(prev => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  };
   const onDelete = async r => {
-    setProcessing(prev => new Set(prev).add(r.id));
+    beginAction(r.id, 'delete');
     try {
       await tx.deletePost(r.target);
       setReports(prev => {
@@ -70,15 +95,11 @@ export function useReports({
         return next;
       });
     } finally {
-      setProcessing(prev => {
-        const next = new Set(prev);
-        next.delete(r.id);
-        return next;
-      });
+      endAction(r.id);
     }
   };
   const onDeleteAndBlock = async r => {
-    setProcessing(prev => new Set(prev).add(r.id));
+    beginAction(r.id, 'deleteBlock');
     try {
       await tx.deletePost(r.target);
       if (r.post_owner) {
@@ -90,23 +111,15 @@ export function useReports({
         return next;
       });
     } finally {
-      setProcessing(prev => {
-        const next = new Set(prev);
-        next.delete(r.id);
-        return next;
-      });
+      endAction(r.id);
     }
   };
   const onIgnore = async r => {
-    setProcessing(prev => new Set(prev).add(r.id));
+    beginAction(r.id, 'ignore');
     try {
       await resolveReport(r.id);
     } finally {
-      setProcessing(prev => {
-        const next = new Set(prev);
-        next.delete(r.id);
-        return next;
-      });
+      endAction(r.id);
       setReports(prev => {
         const next = prev.filter(x => x.id !== r.id);
         notifyCount(next.length);
@@ -121,6 +134,7 @@ export function useReports({
     error,
     userLevel,
     processing,
+    processingAction,
     onDelete,
     onDeleteAndBlock,
     onIgnore
