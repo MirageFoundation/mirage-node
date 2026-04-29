@@ -20,6 +20,7 @@ import MarkdownRenderer from "../components/MarkdownRenderer";
 import Storage from "../../../utils/Storage";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -1357,25 +1358,27 @@ export default function ProfileView({ state }) {
                 <Helmet>
                     <title>Profile | Mirage</title>
                 </Helmet>
-                <ModernPostFeed>
-                    <CappedPageColumn>
-                        <LoggedOutPromptCard
-                            role="region"
-                            aria-label="Sign in to view your profile"
-                            title="Sign in to view your profile"
-                            description="Create an account or sign in to see your identity, balance, posts, and settings."
-                            notice="Currently in Private Beta, Invite Only."
-                            stats={getCachedWelcomeStats()}
-                            links={[
-                                { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
-                                { label: 'Learn More', href: 'https://mirage.foundation', external: true },
-                            ]}
-                            inviteText="Have an invite code? Join the community today."
-                            primaryLabel="Create account"
-                            secondaryLabel="Sign in"
-                        />
-                    </CappedPageColumn>
-                </ModernPostFeed>
+                <FeedRailRow $feedViewMode="card">
+                    <FeedCol>
+                        <ModernPostFeed>
+                            <LoggedOutPromptCard
+                                role="region"
+                                aria-label="Sign in to view your profile"
+                                title="Sign in to view your profile"
+                                description="Create an account or sign in to see your identity, balance, posts, and settings."
+                                notice="Currently in Private Beta, Invite Only."
+                                stats={getCachedWelcomeStats()}
+                                links={[
+                                    { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                                    { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                                ]}
+                                inviteText="Have an invite code? Join the community today."
+                                primaryLabel="Create account"
+                                secondaryLabel="Sign in"
+                            />
+                        </ModernPostFeed>
+                    </FeedCol>
+                </FeedRailRow>
             </ContentGrid>
         );
     }

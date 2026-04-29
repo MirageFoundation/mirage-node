@@ -1767,7 +1767,7 @@ const MainView = ({
                         </FeedHeroColumn>}
 
                         {/* Android app banner - shown once for Android users until dismissed */}
-                        {showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
+                        {isLoggedIn && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
                             <AndroidHeroTitle>
                                 <AndroidHeroEmoji><FaGooglePlay aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on Play Store
                             </AndroidHeroTitle>
@@ -1784,7 +1784,7 @@ const MainView = ({
                             </AndroidHeroButtons>
                         </AndroidAppHero>}
 
-                        {showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
+                        {isLoggedIn && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
                             <AndroidHeroTitle>
                                 <AndroidHeroEmoji><FaApple aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on App Store
                             </AndroidHeroTitle>
@@ -1940,7 +1940,7 @@ const MainView = ({
                     </ModernPostFeed>
                 </MainFeedPanel>
             </FeedCol>
-            <FeedRightRail />
+            {isLoggedIn && <FeedRightRail />}
             </FeedRailRow>
 
             {/* Invite Code Modal */}

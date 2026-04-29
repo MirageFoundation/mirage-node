@@ -9,6 +9,40 @@ const Shell = styled.section`
     justify-content: center;
     padding: 2.25rem 1rem 2rem;
     box-sizing: border-box;
+
+    /* On desktop the Shell sits inside ModernPostFeed which is
+       left-aligned within DefaultShell's Main column. Main itself is
+       offset right by the sidebar + divider when the sidebar is
+       visible, and even when the sidebar is hidden the Layout grid
+       keeps a 17px divider track on the left. Centering inside any
+       of those parents lands the Card off-axis from the topbar's
+       viewport-centered search input.
+
+       No DefaultShell ancestor (ShellRoot, Layout, Main, ContentGrid,
+       ModernPostFeed) is positioned, so an absolutely positioned
+       element here resolves its containing block to the initial
+       containing block (the viewport for sizing purposes). That lets
+       us anchor left: 0 + width: 100vw to the viewport edges
+       directly, regardless of how deeply the Shell is nested or how
+       its parents are offset. The Card then centers within that
+       viewport-spanning Shell, landing on the same axis as the
+       topbar's centered search input — at every screen size and
+       whether the sidebar is shown or hidden.
+
+       Mobile / tablet (≤ 1000px) keeps the simple in-flow centering
+       since Main already spans the full viewport there. */
+    @media (min-width: 1001px) {
+        position: absolute;
+        top: calc(2.5rem + 1px);
+        left: 0;
+        width: 100vw;
+        max-width: 100vw;
+        /* See LoggedOutPromptCard for the full rationale: a viewport-
+           spanning absolute Shell would block clicks against the
+           sidebar / page chrome, so disable pointer events on the
+           Shell and re-enable them on the Card. */
+        pointer-events: none;
+    }
 `;
 
 const Card = styled.div`
@@ -18,6 +52,25 @@ const Card = styled.div`
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+    /* Re-enable interaction inside the absolute, pointer-events: none
+       Shell. Clicks outside the card pass through to the sidebar. */
+    pointer-events: auto;
+
+    /* TopBar.BarInner is a flex row: BrandLink ("MIRAGE", ~190px) +
+       LeftSpacer (flex 1) + SearchWrapper + RightSpacer (flex 1) +
+       right controls. With brand B on the left and right controls R
+       on the right, the search input's center sits at (B - R)/2 px
+       right of BarInner's center. For logged-out viewers R is just
+       the Sign-in pill + GuestMenu (~120px), so the search center is
+       roughly (190 - 120)/2 = 35px right of viewport center.
+
+       In a justify-content: center flex row, a margin counts toward
+       the centering box: an item with margin-left: m has its visual
+       center shifted right by m/2. So margin-left: 70px lines this
+       Card up directly under the search input. */
+    @media (min-width: 1001px) {
+        margin-left: 70px;
+    }
 `;
 
 const Header = styled.header`

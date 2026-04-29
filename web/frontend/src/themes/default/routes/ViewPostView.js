@@ -3324,7 +3324,6 @@ function ViewPostView({
                         />
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }

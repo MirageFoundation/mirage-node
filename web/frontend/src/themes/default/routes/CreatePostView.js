@@ -970,7 +970,6 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             />
                         </ModernPostFeed>
                     </FeedCol>
-                    <FeedRightRail />
                 </FeedRailRow>
             </ContentGrid>
         );

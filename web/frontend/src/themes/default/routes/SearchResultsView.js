@@ -995,7 +995,6 @@ export default function SearchResultsView({ state }) {
                             />
                         </ModernPostFeed>
                     </FeedCol>
-                    <FeedRightRail />
                 </FeedRailRow>
             </ContentGrid>
         );
