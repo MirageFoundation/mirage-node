@@ -987,7 +987,15 @@ function isCompactInteractive(target) {
 /* Thumbnail tile that gracefully falls back to the DiceBear identicon when
  * the derived image URL fails to load (404, blocked, non-image content,
  * dead Photon proxy, etc.). Without this fallback the row shows a blank
- * dark tile, which is what users were seeing on link posts. */
+ * dark tile, which is what users were seeing on link posts.
+ *
+ * Some image responses succeed at the HTTP level but the body is a 0×0
+ * pixel image (Photon occasionally returns this for unsupported
+ * sources, and YouTube `hqdefault.jpg` returns a 120×90 \"no preview\"
+ * placeholder for deleted/private videos). We treat any image that
+ * resolves with `naturalWidth === 0` *or* lands at the YouTube 120×90
+ * placeholder as a failure too, so those rows show the seeded
+ * placeholder instead of an empty dark tile. */
 function CompactThumb({ thumb, to, label, onClick, address, username }) {
     const [failed, setFailed] = useState(false);
     const src = typeof thumb === 'string' ? thumb : (thumb && thumb.src) || null;
@@ -999,6 +1007,20 @@ function CompactThumb({ thumb, to, label, onClick, address, username }) {
             <PostPlaceholderAvatar address={address} username={username} />
         );
     }
+
+    const handleLoad = (e) => {
+        const img = e?.currentTarget;
+        if (!img) return;
+        const w = img.naturalWidth || 0;
+        const h = img.naturalHeight || 0;
+        // Blank / zero-byte images.
+        if (w === 0 || h === 0) { setFailed(true); return; }
+        // YouTube serves a 120×90 grey \"no preview\" placeholder when a
+        // video is deleted, private, or never had a thumbnail. Fall back
+        // to the seeded placeholder so the row doesn't show a dead tile.
+        const isYouTubePoster = typeof src === 'string' && src.indexOf('i.ytimg.com/vi/') !== -1;
+        if (isYouTubePoster && w === 120 && h === 90) { setFailed(true); return; }
+    };
 
     // Favicons are tiny logo marks, not photos — center them on the dark
     // tile with padding instead of cover-fitting them edge-to-edge.
@@ -1015,6 +1037,7 @@ function CompactThumb({ thumb, to, label, onClick, address, username }) {
                 loading="lazy"
                 style={imgStyle}
                 onError={() => setFailed(true)}
+                onLoad={handleLoad}
             />
         </CompactThumbLink>
     );
