@@ -157,6 +157,13 @@ const defaultDarkColors = {
     // space behind the glyph. Dark mode uses `surface3` so the chip reads
     // as a lifted neutral tile against `bg`/`panel`.
     avatarBg: '#232830',
+
+    // Admin tier accent (R2). Used wherever `getTierColor(userLevel)` would
+    // resolve to the shared `ADMIN_COLOR` from `logic/useSubscription.js`
+    // (admin tier label, admin chip, admin section accents). Kept in tokens
+    // so light mode can diverge per R2 without touching the cross-theme
+    // helper. Sub-plan 06.11.A.
+    tierAdmin: '#EF4444',
 };
 
 const defaultLightColors = {
@@ -304,6 +311,11 @@ const defaultLightColors = {
     // (which dissolves into the page) and lighter than `borderStrong`,
     // giving the colored identicon glyph enough contrast to pop.
     avatarBg: '#C4CAD3',
+
+    // Admin tier accent (R2 light-mode pair for `tierAdmin`). Slightly
+    // deeper than the dark-mode hex so it stays legible on the near-white
+    // page bg. Sub-plan 06.11.A.
+    tierAdmin: '#DC2626',
 };
 
 function buildLayout(colors) {

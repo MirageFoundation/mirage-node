@@ -408,15 +408,51 @@ const DropdownHeader = styled.div`
 `;
 
 const DropdownUsername = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     font-size: 0.78rem;
     font-weight: 700;
     color: ${({ theme }) => theme.colors.text};
+`;
+
+/* Eyebrow row used to label a grouped block inside the avatar dropdown
+ * (e.g. the admin-only block above Stats / Reports). Mirrors the
+ * `menuHeaderText` style used by SearchDropdown / MentionDropdown so
+ * dropdown sub-headers stay typographically consistent across the theme.
+ * R7: 0.55rem / 500, uppercase. */
+const MenuHeader = styled.div`
+    padding: 0.45rem 0.9rem 0.2rem;
+    font-size: 0.55rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: ${({ theme }) => theme.colors.menuHeaderText};
+`;
+
+/* Small "Admin" pill rendered inline next to `@username` in the avatar
+ * dropdown header when the signed-in user has `userLevel >= 100`.
+ * Uses the R2 `tierAdmin` token for both border and label so dark/light
+ * pairing is preserved (sub-plan 06.11). */
+const AdminPill = styled.span`
+    display: inline-flex;
+    align-items: center;
+    padding: 0.18rem 0.55rem;
+    border: 1px solid ${({ theme }) => theme.colors.tierAdmin};
+    border-radius: 999px;
+    font-size: 0.55rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: ${({ theme }) => theme.colors.tierAdmin};
 `;
 
 const MenuItem = styled(Link)`
     display: block;
     padding: 0.5rem 0.9rem;
     font-size: 0.78rem;
+    font-weight: 500;
     color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     &:hover {
@@ -430,6 +466,7 @@ const MenuButton = styled.button`
     text-align: left;
     padding: 0.5rem 0.9rem;
     font-size: 0.78rem;
+    font-weight: 500;
     color: ${({ theme }) => theme.colors.text};
     background: transparent;
     border: none;
@@ -874,7 +911,12 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
     return (
         <>
             <DropdownHeader>
-                {displayName && <DropdownUsername>@{displayName}</DropdownUsername>}
+                {displayName && (
+                    <DropdownUsername>
+                        @{displayName}
+                        {isAdmin && <AdminPill aria-label="Admin account">Admin</AdminPill>}
+                    </DropdownUsername>
+                )}
             </DropdownHeader>
             <MenuItem to="/profile" onClick={() => handleItemClick('/profile')}>Profile</MenuItem>
             <MenuItem to="/subscription" onClick={() => handleItemClick('/subscription')}>Subscription</MenuItem>
@@ -889,6 +931,7 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
             {isAdmin && (
                 <>
                     <MenuDivider />
+                    <MenuHeader>Admin</MenuHeader>
                     <MenuItem to="/stats" onClick={() => handleItemClick('/stats')}>Stats</MenuItem>
                     <MenuItem to="/reports" onClick={() => handleItemClick('/reports')}>Reports</MenuItem>
                 </>

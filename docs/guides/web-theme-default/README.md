@@ -100,6 +100,7 @@ A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a larg
 8. [`08-mobile-bottom-nav.md`](./06-subplans/08-mobile-bottom-nav.md) — MobileBottomNav full restyle (deferred from Plan 02)
 9. [`09-polish-and-qa.md`](./06-subplans/09-polish-and-qa.md) — spacing / typography / state / responsive / accessibility polish + QA + optional default-theme switch
 10. [`10-loading-states-skeletons.md`](./06-subplans/10-loading-states-skeletons.md) — tokenized `Skeleton` primitive + per-route skeleton loaders; replaces inherited `Loading…` text (runs after 08, before 09)
+11. [`11-admin-ui.md`](./06-subplans/11-admin-ui.md) — admin UI parity pass: profile menu admin group, Subscription admin branch, post-detail confirm banners → `ConfirmDialog`/`Toast`, feed-row admin parity (`CardView` + `PostMenu`), new `tierAdmin` R2 token (runs after 10, before 09)
 
 ---
 
