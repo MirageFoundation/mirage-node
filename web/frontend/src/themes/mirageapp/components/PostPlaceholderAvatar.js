@@ -29,14 +29,14 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *     a deterministic glyph.
  *
  * Background:
- *   - Hard-pinned to `#232830` (dark-mode `surface3`) in BOTH light and
- *     dark themes, matching the TopBar avatar chip + ProfileView Avatar
- *     convention. DiceBear's `shapes` variant is transparent like
- *     `identicon`, so the pinned grey fills the negative space
- *     identically across themes.
+ *   - Pulled from `theme.colors.avatarBg` so the tile tracks the
+ *     shared DiceBear chip color used by `UserAvatar`. Dark mode
+ *     resolves to `#232830` (the historic TopBar / ProfileView grey);
+ *     light mode resolves to a softer mid-slate so the tile doesn't
+ *     read as a dark hole on the near-white feed canvas. DiceBear's
+ *     `shapes` variant is transparent like `identicon`, so this fill
+ *     shows through the negative space behind the glyph.
  */
-
-const AVATAR_BG = '#232830';
 
 const PlaceholderRoot = styled.div`
     grid-row: 1 / span 3;
@@ -46,7 +46,7 @@ const PlaceholderRoot = styled.div`
     width: ${({ $size }) => $size}px;
     height: ${({ $size }) => $size}px;
     border-radius: 8px;
-    background: ${AVATAR_BG};
+    background: ${({ theme }) => theme.colors.avatarBg};
     flex-shrink: 0;
     overflow: hidden;
 
@@ -62,7 +62,7 @@ const AvatarImg = styled.img`
     height: 50%;
     display: block;
     object-fit: contain;
-    background: ${AVATAR_BG};
+    background: ${({ theme }) => theme.colors.avatarBg};
 `;
 
 function pickSeed({ address, username }) {

@@ -18,10 +18,11 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *     same 20% inner padding around the identicon glyph.
  *
  * Visual contract:
- *   - The wrapper is a `size × size` circle filled with `#232830`
- *     (dark-mode `surface3`). The hard-pinned color matches the
- *     existing TopBar / ProfileView convention so light + dark modes
- *     don't diverge for the dicebear surface.
+ *   - The wrapper is a `size × size` circle filled with
+ *     `theme.colors.avatarBg`. Dark mode resolves to `#232830`
+ *     (matches the historic TopBar / ProfileView convention); light
+ *     mode resolves to a softer mid-slate so the chip doesn't punch a
+ *     dark hole into the near-white layout.
  *   - The identicon `<img>` is centered inside that circle and inset
  *     by 20% on every side, leaving a balanced \"halo\" of negative
  *     space between the identicon and the wrapper edge.
@@ -48,7 +49,6 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *     margins, etc. (e.g. the `CommentAvatar` in `ViewPostView`).
  */
 
-const AVATAR_BG = '#232830';
 const DEFAULT_ROUNDED_RADIUS_PX = 12;
 const DEFAULT_PADDING_RATIO = 0.2;
 
@@ -60,7 +60,7 @@ const Wrapper = styled.span`
     height: ${({ $size }) => $size}px;
     border-radius: ${({ $shape, $radius }) =>
         $shape === 'rounded' ? `${$radius}px` : '50%'};
-    background: ${AVATAR_BG};
+    background: ${({ theme }) => theme.colors.avatarBg};
     flex-shrink: 0;
     box-sizing: border-box;
     padding: ${({ $size, $paddingRatio }) =>

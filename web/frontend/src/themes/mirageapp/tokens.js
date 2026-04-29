@@ -151,6 +151,12 @@ const mirageappDarkColors = {
     // Comment thread rails (J-curve elbow + avatar spine) on post-details
     // screen. Dedicated token so rails can diverge from `borderSubtle`.
     commentThread: 'rgb(47, 48, 47)',
+
+    // DiceBear avatar chip background (UserAvatar + PostPlaceholderAvatar).
+    // Identicon/shapes PNGs are transparent, so this fills the negative
+    // space behind the glyph. Dark mode uses `surface3` so the chip reads
+    // as a lifted neutral tile against `bg`/`panel`.
+    avatarBg: '#232830',
 };
 
 const mirageappLightColors = {
@@ -290,6 +296,14 @@ const mirageappLightColors = {
 
     // Comment thread rails (light-mode pair for `commentThread`).
     commentThread: 'rgb(222, 224, 222)',
+
+    // DiceBear avatar chip background (light-mode pair for `avatarBg`).
+    // A soft mid-slate so the chip reads as a distinct surface against
+    // the near-white page bg without the dark-mode `#232830` punching
+    // a heavy hole into the light layout. Sits darker than `surface3`
+    // (which dissolves into the page) and lighter than `borderStrong`,
+    // giving the colored identicon glyph enough contrast to pop.
+    avatarBg: '#C4CAD3',
 };
 
 function buildLayout(colors) {
