@@ -21,12 +21,13 @@ import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
-import { useViewPost, tagColors, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
+import { useViewPost, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
 import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
 import UserAvatar from "../components/UserAvatar.js";
+import ContentTagBadge from "../components/ContentTagBadge";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -881,25 +882,6 @@ const DesktopMetaInfoRow = styled(MetaInfoRow)`
 }) => $hideOnMobile ? 'none' : 'flex'};
     }
 `;
-const TagBadge = styled.span`
-    display: inline-flex;
-    align-items: center;
-    padding: 0.1rem 0.45rem;
-    border-radius: 999px;
-    background: ${({
-    $tag
-}) => tagColors[$tag]?.bg || tagColors.default.bg};
-    color: ${({
-    $tag
-}) => tagColors[$tag]?.text || tagColors.default.text};
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: lowercase;
-    border: 1px solid ${({
-    $tag
-}) => tagColors[$tag]?.border || tagColors.default.border};
-`;
-
 /**
  * Ellipsis more-menu button. Matches `CardView::MoreButton` (28x28
  * circle, transparent fill, `feedCtrlHoverBg` on hover, no transform).
@@ -3480,7 +3462,7 @@ function ViewPostView({
                                                 const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
                                                 return tagLabel ? <>
                                                     <MetaSeparator>·</MetaSeparator>
-                                                    <TagBadge $tag={tagLabel}>{tagLabel}</TagBadge>
+                                                    <ContentTagBadge tag={tagLabel} size="md" />
                                                 </> : null;
                                             })()}
                                             {post.edited && <>
@@ -3536,7 +3518,7 @@ function ViewPostView({
                                                 const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
                                                 return tagLabel ? <>
                                                     <MetaSeparator>·</MetaSeparator>
-                                                    <TagBadge $tag={tagLabel}>{tagLabel}</TagBadge>
+                                                    <ContentTagBadge tag={tagLabel} size="md" />
                                                 </> : null;
                                             })()}
                                             {/* Collapse/expand chevron for comments — rendered AFTER the

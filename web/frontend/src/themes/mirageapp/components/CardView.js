@@ -31,6 +31,7 @@ import MarkdownRenderer from "./MarkdownRenderer";
 import ConfirmDialog from "./ConfirmDialog";
 import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
+import ContentTagBadge from "./ContentTagBadge";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
@@ -215,29 +216,6 @@ const FeedDebugExplanation = styled.div`
     border-top: 1px solid ${({ theme }) => theme.colors.border};
     color: ${({ theme }) => theme.colors.feedCtrlText};
     white-space: normal;
-`;
-
-// Post content-tag badge (adult / violence / sensitive) — sits next to the
-// username in the header meta row, matching the bluemoon layout.
-const tagColors = {
-    adult: { bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.50)', text: '#ec4899' },
-    violence: { bg: 'rgba(185, 28, 28, 0.18)', border: 'rgba(185, 28, 28, 0.50)', text: '#b91c1c' },
-    sensitive: { bg: 'rgba(109, 40, 217, 0.18)', border: 'rgba(109, 40, 217, 0.50)', text: '#6d28d9' },
-    default: { bg: '#e5e7eb', border: '#cbd5e1', text: '#0f172a' },
-};
-
-const TagBadge = styled.span`
-    display: inline-flex;
-    align-items: center;
-    padding: 0.08rem 0.35rem;
-    border-radius: 999px;
-    background: ${({ $tag }) => (tagColors[$tag]?.bg || tagColors.default.bg)};
-    color: ${({ $tag }) => (tagColors[$tag]?.text || tagColors.default.text)};
-    font-size: 0.58rem;
-    font-weight: 700;
-    text-transform: lowercase;
-    border: 1px solid ${({ $tag }) => (tagColors[$tag]?.border || tagColors.default.border)};
-    vertical-align: middle;
 `;
 
 const HeaderActions = styled.div`
@@ -1232,7 +1210,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         </>
                     )}
                     {hasTag && (
-                        <TagBadge $tag={normalizedTag}>{normalizedTag}</TagBadge>
+                        <>
+                            <HeaderDot>·</HeaderDot>
+                            <ContentTagBadge tag={normalizedTag} />
+                        </>
                     )}
                 </HeaderMeta>
                 <HeaderActions>

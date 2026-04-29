@@ -10,8 +10,10 @@ import MarkdownRenderer from "./components/MarkdownRenderer";
 import { MoreMenuChip, BlockChip } from "./components/PostMenu";
 import PostPlaceholderAvatar from "./components/PostPlaceholderAvatar";
 import Tooltip from "./components/Tooltip";
+import ContentTagBadge from "./components/ContentTagBadge";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
+import { normalizeTag } from "../../utils/ContentTags";
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
 import Storage from "../../utils/Storage";
 import { formatTimeStamp } from "../../logic/useViewPost";
@@ -1122,6 +1124,9 @@ function CompactRow({ post, state, updatePost }) {
         ? (FEED_BUCKET_LABELS[feedBucket] || '')
         : '';
 
+    const hasTag = !!(post.tag && String(post.tag).trim());
+    const normalizedTag = hasTag ? normalizeTag(String(post.tag).trim()) : '';
+
     return (
         <CompactRoot
             $flash={!!post.flash}
@@ -1283,6 +1288,12 @@ function CompactRow({ post, state, updatePost }) {
                                 </CompactFeedDebugTooltip>,
                                 document.body
                             )}
+                        </>
+                    )}
+                    {hasTag && (
+                        <>
+                            <CompactHeaderDot>·</CompactHeaderDot>
+                            <ContentTagBadge tag={normalizedTag} />
                         </>
                     )}
                 </CompactHeader>

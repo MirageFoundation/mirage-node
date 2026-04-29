@@ -16,8 +16,9 @@ import {
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import FeedRightRail from "../components/FeedRightRail.js";
-import { useDiscover, tagColors } from "../../../logic/useDiscover";
+import { useDiscover } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
+import ContentTagBadge from "../components/ContentTagBadge";
 
 /**
  * DiscoverView — `mirageapp` Plan 06 sub-plan 07.
@@ -263,19 +264,6 @@ const TopicLink = styled(Link)`
     }
 `;
 
-const TagBadge = styled.span`
-    display: inline-flex;
-    align-items: center;
-    padding: 0.05rem 0.35rem;
-    border-radius: 999px;
-    background: ${({ $tag }) => tagColors[$tag]?.bg || tagColors.default.bg};
-    color: ${({ $tag }) => tagColors[$tag]?.text || tagColors.default.text};
-    font-size: 0.55rem;
-    font-weight: 700;
-    text-transform: lowercase;
-    border: 1px solid ${({ $tag }) => tagColors[$tag]?.border || tagColors.default.border};
-`;
-
 const RowMeta = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.62rem;
@@ -476,7 +464,7 @@ export default function DiscoverView({ state }) {
                 <RowMain>
                     <TopicLine>
                         <TopicLink to={`/t/${t.topic}`}>{t.topic}</TopicLink>
-                        {tag && <TagBadge $tag={tag}>{tag}</TagBadge>}
+                        {tag && <ContentTagBadge tag={tag} />}
                     </TopicLine>
                     <RowMeta>{formatCountMeta(t)}</RowMeta>
                 </RowMain>
