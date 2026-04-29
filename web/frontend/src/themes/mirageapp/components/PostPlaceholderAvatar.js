@@ -7,32 +7,33 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  * PostPlaceholderAvatar — mirageapp
  *
  * Replacement for the no-media thumbnail tile shown on compact feed rows
- * when a post has no image/video. Renders a DiceBear identicon seeded by
- * the post author's `mirage1…` bech32 address, on a flat neutral grey
- * tile.
+ * when a post has no image/video. Renders a DiceBear `shapes` glyph
+ * seeded by the post author's `mirage1…` bech32 address, on a flat
+ * neutral grey tile.
  *
  * Why this exists:
  *   - The previous placeholder was the loud indigo→purple brand gradient
  *     with the author's first initial stamped on top. The brand gradient
  *     is reserved for primary CTAs; using it here made every media-less
  *     row compete for attention and felt template-y.
- *   - A DiceBear identicon gives each author a stable, visually distinct
- *     mark while staying monochrome + calm, so the post title remains
- *     the focal point of the row.
+ *   - A DiceBear `shapes` glyph gives each author a stable, visually
+ *     distinct mark with more graphic variety than the geometric
+ *     `identicon` style — better suited to a thumbnail-replacement
+ *     tile than to a circular user chip. The other avatar surfaces in
+ *     the app stay on `identicon`.
  *
  * Seed policy:
- *   - Prefer the `mirage1` wallet address (stable across username
- *     changes). Fall back to the username, then a literal `'anonymous'`
- *     string so rows without either still get a deterministic glyph.
- *     Matches the seed order already used elsewhere in mirageapp
- *     (TopBar / ProfileView).
+ *   - Always seed on the `mirage1` bech32 address so the glyph is
+ *     stable across username changes. Fall back to the username, then
+ *     a literal `'anonymous'` string so rows without either still get
+ *     a deterministic glyph.
  *
  * Background:
  *   - Hard-pinned to `#232830` (dark-mode `surface3`) in BOTH light and
  *     dark themes, matching the TopBar avatar chip + ProfileView Avatar
- *     convention. DiceBear's identicon variant is transparent, so the
- *     pinned grey fills the pattern's negative space identically across
- *     themes — no mismatch between the feed avatar and the header avatar.
+ *     convention. DiceBear's `shapes` variant is transparent like
+ *     `identicon`, so the pinned grey fills the negative space
+ *     identically across themes.
  */
 
 const AVATAR_BG = '#232830';
@@ -86,10 +87,11 @@ export default function PostPlaceholderAvatar({
     alt = '',
 }) {
     const seed = pickSeed({ address, username });
-    // Request at the larger (desktop) footprint so the identicon stays sharp
-    // on both breakpoints. `dicebearAvatarUrl` already applies a 2× retina
-    // multiplier internally.
-    const src = dicebearAvatarUrl(seed, size);
+    // Request at the larger (desktop) footprint so the glyph stays sharp
+    // on both breakpoints. `dicebearAvatarUrl` already applies a 2×
+    // retina multiplier internally. Use the `shapes` DiceBear style for
+    // post-card placeholders (vs `identicon` used for user-avatar chips).
+    const src = dicebearAvatarUrl(seed, size, 'shapes');
 
     return (
         <PlaceholderRoot
