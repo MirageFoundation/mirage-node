@@ -1,5 +1,5 @@
 import { Helmet } from "react-helmet-async";
-import styled, { css } from "styled-components";
+import styled, { css, useTheme } from "styled-components";
 import {
     HiChevronDown,
     HiCheckCircle,
@@ -369,6 +369,97 @@ const ActivePlanDivider = styled.div`
     width: 100%;
 `;
 
+/* Admin variant of ActivePlanCard:
+ *  - Left column: tier label + admin name (shrinks to content).
+ *  - Vertical 1px divider that hugs the left column's text.
+ *  - Right column: Balance + Reserve rows, right-aligned so label and
+ *    value sit next to each other.
+ * Stacks vertically (divider flips to a top border) on very narrow
+ * viewports so nothing gets squeezed. Sub-plan 06.11.C. */
+const AdminPlanGrid = styled.div`
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+
+    @media (max-width: 480px) {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+`;
+
+const AdminPlanLeft = styled.div`
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding-right: 1rem;
+    border-right: 1px solid ${({ theme }) => theme.colors.border};
+
+    @media (max-width: 480px) {
+        padding-right: 0;
+        border-right: none;
+        border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+        padding-bottom: 0.6rem;
+    }
+`;
+
+const AdminPlanRight = styled.div`
+    flex: 1;
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: end;
+    align-items: baseline;
+    column-gap: 0.5rem;
+    row-gap: 0.4rem;
+    padding-left: 1rem;
+
+    @media (max-width: 480px) {
+        padding-left: 0;
+        padding-top: 0.6rem;
+        /* On narrow viewports the row stacks below the tier column,
+         * so we have room to space label and value further apart for
+         * a more relaxed read. Sub-plan 06.11.C mobile tweak. */
+        justify-content: space-between;
+        column-gap: 1.25rem;
+    }
+`;
+
+/* Admin Balance / Reserve label — same typography as `AdminBalanceValue`
+ * so the row reads as "Balance 123 MIRAGE" in one consistent voice
+ * (sub-plan 06.11.C tweak). */
+const AdminBalanceLabel = styled.div`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    justify-self: end;
+    ${tooltipStyles()}
+`;
+
+/* Admin Balance / Reserve value. Same font scale + weight as the label
+ * so number + unit + label all share the same visual rhythm. Number and
+ * "MIRAGE" suffix share the main text color so the value reads as one
+ * unit. */
+const AdminBalanceValue = styled.div`
+    color: ${({ theme }) => theme.colors.text};
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    justify-self: end;
+
+    span {
+        font-size: inherit;
+        font-weight: inherit;
+        font-family: inherit;
+        letter-spacing: inherit;
+        color: inherit;
+        margin-left: 0.25rem;
+    }
+`;
+
 const BalanceRow = styled.div`
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -679,6 +770,7 @@ function SubscriptionPageShell({ children }) {
 /* -------------------------------------------------------------------------- */
 
 export default function SubscriptionView({ state }) {
+    const theme = useTheme();
     const {
         address,
         userLevel,
@@ -728,11 +820,14 @@ export default function SubscriptionView({ state }) {
         );
     }
 
-    const currentColor = getTierColor(userLevel);
+    const userIsAdmin = isAdmin(userLevel);
+    // Admin tier accent reads from the R2 `tierAdmin` token so dark/light
+    // pairing is honored (see RULES.md and sub-plan 06.11). Other tiers
+    // continue to flow through the cross-theme `getTierColor` helper.
+    const currentColor = userIsAdmin ? theme.colors.tierAdmin : getTierColor(userLevel);
     const displayAutoRenew = isUpgrading ? autoRenewDisplayRef.current : autoRenew;
     const timeRemainingText = formatTimeRemaining(subscriptionExpiry, displayAutoRenew);
     const exactTime = formatExactTime(subscriptionExpiry);
-    const userIsAdmin = isAdmin(userLevel);
     const periodLabel = formatPeriodLabel(subscriptionPeriodMinutes);
     const showAutoRenew = userLevel > 0 && userLevel < 100;
 
@@ -888,18 +983,33 @@ export default function SubscriptionView({ state }) {
     if (userIsAdmin) {
         return (
             <SubscriptionPageShell>
-                <Section>
-                    <SectionHeader>Active plan</SectionHeader>
+                <Section style={{ marginTop: '0.85rem' }}>
                     <SectionBody>
                         <ActivePlanCard>
-                            <ActivePlanTopRow>
-                                <div>
-                                    <ActivePlanLabel>Current tier</ActivePlanLabel>
+                            <AdminPlanGrid>
+                                <AdminPlanLeft>
+                                    <ActivePlanLabel>Active tier</ActivePlanLabel>
                                     <ActivePlanName $color={currentColor}>
                                         {getTierName(userLevel)}
                                     </ActivePlanName>
-                                </div>
-                            </ActivePlanTopRow>
+                                </AdminPlanLeft>
+                                <AdminPlanRight>
+                                    <AdminBalanceLabel data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
+                                        Balance
+                                    </AdminBalanceLabel>
+                                    <AdminBalanceValue>
+                                        {formatMirageCompact(balance)}
+                                        <span>MIRAGE</span>
+                                    </AdminBalanceValue>
+                                    <AdminBalanceLabel data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
+                                        Reserve
+                                    </AdminBalanceLabel>
+                                    <AdminBalanceValue>
+                                        {formatMirageCompact(reserveFunds)}
+                                        <span>MIRAGE</span>
+                                    </AdminBalanceValue>
+                                </AdminPlanRight>
+                            </AdminPlanGrid>
                         </ActivePlanCard>
                     </SectionBody>
                 </Section>
