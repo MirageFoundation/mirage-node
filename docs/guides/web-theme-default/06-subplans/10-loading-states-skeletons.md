@@ -1,6 +1,6 @@
 # Sub-Plan 06.10 — Loading states + skeletons
 
-**Status:** ⏳ Not started
+**Status:** ✅ Done
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---

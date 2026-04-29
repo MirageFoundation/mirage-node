@@ -13,7 +13,7 @@
 - `themes/default/routes/ViewPostView.js` (`renderPostMenu` admin items ~L2696–L2718, `displayConfirmation` suspend/unsuspend banners ~L2398–L2476)
 - `themes/default/tokens.js` (new admin token, see R2 update)
 
-**Status:** 🚧 In progress — A/B/C ✅ done, D/E/F remain
+**Status:** ✅ Done — A/B/C/D/E/F all landed
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 **Depends on:** 06.1 (Profile), 06.2 (Components — `Button`, `ConfirmDialog`), 06.4 (Stats), 06.5 (Subscription) — all ✅ done.
 
@@ -133,26 +133,32 @@ Two passes — one structural, one visual:
 - "Mark post/comment deleted", "Suspend from quests", "Unsuspend from quests" already use `MenuItem data-danger="true"`. Verify `data-danger` rule in `MenuDropdown` resolves to `menuDangerText` per RULES R2.
 - Order: `Mark deleted` → `Suspend` → `Unsuspend` (current order is fine; just confirm).
 
-### E. Feed-row admin parity (CardView + PostMenu) — closes the parity gap — ⏳ Pending
+### E. Feed-row admin parity (CardView + PostMenu) — closes the parity gap — ✅ Done
 
-In `themes/default/components/CardView.js`:
-- Add the admin computation at the top of the component (mirror bluemoon's `userLevel` + `isAdmin = hasValidAccount && userLevel >= 100` block).
-- Wire `userSuspendedStatus` state + `fetchUserSuspensionStatus` (lift the implementation from bluemoon and route the API call through `utils/api.js` like the existing imports).
-- Pass `isAdmin`, `userSuspendedStatus`, `fetchUserSuspensionStatus`, `handleSuspendFromQuests`, `handleUnsuspendFromQuests`, `handleDeletePost`, `questsEnabled` to `PostMenu`'s `MoreMenuChip`.
+Landed via a shared hook so both feed-row surfaces stay in lockstep:
 
-In `themes/default/components/PostMenu.js` `MoreMenuChip`:
-- After the existing non-owner items (Follow / Gift / Award), append an admin block matching the post-detail ordering: **Mark deleted** → **Suspend from quests** → **Unsuspend from quests**.
-- Each item uses `MenuItemBtn data-danger="true"` with `HiOutlineShieldExclamation` icons (already imported in `ViewPostView.js`; add the import in `PostMenu.js`).
-- The suspend / unsuspend flows reuse the same `ConfirmDialog` + `Toast` pattern from D1. Hoist the dialog state into `MoreMenuChip` so every feed-row can fire its own dialog without bleeding into siblings.
-- `fetchUserSuspensionStatus(post.user_id)` fires only when the menu opens **and** `isAdmin && questsEnabled` (mirror bluemoon).
+- **New module** `themes/default/components/AdminQuestActions.js` exports `useAdminQuestActions({ post, state, updatePost, onCloseMenu })` returning `{ isAdminVisible, adminMenuItems, dialogs, fetchUserSuspensionStatus }`.
+  - Owns the `userLevel >= 100` + `questsEnabled` + `!isOwnPost` visibility gate (mirrors bluemoon).
+  - Fires `/admin/rewards/suspend`, `/admin/rewards/unsuspend`, and `tx.deletePost`. Success / error flow through the global `Toast` via `updateNotification`.
+  - Bundles the `SuspendDurationDropdown` (search-dropdown styling, R6 chevron, check-on-the-right rows, `voteUp` text on the selected row, R5 trigger). Dialog visuals match D1 exactly so post-detail and feed-row dialogs are pixel-identical.
+  - Mark-post-deleted menu icon is `HiOutlineShieldExclamation` (same icon as Suspend) so the admin block reads as one cohesive cluster.
+- `themes/default/components/CardView.js` calls `useAdminQuestActions`, lazy-fetches suspension status the first time the more-menu opens (`adminSuspensionFetchedRef`), maps `adminMenuItems` into the existing `MenuItemBtn` rows after Gift Subscription, and renders `{adminDialogs}` at the card root so overlays sit above feed siblings.
+- `themes/default/components/PostMenu.js` (`MoreMenuChip` used by `ListFeedView.js`) does the same wiring with its own `suspensionFetchedRef`.
+- Dialog title resolves to `Suspend @username from quests?` / `Unsuspend @username from quests?` (falls back to `this user`).
+- `ViewPostView.js` delete dialog now compares `confirmDeletePost` against `root.post_id` to detect comments (the previous `state.posts[id].target` heuristic was unreliable because `state.posts[id]` only stores per-row UI state). Comment variant copy: `Mark comment as deleted?` / "This will permanently remove this comment from every feed. This action cannot be undone."
 
-### F. Visual cleanup — ⏳ Pending
+### F. Visual cleanup — ✅ Done
 
 - No raw hex / rgba in any admin path inside `themes/default/**` after this sub-plan.
 - All admin-related buttons funnel through `themes/default/components/Button.js` (`variant="danger"` / `variant="ghost"`).
 - All admin-related inputs (the duration `<select>`) follow R5 (no blue ring).
 - All admin chevrons / icons use `react-icons/hi2` per R6 — no emoji, no inline polyline SVGs.
 - Page heading / row title typography follows R7.
+- Verified greps:
+  - `#d97706 | #fef3c7 | #92400e | rgba(22, 163, 74 | #16A34A` in `routes/ViewPostView.js` → 0 matches.
+  - `🛡️` in `routes/ViewPostView.js` → 0 matches.
+  - `isAdmin` (or equivalent admin gating via `useAdminQuestActions`) present in both `components/CardView.js` and `components/PostMenu.js`.
+  - `CI=true npm run build` passes (only pre-existing unrelated `Sidebar.js` `EmptyPrompt` warning).
 
 ---
 

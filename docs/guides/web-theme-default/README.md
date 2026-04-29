@@ -44,7 +44,7 @@ Whenever desktop structure and mobile visuals conflict:
 | 03 | Feed, card view, vote / action row | ✅ Done (manual cross-theme browser regression still recommended) | [`03-feed-and-card.md`](./03-feed-and-card.md) |
 | 04 | Post detail + profile | ✅ Done — post-detail shipped as sub-plan 05.3; profile closed by sub-plan 06.1 (tokenization pass) | [`04-post-detail-and-profile.md`](./04-post-detail-and-profile.md) |
 | 05 | Inbox, search, settings, auth flows | ✅ Done | [`05-inbox-search-settings-auth.md`](./05-inbox-search-settings-auth.md) |
-| 06 | Remaining routes, components, polish, QA | 🚧 In progress — only sub-plan 06.11 (Admin UI pass) remaining; A/B/C done, D/E/F left | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
+| 06 | Remaining routes, components, polish, QA | ✅ Done — all sub-plans landed (06.6 ⏭️ skipped) | [`06-remaining-routes-and-polish.md`](./06-remaining-routes-and-polish.md) |
 
 Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plans depend on earlier ones landing first.
 
@@ -62,7 +62,7 @@ Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plan
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
 7. [Sign Out](./05-subplans/07-sign-out.md) — ✅ Done (closes Plan 05)
 
-**Next focus:** Plan 06 — sub-plans 06.1 – 06.5, 06.7 – 06.10 ✅ done; 06.6 ⏭️ skipped. Only [`06-subplans/11-admin-ui.md`](./06-subplans/11-admin-ui.md) remains: sections A (`tierAdmin` token), B (profile menu), C (Subscription admin branch) ✅ done; D (post-detail `ConfirmDialog`/`Toast`), E (feed-row admin parity in `CardView`/`PostMenu`), and F (cleanup + grep gates) still to land.
+**Next focus:** Plan 06 is closed. All sub-plans 06.1 – 06.5, 06.7 – 06.11 ✅ done; 06.6 ⏭️ skipped. Sub-plan [`06-subplans/11-admin-ui.md`](./06-subplans/11-admin-ui.md) (Admin UI pass) landed last — A (`tierAdmin` token), B (profile menu), C (Subscription admin branch), D (post-detail `ConfirmDialog`/`Toast`), E (feed-row admin parity via the new `useAdminQuestActions` hook in `CardView`/`PostMenu`), and F (cleanup + grep gates) all green. Optional follow-up: flip `defaultManifest` to index 0 in `THEME_MANIFESTS` to make `default` the registry default.
 
 Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3, and the profile slice closed via a tokenization-only pass in sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md) (full header/tabs rewrite dropped by design decision). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 

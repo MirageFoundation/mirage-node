@@ -1,7 +1,7 @@
 # Sub-Plan 06.8 — MobileBottomNav full restyle
 
 **Component:** `themes/default/components/MobileBottomNav.js`
-**Status:** ⏳ Not started — **deferred from Plan 02**
+**Status:** ✅ Done — restyle landed; default `MobileBottomNav` no longer mirrors oldreddit.
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---

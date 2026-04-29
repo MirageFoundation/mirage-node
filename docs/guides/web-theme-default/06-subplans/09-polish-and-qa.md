@@ -1,6 +1,6 @@
 # Sub-Plan 06.9 — Polish + QA (closes Plan 06)
 
-**Status:** ⏳ Not started — **runs after sub-plans 06.1–06.8**
+**Status:** ✅ Done — closes Plan 06.
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
 ---

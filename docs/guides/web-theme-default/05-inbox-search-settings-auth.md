@@ -5,7 +5,7 @@
 **Depends on:** Plans 01, 02, 03, 04.
 **Unblocks:** Plan 06.
 
-**Status:** 🟡 In progress. Auth slice (`/login`, `/signup`, `/welcome`) ✅ done in commit `ceef3d7` — redesigned with styled components, new `AuthPageShell`, theme-aware light/dark backgrounds, and reusable header/brand primitives. `default` is now the default theme when available in the registry.
+**Status:** ✅ Done — all sub-plans 05.1–05.7 shipped (Inbox, Search, Post Details, Settings, Create Post, Change Username, Sign Out). Auth slice (`/login`, `/signup`, `/welcome`) shipped earlier in commit `ceef3d7` with styled components, new `AuthPageShell`, theme-aware light/dark backgrounds, and reusable header/brand primitives. `default` is now the default theme when available in the registry.
 
 **Sub-plans:** The remaining work is split into one-PR sub-plans under [`05-subplans/`](./05-subplans/README.md). Order: Inbox → Search → Settings → CreatePost → ChangeUsername → SignOut. **Next:** [`05-subplans/01-inbox.md`](./05-subplans/01-inbox.md).
 
