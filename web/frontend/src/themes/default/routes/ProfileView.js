@@ -565,6 +565,26 @@ const AsideOnlyWhenHeaderHidden = styled.span`
     }
 `;
 
+/** Wrapper that only renders its children on mobile (≤600px). Used to
+ *  surface the Gift Sub pill inside the aside profile card on phones,
+ *  where the Tier row's inline Gift Sub button is hidden to save space. */
+const MobileOnly = styled.span`
+    display: none;
+    @media (max-width: 600px) {
+        display: inline-flex;
+    }
+`;
+
+/** Wrapper that hides its children on mobile (≤600px). Used to keep the
+ *  inline Gift Sub button on the Tier row on desktop while showing it
+ *  inside the aside profile card on phones. */
+const HideOnMobile = styled.span`
+    display: inline-flex;
+    @media (max-width: 600px) {
+        display: none;
+    }
+`;
+
 /** Share button — same visual language as `CardView::ActionPill` (filled `actionIconBg` pill, 32px tall). */
 const AsideShareBtn = styled.button`
     appearance: none;
@@ -592,38 +612,10 @@ const AsideShareBtn = styled.button`
     svg { width: 14px; height: 14px; fill: currentColor; }
 `;
 
-/** Gift Sub button in the aside actions row — same 32px height + visual
- *  language as `AsideShareBtn` so it sits flush next to Share. */
-const AsideGiftSubBtn = styled.button`
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 9999px;
-    border: none;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme }) => theme.colors.text};
-    font-family: inherit;
-    font-size: 0.62rem;
-    font-weight: 500;
-    line-height: 1;
-    cursor: pointer;
-    transition: background 0.12s ease;
-
-    &:hover:not(:disabled) { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
-    &:disabled { cursor: not-allowed; opacity: 0.55; }
-    &:focus { outline: none; }
-    &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
-
-    svg { width: 14px; height: 14px; fill: currentColor; }
-`;
-
 /** Compact Follow button used in the aside identity card and the main profile
  *  header. Solid `followBtnBg` pill in idle / Following states; flips to a
  *  danger outline on hover when already following (so the click target reads
- *  as "Unfollow"). 32px tall — matches `AsideShareBtn` / `AsideGiftSubBtn`
+ *  as "Unfollow"). 32px tall — matches `AsideShareBtn`
  *  so the three action pills sit on the same baseline. */
 const CompactFollowBtn = styled.button`
     appearance: none;
@@ -705,6 +697,18 @@ const GiftMirageBtn = styled.button`
     &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
 
     svg { width: 14px; height: 14px; }
+`;
+
+/** Label inside `GiftMirageBtn` that collapses to a short form on mobile.
+ *  Renders the long label (e.g. "Gift Mirage" / "Gift Sub") on wide
+ *  viewports and just "Gift" under the 600px breakpoint, keeping the
+ *  pill compact next to inline values like Tier / Balance. */
+const GiftBtnLabelFull = styled.span`
+    @media (max-width: 600px) { display: none; }
+`;
+const GiftBtnLabelShort = styled.span`
+    display: none;
+    @media (max-width: 600px) { display: inline; }
 `;
 
 const AsideStatsGrid = styled.div`
@@ -1717,6 +1721,14 @@ function ProfileViewAuthenticated({
                                             ({formatSubscriptionExpiry(subscriptionExpiry)})
                                         </span>}
                                     </span>
+                                    {!isOwnProfile && profileAddress && hasValidAccount && (
+                                        <HideOnMobile>
+                                            <GiftMirageBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
+                                                <HiGift aria-hidden="true" />{' '}
+                                                {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                            </GiftMirageBtn>
+                                        </HideOnMobile>
+                                    )}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             {/* Gift Subscription confirmation moved to a root-level
@@ -1753,7 +1765,11 @@ function ProfileViewAuthenticated({
                                     <Mono title={balanceDisplay}>{compactMirageLabel(balance)}</Mono>
                                     {!isOwnProfile && profileAddress && hasValidAccount && (
                                         <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
-                                            <HiGift aria-hidden="true" /> {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
+                                            <HiGift aria-hidden="true" />{' '}
+                                            {donatePending ? (donateStatus || 'Sending...') : (<>
+                                                <GiftBtnLabelFull>Gift Mirage</GiftBtnLabelFull>
+                                                <GiftBtnLabelShort>Gift</GiftBtnLabelShort>
+                                            </>)}
                                         </GiftMirageBtn>
                                     )}
                                 </ProfileFieldValue>
@@ -2108,9 +2124,12 @@ function ProfileViewAuthenticated({
                                                 {profileShareCopied ? 'Link copied' : 'Share'}
                                             </AsideShareBtn>
                                             {!isOwnProfile && profileAddress && hasValidAccount && (
-                                                <AsideGiftSubBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Sub">
-                                                    <HiGift aria-hidden="true" /> {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
-                                                </AsideGiftSubBtn>
+                                                <MobileOnly>
+                                                    <AsideShareBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
+                                                        <HiGift aria-hidden="true" />
+                                                        {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                                    </AsideShareBtn>
+                                                </MobileOnly>
                                             )}
                                             {!isOwnProfile && address && (
                                                 <AsideOnlyWhenHeaderHidden>
