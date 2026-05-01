@@ -437,6 +437,9 @@ const ChartLabel = styled.div`
     font-size: 0.6rem;
     font-weight: 500;
     color: ${({ theme }) => theme.colors.cardBodyText};
+    /* Align label endpoints with the chart's inner plot area (matches CHART.padding) */
+    padding-left: 12.5%;
+    padding-right: 2.5%;
 `;
 
 const ChartLegend = styled.div`
