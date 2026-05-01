@@ -37,6 +37,8 @@ export function useAgents({
         pendingAgents
     } = usePendingAgents();
     const mountedRef = useRef(true);
+    const enabledOrderRef = useRef([]);
+    useEffect(() => { enabledOrderRef.current = enabledOrder; }, [enabledOrder]);
     const location = useLocation();
     const enabledSet = React.useMemo(() => new Set(enabledOrder), [enabledOrder]);
     const readMaxEnabledAgents = useCallback(() => {
@@ -171,7 +173,7 @@ export function useAgents({
             limit = await ensureChainConfig();
             if (limit !== null && mountedRef.current) setMaxEnabledAgents(limit);
         }
-        const baseOrder = draftDirty ? draftOrder : enabledOrder;
+        const baseOrder = draftDirty ? draftOrder : enabledOrderRef.current;
         const normalizedBase = normalizeOrder(baseOrder);
         const wasEnabled = normalizedBase.includes(addr);
         let newList;
@@ -184,15 +186,17 @@ export function useAgents({
             }
             newList = [...normalizedBase, addr];
         }
+        // Apply optimistic update synchronously so subsequent toggles see the
+        // latest list when computing their own newList. Without this, two
+        // rapid clicks would each compute against the original enabledOrder
+        // and the second setState would clobber the first.
+        enabledOrderRef.current = newList;
+        setEnabledOrder(newList);
+        setDraftOrder(newList);
+        setDraftDirty(false);
         try {
-            const result = await tx.setAgents(newList, {
-                triggerAgent: addr
-            });
-            if (result?.success && mountedRef.current) {
-                setEnabledOrder(newList);
-                setDraftOrder(newList);
-                setDraftDirty(false);
-            } else {
+            const result = wasEnabled ? await tx.disableAgent(addr) : await tx.enableAgent(addr);
+            if (!result?.success && mountedRef.current) {
                 const errText = formatError(result);
                 const lower = errText.toLowerCase();
                 if (lower.includes('limit') || lower.includes('too many agents')) {
@@ -202,11 +206,13 @@ export function useAgents({
                 } else {
                     setErrorMessage(errText);
                 }
+                if (refreshEnabledOrderRef.current) await refreshEnabledOrderRef.current();
             }
         } catch (err) {
             setErrorMessage(String(err?.message || err || 'Agent update failed.'));
+            if (mountedRef.current && refreshEnabledOrderRef.current) await refreshEnabledOrderRef.current();
         }
-    }, [isPending, viewerAddress, maxEnabledAgents, ensureChainConfig, enabledOrder, draftOrder, draftDirty, normalizeOrder, setEnabledOrder, setDraftOrder]);
+    }, [isPending, viewerAddress, maxEnabledAgents, ensureChainConfig, draftOrder, draftDirty, normalizeOrder]);
     const ordersEqual = useCallback((a, b) => {
         if (a.length !== b.length) return false;
         for (let i = 0; i < a.length; i += 1) {
@@ -238,6 +244,7 @@ export function useAgents({
                 timeoutMs: 10000
             });
             const enabled = normalizeOrder(data?.enabled_agents || []);
+            enabledOrderRef.current = enabled;
             setEnabledOrder(enabled);
             if (!draftDirty) setDraftOrder(enabled);
             console.debug('[AgentsView] refreshed enabled order', enabled);
@@ -245,6 +252,8 @@ export function useAgents({
             console.error('[AgentsView] refresh enabled order failed:', err);
         }
     }, [viewerAddress, draftDirty, normalizeOrder]);
+    const refreshEnabledOrderRef = useRef(refreshEnabledOrder);
+    useEffect(() => { refreshEnabledOrderRef.current = refreshEnabledOrder; }, [refreshEnabledOrder]);
     const applyOrder = useCallback(async () => {
         if (!viewerAddress || isApplyingOrder || !hasDraftChanges) return;
         if (Object.keys(pendingAgents || {}).length > 0) {
