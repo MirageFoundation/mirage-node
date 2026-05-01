@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiChevronRight, HiShare, HiGift, HiPencilSquare, HiClipboardDocument, HiCheck } from "react-icons/hi2";
@@ -21,6 +21,7 @@ import Storage from "../../../utils/Storage";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import Api from "../../../utils/api";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -1271,7 +1272,104 @@ function formatCommentAge(ts) {
  *  thread (so the user can see the reply in context). Shows the full
  *  reply body with no truncation and no avatar — the header (topic /
  *  user / time) sits above the raw content. */
+/* Module-level cache of comment_id -> { title, rootId } so navigating
+ * around the Comments tab doesn't refetch the parent chain repeatedly. */
+const __profileCommentParentCache = new Map();
+const __profileCommentParentInflight = new Map();
+/* Tiny concurrency-limited queue so we don't fire one request per
+ * visible row (the backend rate-limits and returns 429 under bursts). */
+const __PARENT_TITLE_MAX_CONCURRENT = 2;
+let __parentTitleActive = 0;
+const __parentTitleQueue = [];
+function __runNextParentTitle() {
+    if (__parentTitleActive >= __PARENT_TITLE_MAX_CONCURRENT) return;
+    const job = __parentTitleQueue.shift();
+    if (!job) return;
+    __parentTitleActive += 1;
+    job().finally(() => {
+        __parentTitleActive -= 1;
+        __runNextParentTitle();
+    });
+}
+function __enqueueParentTitle(task) {
+    return new Promise(resolve => {
+        __parentTitleQueue.push(() => task().then(resolve));
+        __runNextParentTitle();
+    });
+}
+
+async function __requestParentChainOnce(commentId) {
+    // Single attempt with a 429-aware retry (max 3 tries, exponential
+    // backoff with jitter). Failures throw so the caller can decide
+    // whether to cache an empty placeholder.
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            const res = await Api.get('get_comment_context', { comment_id: commentId, max_depth: 5 });
+            return res;
+        } catch (err) {
+            lastErr = err;
+            const status = err && (err.status || err.code);
+            const is429 = status === 429 || /429|rate/i.test(String(err && err.message || ''));
+            if (!is429) throw err;
+            const delay = (300 * Math.pow(2, attempt)) + Math.floor(Math.random() * 200);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    throw lastErr || new Error('rate limited');
+}
+
+async function fetchParentTitle(commentId) {
+    if (!commentId) return null;
+    if (__profileCommentParentCache.has(commentId)) {
+        return __profileCommentParentCache.get(commentId);
+    }
+    if (__profileCommentParentInflight.has(commentId)) {
+        return __profileCommentParentInflight.get(commentId);
+    }
+    const p = __enqueueParentTitle(async () => {
+        try {
+            const res = await __requestParentChainOnce(commentId);
+            const chain = Array.isArray(res?.context) ? res.context : [];
+            // The raw API returns immediate-parent first → root last.
+            // Take the last entry as the root post.
+            const root = chain.length > 0 ? chain[chain.length - 1] : null;
+            const title = (root && typeof root.title === 'string') ? root.title.trim() : '';
+            const rootId = (root && typeof root.post_id === 'string') ? root.post_id : '';
+            const entry = { title, rootId };
+            __profileCommentParentCache.set(commentId, entry);
+            return entry;
+        } catch (_) {
+            // Don't cache failures permanently — return an empty
+            // placeholder so the row falls back to its existing chip,
+            // but allow a retry next time the row mounts.
+            return { title: '', rootId: '' };
+        } finally {
+            __profileCommentParentInflight.delete(commentId);
+        }
+    });
+    __profileCommentParentInflight.set(commentId, p);
+    return p;
+}
+
 function ProfileCommentRow({ post }) {
+    const commentId = post && post.post_id ? String(post.post_id) : '';
+    const cached = commentId ? __profileCommentParentCache.get(commentId) : null;
+    const [parentInfo, setParentInfo] = useState(cached || null);
+    const cancelledRef = useRef(false);
+
+    useEffect(() => {
+        cancelledRef.current = false;
+        if (!commentId) return undefined;
+        if (parentInfo) return undefined;
+        fetchParentTitle(commentId).then(info => {
+            if (!cancelledRef.current) setParentInfo(info);
+        });
+        return () => {
+            cancelledRef.current = true;
+        };
+    }, [commentId, parentInfo]);
+
     if (!post || !post.post_id) return null;
     if (post.deleted || post.hidden_client) return null;
 
@@ -1297,9 +1395,27 @@ function ProfileCommentRow({ post }) {
     const rawTopic = typeof post.topic === 'string' ? post.topic.trim() : '';
     const rootTopic = typeof post.root_topic === 'string' ? post.root_topic.trim() : '';
     const displayTopic = rawTopic || rootTopic;
-    const hasRealTopic = !!displayTopic;
+    // Suppress the synthesized `comment-<short>` placeholder so it
+    // never appears as `#comment-xxxxxxx` when no parent title is
+    // available.
+    const isSyntheticTopic = /^comment-[0-9a-f]+$/i.test(displayTopic);
+    const hasRealTopic = !!displayTopic && !isSyntheticTopic;
     const postId = String(post.post_id);
     const linkTarget = `/p/${postId}`;
+
+    // Parent post title chip — replaces the legacy `#comment-<id>`
+    // placeholder. Fetched client-side via `get_comment_context`
+    // (cached per comment id). Truncated to 50 chars + ellipsis.
+    const rawParentTitle = (parentInfo && typeof parentInfo.title === 'string')
+        ? parentInfo.title.trim()
+        : '';
+    const parentTitle = rawParentTitle.length > 50
+        ? `${rawParentTitle.slice(0, 50)}…`
+        : rawParentTitle;
+    const rootPostId = (parentInfo && typeof parentInfo.rootId === 'string' && parentInfo.rootId.trim())
+        ? parentInfo.rootId.trim()
+        : '';
+    const parentLink = rootPostId ? `/p/${rootPostId}` : linkTarget;
 
     // Show the full reply body. useProfile.js synthesizes a truncated
     // `title` (first 80 chars + ellipsis) for the FeedRow renderer — we
@@ -1312,7 +1428,14 @@ function ProfileCommentRow({ post }) {
         <CommentRowSlot>
             <CommentRoot as={Link} to={linkTarget} role="link" tabIndex={0} style={{ textDecoration: 'none' }}>
             <CommentHeader>
-                {hasRealTopic && (
+                {parentTitle ? (
+                    <>
+                        <CommentTopicLink to={parentLink} onClick={e => e.stopPropagation()}>
+                            {parentTitle}
+                        </CommentTopicLink>
+                        <CommentDot>·</CommentDot>
+                    </>
+                ) : hasRealTopic && (
                     <>
                         <CommentTopicLink to={`/t/${encodeURIComponent(displayTopic)}`} onClick={e => e.stopPropagation()}>
                             #{displayTopic}
