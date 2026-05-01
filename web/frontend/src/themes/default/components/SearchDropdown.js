@@ -10,6 +10,7 @@ import {
 } from "react-icons/hi2";
 import { getAuthorColor } from "../../../utils/tierColors";
 import UserAvatar from "./UserAvatar.js";
+import PostPlaceholderAvatar from "./PostPlaceholderAvatar.js";
 
 /**
  * Dropdown sheet rendered below the TopBar search input. Mirrors the
@@ -171,10 +172,9 @@ const PostThumb = styled.span`
     justify-content: center;
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: 4px;
     overflow: hidden;
-    background: ${({ theme, $src }) =>
-        $src ? theme.colors.accent : theme.colors.gradient};
+    background: ${({ theme }) => theme.colors.accent};
     color: ${({ theme }) => theme.colors.buttonText};
     font-size: 0.7rem;
     font-weight: 700;
@@ -328,12 +328,6 @@ function getPostThumbnail(post) {
         }
     }
     return "";
-}
-
-function firstLetter(str) {
-    const s = String(str || "").trim();
-    if (!s) return "?";
-    return s.charAt(0).toUpperCase();
 }
 
 export default function SearchDropdown({
@@ -549,9 +543,6 @@ export default function SearchDropdown({
                                     ? String(post.content).slice(0, 80)
                                     : "");
                             const thumbUrl = getPostThumbnail(post);
-                            const initial = firstLetter(
-                                post.username || post.user_id || post.address
-                            );
                             return (
                                 <RowLink
                                     key={`live-post-${post.post_id}`}
@@ -561,21 +552,22 @@ export default function SearchDropdown({
                                         onResultNavigate && onResultNavigate()
                                     }
                                 >
-                                    <PostThumb $src={thumbUrl || undefined}>
-                                        {thumbUrl ? (
+                                    {thumbUrl ? (
+                                        <PostThumb $src={thumbUrl}>
                                             <PostThumbImg
                                                 src={thumbUrl}
                                                 alt=""
                                                 loading="lazy"
-                                                onError={(e) => {
-                                                    // On load error fall back to the gradient initial.
-                                                    e.currentTarget.style.display = "none";
-                                                }}
                                             />
-                                        ) : (
-                                            initial
-                                        )}
-                                    </PostThumb>
+                                        </PostThumb>
+                                    ) : (
+                                        <PostPlaceholderAvatar
+                                            address={post.address}
+                                            username={post.username}
+                                            size={28}
+                                            mobileSize={28}
+                                        />
+                                    )}
                                     <RowMain>
                                         <RowPrimary>{preview || "Untitled"}</RowPrimary>
                                         <RowSecondary>

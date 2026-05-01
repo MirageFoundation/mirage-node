@@ -505,9 +505,9 @@ const AsideIdentityRow = styled.div`
 const AsideAvatarWrap = styled.div`
     padding: 3px;
     /* Match the rounded-square avatar shape. UserAvatar shape=rounded
-     * uses a 12px radius; the wrapper sits 3px outside the avatar tile
-     * so we bump to 15px to keep the curve visually parallel. */
-    border-radius: 15px;
+     * uses a 4px radius; the wrapper sits 3px outside the avatar tile
+     * so we bump to 7px to keep the curve visually parallel. */
+    border-radius: 7px;
     background: ${({ theme }) => theme.colors.panel};
     flex-shrink: 0;
 `;

@@ -45,24 +45,28 @@ const PlaceholderRoot = styled.div`
     justify-content: center;
     width: ${({ $size }) => $size}px;
     height: ${({ $size }) => $size}px;
-    border-radius: 8px;
-    background: ${({ theme }) => theme.colors.avatarBg};
+    border-radius: 4px;
+    background: ${({ theme }) =>
+        theme.name === 'light' ? 'transparent' : theme.colors.avatarBg};
+    border: ${({ theme }) =>
+        theme.name === 'light' ? `1px solid ${theme.colors.avatarBg}` : 'none'};
+    box-sizing: border-box;
     flex-shrink: 0;
     overflow: hidden;
 
     @media (max-width: 600px) {
         width: ${({ $mobileSize }) => $mobileSize}px;
         height: ${({ $mobileSize }) => $mobileSize}px;
-        border-radius: 6px;
+        border-radius: 4px;
     }
 `;
 
 const AvatarImg = styled.img`
-    width: 50%;
-    height: 50%;
+    width: 60%;
+    height: 60%;
     display: block;
     object-fit: contain;
-    background: ${({ theme }) => theme.colors.avatarBg};
+    background: transparent;
 `;
 
 function pickSeed({ address, username }) {
@@ -91,7 +95,7 @@ export default function PostPlaceholderAvatar({
     // on both breakpoints. `dicebearAvatarUrl` already applies a 2×
     // retina multiplier internally. Use the `shapes` DiceBear style for
     // post-card placeholders (vs `identicon` used for user-avatar chips).
-    const src = dicebearAvatarUrl(seed, size, 'shapes');
+    const src = dicebearAvatarUrl(seed, size, 'identicon');
 
     return (
         <PlaceholderRoot
