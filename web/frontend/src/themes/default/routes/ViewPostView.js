@@ -3902,16 +3902,21 @@ function ViewPostView({
                                     {/* Agent annotation appendices */}
                                     {!isCollapsed && post.appendices && post.appendices.length > 0 && post.appendices.map((a, idx) => {
                                         const label = a.agent_username || a.agent || 'Agent';
+                                        // Appendices are authored by agent-tier accounts
+                                        // (level 10). Color the @label so the agent tier
+                                        // is visible in the inline byline.
+                                        const appendixTierColor = getAuthorColor(Number(a.agent_level) || 10);
+                                        const appendixTierTooltip = getAuthorTooltip(Number(a.agent_level) || 10);
                                         return <div key={`appx-${idx}`} style={{
                                             margin: '0.5rem 0'
                                         }}>
                                             <div style={{
                                                 marginBottom: '0.2rem'
                                             }}>
-                                                <Link to={`/u/${label}`} style={{
+                                                <Link to={`/u/${label}`} title={appendixTierTooltip || undefined} style={{
                                                     textDecoration: 'underline',
                                                     fontSize: '0.6rem',
-                                                    color: theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
+                                                    color: appendixTierColor || theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
                                                 }}>@{label}</Link>
                                                 <span style={{
                                                     color: theme.colors?.textMuted || '#888',

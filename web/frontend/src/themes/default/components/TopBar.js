@@ -9,6 +9,7 @@ import { useSearchDropdown } from '../../../logic/useSearchDropdown';
 import { dicebearAvatarUrl } from '../../../utils/avatar';
 import ConfirmDialog from './ConfirmDialog.js';
 import UserAvatar from './UserAvatar.js';
+import { getAuthorColor, getAuthorTooltip } from '../../../utils/tierColors';
 
 /**
  * Reddit-style TopBar for the default theme.
@@ -413,7 +414,7 @@ const DropdownUsername = styled.div`
     gap: 0.4rem;
     font-size: 0.78rem;
     font-weight: 700;
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
 `;
 
 /* Eyebrow row used to label a grouped block inside the avatar dropdown
@@ -912,7 +913,10 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
         <>
             <DropdownHeader>
                 {displayName && (
-                    <DropdownUsername>
+                    <DropdownUsername
+                        $tierColor={getAuthorColor(userLevel)}
+                        title={getAuthorTooltip(userLevel) || undefined}
+                    >
                         @{displayName}
                         {isAdmin && <AdminPill aria-label="Admin account">Admin</AdminPill>}
                     </DropdownUsername>

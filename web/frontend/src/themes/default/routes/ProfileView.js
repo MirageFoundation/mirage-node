@@ -442,7 +442,7 @@ const IdentityBlock = styled.div`
 `;
 
 const DisplayName = styled.div`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
     font-size: 1.35rem;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -520,7 +520,7 @@ const AsideNameBlock = styled.div`
 `;
 
 const AsideName = styled.div`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
     font-size: 0.82rem;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -1630,7 +1630,10 @@ function ProfileViewAuthenticated({
                                     <ProfileIdentityMain>
                                         <Avatar $size={64} seed={profileAddress || profileUsername || routeIdentity} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                         <IdentityBlock>
-                                            <DisplayName title={profileUsername}>{usernameDisplay}</DisplayName>
+                                            <DisplayName
+                                                title={profileUsername}
+                                                $tierColor={getAuthorColor(userLevel)}
+                                            >{usernameDisplay}</DisplayName>
                                             <Handle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</Handle>
                                         </IdentityBlock>
                                     </ProfileIdentityMain>
@@ -2107,7 +2110,10 @@ function ProfileViewAuthenticated({
                                                 <Avatar $size={60} seed={profileAddress || profileUsername || routeIdentity} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                             </AsideAvatarWrap>
                                             <AsideNameBlock>
-                                                <AsideName title={profileUsername}>{usernameDisplay}</AsideName>
+                                                <AsideName
+                                                    title={profileUsername}
+                                                    $tierColor={getAuthorColor(userLevel)}
+                                                >{usernameDisplay}</AsideName>
                                                 <AsideHandle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</AsideHandle>
                                             </AsideNameBlock>
                                         </AsideIdentityRow>
