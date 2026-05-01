@@ -145,7 +145,7 @@ const defaultManifest = {
     /** Stable id persisted as Storage `theme_id`. Must match tokens.js `dark.themeId` / `light.themeId`. */
     id: 'default',
     label: 'Default',
-    description: 'Mobile-app visuals on a Reddit-style desktop layout',
+    description: 'Clean community feed desktop layout',
     supportsDarkLight: true,
     dark,
     light,
