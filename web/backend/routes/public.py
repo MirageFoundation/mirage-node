@@ -4179,7 +4179,7 @@ def username_search():
                     owner,
                     LOWER(username) AS username_lc,
                     CASE
-                        WHEN LOWER(username) LIKE 'anon-%' THEN SUBSTRING(LOWER(username) FROM 6)
+                        WHEN LOWER(username) LIKE 'anon-%%' THEN SUBSTRING(LOWER(username) FROM 6)
                         ELSE LOWER(username)
                     END AS search_username
                 FROM profiles
