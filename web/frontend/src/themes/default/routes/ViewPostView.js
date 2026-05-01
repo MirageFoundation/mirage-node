@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
@@ -2230,6 +2230,61 @@ function ViewPostView({
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [openBlockMenuId]);
+
+    /**
+     * Edge-case: when a comment lives near the bottom of the viewport,
+     * its 3-dot dropdown — anchored just below the button — can spill
+     * past the bottom edge and become unreachable (the portal uses
+     * `position: fixed` so the page can't scroll to reveal it).
+     *
+     * After the dropdown mounts we measure its real height and re-anchor:
+     *   • flip above the button if there's room there;
+     *   • else clamp into the viewport with an 8px margin.
+     * Same logic applied to the block/report popover below.
+     */
+    const clampMenuIntoViewport = (dropdownEl, buttonEl, setPosition) => {
+        if (!dropdownEl || !buttonEl) return;
+        const margin = 8;
+        const ddH = dropdownEl.offsetHeight;
+        const ddW = dropdownEl.offsetWidth;
+        const vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
+        const vw = (typeof window !== 'undefined' && window.innerWidth) || 0;
+        const btnRect = buttonEl.getBoundingClientRect();
+        let top = btnRect.bottom + 4;
+        let left = Math.max(10, btnRect.right - ddW);
+        if (top + ddH > vh - margin) {
+            const flippedTop = btnRect.top - 4 - ddH;
+            if (flippedTop >= margin) {
+                top = flippedTop;
+            } else {
+                top = Math.max(margin, vh - margin - ddH);
+            }
+        }
+        if (left + ddW > vw - margin) {
+            left = Math.max(margin, vw - margin - ddW);
+        }
+        setPosition({ top, left });
+    };
+
+    useLayoutEffect(() => {
+        if (!openMenuId) return;
+        clampMenuIntoViewport(
+            menuDropdownRef.current,
+            menuButtonRefs.current[openMenuId],
+            setMenuPosition
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openMenuId]);
+
+    useLayoutEffect(() => {
+        if (!openBlockMenuId) return;
+        clampMenuIntoViewport(
+            blockDropdownRef.current,
+            blockButtonRefs.current[openBlockMenuId],
+            setBlockMenuPosition
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openBlockMenuId]);
 
     /**
