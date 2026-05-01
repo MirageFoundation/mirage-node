@@ -1237,6 +1237,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </>
                     )}
+                    {post.agent_edited && (
+                        <>
+                            <HeaderDot>·</HeaderDot>
+                            <span style={{ fontStyle: 'italic' }}>agent modified</span>
+                        </>
+                    )}
                     {hasTag && (
                         <>
                             <HeaderDot>·</HeaderDot>
