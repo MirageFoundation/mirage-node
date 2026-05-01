@@ -429,15 +429,11 @@ class App extends Component {
             const hasNodeConfig = !!(nodeConfigCached && typeof nodeConfigCached === 'object');
             const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 3600_000 || !hasNodeConfig;
             if (nodeStale) {
-                Api.get('get_node_config', undefined)
-                    .then((cfg) => { if (cfg) try { tx.cacheNodeConfig(cfg); } catch (_) { } })
-                    .catch(() => { })
-                    .finally(() => {
-                        // Always notify listeners a config fetch attempt completed.
-                        // Without this, create-account can stay on "Loading..." forever
-                        // if the request fails before nodeConfig is cached.
-                        try { window.dispatchEvent(new Event('nodeConfigUpdated')); } catch (_) { }
-                    });
+                // Retry up to 4 attempts (0s, 1s, 3s, 7s) so that a transient
+                // failure on first load (e.g. node still catching up → 503)
+                // doesn't leave the home cards / profile menu / create-account
+                // view stuck waiting until the user manually refreshes.
+                this._bootstrapNodeConfig();
             }
         } catch (_) { }
 
@@ -496,6 +492,12 @@ class App extends Component {
                 this._chainConfigRetryTimer = null;
             }
         } catch (_) { }
+        try {
+            if (this._nodeConfigRetryTimer) {
+                clearTimeout(this._nodeConfigRetryTimer);
+                this._nodeConfigRetryTimer = null;
+            }
+        } catch (_) { }
     }
 
     _bootstrapChainConfig(attempt = 0) {
@@ -527,6 +529,42 @@ class App extends Component {
             run();
         } else {
             this._chainConfigRetryTimer = setTimeout(run, delays[attempt]);
+        }
+    }
+
+    _bootstrapNodeConfig(attempt = 0) {
+        // Mirrors `_bootstrapChainConfig`: retry get_node_config on transient
+        // failures so home cards (invite-only banner, quest hero), the profile
+        // menu's Referrals item, and CreateAccountView don't render in their
+        // "missing" state until the user manually refreshes.
+        const delays = [0, 1000, 3000, 7000];
+        if (attempt >= delays.length) {
+            // Out of retries — wake up listeners (e.g. CreateAccountView) so
+            // they can stop showing a permanent "Loading..." state.
+            try { window.dispatchEvent(new Event('nodeConfigUpdated')); } catch (_) { }
+            return;
+        }
+
+        const run = () => {
+            console.debug('[App] get_node_config.fetch attempt', attempt + 1);
+            Api.get('get_node_config', undefined)
+                .then((cfg) => {
+                    if (cfg && typeof cfg === 'object') {
+                        // cacheNodeConfig stores + dispatches nodeConfigUpdated.
+                        try { tx.cacheNodeConfig(cfg); } catch (_) { }
+                    } else {
+                        this._bootstrapNodeConfig(attempt + 1);
+                    }
+                })
+                .catch(() => {
+                    this._bootstrapNodeConfig(attempt + 1);
+                });
+        };
+
+        if (attempt === 0) {
+            run();
+        } else {
+            this._nodeConfigRetryTimer = setTimeout(run, delays[attempt]);
         }
     }
 
