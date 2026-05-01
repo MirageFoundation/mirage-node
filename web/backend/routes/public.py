@@ -4194,8 +4194,6 @@ def username_search():
                     WHEN username_lc LIKE %s THEN 0
                     ELSE 1
                 END,
-                NULLIF(POSITION(%s IN search_username), 0),
-                NULLIF(POSITION(%s IN username_lc), 0),
                 username_lc
             LIMIT %s
             """,
@@ -4204,8 +4202,6 @@ def username_search():
                 f"%{search_q}%",
                 f"{search_q}%",
                 f"{q}%",
-                search_q,
-                q,
                 limit,
             ),
         )

@@ -398,8 +398,8 @@ const MentionDropdown = styled.div`
 	left: 0;
 	right: 0;
 	margin-bottom: 4px;
-	background: ${({ theme }) => theme.colors.surface3 };
-	border: 1px solid ${({ theme }) => theme.colors.borderSubtle };
+	background: ${({ theme }) => theme.colors.surface3};
+	border: 1px solid ${({ theme }) => theme.colors.borderSubtle};
 	border-radius: 6px;
 	box-shadow: ${({ theme }) =>
         theme.name === "dark"
@@ -419,9 +419,9 @@ const MentionItem = styled.div`
 	gap: 0.4rem;
 	color: ${({ theme }) => theme.colors.text};
 	background: ${({ $active, theme }) =>
-        $active ? (theme.colors.accentSubtle ) : "transparent"};
+        $active ? (theme.colors.accentSubtle) : "transparent"};
 	&:hover {
-		background: ${({ theme }) => theme.colors.accentSubtle };
+		background: ${({ theme }) => theme.colors.accentSubtle};
 	}
 	&:first-child {
 		border-radius: 6px 6px 0 0;
@@ -438,7 +438,7 @@ const MentionUsername = styled.span`
 
 const MentionAddress = styled.span`
 	font-size: 0.65rem;
-	color: ${({ theme }) => theme.colors.textSecondary };
+	color: ${({ theme }) => theme.colors.textSecondary};
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -446,7 +446,7 @@ const MentionAddress = styled.span`
 
 const MentionHint = styled.div`
 	padding: 0.35rem 0.6rem;
-	color: ${({ theme }) => theme.colors.textSecondary };
+	color: ${({ theme }) => theme.colors.textSecondary};
 	font-size: 0.7rem;
 	font-style: italic;
 `;
@@ -664,7 +664,8 @@ export default function MarkdownEditor({
             const controller = new AbortController();
             mentionAbortRef.current = controller;
             try {
-                const res = await Api.get('search_username', { q: mentionQuery, limit: 8 }, { timeoutMs: 4000 });
+                const mentionSearchQuery = mentionQuery.startsWith("anon-") ? mentionQuery.slice(5) : mentionQuery;
+                const res = await Api.get('search_username', { q: mentionSearchQuery || mentionQuery, limit: 8 }, { timeoutMs: 4000 });
                 if (!controller.signal.aborted && res && Array.isArray(res.results)) {
                     setMentionResults(res.results);
                     setMentionIndex(0);

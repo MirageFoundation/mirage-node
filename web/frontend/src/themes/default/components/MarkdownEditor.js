@@ -458,7 +458,7 @@ const MentionItem = styled.div`
 	cursor: pointer;
 	color: ${({ theme }) => theme.colors.sidebarItemText};
 	background: ${({ $active, theme }) =>
-				$active ? theme.colors.menuSelectedBg : "transparent"};
+        $active ? theme.colors.menuSelectedBg : "transparent"};
 	transition: background 0.15s ease, color 0.15s ease;
 
 	&:hover {
@@ -734,7 +734,8 @@ export default function MarkdownEditor({
             const controller = new AbortController();
             mentionAbortRef.current = controller;
             try {
-                const res = await Api.get('search_username', { q: mentionQuery, limit: 8 }, { timeoutMs: 4000 });
+                const mentionSearchQuery = mentionQuery.startsWith("anon-") ? mentionQuery.slice(5) : mentionQuery;
+                const res = await Api.get('search_username', { q: mentionSearchQuery || mentionQuery, limit: 8 }, { timeoutMs: 4000 });
                 if (!controller.signal.aborted && res && Array.isArray(res.results)) {
                     setMentionResults(res.results);
                     setMentionIndex(0);
