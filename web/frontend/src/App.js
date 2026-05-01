@@ -613,9 +613,13 @@ class App extends Component {
         // Fetch latest status on login
         try {
             if (publicKey) {
-                // Node config already fetched by componentDidMount; no need to re-fetch on login.
-                // Re-prime chain config after cache clear so views can read it immediately.
+                // We just cleared the cached chain/node config above to drop
+                // stale per-wallet data, so re-prime both immediately.
+                // Without this, after sign-in/sign-up the home view renders
+                // with empty nodeConfig (no invite-only banner, no quest hero
+                // card, no Referrals menu item) until the next full reload.
                 try { this._bootstrapChainConfig(); } catch (_) { }
+                try { this._bootstrapNodeConfig(); } catch (_) { }
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
                 Api.get('get_user_status', { address: publicKey, _cb: Date.now() })
