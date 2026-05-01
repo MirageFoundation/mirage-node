@@ -186,7 +186,7 @@ export function useReferrals({ state, targetAddress }) {
     /* Mirrors `useSettings::handleReferralPrecheckToggle`. Persists to the
      * same `referral_precheck_enabled` key + `/referrals/precheck_opt_in`
      * endpoint so the Referrals-page toggle stays in sync with the one on
-     * the Settings page. Only surfaced in the mirageapp ReferralsView. */
+     * the Settings page. Only surfaced in the default ReferralsView. */
     const handleReferralPrecheckToggle = async (nextVal) => {
         if (!publicKey || referralPrecheckBusy) return;
         setReferralPrecheckBusy(true);

@@ -4,7 +4,7 @@ import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
 
 /**
- * Drives the TopBar search dropdown sheet for the mirageapp theme.
+ * Drives the TopBar search dropdown sheet for the default theme.
  *
  * Mirrors `mirage-mobile-app/src/pages/search-screen.tsx` behavior:
  *  - When the input is empty, surface **recent searches** + **trending topics**.

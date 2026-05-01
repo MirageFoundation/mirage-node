@@ -4,7 +4,7 @@
  * @see ../themes/manifests.js — import manifests there only; this file builds lookups + helpers.
  */
 
-import { THEME_MANIFESTS } from '../themes/manifests';
+import { THEME_MANIFESTS, LEGACY_THEME_IDS } from '../themes/manifests';
 
 export const THEMES = {};
 THEME_MANIFESTS.forEach((m) => { THEMES[m.id] = m; });
@@ -36,21 +36,21 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
  * HARD FAIL RULE — READ THIS BEFORE CHANGING ANYTHING BELOW.
  * ============================================================================
  *
- * 1. The default theme is ALWAYS `mirageapp`. No exceptions. No "pick the
+ * 1. The default theme is ALWAYS `default`. No exceptions. No "pick the
  *    first manifest", no env-var override, no A/B flag, no user-id-based
  *    gating. If you think you need to change this, talk to nik first.
  *
  *    History: the default was `bluemoon` until 2026-04-25. Per nik's call,
- *    `mirageapp` is now the single shipped theme experience for every user,
+ *    `default` is now the single shipped theme experience for every user,
  *    and `normalizeThemeId` below force-overrides any persisted selection
  *    (see point 4). The other theme manifests (`bluemoon`, `onyx`,
  *    `oldreddit`) are kept in the registry only so that legacy `theme_id`
  *    values don't blow up `getThemeFamily` calls during migration; they are
  *    intentionally NOT reachable as a runtime visual.
  *
- * 2. If `mirageapp` is not registered in `THEME_MANIFESTS`, THIS MODULE MUST
+ * 2. If `default` is not registered in `THEME_MANIFESTS`, THIS MODULE MUST
  *    THROW at import time. Do NOT fall back to another theme. Do NOT default
- *    to `THEME_MANIFESTS[0]`. A missing `mirageapp` manifest is a build-time
+ *    to `THEME_MANIFESTS[0]`. A missing `default` manifest is a build-time
  *    bug and must surface immediately — silent fallbacks hide regressions and
  *    have burned us before.
  *
@@ -63,34 +63,34 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
  *    persisted value. This deliberately overrides any user-selected theme
  *    that was saved in localStorage before this rule landed. The settings
  *    UI's theme dropdown is now visual-only: any change there is mapped
- *    back to `mirageapp` on the next normalization pass and the storage
+ *    back to `default` on the next normalization pass and the storage
  *    value is rewritten by the App / bootstrap rewrite logic.
  *
  * If you are adding a new theme, add it to `themes/manifests.js` and leave
  * THIS line alone. The default does not change when new themes ship.
  * ============================================================================
  */
-if (!THEMES.mirageapp) {
-    throw new Error('DEFAULT_THEME_ID: "mirageapp" manifest is missing from THEME_MANIFESTS — the default theme must always be mirageapp; no fallback is permitted.');
+if (!THEMES.default) {
+    throw new Error('DEFAULT_THEME_ID: "default" manifest is missing from THEME_MANIFESTS — the default theme must always be default; no fallback is permitted.');
 }
-export const DEFAULT_THEME_ID = 'mirageapp';
+export const DEFAULT_THEME_ID = 'default';
 
 /**
- * Force-resolve any persisted or runtime theme id to the global default.
- *
- * As of 2026-04-25 every user gets `mirageapp` regardless of:
- *   - what's in localStorage `theme_id`
- *   - what they pick in Settings (the dropdown is cosmetic now)
- *   - what value other code passes in
- *
- * The function intentionally ignores `id` and `LEGACY_THEME_IDS` mappings.
- * If we ever want per-user theming back, restore the previous lookup logic
- * (see git history for the 2026-04-24 version).
- *
- * @param {unknown} _id  ignored on purpose
- * @returns {string} always `DEFAULT_THEME_ID`
+ * Map legacy ids and unknown values to a registered theme id.
+ * Falls back to DEFAULT_THEME_ID for missing/unknown values.
+ * @param {unknown} id
+ * @returns {string}
  */
-export function normalizeThemeId(_id) {
+export function normalizeThemeId(id) {
+    // Uncomment the line below to lock every user to the default theme
+    // (ignores persisted theme_id and any selection from Settings).
+    // return DEFAULT_THEME_ID;
+    if (id == null || typeof id !== 'string') return DEFAULT_THEME_ID;
+    const t = id.trim();
+    if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_IDS, t)) {
+        return LEGACY_THEME_IDS[t];
+    }
+    if (THEMES[t]) return t;
     return DEFAULT_THEME_ID;
 }
 

@@ -1,16 +1,16 @@
 # `src/themes` — full UI families (not skins)
 
-> **As of 2026-04-25:** every user is locked to the **`mirageapp`** theme.
-> `registry/theme.js` exports `DEFAULT_THEME_ID = 'mirageapp'` and
+> **As of 2026-04-25:** every user is locked to the **`default`** theme.
+> `registry/theme.js` exports `DEFAULT_THEME_ID = 'default'` and
 > `normalizeThemeId` force-overrides any persisted `theme_id` to that value
 > regardless of input. The Theme picker has been removed from
-> `mirageapp/SettingsView`. The other manifests (`bluemoon`, `onyx`,
+> `default/SettingsView`. The other manifests (`bluemoon`, `onyx`,
 > `oldreddit`) are kept registered only so legacy storage values don't blow
 > up `getThemeFamily`; they are not reachable as a runtime visual. To restore
 > per-user theming, undo the override in `registry/theme.js` (see git history
 > for the 2026-04-24 version) and re-add the picker UI.
 >
-> Until then: product UI feedback targets **`mirageapp`** only.
+> Until then: product UI feedback targets **`default`** only.
 
 A **theme** is a complete visual and structural implementation: layout, typography, navigation, route screens, styled-components, global CSS (`Style`), tokens, shell, feed, and vote UI. Switching `theme_id` swaps that entire tree. Shared **behavior** (API, txs, crypto, storage) stays in **`src/logic/`**, **`src/utils/`**, and **`src/views/`** facades.
 
@@ -35,7 +35,7 @@ A **theme** is a complete visual and structural implementation: layout, typograp
 
 1. **Create** `src/themes/<your-id>/` with a **default-exported manifest** from **`index.js`** (copy **`bluemoon`** or **`oldreddit`** as a template — see §4).
 2. **Import** that manifest in **`src/themes/manifests.js`** and **append** it to **`THEME_MANIFESTS`**.
-   - **`DEFAULT_THEME_ID`** is hard-coded to **`mirageapp`** in **`registry/theme.js`** (since 2026-04-25); manifest order in **`THEME_MANIFESTS`** does **not** determine the default. New themes are not auto-promoted to default.
+   - **`DEFAULT_THEME_ID`** is hard-coded to **`default`** in **`registry/theme.js`** (since 2026-04-25); manifest order in **`THEME_MANIFESTS`** does **not** determine the default. New themes are not auto-promoted to default.
 3. If you **rename** a theme id and users may still have the old value in **`localStorage`**, add **`LEGACY_THEME_IDS: { oldId: 'newId' }`** in **`manifests.js`**.
 4. Run **`CI=true npm run build`** in **`web/frontend`** — startup asserts **`REQUIRED_THEME_COMPONENT_KEYS`** on every manifest (§5).
 

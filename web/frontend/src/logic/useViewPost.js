@@ -963,7 +963,7 @@ export function useViewPost({
         setConfirmDeletePost(null);
         clearBlockMessages();
     };
-    const handleSuspendFromQuests = (userId, postId) => {
+    const handleSuspendFromQuests = (userId, postId, username) => {
         if (!userId) return;
         clearBlockMessages();
         setConfirmBlockPost(null);
@@ -972,9 +972,11 @@ export function useViewPost({
         setConfirmReportPost(null);
         setConfirmDonate(null);
         setConfirmUnsuspendQuests(null);
+        const trimmed = typeof username === 'string' ? username.trim() : '';
         setConfirmSuspendQuests({
             userId,
-            postId
+            postId,
+            username: trimmed || null
         });
     };
     const confirmSuspendFromQuests = async () => {
@@ -1040,7 +1042,7 @@ export function useViewPost({
             console.error('Error fetching suspension status:', err);
         }
     };
-    const handleUnsuspendFromQuests = (userId, postId) => {
+    const handleUnsuspendFromQuests = (userId, postId, username) => {
         if (!userId) return;
         clearBlockMessages();
         setConfirmBlockPost(null);
@@ -1048,9 +1050,11 @@ export function useViewPost({
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
         setConfirmSuspendQuests(null);
+        const trimmed = typeof username === 'string' ? username.trim() : '';
         setConfirmUnsuspendQuests({
             userId,
-            postId
+            postId,
+            username: trimmed || null
         });
     };
     const confirmUnsuspendFromQuests = async () => {

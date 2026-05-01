@@ -14,11 +14,12 @@
 import bluemoonManifest from './bluemoon/index';
 import onyxManifest from './onyx/index';
 import oldredditManifest from './oldreddit/index';
-import mirageappManifest from './mirageapp/index';
+import defaultManifest from './default/index';
 
-export const THEME_MANIFESTS = [bluemoonManifest, mirageappManifest, onyxManifest, oldredditManifest];
+export const THEME_MANIFESTS = [bluemoonManifest, defaultManifest, onyxManifest, oldredditManifest];
 
 /** Map old persisted theme_id values → current manifest id (renames only). */
 export const LEGACY_THEME_IDS = Object.freeze({
     moon: 'bluemoon',
+    mirageapp: 'default',
 });

@@ -373,7 +373,7 @@ def check_award_cost_cap(backend_api: str) -> None:
 def check_binary_version() -> None:
     """Cross-check that the frontend version.txt (shipped with this release)
     reports v1.24.0. This is a cheap proxy for 'we shipped the correct
-    binary' — operators running an older mirageapp static bundle will fail
+    binary' — operators running an older default static bundle will fail
     this check. It does NOT prove the on-chain binary version; that is
     implicit from the handler log check above."""
     candidates = [
