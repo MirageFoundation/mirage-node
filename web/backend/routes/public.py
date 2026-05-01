@@ -4154,13 +4154,16 @@ def get_address_from_username():
 
 @public_bp.route("/api/search_username")
 def username_search():
-    """Lightweight username prefix search for @mention autocomplete.
+    """Lightweight username search for @mention autocomplete.
 
-    GET: ?q=<prefix>&limit=8
+    GET: ?q=<query>&limit=8
     Returns: { results: [{username, address}, ...] }
     """
     q = (request.args.get("q") or "").strip().lower()
     limit = min(max(1, request.args.get("limit", 8, type=int)), 20)
+    search_q = q[5:] if q.startswith("anon-") else q
+    if not search_q:
+        search_q = q
 
     if not q:
         return jsonify({"results": []})
@@ -4168,10 +4171,43 @@ def username_search():
     try:
         conn = connect_db(timeout=5.0, busy_timeout_ms=5000)
         cur = conn.cursor()
-        # Prefix match on username, exclude empty usernames
         cur.execute(
-            "SELECT username, owner FROM profiles WHERE LOWER(username) LIKE %s AND username != '' AND deleted_at IS NULL ORDER BY username LIMIT %s",
-            (q + "%", limit),
+            """
+            WITH searchable_profiles AS (
+                SELECT
+                    username,
+                    owner,
+                    LOWER(username) AS username_lc,
+                    CASE
+                        WHEN LOWER(username) LIKE 'anon-%' THEN SUBSTRING(LOWER(username) FROM 6)
+                        ELSE LOWER(username)
+                    END AS search_username
+                FROM profiles
+                WHERE username != '' AND deleted_at IS NULL
+            )
+            SELECT username, owner
+            FROM searchable_profiles
+            WHERE username_lc LIKE %s OR search_username LIKE %s
+            ORDER BY
+                CASE
+                    WHEN search_username LIKE %s THEN 0
+                    WHEN username_lc LIKE %s THEN 0
+                    ELSE 1
+                END,
+                NULLIF(POSITION(%s IN search_username), 0),
+                NULLIF(POSITION(%s IN username_lc), 0),
+                username_lc
+            LIMIT %s
+            """,
+            (
+                f"%{q}%",
+                f"%{search_q}%",
+                f"{search_q}%",
+                f"{q}%",
+                search_q,
+                q,
+                limit,
+            ),
         )
         results = [{"username": row[0], "address": row[1]} for row in cur.fetchall() if row[0] and row[1]]
         conn.close()
