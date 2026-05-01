@@ -32,7 +32,7 @@ export function formatMirage(umirage) {
 /**
  * Format umirage amount as compact MIRAGE (e.g., 100k, 1.5M, 2B)
  * - Uses k/M/B suffixes for large numbers
- * - Shows up to 1 decimal place when needed
+ * - Shows up to 2 decimal places when needed (trailing zeros trimmed)
  */
 export function formatMirageCompact(umirage) {
     const n = Number(umirage);
@@ -42,17 +42,21 @@ export function formatMirageCompact(umirage) {
 
     if (mirage === 0) return '0';
 
+    // Truncate (don't round) to 2 decimals so values like 4.995 show as 4.99B,
+    // not 5.00B. Trailing zeros are trimmed.
+    const trim = (v) => {
+        const truncated = Math.floor(v * 100) / 100;
+        return truncated.toFixed(2).replace(/\.?0+$/, '');
+    };
+
     if (mirage >= 1_000_000_000) {
-        const v = mirage / 1_000_000_000;
-        return v % 1 === 0 ? `${v}B` : `${v.toFixed(1)}B`;
+        return `${trim(mirage / 1_000_000_000)}B`;
     }
     if (mirage >= 1_000_000) {
-        const v = mirage / 1_000_000;
-        return v % 1 === 0 ? `${v}M` : `${v.toFixed(1)}M`;
+        return `${trim(mirage / 1_000_000)}M`;
     }
     if (mirage >= 1_000) {
-        const v = mirage / 1_000;
-        return v % 1 === 0 ? `${v}k` : `${v.toFixed(1)}k`;
+        return `${trim(mirage / 1_000)}k`;
     }
 
     // Small values: show up to 2 decimals if needed
