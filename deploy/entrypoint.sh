@@ -583,6 +583,19 @@ fi
 tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
 
+# Divergence watchdog — detects app-hash divergence and auto-state-syncs.
+# Set AUTO_DIVERGENCE_RECOVERY=false to disable, or DIVERGENCE_DRY_RUN=true to
+# detect-only (log triggers without invoking the recovery script).
+if [ "${AUTO_DIVERGENCE_RECOVERY:-true}" = "true" ]; then
+  echo "==> Starting divergence watchdog (DRY_RUN=${DIVERGENCE_DRY_RUN:-false})"
+  tmux new-window -t "$SESSION" -n watchdog -c "$ROOT_DIR"
+  WATCHDOG_CMD="DRY_RUN=${DIVERGENCE_DRY_RUN:-false} PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/divergence_watchdog.py"
+  tmux send-keys -t "$SESSION:watchdog" \
+    "$WATCHDOG_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/divergence_watchdog-%Y-%m-%d.log\")" C-m
+else
+  echo "==> Divergence watchdog disabled (set AUTO_DIVERGENCE_RECOVERY=true to enable)"
+fi
+
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
 # Keep container alive + periodic cleanup (WAL segments, old logs)

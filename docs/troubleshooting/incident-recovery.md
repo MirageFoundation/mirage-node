@@ -71,6 +71,64 @@ After the node catches up:
 
 **Do not** use `miraged rollback` as a first move. It only rewinds one block and cannot repair an IAVL cache corruption; restore-from-peer is always the safe play.
 
+### 2.1 Auto-recovery via state-sync (watchdog)
+
+**Scripts**: [`scripts/divergence_watchdog.py`](../../scripts/divergence_watchdog.py), [`scripts/recover_via_state_sync.sh`](../../scripts/recover_via_state_sync.sh).
+
+Each container ships with a `watchdog` tmux window that polls miraged every 60s and triggers an in-place state-sync recovery when it detects either:
+
+1. The miraged log contains `"wrong Block.Header.AppHash"` or `"CONSENSUS FAILURE!!!"` within the last 5 minutes, **or**
+2. The local `latest_block_height` has not advanced for ~10 polls (~10 min) **and** ≥2 healthy peers report a height ≥20 blocks ahead.
+
+When triggered, [`recover_via_state_sync.sh --auto`](../../scripts/recover_via_state_sync.sh) runs inside the container and:
+
+1. Verifies cool-down (≥6 h since last recovery) and that the opt-out marker `~/.mirage/.recovery_disabled` does not exist.
+2. Selects ≥2 healthy peers from `persistent_peers` and confirms they agree on `app_hash` for a recent height (refuses to act on a split-brain peer set).
+3. Pauses the `indexer`, `backend`, and `status` tmux windows so the CometBFT light client gets full CPU during snapshot verification (this matters on droplets with high steal time).
+4. Stops `miraged`, **backs up `priv_validator_state.json`** (so the height-watermark is preserved — no double-sign risk), wipes only the chain DBs (`application.db`, `blockstore.db`, `cs.wal`, `evidence.db`, `snapshots`, `state.db`, `tx_index.db`).
+5. Pins `STATESYNC_TRUST_HEIGHT` to **snapshot height + 1** (computed from `SNAPSHOT_INTERVAL`) — this avoids the light-client bisection ladder that is the root cause of `context deadline exceeded` on slow VMs.
+6. Re-renders `config.toml` from the template, restarts `miraged`, and waits up to 5 minutes for `Snapshot restored`.
+7. Resets `STATESYNC_ENABLE=false` (so a future container restart doesn't re-trigger sync), resumes the paused services, writes a cool-down marker (`~/.mirage/.divergence_recovery_lock`).
+
+The script does **not** auto-unjail and does **not** restore PostgreSQL or any backend data — only chain state. Honors the `mirage.talk` hard rule (no cross-node restore).
+
+**Disable / dry-run / opt-out**:
+
+```bash
+# Detect-only mode (per restart): set in node.env and restart container
+DIVERGENCE_DRY_RUN=true
+
+# Disable watchdog entirely (per restart): set in node.env and restart container
+AUTO_DIVERGENCE_RECOVERY=false
+
+# One-shot opt-out (no restart needed): create marker inside the container
+docker exec mirage touch /root/.mirage/.recovery_disabled
+docker exec mirage rm   /root/.mirage/.recovery_disabled   # re-enable
+
+# Override the cool-down (only do this if you know what you're doing)
+docker exec mirage rm /root/.mirage/.divergence_recovery_lock
+docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto --force
+```
+
+**Logs**:
+
+- Watchdog decisions: `~/.mirage/logs/deploy/divergence_watchdog-YYYY-MM-DD.log` (or `tmux attach -t mirage` → `watchdog`)
+- Recovery actions: `~/.mirage/logs/deploy/divergence_recovery-YYYY-MM-DD.log`
+- Backups of `priv_validator_state.json` are timestamped under `~/.mirage/.recovery_backup/`.
+
+**Manual invocation** (e.g. when triaging):
+
+```bash
+docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --dry-run   # plan only
+docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto      # do it
+```
+
+**Limitations**:
+
+- Cannot recover if <2 peers are healthy or peers disagree (by design — refuses to act on a split-brain).
+- Does not auto-unjail; after catchup, run §3.
+- Does not restore application/backend data on `mirage.talk` (intentional; chain-state-only).
+
 ## 3. Unjailing a validator
 
 **Script**: [`scripts/unjail_validator.sh`](../../scripts/unjail_validator.sh). **Troubleshooting**: [`docs/troubleshooting/validator-unjail-failure.md`](validator-unjail-failure.md).
