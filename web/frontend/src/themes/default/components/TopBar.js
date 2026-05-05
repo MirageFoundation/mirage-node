@@ -9,6 +9,7 @@ import { useSearchDropdown } from '../../../logic/useSearchDropdown';
 import { dicebearAvatarUrl } from '../../../utils/avatar';
 import ConfirmDialog from './ConfirmDialog.js';
 import UserAvatar from './UserAvatar.js';
+import { getAuthorColor, getAuthorTooltip } from '../../../utils/tierColors';
 
 /**
  * Reddit-style TopBar for the default theme.
@@ -354,13 +355,14 @@ const UserMenuTrigger = styled.button`
 
 const AvatarGlow = styled.img`
     position: absolute;
-    top: 50%;
+    top: calc(50% + 5px);
     left: 50%;
-    width: 42px;
-    height: 42px;
-    border-radius: 9999px;
-    transform: translate(-50%, -50%) scale(0.95);
-    filter: blur(10px);
+    width: 36px;
+    height: 36px;
+    border-radius: 4px;
+    transform: translate(-50%, -50%) scale(0.9);
+    filter: ${({ theme }) =>
+        theme.name === 'light' ? 'blur(8px)' : 'blur(12px) saturate(1.4)'};
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.18s ease, transform 0.18s ease;
@@ -368,8 +370,8 @@ const AvatarGlow = styled.img`
     z-index: 0;
 
     ${UserMenuTrigger}:hover & {
-        opacity: 0.85;
-        transform: translate(-50%, -50%) scale(1);
+        opacity: ${({ theme }) => (theme.name === 'light' ? 0.7 : 1)};
+        transform: translate(-50%, -50%) scale(1.05);
     }
 `;
 
@@ -381,6 +383,13 @@ const AvatarGlow = styled.img`
 const AvatarChip = styled(UserAvatar)`
     position: relative;
     z-index: 1;
+    /* Force a solid background so the blurred AvatarGlow sitting behind
+     * the chip can't bleed through transparent areas (e.g. light-mode
+     * UserAvatar uses a transparent fill + border). Without this the
+     * blurred halo shows through the identicon's negative space and
+     * reads as a shadow on top of the avatar instead of behind it. */
+    background: ${({ theme }) =>
+        theme.name === 'light' ? theme.colors.background : theme.colors.avatarBg};
 
     @media (max-width: 1000px) {
         width: 28px;
@@ -413,7 +422,7 @@ const DropdownUsername = styled.div`
     gap: 0.4rem;
     font-size: 0.78rem;
     font-weight: 700;
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
 `;
 
 /* Eyebrow row used to label a grouped block inside the avatar dropdown
@@ -912,7 +921,10 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
         <>
             <DropdownHeader>
                 {displayName && (
-                    <DropdownUsername>
+                    <DropdownUsername
+                        $tierColor={getAuthorColor(userLevel)}
+                        title={getAuthorTooltip(userLevel) || undefined}
+                    >
                         @{displayName}
                         {isAdmin && <AdminPill aria-label="Admin account">Admin</AdminPill>}
                     </DropdownUsername>

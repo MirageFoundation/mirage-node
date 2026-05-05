@@ -49,7 +49,7 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *     margins, etc. (e.g. the `CommentAvatar` in `ViewPostView`).
  */
 
-const DEFAULT_ROUNDED_RADIUS_PX = 12;
+const DEFAULT_ROUNDED_RADIUS_PX = 4;
 const DEFAULT_PADDING_RATIO = 0.2;
 
 const Wrapper = styled.span`
@@ -60,7 +60,10 @@ const Wrapper = styled.span`
     height: ${({ $size }) => $size}px;
     border-radius: ${({ $shape, $radius }) =>
         $shape === 'rounded' ? `${$radius}px` : '50%'};
-    background: ${({ theme }) => theme.colors.avatarBg};
+    background: ${({ theme }) =>
+        theme.name === 'light' ? 'transparent' : theme.colors.avatarBg};
+    border: ${({ theme }) =>
+        theme.name === 'light' ? `1px solid ${theme.colors.avatarBg}` : 'none'};
     flex-shrink: 0;
     box-sizing: border-box;
     padding: ${({ $size, $paddingRatio }) =>
@@ -92,7 +95,7 @@ const UserAvatar = forwardRef(function UserAvatar(
         alt = '',
         loading = 'lazy',
         activeBorderColor,
-        shape = 'circle',
+        shape = 'rounded',
         radius = DEFAULT_ROUNDED_RADIUS_PX,
         paddingRatio = DEFAULT_PADDING_RATIO,
         className,

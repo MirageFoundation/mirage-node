@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import { HiChevronRight, HiShare, HiGift, HiPencilSquare, HiClipboardDocument, HiCheck } from "react-icons/hi2";
@@ -21,6 +21,7 @@ import Storage from "../../../utils/Storage";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import Api from "../../../utils/api";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -442,7 +443,7 @@ const IdentityBlock = styled.div`
 `;
 
 const DisplayName = styled.div`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
     font-size: 1.35rem;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -504,9 +505,9 @@ const AsideIdentityRow = styled.div`
 const AsideAvatarWrap = styled.div`
     padding: 3px;
     /* Match the rounded-square avatar shape. UserAvatar shape=rounded
-     * uses a 12px radius; the wrapper sits 3px outside the avatar tile
-     * so we bump to 15px to keep the curve visually parallel. */
-    border-radius: 15px;
+     * uses a 4px radius; the wrapper sits 3px outside the avatar tile
+     * so we bump to 7px to keep the curve visually parallel. */
+    border-radius: 7px;
     background: ${({ theme }) => theme.colors.panel};
     flex-shrink: 0;
 `;
@@ -520,7 +521,7 @@ const AsideNameBlock = styled.div`
 `;
 
 const AsideName = styled.div`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
     font-size: 0.82rem;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -565,6 +566,26 @@ const AsideOnlyWhenHeaderHidden = styled.span`
     }
 `;
 
+/** Wrapper that only renders its children on mobile (≤600px). Used to
+ *  surface the Gift Sub pill inside the aside profile card on phones,
+ *  where the Tier row's inline Gift Sub button is hidden to save space. */
+const MobileOnly = styled.span`
+    display: none;
+    @media (max-width: 600px) {
+        display: inline-flex;
+    }
+`;
+
+/** Wrapper that hides its children on mobile (≤600px). Used to keep the
+ *  inline Gift Sub button on the Tier row on desktop while showing it
+ *  inside the aside profile card on phones. */
+const HideOnMobile = styled.span`
+    display: inline-flex;
+    @media (max-width: 600px) {
+        display: none;
+    }
+`;
+
 /** Share button — same visual language as `CardView::ActionPill` (filled `actionIconBg` pill, 32px tall). */
 const AsideShareBtn = styled.button`
     appearance: none;
@@ -592,38 +613,10 @@ const AsideShareBtn = styled.button`
     svg { width: 14px; height: 14px; fill: currentColor; }
 `;
 
-/** Gift Sub button in the aside actions row — same 32px height + visual
- *  language as `AsideShareBtn` so it sits flush next to Share. */
-const AsideGiftSubBtn = styled.button`
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 9999px;
-    border: none;
-    background: ${({ theme }) => theme.colors.actionIconBg};
-    color: ${({ theme }) => theme.colors.text};
-    font-family: inherit;
-    font-size: 0.62rem;
-    font-weight: 500;
-    line-height: 1;
-    cursor: pointer;
-    transition: background 0.12s ease;
-
-    &:hover:not(:disabled) { background: ${({ theme }) => theme.colors.actionIconHoverBg}; }
-    &:disabled { cursor: not-allowed; opacity: 0.55; }
-    &:focus { outline: none; }
-    &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
-
-    svg { width: 14px; height: 14px; fill: currentColor; }
-`;
-
 /** Compact Follow button used in the aside identity card and the main profile
  *  header. Solid `followBtnBg` pill in idle / Following states; flips to a
  *  danger outline on hover when already following (so the click target reads
- *  as "Unfollow"). 32px tall — matches `AsideShareBtn` / `AsideGiftSubBtn`
+ *  as "Unfollow"). 32px tall — matches `AsideShareBtn`
  *  so the three action pills sit on the same baseline. */
 const CompactFollowBtn = styled.button`
     appearance: none;
@@ -705,6 +698,18 @@ const GiftMirageBtn = styled.button`
     &:focus-visible { box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.borderStrong}; }
 
     svg { width: 14px; height: 14px; }
+`;
+
+/** Label inside `GiftMirageBtn` that collapses to a short form on mobile.
+ *  Renders the long label (e.g. "Gift Mirage" / "Gift Sub") on wide
+ *  viewports and just "Gift" under the 600px breakpoint, keeping the
+ *  pill compact next to inline values like Tier / Balance. */
+const GiftBtnLabelFull = styled.span`
+    @media (max-width: 600px) { display: none; }
+`;
+const GiftBtnLabelShort = styled.span`
+    display: none;
+    @media (max-width: 600px) { display: inline; }
 `;
 
 const AsideStatsGrid = styled.div`
@@ -1267,7 +1272,104 @@ function formatCommentAge(ts) {
  *  thread (so the user can see the reply in context). Shows the full
  *  reply body with no truncation and no avatar — the header (topic /
  *  user / time) sits above the raw content. */
+/* Module-level cache of comment_id -> { title, rootId } so navigating
+ * around the Comments tab doesn't refetch the parent chain repeatedly. */
+const __profileCommentParentCache = new Map();
+const __profileCommentParentInflight = new Map();
+/* Tiny concurrency-limited queue so we don't fire one request per
+ * visible row (the backend rate-limits and returns 429 under bursts). */
+const __PARENT_TITLE_MAX_CONCURRENT = 2;
+let __parentTitleActive = 0;
+const __parentTitleQueue = [];
+function __runNextParentTitle() {
+    if (__parentTitleActive >= __PARENT_TITLE_MAX_CONCURRENT) return;
+    const job = __parentTitleQueue.shift();
+    if (!job) return;
+    __parentTitleActive += 1;
+    job().finally(() => {
+        __parentTitleActive -= 1;
+        __runNextParentTitle();
+    });
+}
+function __enqueueParentTitle(task) {
+    return new Promise(resolve => {
+        __parentTitleQueue.push(() => task().then(resolve));
+        __runNextParentTitle();
+    });
+}
+
+async function __requestParentChainOnce(commentId) {
+    // Single attempt with a 429-aware retry (max 3 tries, exponential
+    // backoff with jitter). Failures throw so the caller can decide
+    // whether to cache an empty placeholder.
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            const res = await Api.get('get_comment_context', { comment_id: commentId, max_depth: 5 });
+            return res;
+        } catch (err) {
+            lastErr = err;
+            const status = err && (err.status || err.code);
+            const is429 = status === 429 || /429|rate/i.test(String(err && err.message || ''));
+            if (!is429) throw err;
+            const delay = (300 * Math.pow(2, attempt)) + Math.floor(Math.random() * 200);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    throw lastErr || new Error('rate limited');
+}
+
+async function fetchParentTitle(commentId) {
+    if (!commentId) return null;
+    if (__profileCommentParentCache.has(commentId)) {
+        return __profileCommentParentCache.get(commentId);
+    }
+    if (__profileCommentParentInflight.has(commentId)) {
+        return __profileCommentParentInflight.get(commentId);
+    }
+    const p = __enqueueParentTitle(async () => {
+        try {
+            const res = await __requestParentChainOnce(commentId);
+            const chain = Array.isArray(res?.context) ? res.context : [];
+            // The raw API returns immediate-parent first → root last.
+            // Take the last entry as the root post.
+            const root = chain.length > 0 ? chain[chain.length - 1] : null;
+            const title = (root && typeof root.title === 'string') ? root.title.trim() : '';
+            const rootId = (root && typeof root.post_id === 'string') ? root.post_id : '';
+            const entry = { title, rootId };
+            __profileCommentParentCache.set(commentId, entry);
+            return entry;
+        } catch (_) {
+            // Don't cache failures permanently — return an empty
+            // placeholder so the row falls back to its existing chip,
+            // but allow a retry next time the row mounts.
+            return { title: '', rootId: '' };
+        } finally {
+            __profileCommentParentInflight.delete(commentId);
+        }
+    });
+    __profileCommentParentInflight.set(commentId, p);
+    return p;
+}
+
 function ProfileCommentRow({ post }) {
+    const commentId = post && post.post_id ? String(post.post_id) : '';
+    const cached = commentId ? __profileCommentParentCache.get(commentId) : null;
+    const [parentInfo, setParentInfo] = useState(cached || null);
+    const cancelledRef = useRef(false);
+
+    useEffect(() => {
+        cancelledRef.current = false;
+        if (!commentId) return undefined;
+        if (parentInfo) return undefined;
+        fetchParentTitle(commentId).then(info => {
+            if (!cancelledRef.current) setParentInfo(info);
+        });
+        return () => {
+            cancelledRef.current = true;
+        };
+    }, [commentId, parentInfo]);
+
     if (!post || !post.post_id) return null;
     if (post.deleted || post.hidden_client) return null;
 
@@ -1293,9 +1395,27 @@ function ProfileCommentRow({ post }) {
     const rawTopic = typeof post.topic === 'string' ? post.topic.trim() : '';
     const rootTopic = typeof post.root_topic === 'string' ? post.root_topic.trim() : '';
     const displayTopic = rawTopic || rootTopic;
-    const hasRealTopic = !!displayTopic;
+    // Suppress the synthesized `comment-<short>` placeholder so it
+    // never appears as `#comment-xxxxxxx` when no parent title is
+    // available.
+    const isSyntheticTopic = /^comment-[0-9a-f]+$/i.test(displayTopic);
+    const hasRealTopic = !!displayTopic && !isSyntheticTopic;
     const postId = String(post.post_id);
     const linkTarget = `/p/${postId}`;
+
+    // Parent post title chip — replaces the legacy `#comment-<id>`
+    // placeholder. Fetched client-side via `get_comment_context`
+    // (cached per comment id). Truncated to 50 chars + ellipsis.
+    const rawParentTitle = (parentInfo && typeof parentInfo.title === 'string')
+        ? parentInfo.title.trim()
+        : '';
+    const parentTitle = rawParentTitle.length > 50
+        ? `${rawParentTitle.slice(0, 50)}…`
+        : rawParentTitle;
+    const rootPostId = (parentInfo && typeof parentInfo.rootId === 'string' && parentInfo.rootId.trim())
+        ? parentInfo.rootId.trim()
+        : '';
+    const parentLink = rootPostId ? `/p/${rootPostId}` : linkTarget;
 
     // Show the full reply body. useProfile.js synthesizes a truncated
     // `title` (first 80 chars + ellipsis) for the FeedRow renderer — we
@@ -1308,7 +1428,14 @@ function ProfileCommentRow({ post }) {
         <CommentRowSlot>
             <CommentRoot as={Link} to={linkTarget} role="link" tabIndex={0} style={{ textDecoration: 'none' }}>
             <CommentHeader>
-                {hasRealTopic && (
+                {parentTitle ? (
+                    <>
+                        <CommentTopicLink to={parentLink} onClick={e => e.stopPropagation()}>
+                            {parentTitle}
+                        </CommentTopicLink>
+                        <CommentDot>·</CommentDot>
+                    </>
+                ) : hasRealTopic && (
                     <>
                         <CommentTopicLink to={`/t/${encodeURIComponent(displayTopic)}`} onClick={e => e.stopPropagation()}>
                             #{displayTopic}
@@ -1626,7 +1753,10 @@ function ProfileViewAuthenticated({
                                     <ProfileIdentityMain>
                                         <Avatar $size={64} seed={profileAddress || profileUsername || routeIdentity} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                         <IdentityBlock>
-                                            <DisplayName title={profileUsername}>{usernameDisplay}</DisplayName>
+                                            <DisplayName
+                                                title={profileUsername}
+                                                $tierColor={getAuthorColor(userLevel)}
+                                            >{usernameDisplay}</DisplayName>
                                             <Handle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</Handle>
                                         </IdentityBlock>
                                     </ProfileIdentityMain>
@@ -1717,6 +1847,14 @@ function ProfileViewAuthenticated({
                                             ({formatSubscriptionExpiry(subscriptionExpiry)})
                                         </span>}
                                     </span>
+                                    {!isOwnProfile && profileAddress && hasValidAccount && (
+                                        <HideOnMobile>
+                                            <GiftMirageBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
+                                                <HiGift aria-hidden="true" />{' '}
+                                                {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                            </GiftMirageBtn>
+                                        </HideOnMobile>
+                                    )}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             {/* Gift Subscription confirmation moved to a root-level
@@ -1753,7 +1891,11 @@ function ProfileViewAuthenticated({
                                     <Mono title={balanceDisplay}>{compactMirageLabel(balance)}</Mono>
                                     {!isOwnProfile && profileAddress && hasValidAccount && (
                                         <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
-                                            <HiGift aria-hidden="true" /> {donatePending ? donateStatus || 'Sending...' : 'Gift Mirage'}
+                                            <HiGift aria-hidden="true" />{' '}
+                                            {donatePending ? (donateStatus || 'Sending...') : (<>
+                                                <GiftBtnLabelFull>Gift Mirage</GiftBtnLabelFull>
+                                                <GiftBtnLabelShort>Gift</GiftBtnLabelShort>
+                                            </>)}
                                         </GiftMirageBtn>
                                     )}
                                 </ProfileFieldValue>
@@ -2091,7 +2233,10 @@ function ProfileViewAuthenticated({
                                                 <Avatar $size={60} seed={profileAddress || profileUsername || routeIdentity} alt={profileUsername ? `${profileUsername} avatar` : 'Profile avatar'} />
                                             </AsideAvatarWrap>
                                             <AsideNameBlock>
-                                                <AsideName title={profileUsername}>{usernameDisplay}</AsideName>
+                                                <AsideName
+                                                    title={profileUsername}
+                                                    $tierColor={getAuthorColor(userLevel)}
+                                                >{usernameDisplay}</AsideName>
                                                 <AsideHandle>u/{profileUsername || (profileAddress ? shortenAddress(profileAddress) : 'anon')}</AsideHandle>
                                             </AsideNameBlock>
                                         </AsideIdentityRow>
@@ -2108,9 +2253,12 @@ function ProfileViewAuthenticated({
                                                 {profileShareCopied ? 'Link copied' : 'Share'}
                                             </AsideShareBtn>
                                             {!isOwnProfile && profileAddress && hasValidAccount && (
-                                                <AsideGiftSubBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Sub">
-                                                    <HiGift aria-hidden="true" /> {subFeePending ? subFeeStatus || 'Gifting...' : 'Gift Sub'}
-                                                </AsideGiftSubBtn>
+                                                <MobileOnly>
+                                                    <AsideShareBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
+                                                        <HiGift aria-hidden="true" />
+                                                        {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                                    </AsideShareBtn>
+                                                </MobileOnly>
                                             )}
                                             {!isOwnProfile && address && (
                                                 <AsideOnlyWhenHeaderHidden>

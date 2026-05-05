@@ -1290,6 +1290,12 @@ function CompactRow({ post, state, updatePost }) {
                             )}
                         </>
                     )}
+                    {post.agent_edited && (
+                        <>
+                            <CompactHeaderDot>·</CompactHeaderDot>
+                            <span style={{ fontStyle: 'italic' }}>agent modified</span>
+                        </>
+                    )}
                     {hasTag && (
                         <>
                             <CompactHeaderDot>·</CompactHeaderDot>

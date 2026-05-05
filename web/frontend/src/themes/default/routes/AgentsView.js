@@ -19,6 +19,7 @@ import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import FeedRightRail from "../components/FeedRightRail.js";
 import { useAgents, formatTimeAgo } from "../../../logic/useAgents";
 import UserAvatar from "../components/UserAvatar.js";
+import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 
 /**
  * AgentsView — `default` Plan 06 sub-plan 07.
@@ -236,7 +237,7 @@ const NameRow = styled.div`
 `;
 
 const NameLink = styled(Link)`
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme, $tierColor }) => $tierColor || theme.colors.text};
     text-decoration: none;
     font-size: 0.75rem;
     font-weight: 500;
@@ -247,7 +248,7 @@ const NameLink = styled(Link)`
     white-space: nowrap;
 
     &:hover {
-        color: ${({ theme }) => theme.colors.link};
+        color: ${({ theme, $tierColor }) => $tierColor || theme.colors.link};
     }
 `;
 
@@ -521,6 +522,10 @@ export default function AgentsView({ state }) {
         const avatarSeed = agent.address || addrLower;
         const profileUrl = `/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`;
         const hovering = hoverAgent === addrLower;
+        // Agents listed here are by definition Agent-tier (level 10).
+        const agentLevel = Number(agent.level) || 10;
+        const agentTierColor = getAuthorColor(agentLevel);
+        const agentTierTooltip = getAuthorTooltip(agentLevel);
 
         return (
             <Row key={agent.address}>
@@ -528,7 +533,11 @@ export default function AgentsView({ state }) {
                     <AvatarImg seed={avatarSeed} alt="" />
                     <Identity>
                         <NameRow>
-                            <NameLink to={profileUrl}>{displayName}</NameLink>
+                            <NameLink
+                                to={profileUrl}
+                                $tierColor={agentTierColor}
+                                title={agentTierTooltip || undefined}
+                            >{displayName}</NameLink>
                             <AgentBadge>Agent</AgentBadge>
                             <LastActive>{formatActive(agent.last_active)}</LastActive>
                         </NameRow>

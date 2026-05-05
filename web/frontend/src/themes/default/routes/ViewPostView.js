@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
@@ -2233,6 +2233,61 @@ function ViewPostView({
     }, [openBlockMenuId]);
 
     /**
+     * Edge-case: when a comment lives near the bottom of the viewport,
+     * its 3-dot dropdown — anchored just below the button — can spill
+     * past the bottom edge and become unreachable (the portal uses
+     * `position: fixed` so the page can't scroll to reveal it).
+     *
+     * After the dropdown mounts we measure its real height and re-anchor:
+     *   • flip above the button if there's room there;
+     *   • else clamp into the viewport with an 8px margin.
+     * Same logic applied to the block/report popover below.
+     */
+    const clampMenuIntoViewport = (dropdownEl, buttonEl, setPosition) => {
+        if (!dropdownEl || !buttonEl) return;
+        const margin = 8;
+        const ddH = dropdownEl.offsetHeight;
+        const ddW = dropdownEl.offsetWidth;
+        const vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
+        const vw = (typeof window !== 'undefined' && window.innerWidth) || 0;
+        const btnRect = buttonEl.getBoundingClientRect();
+        let top = btnRect.bottom + 4;
+        let left = Math.max(10, btnRect.right - ddW);
+        if (top + ddH > vh - margin) {
+            const flippedTop = btnRect.top - 4 - ddH;
+            if (flippedTop >= margin) {
+                top = flippedTop;
+            } else {
+                top = Math.max(margin, vh - margin - ddH);
+            }
+        }
+        if (left + ddW > vw - margin) {
+            left = Math.max(margin, vw - margin - ddW);
+        }
+        setPosition({ top, left });
+    };
+
+    useLayoutEffect(() => {
+        if (!openMenuId) return;
+        clampMenuIntoViewport(
+            menuDropdownRef.current,
+            menuButtonRefs.current[openMenuId],
+            setMenuPosition
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openMenuId]);
+
+    useLayoutEffect(() => {
+        if (!openBlockMenuId) return;
+        clampMenuIntoViewport(
+            blockDropdownRef.current,
+            blockButtonRefs.current[openBlockMenuId],
+            setBlockMenuPosition
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openBlockMenuId]);
+
+    /**
      * Blocked-post affordance (06.3 polish round 5) — wired to the same
      * `useBlocks` hook BlocksView uses, so unblocking from this page
      * instantly updates `/blocks` and vice versa. Renders a dedicated
@@ -3847,16 +3902,21 @@ function ViewPostView({
                                     {/* Agent annotation appendices */}
                                     {!isCollapsed && post.appendices && post.appendices.length > 0 && post.appendices.map((a, idx) => {
                                         const label = a.agent_username || a.agent || 'Agent';
+                                        // Appendices are authored by agent-tier accounts
+                                        // (level 10). Color the @label so the agent tier
+                                        // is visible in the inline byline.
+                                        const appendixTierColor = getAuthorColor(Number(a.agent_level) || 10);
+                                        const appendixTierTooltip = getAuthorTooltip(Number(a.agent_level) || 10);
                                         return <div key={`appx-${idx}`} style={{
                                             margin: '0.5rem 0'
                                         }}>
                                             <div style={{
                                                 marginBottom: '0.2rem'
                                             }}>
-                                                <Link to={`/u/${label}`} style={{
+                                                <Link to={`/u/${label}`} title={appendixTierTooltip || undefined} style={{
                                                     textDecoration: 'underline',
                                                     fontSize: '0.6rem',
-                                                    color: theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
+                                                    color: appendixTierColor || theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
                                                 }}>@{label}</Link>
                                                 <span style={{
                                                     color: theme.colors?.textMuted || '#888',

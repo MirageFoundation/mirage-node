@@ -16,25 +16,31 @@ const TIER_NAMES = {
     10: 'Agent'
 };
 
+// Admin accent color. Matches `tierAdmin` token in the default theme
+// (`themes/default/tokens.js`) and the `ADMIN_COLOR` constant in
+// `logic/useSubscription.js` so the admin red is consistent everywhere.
+const ADMIN_COLOR = '#EF4444';
+const ADMIN_LABEL = 'Admin';
+
 /**
  * Get the color for a user's tier level.
  * @param {number} level - The user's tier level (0, 1, 10 for regular tiers, >= 100 for admin)
- * @returns {string|null} - The color hex code, or null if Free tier (level 0) or admin (level >= 100)
+ * @returns {string|null} - The color hex code, or null if Free tier (level 0)
  */
 export const getTierColor = (level) => {
     if (level === undefined || level === null || level === 0) return null;
-    if (level >= 100) return null; // Admins use default colors
+    if (level >= 100) return ADMIN_COLOR; // Admin red
     return TIER_COLORS[level] || null;
 };
 
 /**
  * Get the display name for a user's tier level (for tooltips).
- * @param {number} level - The user's tier level (0, 1, 10 for regular tiers)
- * @returns {string|null} - The tier name, or null if Free tier or admin
+ * @param {number} level - The user's tier level (0, 1, 10 for regular tiers, >= 100 for admin)
+ * @returns {string|null} - The tier name, or null if Free tier
  */
 export const getTierName = (level) => {
     if (level === undefined || level === null || level === 0) return null;
-    if (level >= 100) return null; // Admins don't show tier tooltip
+    if (level >= 100) return ADMIN_LABEL;
     return TIER_NAMES[level] || null;
 };
 
