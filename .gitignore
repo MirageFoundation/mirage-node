@@ -95,6 +95,8 @@ scripts/*
 !scripts/check_persistent_peers.sh
 !scripts/hot_swap_statesync.py
 !scripts/remote_hot_swap.py
+!scripts/recover_via_state_sync.sh
+!scripts/divergence_watchdog.py
 
 cursor.md
 .cursor/
