@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/big"
 	"strings"
-	"sync"
 
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -27,92 +26,129 @@ import (
 //
 //	challenge = Argon2id(canonical_without_signature || ":" || pow, salt=last_block_hash)
 //	int(challenge) <= base_target * 1000 / (1000 * (1 + pow_factor)^difficulty)
-//	last_block_hash matches one of the last Window committed block hashes (case-insensitive)
+//	last_block_hash matches the current LastBlockId or one of the last Window
+//	committed block hashes recorded in the on-chain window (case-insensitive)
 //	difficulty >= current dynamic difficulty (prevents spam with artificially low difficulty)
+//
+// DETERMINISM CONTRACT: the recent-block-hash acceptance window is read from
+// on-chain state (types.RecentBlockHashesKey, written by BeginBlock). This is
+// IDENTICAL across all peers and across process restarts — eliminating the
+// per-process cache that previously caused restart-vs-warm-node divergence:
+// a freshly-restarted node had an empty cache and would reject envelopes
+// referencing block hashes within the window, while peers (with full caches)
+// would accept them, producing per-node tx-acceptance divergence ->
+// app-hash divergence.
 //
 // The last_block_hash equality check is skipped for CheckTx (mempool) where header info may be
 // unavailable; it is enforced during DeliverTx.
 type PowDecorator struct {
-	// Window is how many recent committed block hashes to accept (from params)
-	Window uint32
 	// MinFee, when provided in the tx fee with same denom and amount >=, skips PoW entirely
 	MinFee sdk.Coin
-	// Keeper provides access to dynamic difficulty and params
+	// Keeper provides access to dynamic difficulty, params, and the on-chain
+	// recent-block-hash window.
 	Keeper corekeeper.Keeper
-
-	mu     sync.Mutex
-	recent []string // most-recent-first, lowercase hex strings of block IDs
 }
 
-func (d *PowDecorator) remember(hashLower string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if hashLower == "" {
-		return
-	}
-	if len(d.recent) == 0 || d.recent[0] != hashLower {
-		// prepend newest
-		d.recent = append([]string{hashLower}, d.recent...)
-		// trim
-		limit := int(d.Window)
-		if limit <= 0 {
-			limit = 60
-		}
-		if len(d.recent) > limit {
-			d.recent = d.recent[:limit]
-		}
-	}
-}
-
-func (d *PowDecorator) seen(hash string) bool {
+// recentHashSeen returns true if `hash` (lowercase hex) appears in the
+// on-chain recent-block-hashes window. The window is written by BeginBlock
+// before any tx in the current block runs, so by the time this is called the
+// window contains the previous BlockHashWindow committed block hashes.
+//
+// Decode/store errors propagate so the caller can reject the tx; silent
+// "false" would route a legitimate tx to rejection on this node only and
+// produce divergence on the very thing this refactor is fixing.
+func (d *PowDecorator) recentHashSeen(ctx sdk.Context, hash string) (bool, error) {
 	cmp := strings.ToLower(strings.TrimSpace(hash))
 	if cmp == "" {
-		return false
+		return false, nil
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, h := range d.recent {
+	hashes, err := d.Keeper.GetRecentBlockHashes(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, h := range hashes {
 		if h == cmp {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-// getUserLevel returns user level for the address derived from pubkey
-func (d *PowDecorator) getUserLevel(ctx sdk.Context, pubkey []byte) (level int, addr string) {
+// getUserLevel returns the user level for the address derived from pubkey.
+//
+// FAIL-FAST CONTRACT: any error reading or decoding the stored ProfileCore is
+// returned to the caller — silently treating a corrupt profile as level=0
+// routes the tx through the free-tier PoW branch on this node while peers
+// route it through the paid-reserve branch, producing a per-node app-hash
+// divergence (different events emitted, different state mutations). A
+// returned error must reject the tx; the same corrupt bytes on all peers
+// reject it identically, so consensus is preserved without silent skew.
+//
+// Profile not found is NOT an error: it is the legitimate state of a
+// brand-new account, which is free-tier by definition.
+func (d *PowDecorator) getUserLevel(ctx sdk.Context, pubkey []byte) (level int, addr string, err error) {
 	if len(pubkey) != 33 {
-		return 0, ""
+		return 0, "", nil
 	}
 	var cpk cryptotypes.PubKey
 	cpk.Key = pubkey
 	addrBytes := sdk.AccAddress(cpk.Address())
 	addr, _ = bech32.ConvertAndEncode(AccountAddressPrefix, addrBytes)
 
-	// Get profile core for level (only need Level, avoid loading lists)
-	if bz, found, _ := d.Keeper.GetProfileCore(ctx, addr); found {
-		var core coretypes.ProfileCore
-		if err := json.Unmarshal(bz, &core); err == nil {
-			level = int(core.Level)
-		}
+	bz, found, gerr := d.Keeper.GetProfileCore(ctx, addr)
+	if gerr != nil {
+		return 0, addr, fmt.Errorf("CONSENSUS_FATAL:PROFILE_GET addr=%s: %w", addr, gerr)
 	}
-
-	return level, addr
+	if !found {
+		return 0, addr, nil
+	}
+	var core coretypes.ProfileCore
+	if err := json.Unmarshal(bz, &core); err != nil {
+		return 0, addr, fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE addr=%s bytes=%d: %w", addr, len(bz), err)
+	}
+	return int(core.Level), addr, nil
 }
 
-// canUsePoW checks if a user can use PoW instead of gas fees
-// Returns true if PoW is allowed, false if user must pay gas
-// Only free tier (level 0) can use PoW; paid users use their escrowed reserve for gas
-func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, reason string) {
-	level, addr := d.getUserLevel(ctx, pubkey)
-
-	// Free users (level 0) can always use PoW
-	if level == 0 {
-		return true, "free tier"
+// canUsePoW checks whether a user may use PoW instead of paying relayed gas.
+// Only free tier (level 0) may use PoW; paid users (>=1) must use reserve.
+//
+// Decode errors from getUserLevel propagate; callers MUST reject the tx on
+// non-nil err to avoid silent free-tier routing on a corrupt profile.
+func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, reason string, err error) {
+	level, addr, lerr := d.getUserLevel(ctx, pubkey)
+	if lerr != nil {
+		return false, "", lerr
 	}
+	if level == 0 {
+		return true, "free tier", nil
+	}
+	return false, fmt.Sprintf("paid user (level=%d) must use reserve for gas, addr=%s", level, addr), nil
+}
 
-	// Paid users (level >= 1) must use their reserve for gas, not PoW
-	return false, fmt.Sprintf("paid user (level=%d) must use reserve for gas, addr=%s", level, addr)
+// routePoWTx unifies the canUsePoW + checkReserveOrDowngrade decision used by
+// every PoW-eligible message branch in AnteHandle.
+//
+// Returns (canPoW, err):
+//   - err != nil: tx must be rejected (decode failure or insufficient reserve).
+//     The error string is logged with msgName context for triage.
+//   - canPoW == true: caller must run validatePoWBytesArgon2.
+//   - canPoW == false, err == nil: caller must skip PoW (paid path covered
+//     by reserve, gas will be deducted by the message handler).
+func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgName string) (canPoW bool, err error) {
+	allowed, _, lerr := d.canUsePoW(ctx, pubkey)
+	if lerr != nil {
+		ctx.Logger().Error("PoW: profile decode failure (rejecting tx, peers will reject identically)",
+			"msg", msgName, "err", lerr.Error())
+		return false, lerr
+	}
+	if !allowed {
+		if rerr := d.checkReserveOrDowngrade(ctx, pubkey, params); rerr != nil {
+			ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", msgName, "err", rerr.Error())
+			return false, rerr
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 // checkReserveOrDowngrade checks if a paid user has sufficient reserve for gas.
@@ -127,14 +163,17 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 	addrBytes := sdk.AccAddress(cpk.Address())
 	addr, _ := bech32.ConvertAndEncode(AccountAddressPrefix, addrBytes)
 
-	bz, found, _ := d.Keeper.GetProfileCore(ctx, addr)
+	bz, found, gerr := d.Keeper.GetProfileCore(ctx, addr)
+	if gerr != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_GET addr=%s: %w", addr, gerr)
+	}
 	if !found {
-		return nil // No profile, treat as free tier
+		return nil
 	}
 
 	var core coretypes.ProfileCore
 	if err := json.Unmarshal(bz, &core); err != nil {
-		return nil
+		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE addr=%s bytes=%d: %w", addr, len(bz), err)
 	}
 
 	// Free users don't need reserve check
@@ -208,16 +247,20 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 }
 
 func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	// Refresh params from the blockchain state (local copies to avoid data race)
+	// Refresh params from the blockchain state.
 	params := d.Keeper.GetParams(ctx)
-	window := uint32(params.BlockHashWindow)
-	d.mu.Lock()
-	d.Window = window
-	d.mu.Unlock()
 
-	// derive last committed block id hash from header and remember it
+	// chainLastID is the hash of the immediately-previous committed block.
+	// This is always accepted by the equality branch of the PoW validator;
+	// it is also already prepended to the on-chain recent-block-hashes
+	// window by BeginBlock so older envelopes within the window pass the
+	// list-check branch.
 	chainLastID := strings.ToLower(hex.EncodeToString(ctx.BlockHeader().LastBlockId.Hash))
-	d.remember(chainLastID)
+
+	// lookupHash queries the on-chain recent-block-hashes window. The
+	// closure captures the ABCI context so the validator stays a pure
+	// function of (canonical bytes, header, on-chain state).
+	lookupHash := func(h string) (bool, error) { return d.recentHashSeen(ctx, h) }
 
 	// Enforce last_block_hash even in CheckTx so stale/invalid PoW fails fast and doesn't linger
 	skipHashCheck := false
@@ -262,17 +305,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			// Check if user can use PoW based on tier/balance
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				// Paid user - check reserve before allowing tx
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgPost", "err", err.Error())
-					return ctx, err
-				}
-				continue // Skip PoW validation, user pays gas from reserve
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgPost")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
+				continue
 			}
 			canon := buildCanonForPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
 			}
@@ -289,15 +330,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgVote", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgVote")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForVote(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgVote", "err", err.Error())
 				return ctx, err
 			}
@@ -314,15 +355,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgEdit", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEdit")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForEdit(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err
 			}
@@ -352,15 +393,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgSetUsername", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetUsername")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForSetUsername(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, err
 			}
@@ -377,15 +418,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgSetBiography", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetBiography")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForSetBiography(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, err
 			}
@@ -402,15 +443,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgDelete", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDelete")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForDelete(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDelete", "err", err.Error())
 				return ctx, err
 			}
@@ -427,15 +468,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgDeleteUser", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDeleteUser")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForDeleteUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDeleteUser", "err", err.Error())
 				return ctx, err
 			}
@@ -452,15 +493,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgSendTokens", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSendTokens")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForSendTokens(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSendTokens", "err", err.Error())
 				return ctx, err
 			}
@@ -495,15 +536,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgEnableAgent", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEnableAgent")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForEnableAgent(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, err
 			}
@@ -520,15 +561,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgDisableAgent", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDisableAgent")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForDisableAgent(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDisableAgent", "err", err.Error())
 				return ctx, err
 			}
@@ -545,15 +586,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgSetAgents", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetAgents")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForSetAgents(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetAgents", "err", err.Error())
 				return ctx, err
 			}
@@ -570,15 +611,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgFollowUser", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowUser")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForFollowUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowUser", "err", err.Error())
 				return ctx, err
 			}
@@ -595,15 +636,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnfollowUser", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowUser")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForUnfollowUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, err
 			}
@@ -620,15 +661,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgFollowTopic", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowTopic")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForFollowTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -645,15 +686,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnfollowTopic", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowTopic")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForUnfollowTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -670,15 +711,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgBlockPost", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockPost")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForBlockPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockPost", "err", err.Error())
 				return ctx, err
 			}
@@ -695,15 +736,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnblockPost", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockPost")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForUnblockPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockPost", "err", err.Error())
 				return ctx, err
 			}
@@ -720,15 +761,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgBlockUser", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockUser")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForBlockUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockUser", "err", err.Error())
 				return ctx, err
 			}
@@ -745,15 +786,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnblockUser", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockUser")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForUnblockUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, err
 			}
@@ -770,15 +811,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgBlockTopic", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockTopic")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForBlockTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -795,15 +836,15 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnblockTopic", "err", err.Error())
-					return ctx, err
-				}
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockTopic")
+			if err != nil {
+				return ctx, err
+			}
+			if !canPoW {
 				continue
 			}
 			canon := buildCanonForUnblockTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -1198,7 +1239,16 @@ func computeTarget(baseBits uint64, difficultySteps uint64, powFactor float64) (
 
 // validatePoWBytesArgon2 computes Argon2id(password=canonical||":"||uvarint(pow), salt=last_block_hash bytes)
 // and requires hash <= target derived from difficulty steps and pow_base_bits (with grace period).
-func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty uint64, pow uint64, currentLastID string, ring interface{ seen(string) bool }, skipHashCheck bool, required uint64, prev uint64, lastChange int64, gracePeriod uint64, currentHeight int64, baseBits uint64, powFactor float64) error {
+//
+// The last_block_hash check accepts:
+//   1. Equality with the current LastBlockId (most common path), OR
+//   2. Membership in the on-chain recent-block-hashes window via lookupHash.
+//
+// lookupHash MUST be a deterministic, state-derived predicate (not a process-
+// local cache) to ensure all peers and restarted nodes agree on acceptance.
+// Errors from lookupHash propagate so callers can reject the tx; a silent
+// "false" would mask a state-read failure and produce divergence.
+func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty uint64, pow uint64, currentLastID string, lookupHash func(string) (bool, error), skipHashCheck bool, required uint64, prev uint64, lastChange int64, gracePeriod uint64, currentHeight int64, baseBits uint64, powFactor float64) error {
 	if difficulty > corekeeper.MaxSafeDifficultySteps {
 		return fmt.Errorf("invalid difficulty: exceeds max safe value")
 	}
@@ -1240,7 +1290,17 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	}
 	// Compare block hash as lowercase hex
 	lb := strings.ToLower(hex.EncodeToString(lastBlockHash))
-	if lb != strings.ToLower(currentLastID) && !ring.seen(lb) {
+	if lb == strings.ToLower(currentLastID) {
+		return nil
+	}
+	if lookupHash == nil {
+		return fmt.Errorf("invalid last_block_hash")
+	}
+	seen, lerr := lookupHash(lb)
+	if lerr != nil {
+		return fmt.Errorf("recent-block-hash window read failed: %w", lerr)
+	}
+	if !seen {
 		return fmt.Errorf("invalid last_block_hash")
 	}
 	return nil

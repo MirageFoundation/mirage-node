@@ -17,12 +17,12 @@ export function getCachedWelcomeStats() {
 
     const prefix = cached.stale ? "~" : "";
     const users = Number(cached.userCount || 0);
-    const active = Number(cached.active24h || 0);
+    const active = Number(cached.active7d || 0);
     const posts = Number(cached.posts24h || 0) + Number(cached.comments24h || 0);
 
     return [
         { label: "Users", value: `${prefix}${users.toLocaleString()}` },
-        { label: "Active (24h)", value: `${prefix}${active.toLocaleString()}` },
+        { label: "Active (7d)", value: `${prefix}${active.toLocaleString()}` },
         { label: "Posts (24h)", value: `${prefix}${posts.toLocaleString()}` },
     ];
 }

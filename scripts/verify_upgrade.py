@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
 """
-Post-upgrade verification for v1.24.0.
+Post-upgrade verification for v1.25.0.
 
-Only v1.24.0-specific checks are included. Generic prior-upgrade checks
-(pruning logs, content tag normalization, log retention, etc.) have been
-removed per the /upgrade workflow: keep only checks needed to validate
-THIS upgrade.
+Only v1.25.0-specific checks are included. Generic prior-upgrade checks
+have been removed per the /upgrade workflow: keep only checks needed
+to validate THIS upgrade.
 
 Checks:
   1. Required environment variables are set (DB URLs)
   2. Database connectivity (backend + indexer RO)
   3. Upgrade handler ran:
-       - node logs contain "Upgrade to v1.24.0 complete"
-       - node logs do NOT contain "Upgrade to v1.24.0 complete" errors
-  4. Never-halt invariant: chain is still producing blocks post-upgrade
-     (indexer freshness) and no "panic" lines from the hardened code paths
-     (core/GetParams, core/MintIfNeeded, EndBlock, BeginBlock) appear.
-  5. Award cost cap (MaxAwardConfigCost = 1,000,000 MIRAGE):
-       - /api/get_chain_config returns award_configs
-       - every award_configs[i].cost <= 1_000_000_000_000 (umirage)
-       - expected default AwardConfig names are present
-  6. Cancel-unbonding ante rule: verify the binary is the v1.24.0 binary
-     (version.txt frontend reports v1.24.0) — the actual rule is code-level
-     and is enforced by compiled binary identity. An on-chain negative test
-     (submit a non-self MsgCancelUnbondingDelegation, expect rejection)
-     can be driven manually via scripts/integration tests.
+       - node logs contain "Starting upgrade to v1.25.0"
+       - node logs contain "Upgrade to v1.25.0 complete"
+       - node logs contain the post-migration params validation line
+  4. Fail-fast contract is dormant (regression check):
+       - no "panic:" + "CONSENSUS_FATAL:" co-occurrence in node logs
+         after the upgrade height. CONSENSUS_FATAL is the new tag for
+         deliberate halts on consensus-critical decode failures; in
+         healthy steady state it MUST NOT fire.
+  5. Chain liveness post-upgrade (indexer freshness): the chain is
+     producing fresh blocks, which is the external proof that
+     BeginBlock is successfully writing the new on-chain
+     recent_block_hashes window every block.
+  6. Frontend version cross-check (version.txt == v1.25.0).
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -47,31 +45,30 @@ except ImportError:
     print("FATAL: psycopg not installed")
     sys.exit(1)
 
-try:
-    import requests as _requests
-except ImportError:
-    print("FATAL: requests not installed")
-    sys.exit(1)
-
 
 # Constants tied to THIS upgrade. If they change, this file must change.
-UPGRADE_NAME = "v1.24.0"
-MAX_AWARD_CONFIG_COST_UMIRAGE = 1_000_000_000_000  # 1,000,000 MIRAGE
-EXPECTED_AWARD_NAMES = {
-    "quality_post",
-    "original_content",
-    "based",
-    "receipts",
-}
+UPGRADE_NAME = "v1.25.0"
 
-# Code paths hardened to never halt. A "panic:" line mentioning any of
-# these strings in post-upgrade logs is a regression.
-NEVER_HALT_SOURCE_HINTS = (
-    "core/GetParams",
-    "MintIfNeeded",
-    "mint distribution",
-    "BeginBlock",
-    "EndBlock",
+# Tag prefix used by every fail-fast site introduced in v1.25.0
+# (core.GetParams, deductRelayGasFee, processSubscriptions, PoW ante).
+# In a healthy node this string MUST NOT appear after the upgrade height
+# unless an operator deliberately corrupted state for testing.
+CONSENSUS_FATAL_TAG = "CONSENSUS_FATAL:"
+
+# Specific tags expected to never fire in steady state. We list them so
+# that if a new tag is added in a future release without updating this
+# checklist, we still catch it via the prefix scan above.
+KNOWN_FATAL_TAGS = (
+    "CONSENSUS_FATAL:PARAMS_STORE_GET",
+    "CONSENSUS_FATAL:PARAMS_EMPTY",
+    "CONSENSUS_FATAL:PARAMS_UNMARSHAL",
+    "CONSENSUS_FATAL:PARAMS_VALIDATE",
+    "CONSENSUS_FATAL:PROFILE_GET",
+    "CONSENSUS_FATAL:PROFILE_MISSING",
+    "CONSENSUS_FATAL:PROFILE_DECODE",
+    "CONSENSUS_FATAL:RECENT_HASHES_GET",
+    "CONSENSUS_FATAL:RECENT_HASHES_DECODE",
+    "CONSENSUS_FATAL:RECENT_HASHES_WRITE",
 )
 
 
@@ -122,32 +119,7 @@ def ensure_local_url(name: str, raw: str) -> None:
         raise RuntimeError(f"{name} must be local (got host={host})")
 
 
-# ─── HTTP helpers (rate-limit aware) ──────────────────────────────────
-
-_SESSION = _requests.Session()
-_LAST_REQUEST_TIME: float = 0.0
-_MIN_INTERVAL: float = 0.35
-
-
-def _throttle() -> None:
-    global _LAST_REQUEST_TIME
-    elapsed = time.monotonic() - _LAST_REQUEST_TIME
-    if elapsed < _MIN_INTERVAL:
-        time.sleep(_MIN_INTERVAL - elapsed)
-    _LAST_REQUEST_TIME = time.monotonic()
-
-
-def api_get(url: str, params: dict | None = None, retries: int = 2) -> _requests.Response:
-    for attempt in range(retries + 1):
-        _throttle()
-        resp = _SESSION.get(url, params=params, timeout=10)
-        if resp.status_code != 429:
-            return resp
-        time.sleep(1.5 * (attempt + 1))
-    return resp
-
-
-# ─── v1.24.0 checks ──────────────────────────────────────────────────
+# ─── Log discovery ────────────────────────────────────────────────────
 
 
 def find_latest_log(log_dir: Path) -> Path:
@@ -158,17 +130,7 @@ def find_latest_log(log_dir: Path) -> Path:
 
 
 def resolve_node_log_dir() -> Path:
-    """Resolve node log directory across local + container layouts.
-
-    Supported overrides/layouts:
-    - NODE_LOG_DIR (explicit)
-    - NODE_HOME/logs/node
-    - NODE_HOME/logs
-    - ~/.mirage/node/logs/node
-    - ~/.mirage/logs/node
-    - /root/.mirage/node/logs/node
-    - /root/.mirage/logs/node
-    """
+    """Resolve node log directory across local + container layouts."""
     explicit = os.environ.get("NODE_LOG_DIR", "").strip()
     if explicit:
         p = Path(explicit).expanduser()
@@ -195,6 +157,9 @@ def resolve_node_log_dir() -> Path:
     raise RuntimeError(f"node log dir not found; tried: {tried}")
 
 
+# ─── v1.25.0 checks ──────────────────────────────────────────────────
+
+
 def check_upgrade_handler_ran() -> None:
     try:
         log_dir = resolve_node_log_dir()
@@ -210,6 +175,7 @@ def check_upgrade_handler_ran() -> None:
     content = log_path.read_text(errors="ignore")
     start_marker = f"Starting upgrade to {UPGRADE_NAME}"
     done_marker = f"Upgrade to {UPGRADE_NAME} complete"
+    params_marker = f"{UPGRADE_NAME}: params validated post-migration"
 
     if start_marker in content:
         ok(f"{start_marker!r} present in node log")
@@ -221,13 +187,20 @@ def check_upgrade_handler_ran() -> None:
     else:
         fail(f"{done_marker!r} not found — upgrade handler may not have run cleanly")
 
+    if params_marker in content:
+        ok(f"{params_marker!r} present in node log (fail-fast GetParams sanity check passed)")
+    else:
+        warn(
+            f"{params_marker!r} not found — handler may have run but the post-migration "
+            f"params sanity log line was not emitted (rotated log?)"
+        )
 
-def check_never_halt_invariant() -> None:
-    """A regression of the never-halt invariant would show up as a panic
-    originating from BeginBlock/EndBlock/MintIfNeeded/GetParams code paths,
-    NOT as a "chain continued on defaults" log line (those are expected and
-    loud-but-benign). We scan for panic lines first, then for the benign
-    fallback indicators as info."""
+
+def check_no_consensus_fatal() -> None:
+    """The whole point of v1.25.0 is that CONSENSUS_FATAL paths exist as
+    a safety mechanism. In normal operation they MUST NOT fire — if they
+    do, either we have a real bug or a real corruption event that needs
+    investigation. Either way, the deploy is not green."""
     try:
         log_dir = resolve_node_log_dir()
     except Exception as exc:
@@ -240,52 +213,36 @@ def check_never_halt_invariant() -> None:
         return
 
     content = log_path.read_text(errors="ignore")
-
     lines = content.splitlines()
-    regressions = []
+
+    fatal_hits: list[tuple[int, str]] = []
     for i, line in enumerate(lines):
-        lower = line.lower()
-        if "panic:" not in lower and lower.strip() != "panic":
-            continue
+        if CONSENSUS_FATAL_TAG in line:
+            fatal_hits.append((i + 1, line.strip()[:200]))
 
-        # Go panics emit "panic: ..." and stack frames on subsequent lines.
-        # Match source hints across a small post-panic window.
-        window = "\n".join(lines[i : i + 40])
-        for hint in NEVER_HALT_SOURCE_HINTS:
-            if hint in window:
-                regressions.append((line.strip()[:200], hint))
-                break
-
-    if regressions:
-        fail(f"panic found in hardened code paths ({len(regressions)} lines)")
-        for panic_line, hint in regressions[:5]:
-            info(f"{panic_line} [matched hint: {hint}]")
-    else:
-        ok("no panic lines from hardened code paths (GetParams/MintIfNeeded/BeginBlock/EndBlock)")
-
-    fallback_markers = [
-        "falling back to defaults",
-        "IterateValidators failed; skipping interval",
-        "recipient slice length mismatch",
-        "send failed; attempting to burn skipped reward",
-        "BeginBlock:",
-        "EndBlock:",
-    ]
-    hit_fallbacks = [m for m in fallback_markers if m in content]
-    if hit_fallbacks:
-        warn(
-            f"benign never-halt log markers present ({len(hit_fallbacks)}: "
-            f"{', '.join(hit_fallbacks)}) — investigate root cause separately"
+    if fatal_hits:
+        fail(
+            f"{CONSENSUS_FATAL_TAG} appeared {len(fatal_hits)} time(s) in latest node log — "
+            f"one of the new fail-fast paths fired"
         )
-    else:
-        info("no never-halt fallback markers fired (clean)")
+        for lineno, snippet in fatal_hits[:5]:
+            info(f"line {lineno}: {snippet}")
+        if len(fatal_hits) > 5:
+            info(f"... and {len(fatal_hits) - 5} more")
+        return
+
+    ok(f"no {CONSENSUS_FATAL_TAG} occurrences in latest node log")
+    info(
+        f"watched tags ({len(KNOWN_FATAL_TAGS)}): "
+        f"{', '.join(t.split(':', 1)[1] for t in KNOWN_FATAL_TAGS)}"
+    )
 
 
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
-    """Post-upgrade liveness proof: the chain is still producing blocks.
-    This is the external confirmation that never-halt works in practice
-    (if a halt had occurred we'd see a gap between wall clock and block
-    time)."""
+    """Post-upgrade liveness proof. Also serves as the implicit check
+    that BeginBlock's RecordRecentBlockHash write is not failing — a
+    failure there would propagate as a non-nil error from BeginBlock,
+    halt the chain, and freeze the indexer."""
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
         row = cur.fetchone()
@@ -307,75 +264,17 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
         return
     age_sec = time.time() - block_ts
     if age_sec < 120:
-        ok(f"latest block is {age_sec:.0f}s old — chain is live")
+        ok(f"latest block is {age_sec:.0f}s old — chain is live, BeginBlock writes succeeding")
     elif age_sec < 600:
         warn(f"latest block is {age_sec:.0f}s old (slightly stale)")
     else:
-        fail(f"latest block is {age_sec:.0f}s old — chain may have halted")
-
-
-def check_award_cost_cap(backend_api: str) -> None:
-    try:
-        resp = api_get(f"{backend_api}/api/get_chain_config")
-    except Exception as exc:
-        fail(f"/api/get_chain_config error: {exc}")
-        return
-    if resp.status_code != 200:
-        fail(f"/api/get_chain_config returned {resp.status_code}")
-        return
-    try:
-        cfg = resp.json()
-    except Exception:
-        fail("/api/get_chain_config returned non-JSON")
-        return
-
-    awards = cfg.get("award_configs")
-    if not isinstance(awards, list) or not awards:
-        fail(
-            "chain config has no award_configs (would imply fallback to defaults with empty list, or schema regression)"
-        )
-        return
-    ok(f"chain config returned {len(awards)} award_configs")
-
-    names_seen: set[str] = set()
-    for i, entry in enumerate(awards):
-        if not isinstance(entry, dict):
-            fail(f"award_configs[{i}] is not an object: {type(entry).__name__}")
-            continue
-        name = entry.get("name", "")
-        cost_raw = entry.get("cost")
-        try:
-            cost = int(cost_raw)
-        except (TypeError, ValueError):
-            fail(f"award_configs[{i}] cost is not an int: {cost_raw!r}")
-            continue
-        names_seen.add(name)
-        if cost < 0:
-            fail(f"award_configs[{i}] name={name!r} cost={cost} is negative")
-        elif cost > MAX_AWARD_CONFIG_COST_UMIRAGE:
-            fail(
-                f"award_configs[{i}] name={name!r} cost={cost} umirage exceeds "
-                f"MaxAwardConfigCost={MAX_AWARD_CONFIG_COST_UMIRAGE} — new Validate() should reject this"
-            )
-        else:
-            ok(f"award_configs[{i}] name={name!r} cost={cost} umirage within cap")
-
-    missing_defaults = EXPECTED_AWARD_NAMES - names_seen
-    if missing_defaults:
-        warn(
-            f"default AwardConfig names missing: {sorted(missing_defaults)} "
-            f"— chain may be on a custom governance-set table, verify manually"
-        )
-    else:
-        ok(f"all expected default AwardConfig names present: {sorted(EXPECTED_AWARD_NAMES)}")
+        fail(f"latest block is {age_sec:.0f}s old — chain may have halted (check for CONSENSUS_FATAL)")
 
 
 def check_binary_version() -> None:
-    """Cross-check that the frontend version.txt (shipped with this release)
-    reports v1.24.0. This is a cheap proxy for 'we shipped the correct
-    binary' — operators running an older default static bundle will fail
-    this check. It does NOT prove the on-chain binary version; that is
-    implicit from the handler log check above."""
+    """Cross-check that the frontend version.txt (shipped with this
+    release) reports the upgrade target. Cheap proxy for 'we shipped the
+    correct binary'."""
     candidates = [
         Path("/opt/mirage/web/frontend/public/version.txt"),
         Path.cwd() / "web" / "frontend" / "public" / "version.txt",
@@ -414,16 +313,6 @@ def main() -> None:
         print("\nFATAL: Missing required environment variables")
         sys.exit(1)
 
-    backend_api = os.environ.get("BACKEND_API", "").strip() or "http://127.0.0.1:80"
-    ok(f"BACKEND_API = {backend_api}")
-    try:
-        ensure_local_url("BACKEND_API", backend_api)
-        ok("BACKEND_API is local")
-    except Exception as exc:
-        fail(str(exc))
-        print("\nFATAL: Refusing to run against non-local BACKEND_API")
-        sys.exit(1)
-
     section("2. Database Connectivity")
     indexer_conn = None
     backend_conn = None
@@ -444,16 +333,13 @@ def main() -> None:
     section(f"3. Upgrade Handler ({UPGRADE_NAME})")
     check_upgrade_handler_ran()
 
-    section("4. Never-Halt Invariant (no panics from hardened paths)")
-    check_never_halt_invariant()
+    section(f"4. CONSENSUS_FATAL Dormant (no fail-fast paths fired)")
+    check_no_consensus_fatal()
 
     section("5. Chain Liveness (block production post-upgrade)")
     check_indexer_freshness(indexer_conn)
 
-    section("6. Award Cost Cap (MaxAwardConfigCost = 1,000,000 MIRAGE)")
-    check_award_cost_cap(backend_api)
-
-    section("7. Binary Version Cross-Check")
+    section("6. Binary Version Cross-Check")
     check_binary_version()
 
     if backend_conn:

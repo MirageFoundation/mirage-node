@@ -324,17 +324,24 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		return nil
 	}
 
-	// Load profile core to access reserve
+	// Load profile core to access reserve.
+	// FAIL-FAST: a paid user (level >= 1) without a readable profile is a
+	// state inconsistency. Silently skipping the fee deduction on this node
+	// while peers (with intact state) deduct correctly produces a per-node
+	// state divergence -> app-hash divergence on the next consensus round.
+	// Returning the error rejects the tx; the same corrupt bytes on all
+	// peers reject identically, so consensus is preserved.
 	bz, found, err := am.k.GetProfileCore(ctx, owner)
-	if err != nil || !found {
-		ctx.Logger().Warn("deductRelayGasFee: profile not found", "owner", owner)
-		return nil
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_GET deductRelayGasFee owner=%s: %w", owner, err)
+	}
+	if !found {
+		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_MISSING deductRelayGasFee owner=%s level=%d: paid user has no profile", owner, userLevel)
 	}
 
 	var core types.ProfileCore
 	if err := json.Unmarshal(bz, &core); err != nil {
-		ctx.Logger().Warn("deductRelayGasFee: failed to unmarshal profile", "owner", owner, "err", err)
-		return nil
+		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE deductRelayGasFee owner=%s bytes=%d: %w", owner, len(bz), err)
 	}
 
 	// Deduct from reserve
@@ -616,12 +623,24 @@ func (AppModule) ConsensusVersion() uint64 { return 1 }
 
 // BeginBlock runs consensus-critical housekeeping: burn fee collector,
 // maybe-mint + distribute rewards, initialize difficulty on first run,
-// reconcile reserved module profiles, and periodically clean up counters.
+// record the previous block's hash in the on-chain recent-block-hashes
+// window, reconcile reserved module profiles, and periodically clean
+// up counters.
 //
-// INVARIANT: this function MUST NEVER return a non-nil error. A non-nil
-// return from BeginBlock halts the chain on every honest validator. All
-// internal failures are logged and the block proceeds; the error return
-// is retained for API compatibility only and is always nil.
+// FAIL-FAST CONTRACT (consensus-critical writes only):
+// RecordRecentBlockHash failures propagate as a non-nil return, which
+// the SDK turns into a chain halt. The on-chain recent-block-hashes
+// window is consensus-critical state read by the PoW ante; a per-node
+// write failure here would cause per-node tx-acceptance divergence on
+// subsequent blocks, which is strictly worse than a clean halt
+// detected by the auto-recovery watchdog.
+//
+// Non-consensus-critical write failures (BurnAllFromModuleName(fee_collector),
+// MintIfNeeded, SetCurrentDifficulty, ClaimUsername/SetProfileCore for
+// reserved module profiles, CleanupOldCounters) are still logged and
+// the corresponding state simply does not update this block; those
+// failures affect ALL nodes equally (same operation, same in-memory
+// state) and so do not cause divergence.
 func (am AppModule) BeginBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
@@ -641,6 +660,21 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		if err := am.k.SetCurrentDifficulty(sdkCtx, keeper.BaseDifficultySteps); err != nil {
 			sdkCtx.Logger().Error("BeginBlock: SetCurrentDifficulty(base) failed; will retry next block", "err", err)
 		}
+	}
+
+	// Record the previous block's hash into the on-chain recent-block-hashes
+	// window. This is consensus-critical state used by the PoW ante to
+	// validate that an envelope's last_block_hash references a recent
+	// committed block. The window MUST be identical across all nodes; a
+	// state-write failure here causes per-node window divergence -> later
+	// per-node tx-acceptance divergence -> app-hash divergence. Halt the
+	// chain via the propagated error so the auto-recovery watchdog can
+	// state-sync from healthy peers.
+	lastHash := strings.ToLower(hex.EncodeToString(sdkCtx.BlockHeader().LastBlockId.Hash))
+	if err := am.k.RecordRecentBlockHash(sdkCtx, lastHash, uint32(params.BlockHashWindow)); err != nil {
+		sdkCtx.Logger().Error("CONSENSUS_FATAL:RECENT_HASHES_WRITE BeginBlock; halting chain (auto-recovery will state-sync)",
+			"height", sdkCtx.BlockHeight(), "err", err)
+		return err
 	}
 
 	// Ensure reserved module account profiles exist even if they were absent at genesis
@@ -670,9 +704,21 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 
 // EndBlock adjusts PoW difficulty based on message volume and processes subscription renewals.
 //
-// INVARIANT: this function MUST NEVER return a non-nil error. All internal
-// failures are logged; affected state simply does not update this block and
-// is retried on subsequent blocks. Never halt the chain from EndBlock.
+// FAIL-FAST CONTRACT (consensus-critical decode paths only):
+// CONSENSUS_FATAL errors from processSubscriptions (corrupt or missing
+// ProfileCore for an expired subscription) propagate as a non-nil return,
+// which the SDK turns into a chain halt. This is strictly safer than the
+// prior "log and continue" behavior: silently skipping a renewal/expiry on
+// one node while peers process it correctly produces a per-node app-hash
+// divergence that is invisible until the next consensus round. A clean halt
+// is detected by the auto-recovery watchdog and state-synced from healthy
+// peers.
+//
+// Non-consensus-critical write failures (PruneExpiredNonces,
+// SetCurrentDifficulty, SetConsecutiveLowUsage, etc.) are still logged and
+// the corresponding state simply does not update this block; those failures
+// affect ALL nodes equally (same operation, same in-memory state) and so do
+// not cause divergence.
 func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
@@ -683,9 +729,12 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		sdkCtx.Logger().Debug("EndBlock: pruned expired nonces", "count", pruned)
 	}
 
-	// Process subscription renewals/expirations
+	// Process subscription renewals/expirations. CONSENSUS_FATAL decode
+	// failures propagate to halt the chain rather than silently diverge.
 	if err := am.processSubscriptions(sdkCtx, params); err != nil {
-		sdkCtx.Logger().Error("EndBlock: failed to process subscriptions", "err", err)
+		sdkCtx.Logger().Error("EndBlock: processSubscriptions returned error; propagating to halt chain (auto-recovery will state-sync)",
+			"height", sdkCtx.BlockHeight(), "err", err)
+		return err
 	}
 
 	currentDifficulty := am.k.GetCurrentDifficulty(sdkCtx)
@@ -791,19 +840,25 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			continue
 		}
 
-		// Load profile core
+		// Load profile core.
+		// FAIL-FAST: an expired-subscription record without a readable profile
+		// is a state inconsistency. Silently `continue`-ing on one node while
+		// peers (with intact state) renew/expire the subscription produces a
+		// per-node state divergence -> app-hash divergence. Returning the
+		// error from EndBlock halts the chain cleanly so the auto-recovery
+		// watchdog can state-sync from healthy peers, which is strictly
+		// safer than silent divergence.
 		bz, found, err := am.k.GetProfileCore(sdkCtx, sub.Address)
-		if err != nil || !found {
-			sdkCtx.Logger().Error("processSubscriptions: profile not found",
-				"address", sub.Address)
-			continue
+		if err != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:PROFILE_GET processSubscriptions address=%s expiry=%d: %w", sub.Address, sub.Expiry, err)
+		}
+		if !found {
+			return fmt.Errorf("CONSENSUS_FATAL:PROFILE_MISSING processSubscriptions address=%s expiry=%d: subscription index points to missing profile", sub.Address, sub.Expiry)
 		}
 
 		var core types.ProfileCore
 		if err := json.Unmarshal(bz, &core); err != nil {
-			sdkCtx.Logger().Error("processSubscriptions: failed to unmarshal profile",
-				"address", sub.Address, "err", err)
-			continue
+			return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE processSubscriptions address=%s bytes=%d: %w", sub.Address, len(bz), err)
 		}
 
 		// Burn any remaining reserve from module account before renewal/downgrade

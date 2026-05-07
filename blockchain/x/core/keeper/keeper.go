@@ -1073,39 +1073,39 @@ func (k Keeper) ResetAllRelayCredits(ctx sdk.Context) error {
 
 // GetParams returns the current chain parameters.
 //
-// INVARIANT: this function MUST NEVER panic. GetParams is called from
-// BeginBlock, EndBlock, and many message handlers — a panic from any of
-// those paths halts the chain. On corrupt or invalid stored params we log
-// loudly and fall back to DefaultParams so the chain stays live. Operators
-// will see the error immediately and can restore correct params via
-// governance. A single-node disk corruption that yields non-consensus bytes
-// will still fail that node's apphash check (same outcome as if we panicked
-// here), so the fallback does not create a new divergence vector.
+// FAIL-FAST CONTRACT: any read/decode/validate failure panics with a tagged
+// CONSENSUS_FATAL message. Silently substituting DefaultParams() on one node
+// while peers use the stored params produces a single-node app-hash
+// divergence that is invisible until the next consensus round. A panic in
+// BeginBlock/EndBlock halts the validator cleanly so the auto-recovery
+// watchdog can state-sync from healthy peers; a panic in DeliverTx fails the
+// tx loudly with a stack trace operators can grep for. Both outcomes are
+// strictly safer than silent divergence.
+//
+// InitGenesis writes SetParams before any block handler runs, so an empty
+// store post-genesis is also a bug we want to surface, not paper over.
 func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get([]byte("params"))
 	if err != nil {
-		ctx.Logger().Error("core/GetParams: store.Get failed; falling back to defaults to avoid halting the chain",
-			"err", err)
-		return types.DefaultParams()
+		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
-		// Store empty (first boot / genesis) — use defaults.
-		// InitGenesis writes SetParams before any block handler runs, so after
-		// genesis this branch should never fire in production. Keep for test
-		// harnesses and genesis ordering safety.
-		ctx.Logger().Debug("core/GetParams: using default params", "reason", "empty_store")
-		return types.DefaultParams()
+		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_EMPTY",
+			"height", ctx.BlockHeight(), "module", "core")
+		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_EMPTY height=%d: params not initialized (InitGenesis must SetParams)", ctx.BlockHeight()))
 	}
 	if err := k.cdc.Unmarshal(bz, &p); err != nil {
-		ctx.Logger().Error("core/GetParams: stored params failed to unmarshal; falling back to defaults to avoid halting the chain",
-			"err", err, "bytes_len", len(bz))
-		return types.DefaultParams()
+		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_UNMARSHAL",
+			"height", ctx.BlockHeight(), "module", "core", "err", err, "bytes_len", len(bz))
+		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_UNMARSHAL height=%d bytes=%d: %w", ctx.BlockHeight(), len(bz), err))
 	}
 	if err := p.Validate(); err != nil {
-		ctx.Logger().Error("core/GetParams: stored params failed validation; falling back to defaults to avoid halting the chain",
-			"err", err)
-		return types.DefaultParams()
+		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_VALIDATE",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_VALIDATE height=%d: %w", ctx.BlockHeight(), err))
 	}
 	return p
 }
@@ -1120,6 +1120,74 @@ func (k Keeper) SetParams(ctx sdk.Context, p types.Params) error {
 		return err
 	}
 	return store.Set([]byte("params"), bz)
+}
+
+// GetRecentBlockHashes returns the on-chain rolling window of recently
+// committed block hashes (lowercase hex). Most-recent-first. Empty if the
+// chain has not yet recorded any (immediately after genesis or upgrade).
+//
+// FAIL-FAST: store-read or decode failures are returned to the caller and
+// must propagate as tx-rejection errors. Silently returning an empty list
+// would route the tx through a different acceptance branch on this node
+// than on peers, producing the same divergence vector that the on-chain
+// window was introduced to eliminate.
+func (k Keeper) GetRecentBlockHashes(ctx sdk.Context) ([]string, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	bz, err := store.Get([]byte(types.RecentBlockHashesKey))
+	if err != nil {
+		return nil, fmt.Errorf("CONSENSUS_FATAL:RECENT_HASHES_GET height=%d: %w", ctx.BlockHeight(), err)
+	}
+	if len(bz) == 0 {
+		return nil, nil
+	}
+	var hashes []string
+	if err := json.Unmarshal(bz, &hashes); err != nil {
+		return nil, fmt.Errorf("CONSENSUS_FATAL:RECENT_HASHES_DECODE height=%d bytes=%d: %w", ctx.BlockHeight(), len(bz), err)
+	}
+	return hashes, nil
+}
+
+// SetRecentBlockHashes overwrites the on-chain rolling window. Marshal
+// failures bubble up; the caller (BeginBlock) will halt the chain rather
+// than diverge silently.
+func (k Keeper) SetRecentBlockHashes(ctx sdk.Context, hashes []string) error {
+	bz, err := json.Marshal(hashes)
+	if err != nil {
+		return fmt.Errorf("SetRecentBlockHashes: marshal failed: %w", err)
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	return store.Set([]byte(types.RecentBlockHashesKey), bz)
+}
+
+// RecordRecentBlockHash prepends a new block-hash to the rolling window and
+// trims to `window` entries. Called from BeginBlock with the previous block's
+// hash (ctx.BlockHeader().LastBlockId.Hash). The empty hash is ignored — at
+// genesis there is no previous block. Duplicate-of-newest is also ignored to
+// keep the window monotonic.
+func (k Keeper) RecordRecentBlockHash(ctx sdk.Context, hashLower string, window uint32) error {
+	if hashLower == "" {
+		return nil
+	}
+	current, err := k.GetRecentBlockHashes(ctx)
+	if err != nil {
+		return err
+	}
+	if len(current) > 0 && current[0] == hashLower {
+		return nil
+	}
+	next := make([]string, 0, len(current)+1)
+	next = append(next, hashLower)
+	limit := int(window)
+	if limit <= 0 {
+		limit = 60
+	}
+	for i := 0; i < len(current) && len(next) < limit; i++ {
+		if current[i] == hashLower {
+			continue
+		}
+		next = append(next, current[i])
+	}
+	return k.SetRecentBlockHashes(ctx, next)
 }
 
 // moduleAddress returns the module account address for core

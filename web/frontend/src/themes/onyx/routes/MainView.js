@@ -1418,8 +1418,8 @@ const MainView = ({
                                 <WelcomeStatLabel>Users</WelcomeStatLabel>
                             </WelcomeStatItem>
                             <WelcomeStatItem>
-                                <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
-                                <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
+                                <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active7d.toLocaleString()}</WelcomeStatValue>
+                                <WelcomeStatLabel>Active (7d)</WelcomeStatLabel>
                             </WelcomeStatItem>
                             <WelcomeStatItem>
                                 <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>

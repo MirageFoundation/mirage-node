@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -18,13 +19,107 @@ import (
 	// "golang.org/x/crypto/argon2"
 )
 
-// Mock ring buffer for testing
-type mockRing struct {
+// mockHashLookup mimics the on-chain recent-block-hashes window for ante
+// tests. The new validatePoWBytesArgon2 signature takes a callback
+// (deterministic, state-derived); this fixture lets tests pre-seed the
+// "seen" set without needing a real KV store.
+type mockHashLookup struct {
 	seenHashes map[string]bool
+	err        error // when non-nil, simulates a state-read failure
 }
 
-func (m *mockRing) seen(hash string) bool {
-	return m.seenHashes[hash]
+func (m *mockHashLookup) lookup(hash string) (bool, error) {
+	if m.err != nil {
+		return false, m.err
+	}
+	return m.seenHashes[hash], nil
+}
+
+// TestValidatePoWBytesArgon2_RestartEquivalence pins the consensus
+// determinism contract for the recent-block-hash acceptance branch:
+// acceptance MUST be a pure function of (canonical bytes, header,
+// on-chain window). Specifically, a "warm" node and a "freshly-restarted"
+// node MUST produce the same accept/reject decision when the on-chain
+// window contents are identical.
+//
+// Regression target: the previous PowDecorator.recent in-memory cache.
+// After a process restart it was empty; envelopes referencing block hashes
+// that were still inside the warm peers' window were rejected on the
+// restarted node only — a per-node tx-acceptance flip and therefore an
+// app-hash divergence.
+func TestValidatePoWBytesArgon2_RestartEquivalence(t *testing.T) {
+	canonical := []byte("canonical_bytes_for_restart_equivalence_test")
+	envelopeHash, _ := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
+	envelopeHashHex := hex.EncodeToString(envelopeHash)
+	currentLastID := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	const minDiff = uint64(8)
+	const step = 0.25
+
+	findValidNonce := func(seenSet map[string]bool) uint64 {
+		ring := &mockHashLookup{seenHashes: seenSet}
+		var n uint64
+		for n = 0; n < 100_000; n++ {
+			if err := validatePoWBytesArgon2(canonical, envelopeHash, 0, n, currentLastID, ring.lookup, false, 0, 0, 0, 0, 0, minDiff, step); err == nil {
+				return n
+			}
+		}
+		t.Fatal("could not find valid PoW within 100k nonces; raise minDiff sanity")
+		return 0
+	}
+
+	// Warm node: window contains the envelope's block hash.
+	warm := &mockHashLookup{seenHashes: map[string]bool{envelopeHashHex: true}}
+	nonce := findValidNonce(warm.seenHashes)
+
+	// Acceptance on a warm node.
+	require.NoError(t,
+		validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, warm.lookup, false, 0, 0, 0, 0, 0, minDiff, step),
+		"warm node accepts envelope referencing in-window hash")
+
+	// Restarted node viewing the SAME on-chain window: same accept.
+	restarted := &mockHashLookup{seenHashes: map[string]bool{envelopeHashHex: true}}
+	require.NoError(t,
+		validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, restarted.lookup, false, 0, 0, 0, 0, 0, minDiff, step),
+		"restarted node sees same on-chain window -> same acceptance")
+
+	// Node whose on-chain window does NOT contain the hash: same reject on
+	// EVERY node (no in-memory cache to silently rescue it).
+	missing := &mockHashLookup{seenHashes: map[string]bool{}}
+	err := validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, missing.lookup, false, 0, 0, 0, 0, 0, minDiff, step)
+	require.Error(t, err, "node whose on-chain window omits the hash MUST reject (no silent in-memory rescue)")
+	require.Contains(t, err.Error(), "invalid last_block_hash")
+}
+
+// TestValidatePoWBytesArgon2_PropagatesLookupError: when the on-chain window
+// read itself fails, validate must return a wrapped error rather than
+// treating the missing window as "not seen" (which would leak a state-read
+// failure as a tx-rejection on this node only -> divergence).
+func TestValidatePoWBytesArgon2_PropagatesLookupError(t *testing.T) {
+	canonical := []byte("canonical_bytes_for_lookup_error")
+	envelopeHash, _ := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
+	currentLastID := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	const minDiff = uint64(8)
+	const step = 0.25
+
+	// Find a PoW that satisfies the difficulty (the lookup is exercised
+	// only after the difficulty check passes).
+	good := &mockHashLookup{seenHashes: map[string]bool{hex.EncodeToString(envelopeHash): true}}
+	var nonce uint64
+	for nonce = 0; nonce < 100_000; nonce++ {
+		if err := validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, good.lookup, false, 0, 0, 0, 0, 0, minDiff, step); err == nil {
+			break
+		}
+	}
+	require.Less(t, nonce, uint64(100_000), "could not find valid PoW")
+
+	// Now exercise the lookup-error path with the same nonce.
+	failing := &mockHashLookup{err: fmt.Errorf("simulated state-read failure")}
+	err := validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, failing.lookup, false, 0, 0, 0, 0, 0, minDiff, step)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "recent-block-hash window read failed",
+		"lookup errors must be wrapped, not silently treated as 'not seen'")
 }
 
 func TestComputeDifficultyFactor(t *testing.T) {
@@ -109,7 +204,7 @@ func TestValidatePoW(t *testing.T) {
 	step := 0.25
 	lastBlockHash, _ := hex.DecodeString("0000000000000000000000000000000000000000000000000000000000000000")
 	canonical := []byte("test_canonical_bytes")
-	ring := &mockRing{seenHashes: make(map[string]bool)}
+	ring := &mockHashLookup{seenHashes: make(map[string]bool)}
 
 	// Helper to find a valid nonce
 	findNonce := func(diff uint64) uint64 {
@@ -139,7 +234,7 @@ func TestValidatePoW(t *testing.T) {
 			// We need to generate a valid input.
 
 			// Let's just try to find one.
-			err := validatePoWBytesArgon2(canonical, lastBlockHash, diff, nonce, "", ring, true, diff, 0, 0, 0, 0, minDiff, step)
+			err := validatePoWBytesArgon2(canonical, lastBlockHash, diff, nonce, "", ring.lookup, true, diff, 0, 0, 0, 0, minDiff, step)
 			if err == nil {
 				return nonce
 			}
@@ -149,16 +244,16 @@ func TestValidatePoW(t *testing.T) {
 
 	// 1. Valid PoW at Diff 0
 	nonce0 := findNonce(0)
-	err := validatePoWBytesArgon2(canonical, lastBlockHash, 0, nonce0, "", ring, true, 0, 0, 0, 0, 0, minDiff, step)
+	err := validatePoWBytesArgon2(canonical, lastBlockHash, 0, nonce0, "", ring.lookup, true, 0, 0, 0, 0, 0, minDiff, step)
 	require.NoError(t, err, "Should accept valid PoW at diff 0")
 
 	// 2. Valid PoW at Diff 1
 	nonce1 := findNonce(1)
-	err = validatePoWBytesArgon2(canonical, lastBlockHash, 1, nonce1, "", ring, true, 1, 0, 0, 0, 0, minDiff, step)
+	err = validatePoWBytesArgon2(canonical, lastBlockHash, 1, nonce1, "", ring.lookup, true, 1, 0, 0, 0, 0, minDiff, step)
 	require.NoError(t, err, "Should accept valid PoW at diff 1")
 
 	// 3. Invalid PoW (wrong nonce)
-	err = validatePoWBytesArgon2(canonical, lastBlockHash, 0, nonce0+1, "", ring, true, 0, 0, 0, 0, 0, minDiff+10, step) // High minDiff to ensure failure
+	err = validatePoWBytesArgon2(canonical, lastBlockHash, 0, nonce0+1, "", ring.lookup, true, 0, 0, 0, 0, 0, minDiff+10, step) // High minDiff to ensure failure
 	require.Error(t, err, "Should reject invalid PoW")
 
 	// 4. Replay Attack (same nonce, same block hash)
@@ -192,7 +287,7 @@ func TestValidatePoW(t *testing.T) {
 
 	// Test: Change canonical bytes -> PoW should fail
 	canonical2 := []byte("test_canonical_bytes_2")
-	err = validatePoWBytesArgon2(canonical2, lastBlockHash, 0, nonce0, "", ring, true, 0, 0, 0, 0, 0, minDiff, step)
+	err = validatePoWBytesArgon2(canonical2, lastBlockHash, 0, nonce0, "", ring.lookup, true, 0, 0, 0, 0, 0, minDiff, step)
 	require.Error(t, err, "Should reject PoW if canonical bytes change")
 }
 

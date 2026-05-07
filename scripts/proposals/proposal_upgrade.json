@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.24.0 (Security hardening: never-halt invariant, validator mint isolation, award cost cap, cancel-unbonding ante rule)",
-    "summary": "Hardens BeginBlock / EndBlock / MintIfNeeded / GetParams so runtime state-write or read failures are logged and the chain continues instead of halting. Isolates per-validator mint distribution so an invalid validator operator address or a failed send/burn on one recipient never blocks minting for the rest (supply is kept neutral via burn of the skipped share, with stuck-in-module accounting if burn also fails). Adds an upper bound of 1,000,000 MIRAGE to AwardConfig.Cost in params validation. Extends DisableDelegatorStakingDecorator to reject MsgCancelUnbondingDelegation from non-self accounts (same rule as MsgUndelegate). No on-chain state migration and no new store keys.",
+    "title": "Upgrade to v1.25.0 (Consensus determinism hardening: fail-fast on params/profile decode failures, on-chain recent-block-hashes window for PoW)",
+    "summary": "Replaces the previous never-halt invariant with a fail-fast contract for consensus-critical decode paths. core.GetParams now panics with CONSENSUS_FATAL on store-get / empty / unmarshal / validate failure instead of silently substituting DefaultParams (the original mirage.talk divergence vector at height 4,349,996). deductRelayGasFee, processSubscriptions, and the PoW ante (getUserLevel / checkReserveOrDowngrade) now return tagged CONSENSUS_FATAL errors on profile decode/missing failures rather than silently routing through the wrong code branch. Adds an on-chain rolling window of recently-committed block hashes (new state key recent_block_hashes, written each BeginBlock from ctx.BlockHeader().LastBlockId.Hash, length bounded by params.BlockHashWindow) and replaces the per-process in-memory PoW recent-hash cache with reads from this window — eliminating restart-vs-warm-node divergence. EndBlock now propagates iterator failures from GetExpiredSubscriptions instead of silently skipping renewals. No new chain params; no genesis migration. Brief UX dip: the on-chain window starts empty at the upgrade height and refills over BlockHashWindow blocks; PoW envelopes referencing pre-upgrade block hashes will be rejected for that period and clients will automatically retry with the new last_block_hash.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.24.0",
+                "name": "v1.25.0",
                 "height": "T+50",
                 "info": ""
             }

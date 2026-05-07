@@ -35,12 +35,9 @@ _listener_lock_fp = None
 TRENDING_POLL_INTERVAL_SECONDS = 60
 TRENDING_UNIQUE_COMMENTERS_THRESHOLD = 10
 TRENDING_POST_MAX_AGE_SECONDS = 24 * 3600
-TRENDING_TIME_MATCH_TOLERANCE_MINUTES = 1
-# Per-user escalating cooldown for trending pushes. The minute-of-day match
-# means the earliest possible re-fire is ~24h after last_seen anyway, so the
-# floor here starts at 24h (anything shorter would be unreachable in practice).
+TRENDING_TIME_MATCH_TOLERANCE_MINUTES = 60
 TRENDING_LEVEL_WAITS = [
-    24 * 3600,
+    8 * 3600,
     3 * 86400,
     7 * 86400,
     14 * 86400,
@@ -695,6 +692,12 @@ def _poll_trending() -> int:
                   AND EXISTS (
                       SELECT 1 FROM push_tokens pt WHERE LOWER(pt.owner) = LOWER(u.owner)
                   )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM inbox_events ie
+                      WHERE LOWER(ie.recipient) = LOWER(u.owner)
+                        AND ie.event_type = 'trending'
+                        AND LOWER(ie.tx_hash) = LOWER(%s)
+                  )
                   AND (
                       ABS(((u.last_seen_at / 60) %% 1440) - %s) <= %s
                       OR ABS(((u.last_seen_at / 60) %% 1440) - %s) >= 1440 - %s
@@ -706,6 +709,7 @@ def _poll_trending() -> int:
                     txhash_lc,
                     author_lc,
                     now_ts - min_inactive,
+                    txhash_lc,
                     minute_of_day_now,
                     tolerance,
                     minute_of_day_now,

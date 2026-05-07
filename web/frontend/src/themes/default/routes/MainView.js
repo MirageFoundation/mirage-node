@@ -390,7 +390,7 @@ const InviteModalHeroIcon = styled.div`
 // AuthPageShell so the invite modal feels like a first-party Mirage surface).
 const MiragePalmTreeIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 527.41 593.64" aria-hidden="true">
-        <path d="M85.03,197.11c-.77-.41-1.02,1.23-1.27,1.98-.89,4.66-1.97,9.3-2.97,13.74-4.2,16.58-.74,36.06-12.57,49.79-19.98,21.05-35.86,46.61-49.24,72.25-2.54,4.08-5,14.71-9.37,11.16-10.87-20.06-10.77-56.33-8.13-80.05,8.11-74.35,64.71-133.17,140.39-137.47,25.49-1.82,51.61,1.9,75.05,12.03,4.28,1.83,3.56-.9,1.44-3.38-14.47-18.53-32.09-34.46-50.45-48.97-6.85-5.97,2.67-9.75,4.16-15.29-.57-2.2-4.03-.86-6.05-.95-5.01.31-11.57.58-15.54-.33-9.76-3.12-17.1-10.88-26.25-15.46-2.83-1.81-7.17-3.15-8.24-6.48-.16-4.05,3.86-8.93,5.99-12.27,4.72-5.67.85-5.42-4.33-3.97-6.1,1.49-12.2,4.27-18.51,4.21-8.89-.62-19.71-5.44-28.83-7.13-10.53-2.21-21.48-3.4-32.19-4.48-1.55-.15-3.18-.2-4.71-.48-1.54-.26-2.54-.96-2.43-1.92.18-1.21,1.22-2.15,2.13-2.92,12.76-9.25,31.39-14.68,45.47-17.65,87.21-17.38,152.37,47.81,181.95,123.22.62.03,1.13-1.02,1.55-2.36.56-1.92,1.07-3.92,1.74-5.79C288.75,45.92,362.99-15.54,441.97,3.5c13.15,2.8,26.57,8.26,38.43,14.69,3.05,2.01,5.62,3.08,6.83,5.59.2.77-.49,1.33-1.99,1.58-1.8.29-4.39.29-6.49.37-27.45.93-54.01,10.14-75.58,27.36-5.24,4.36-12.11,1.67-18.25.55-3.09-.75-6.54-.66-10.08-.72-2.63.05-6.46-.29-8.81.48-.61.3-.68.76-.27,1.32,3.71,3.17,10.62,6.8,13.43,10.29,1.92,2.1.07,4.3-1.96,5.72-27.33,20.52-55.82,41.74-78,68.06-3.59,4.29-1.27,4.95,3.04,2.8,101.2-46.59,244.69,12.48,222.91,138.05-1.12,4.66-2.51,9.22-4.48,13.59-1.59,3.35-3.35,5.73-7.15,2.78-8.67-6.91-16.19-15.31-24-23.21-13.03-13.67-27.22-26.21-42.42-37.49-9.29-6.31-15.87-10.04-16.58-22.27-1.12-8.18-3.49-16.18-5.39-24.18-.61-2.73-1.76-3.87-3.15-.85-2.97,5.04-4.39,22.37-9.19,23.78-4.76.73-8.88-4.31-13.09-6-39.7-21.77-83.93-26.94-128.72-25.07-4.85.08-6.56,4.21-7.78,8.3-39.34,131.64-2.05,288.21,88.55,390.43,5.01,4.53,6.1,11.99-3.63,13.79-35.93.13-72.02.82-107.94-.04-9-.37-19.77,1.45-23.34-9.2-21.22-77.97-26.49-159.48-23.41-240.19,1.04-22.78,3.56-45.49,8.02-67.89,6.36-31.78,16.54-63.02,32.21-91.36,2.95-4.91-2.26-4.82-5.58-4.85-8.36-.08-17.58.72-26.01,1.57-38.68,4.18-71.21,22.85-100.3,47.6-2.41,1.7-5.2,5.72-8.19,5.7-2.89-1.86-2.41-6.9-3.35-9.94-1.36-7.2-2.46-14.46-3.74-21.64-.48-1.8-.37-4.37-1.43-5.85l-.05-.05Z"/>
+        <path d="M85.03,197.11c-.77-.41-1.02,1.23-1.27,1.98-.89,4.66-1.97,9.3-2.97,13.74-4.2,16.58-.74,36.06-12.57,49.79-19.98,21.05-35.86,46.61-49.24,72.25-2.54,4.08-5,14.71-9.37,11.16-10.87-20.06-10.77-56.33-8.13-80.05,8.11-74.35,64.71-133.17,140.39-137.47,25.49-1.82,51.61,1.9,75.05,12.03,4.28,1.83,3.56-.9,1.44-3.38-14.47-18.53-32.09-34.46-50.45-48.97-6.85-5.97,2.67-9.75,4.16-15.29-.57-2.2-4.03-.86-6.05-.95-5.01.31-11.57.58-15.54-.33-9.76-3.12-17.1-10.88-26.25-15.46-2.83-1.81-7.17-3.15-8.24-6.48-.16-4.05,3.86-8.93,5.99-12.27,4.72-5.67.85-5.42-4.33-3.97-6.1,1.49-12.2,4.27-18.51,4.21-8.89-.62-19.71-5.44-28.83-7.13-10.53-2.21-21.48-3.4-32.19-4.48-1.55-.15-3.18-.2-4.71-.48-1.54-.26-2.54-.96-2.43-1.92.18-1.21,1.22-2.15,2.13-2.92,12.76-9.25,31.39-14.68,45.47-17.65,87.21-17.38,152.37,47.81,181.95,123.22.62.03,1.13-1.02,1.55-2.36.56-1.92,1.07-3.92,1.74-5.79C288.75,45.92,362.99-15.54,441.97,3.5c13.15,2.8,26.57,8.26,38.43,14.69,3.05,2.01,5.62,3.08,6.83,5.59.2.77-.49,1.33-1.99,1.58-1.8.29-4.39.29-6.49.37-27.45.93-54.01,10.14-75.58,27.36-5.24,4.36-12.11,1.67-18.25.55-3.09-.75-6.54-.66-10.08-.72-2.63.05-6.46-.29-8.81.48-.61.3-.68.76-.27,1.32,3.71,3.17,10.62,6.8,13.43,10.29,1.92,2.1.07,4.3-1.96,5.72-27.33,20.52-55.82,41.74-78,68.06-3.59,4.29-1.27,4.95,3.04,2.8,101.2-46.59,244.69,12.48,222.91,138.05-1.12,4.66-2.51,9.22-4.48,13.59-1.59,3.35-3.35,5.73-7.15,2.78-8.67-6.91-16.19-15.31-24-23.21-13.03-13.67-27.22-26.21-42.42-37.49-9.29-6.31-15.87-10.04-16.58-22.27-1.12-8.18-3.49-16.18-5.39-24.18-.61-2.73-1.76-3.87-3.15-.85-2.97,5.04-4.39,22.37-9.19,23.78-4.76.73-8.88-4.31-13.09-6-39.7-21.77-83.93-26.94-128.72-25.07-4.85.08-6.56,4.21-7.78,8.3-39.34,131.64-2.05,288.21,88.55,390.43,5.01,4.53,6.1,11.99-3.63,13.79-35.93.13-72.02.82-107.94-.04-9-.37-19.77,1.45-23.34-9.2-21.22-77.97-26.49-159.48-23.41-240.19,1.04-22.78,3.56-45.49,8.02-67.89,6.36-31.78,16.54-63.02,32.21-91.36,2.95-4.91-2.26-4.82-5.58-4.85-8.36-.08-17.58.72-26.01,1.57-38.68,4.18-71.21,22.85-100.3,47.6-2.41,1.7-5.2,5.72-8.19,5.7-2.89-1.86-2.41-6.9-3.35-9.94-1.36-7.2-2.46-14.46-3.74-21.64-.48-1.8-.37-4.37-1.43-5.85l-.05-.05Z" />
     </svg>
 );
 
@@ -521,7 +521,7 @@ const InviteCodeCopyIcon = styled.button`
 
     &:hover {
         background: ${({ theme, $copied }) =>
-            $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
         border-color: ${({ theme }) => theme.colors.borderStrong};
     }
 
@@ -570,9 +570,9 @@ const InviteActionButton = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({ theme, $copied }) =>
-            $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
         border-color: ${({ theme, $copied }) =>
-            $copied ? theme.colors.buttonSuccessBg : theme.colors.borderStrong};
+        $copied ? theme.colors.buttonSuccessBg : theme.colors.borderStrong};
     }
 
     &:disabled {
@@ -1653,294 +1653,294 @@ const MainView = ({
                 <title>{pageTitle} | Mirage</title>
             </Helmet>
             <FeedRailRow $feedViewMode={feedViewMode}>
-            <FeedCol>
-                {header}
-                <MainFeedPanel>
-                    <ModernPostFeed>
+                <FeedCol>
+                    {header}
+                    <MainFeedPanel>
+                        <ModernPostFeed>
 
-                        {isLoggedIn && isCurrentTopic && showHero && !isUrlTopicBlocked && <TopicHeroCard>
-                            <TopicHeroHeader>
-                                <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
-                                <HomeFeedModeInline>
-                                    <HomeFeedModeSelect value={homeSortMode} onChange={e => {
-                                        const mode = e.target.value;
-                                        setHomeSortMode(mode);
-                                        Storage.save('home_sort_mode', mode);
-                                    }}>
-                                        <option value="magic">Magic</option>
-                                        <option value="newest">Newest</option>
-                                    </HomeFeedModeSelect>
-                                    <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
-                                        <option value="large">Large</option>
-                                        {!isMobile && <option value="compact">Compact</option>}
-                                        <option value="media">Media</option>
-                                    </HomeFeedModeSelect>
-                                    <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" minWidth="5.5rem" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
-                                        const topicName = urlTopic;
-                                        if (!topicName) return;
-                                        const key = topicKeyLower;
-                                        if (!key) return;
-                                        if (isTopicPending(key)) return;
-                                        try {
-                                            if (isTopicFollowing) {
-                                                await unsubscribe(viewerAddress || 'guest', topicName);
-                                                setFollowedTopicsSet(prev => {
-                                                    const next = new Set(prev);
-                                                    next.delete(key);
-                                                    return next;
-                                                });
-                                            } else {
-                                                await subscribe(viewerAddress || 'guest', topicName);
-                                                setFollowedTopicsSet(prev => new Set([...prev, key]));
-                                            }
-                                            invalidateTopicsCache();
-                                        } catch (_) {/* noop */ }
-                                    }}>
-                                        {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Unfollow' : 'Following' : 'Follow'}
-                                    </Button>
-                                </HomeFeedModeInline>
-                            </TopicHeroHeader>
-                            <TopicHeroDescription>
-                                Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
-                            </TopicHeroDescription>
-                        </TopicHeroCard>}
-
-                        {(isLoggedIn && (urlTopic === 'home' || urlTopic === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
-                            {/* Keep only the feed title row at the top for home/following. */}
-                            <HomeFeedTitleBar role="region" aria-label={`${urlTopic} feed header`}>
-                                <HomeFeedHeaderRow>
-                                    <HomeFeedInfoTitle>
-                                        {urlTopic === 'home' ? 'Home' : 'Following'}
-                                    </HomeFeedInfoTitle>
+                            {isLoggedIn && isCurrentTopic && showHero && !isUrlTopicBlocked && <TopicHeroCard>
+                                <TopicHeroHeader>
+                                    <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
                                     <HomeFeedModeInline>
-                                        <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
-                                        <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
+                                        <HomeFeedModeSelect value={homeSortMode} onChange={e => {
+                                            const mode = e.target.value;
+                                            setHomeSortMode(mode);
+                                            Storage.save('home_sort_mode', mode);
+                                        }}>
+                                            <option value="magic">Magic</option>
+                                            <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                        <HomeFeedModeSelect value={cardSize} onChange={e => handleCardSizeChange(e.target.value)}>
+                                            <option value="large">Large</option>
+                                            {!isMobile && <option value="compact">Compact</option>}
+                                            <option value="media">Media</option>
+                                        </HomeFeedModeSelect>
+                                        <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" minWidth="5.5rem" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
+                                            const topicName = urlTopic;
+                                            if (!topicName) return;
+                                            const key = topicKeyLower;
+                                            if (!key) return;
+                                            if (isTopicPending(key)) return;
+                                            try {
+                                                if (isTopicFollowing) {
+                                                    await unsubscribe(viewerAddress || 'guest', topicName);
+                                                    setFollowedTopicsSet(prev => {
+                                                        const next = new Set(prev);
+                                                        next.delete(key);
+                                                        return next;
+                                                    });
+                                                } else {
+                                                    await subscribe(viewerAddress || 'guest', topicName);
+                                                    setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                                }
+                                                invalidateTopicsCache();
+                                            } catch (_) {/* noop */ }
+                                        }}>
+                                            {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Unfollow' : 'Following' : 'Follow'}
+                                        </Button>
                                     </HomeFeedModeInline>
-                                </HomeFeedHeaderRow>
-                            </HomeFeedTitleBar>
-                            {/* Invite-only banner - shown only when invite codes are enabled on this node */}
-                            {inviteCodesEnabled && <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
-                                <InviteHeaderButton
-                                    type="button"
-                                    onClick={toggleInviteBanner}
-                                    aria-expanded={!inviteBannerCollapsed}
-                                >
-                                    <InviteTitleRow>
-                                        <InviteIconTile aria-hidden="true">🎁</InviteIconTile>
-                                        <InviteTitleStack>
-                                            <InviteTitleText>Invite Codes</InviteTitleText>
-                                            <InviteSubtitleText>
-                                                {availableCodeCount > 0
-                                                    ? `${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} available`
-                                                    : 'No codes left'}
-                                            </InviteSubtitleText>
-                                        </InviteTitleStack>
-                                    </InviteTitleRow>
-                                    <InviteHeaderRight>
-                                        {availableCodeCount > 0 && (
-                                            <InviteCountBadge>{availableCodeCount}</InviteCountBadge>
-                                        )}
-                                        <InviteChevron $collapsed={inviteBannerCollapsed} aria-hidden="true" />
-                                    </InviteHeaderRight>
-                                </InviteHeaderButton>
-                                {!inviteBannerCollapsed && <InviteContent>
-                                    <InviteSubtitleBody>
-                                        Mirage is now invite-only — because great conversations require great people!
-                                        {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
-                                    </InviteSubtitleBody>
-                                    <InviteBannerButton
+                                </TopicHeroHeader>
+                                <TopicHeroDescription>
+                                    Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
+                                </TopicHeroDescription>
+                            </TopicHeroCard>}
+
+                            {(isLoggedIn && (urlTopic === 'home' || urlTopic === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
+                                {/* Keep only the feed title row at the top for home/following. */}
+                                <HomeFeedTitleBar role="region" aria-label={`${urlTopic} feed header`}>
+                                    <HomeFeedHeaderRow>
+                                        <HomeFeedInfoTitle>
+                                            {urlTopic === 'home' ? 'Home' : 'Following'}
+                                        </HomeFeedInfoTitle>
+                                        <HomeFeedModeInline>
+                                            <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
+                                            <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
+                                        </HomeFeedModeInline>
+                                    </HomeFeedHeaderRow>
+                                </HomeFeedTitleBar>
+                                {/* Invite-only banner - shown only when invite codes are enabled on this node */}
+                                {inviteCodesEnabled && <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
+                                    <InviteHeaderButton
                                         type="button"
-                                        onClick={handleOpenInviteModal}
-                                        disabled={availableCodeCount === 0}
+                                        onClick={toggleInviteBanner}
+                                        aria-expanded={!inviteBannerCollapsed}
                                     >
-                                        {availableCodeCount > 0 && <HiShare aria-hidden="true" />}
-                                        {availableCodeCount > 0
-                                            ? 'Share Invite Code'
-                                            : 'No Codes Left'}
-                                    </InviteBannerButton>
-                                </InviteContent>}
-                            </InviteOnlyBanner>}
+                                        <InviteTitleRow>
+                                            <InviteIconTile aria-hidden="true">🎁</InviteIconTile>
+                                            <InviteTitleStack>
+                                                <InviteTitleText>Invite Codes</InviteTitleText>
+                                                <InviteSubtitleText>
+                                                    {availableCodeCount > 0
+                                                        ? `${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} available`
+                                                        : 'No codes left'}
+                                                </InviteSubtitleText>
+                                            </InviteTitleStack>
+                                        </InviteTitleRow>
+                                        <InviteHeaderRight>
+                                            {availableCodeCount > 0 && (
+                                                <InviteCountBadge>{availableCodeCount}</InviteCountBadge>
+                                            )}
+                                            <InviteChevron $collapsed={inviteBannerCollapsed} aria-hidden="true" />
+                                        </InviteHeaderRight>
+                                    </InviteHeaderButton>
+                                    {!inviteBannerCollapsed && <InviteContent>
+                                        <InviteSubtitleBody>
+                                            Mirage is now invite-only — because great conversations require great people!
+                                            {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
+                                        </InviteSubtitleBody>
+                                        <InviteBannerButton
+                                            type="button"
+                                            onClick={handleOpenInviteModal}
+                                            disabled={availableCodeCount === 0}
+                                        >
+                                            {availableCodeCount > 0 && <HiShare aria-hidden="true" />}
+                                            {availableCodeCount > 0
+                                                ? 'Share Invite Code'
+                                                : 'No Codes Left'}
+                                        </InviteBannerButton>
+                                    </InviteContent>}
+                                </InviteOnlyBanner>}
 
-                            {/* Quest hero card - shown below invite codes on home/following */}
-                            {inviteCodesEnabled && questsEnabled && <HomeSectionSpacer />}
-                            {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
-                        </FeedHeroColumn>}
+                                {/* Quest hero card - shown below invite codes on home/following */}
+                                {inviteCodesEnabled && questsEnabled && <HomeSectionSpacer />}
+                                {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
+                            </FeedHeroColumn>}
 
-                        {/* Android app banner - shown once for Android users until dismissed */}
-                        {isLoggedIn && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
-                            <AndroidHeroTitle>
-                                <AndroidHeroEmoji><FaGooglePlay aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on Play Store
-                            </AndroidHeroTitle>
-                            <AndroidHeroDescription>
-                                Get the native Android app for a faster, smoother experience with push notifications and offline support.
-                            </AndroidHeroDescription>
-                            <AndroidHeroButtons>
-                                <AndroidHeroButton href="https://play.google.com/store/apps/details?id=talk.mirage.mobile" target="_blank" rel="noopener noreferrer">
-                                    <FaGooglePlay aria-hidden="true" /> Get the app
-                                </AndroidHeroButton>
-                                <AndroidHeroDismiss onClick={dismissAndroidBanner}>
-                                    No thanks
-                                </AndroidHeroDismiss>
-                            </AndroidHeroButtons>
-                        </AndroidAppHero>}
+                            {/* Android app banner - shown once for Android users until dismissed */}
+                            {isLoggedIn && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">
+                                <AndroidHeroTitle>
+                                    <AndroidHeroEmoji><FaGooglePlay aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on Play Store
+                                </AndroidHeroTitle>
+                                <AndroidHeroDescription>
+                                    Get the native Android app for a faster, smoother experience with push notifications and offline support.
+                                </AndroidHeroDescription>
+                                <AndroidHeroButtons>
+                                    <AndroidHeroButton href="https://play.google.com/store/apps/details?id=talk.mirage.mobile" target="_blank" rel="noopener noreferrer">
+                                        <FaGooglePlay aria-hidden="true" /> Get the app
+                                    </AndroidHeroButton>
+                                    <AndroidHeroDismiss onClick={dismissAndroidBanner}>
+                                        No thanks
+                                    </AndroidHeroDismiss>
+                                </AndroidHeroButtons>
+                            </AndroidAppHero>}
 
-                        {isLoggedIn && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
-                            <AndroidHeroTitle>
-                                <AndroidHeroEmoji><FaApple aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on App Store
-                            </AndroidHeroTitle>
-                            <AndroidHeroDescription>
-                                Get the native iOS app for a faster, smoother experience with push notifications and offline support.
-                            </AndroidHeroDescription>
-                            <AndroidHeroButtons>
-                                <IPhoneHeroButton href="https://apps.apple.com/us/app/mirage-speak-your-mind/id6757619038" target="_blank" rel="noopener noreferrer">
-                                    <FaApple aria-hidden="true" /> Get the app
-                                </IPhoneHeroButton>
-                                <AndroidHeroDismiss onClick={dismissIPhoneBanner}>
-                                    No thanks
-                                </AndroidHeroDismiss>
-                            </AndroidHeroButtons>
-                        </IPhoneAppHero>}
+                            {isLoggedIn && showIPhoneBanner && <IPhoneAppHero role="region" aria-label="iPhone app available">
+                                <AndroidHeroTitle>
+                                    <AndroidHeroEmoji><FaApple aria-hidden="true" /></AndroidHeroEmoji> Mirage is available on App Store
+                                </AndroidHeroTitle>
+                                <AndroidHeroDescription>
+                                    Get the native iOS app for a faster, smoother experience with push notifications and offline support.
+                                </AndroidHeroDescription>
+                                <AndroidHeroButtons>
+                                    <IPhoneHeroButton href="https://apps.apple.com/us/app/mirage-speak-your-mind/id6757619038" target="_blank" rel="noopener noreferrer">
+                                        <FaApple aria-hidden="true" /> Get the app
+                                    </IPhoneHeroButton>
+                                    <AndroidHeroDismiss onClick={dismissIPhoneBanner}>
+                                        No thanks
+                                    </AndroidHeroDismiss>
+                                </AndroidHeroButtons>
+                            </IPhoneAppHero>}
 
-                        {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
-                        {/* Consent prompt — always show regardless of theme.caps.showHeroCards so
+                            {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
+                            {/* Consent prompt — always show regardless of theme.caps.showHeroCards so
                             the default theme (which disables hero cards) still surfaces it. */}
-                        {/* Match the Invite↔Quest spacing (HomeSectionSpacer) so the
+                            {/* Match the Invite↔Quest spacing (HomeSectionSpacer) so the
                             Quest↔NSFW gap reads identical to the Invite↔Quest gap. */}
-                        {isLoggedIn && urlTopic === 'home' && showNsfwHero && questsEnabled && <HomeSectionSpacer />}
-                        {isLoggedIn && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
-                            <NsfwHeroHeader>
-                                <NsfwHeroIconTile aria-hidden="true">
-                                    <NsfwHeroEmoji>🔞</NsfwHeroEmoji>
-                                </NsfwHeroIconTile>
-                                <NsfwHeroTitle>Allow adult content?</NsfwHeroTitle>
-                            </NsfwHeroHeader>
-                            <NsfwHeroDescription>
-                                Mirage is uncensored and may include <strong>adult content</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
-                            </NsfwHeroDescription>
-                            <NsfwHeroButtons>
-                                <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>
-                                    Show everything
-                                </NsfwHeroButton>
-                                <NsfwHeroButton $variant="no" onClick={() => handleNsfwChoice(false)}>
-                                    Keep it clean
-                                </NsfwHeroButton>
-                            </NsfwHeroButtons>
-                            <NsfwHeroNote>
-                                You can change this anytime in <Link to="/settings" style={{
-                                    color: 'inherit',
-                                    textDecoration: 'underline'
-                                }}>Settings</Link>.
-                            </NsfwHeroNote>
-                        </NsfwWelcomeHero>}
+                            {isLoggedIn && urlTopic === 'home' && showNsfwHero && questsEnabled && <HomeSectionSpacer />}
+                            {isLoggedIn && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
+                                <NsfwHeroHeader>
+                                    <NsfwHeroIconTile aria-hidden="true">
+                                        <NsfwHeroEmoji>🔞</NsfwHeroEmoji>
+                                    </NsfwHeroIconTile>
+                                    <NsfwHeroTitle>Allow adult content?</NsfwHeroTitle>
+                                </NsfwHeroHeader>
+                                <NsfwHeroDescription>
+                                    Mirage is uncensored and may include <strong>adult content</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
+                                </NsfwHeroDescription>
+                                <NsfwHeroButtons>
+                                    <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>
+                                        Show everything
+                                    </NsfwHeroButton>
+                                    <NsfwHeroButton $variant="no" onClick={() => handleNsfwChoice(false)}>
+                                        Keep it clean
+                                    </NsfwHeroButton>
+                                </NsfwHeroButtons>
+                                <NsfwHeroNote>
+                                    You can change this anytime in <Link to="/settings" style={{
+                                        color: 'inherit',
+                                        textDecoration: 'underline'
+                                    }}>Settings</Link>.
+                                </NsfwHeroNote>
+                            </NsfwWelcomeHero>}
 
-                        {/* Home/Following header cards moved to the very top of the feed
+                            {/* Home/Following header cards moved to the very top of the feed
                          * (see block rendered just after <TopicHeroCard>). */}
 
-                        {/* Blocked topic state — takes precedence over loading/empty states */}
-                        {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked topic">
-                            <BlockedTopicIcon aria-hidden="true">
-                                <HiNoSymbol />
-                            </BlockedTopicIcon>
-                            <BlockedTopicTitle>#{urlTopic} is blocked</BlockedTopicTitle>
-                            <BlockedTopicMessage>
-                                Posts tagged with this topic are hidden from your feeds. Unblock to see them again — you can always re-block it later from any post header or the Blocks page.
-                            </BlockedTopicMessage>
-                            <BlockedTopicActions>
-                                {/* Standalone state panel — use `size="md"`
+                            {/* Blocked topic state — takes precedence over loading/empty states */}
+                            {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked topic">
+                                <BlockedTopicIcon aria-hidden="true">
+                                    <HiNoSymbol />
+                                </BlockedTopicIcon>
+                                <BlockedTopicTitle>#{urlTopic} is blocked</BlockedTopicTitle>
+                                <BlockedTopicMessage>
+                                    Posts tagged with this topic are hidden from your feeds. Unblock to see them again — you can always re-block it later from any post header or the Blocks page.
+                                </BlockedTopicMessage>
+                                <BlockedTopicActions>
+                                    {/* Standalone state panel — use `size="md"`
                                     so the CTA height matches primary buttons
                                     elsewhere (larger than BlocksView rows). */}
-                                <Button
-                                    variant="danger"
-                                    size="md"
-                                    minWidth="5.5rem"
-                                    onClick={async () => {
-                                        try { await tx.unblockTopic(routeTopicLower); } catch (_) { /* noop */ }
-                                    }}
-                                >
-                                    Unblock #{urlTopic}
-                                </Button>
-                            </BlockedTopicActions>
-                        </BlockedTopicState>}
+                                    <Button
+                                        variant="danger"
+                                        size="md"
+                                        minWidth="5.5rem"
+                                        onClick={async () => {
+                                            try { await tx.unblockTopic(routeTopicLower); } catch (_) { /* noop */ }
+                                        }}
+                                    >
+                                        Unblock #{urlTopic}
+                                    </Button>
+                                </BlockedTopicActions>
+                            </BlockedTopicState>}
 
-                        {/* Loading state - only show to logged-in users */}
-                        {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && (
-                            <FeedSkeletonColumn $feedViewMode={feedViewMode}>
-                                <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
-                                <FeedCardSkeletonList count={5} />
-                            </FeedSkeletonColumn>
-                        )}
-
-                        {/* Empty home feed - only show to logged-in users */}
-                        {isLoggedIn && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
-
-                        {/* No posts available - only show to logged-in users */}
-                        {isLoggedIn && !isUrlTopicBlocked && showNoPostsAvailable && <LoadingCard $size={cardSize}>
-                            <LoadingText>{noPostsMessage}</LoadingText>
-                        </LoadingCard>}
-
-                        {/* Invite-only hero - shown to logged-out users on all feeds */}
-                        {!isLoggedIn && <LoggedOutPromptCard
-                            role="region"
-                            aria-label="Welcome to Mirage"
-                            title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
-                            notice="Currently in Private Beta, Invite Only."
-                            description={urlTopic === 'following'
-                                ? 'Sign in to unlock your following feed and keep up with the people and topics you care about.'
-                                : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
-                            stats={welcomeStats && welcomeStats.userCount > 0 ? [
-                                { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },
-                                { label: 'Active (24h)', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.active24h.toLocaleString()}` },
-                                { label: 'Posts (24h)', value: `${welcomeStatsStale ? '~' : ''}${(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}` },
-                            ] : []}
-                            links={[
-                                { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
-                                { label: 'Learn More', href: 'https://mirage.foundation', external: true },
-                            ]}
-                            inviteText="Have an invite code? Join the community today."
-                            primaryLabel="Create account"
-                            secondaryLabel="Sign in"
-                        />}
-
-                        {/* Posts grid - only show to logged-in users */}
-                        {isLoggedIn && !isUrlTopicBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
-                            const family = getThemeFamily(state?.themeId);
-                            const FeedComponent = family.Feed;
-                            const visiblePosts = orderedPosts.filter(p => {
-                                const hasValidTitle = p && typeof p.title === 'string' && p.title.trim().length > 0;
-                                const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
-                                return hasValidTitle && hasValidTopic && !p.deleted;
-                            });
-                            // Feed header is now owned by ListFeedView (sort + view controls only).
-                            // Create-post action and nav tabs live in the left rail / sidebar,
-                            // so we no longer inject a sidebar column here.
-                            // Feed header is shown on all/topic feeds only.
-                            // Home/following keep the toolbar controls without an
-                            // extra title header above the posts.
-                            const isTopicFeed = !!urlTopic && !['home', 'following', 'all'].includes(urlTopic);
-                            const showFeedToolbar = urlTopic === 'all' || isTopicFeed;
-                            let feedTitle = null;
-                            if (urlTopic === 'all') feedTitle = 'All';
-                            else if (isTopicFeed) feedTitle = `#${urlTopic}`;
-                            return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
-                        })()}
-
-                        {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
-                            <FeedSkeletonColumn $feedViewMode={feedViewMode}>
-                                <FeedCardSkeleton />
-                            </FeedSkeletonColumn>
-                        )}
-                        {isLoggedIn && <div ref={bottomSentinelRef} style={{
-                            width: '100%',
-                            minHeight: '1px'
-                        }}>
-                            {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && (
-                                <ShowMoreButton onClick={loadMore}>Show more</ShowMoreButton>
+                            {/* Loading state - only show to logged-in users */}
+                            {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && (
+                                <FeedSkeletonColumn $feedViewMode={feedViewMode}>
+                                    <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
+                                    <FeedCardSkeletonList count={5} />
+                                </FeedSkeletonColumn>
                             )}
-                        </div>}
-                    </ModernPostFeed>
-                </MainFeedPanel>
-            </FeedCol>
-            {isLoggedIn && <FeedRightRail />}
+
+                            {/* Empty home feed - only show to logged-in users */}
+                            {isLoggedIn && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
+
+                            {/* No posts available - only show to logged-in users */}
+                            {isLoggedIn && !isUrlTopicBlocked && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                                <LoadingText>{noPostsMessage}</LoadingText>
+                            </LoadingCard>}
+
+                            {/* Invite-only hero - shown to logged-out users on all feeds */}
+                            {!isLoggedIn && <LoggedOutPromptCard
+                                role="region"
+                                aria-label="Welcome to Mirage"
+                                title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
+                                notice="Currently in Private Beta, Invite Only."
+                                description={urlTopic === 'following'
+                                    ? 'Sign in to unlock your following feed and keep up with the people and topics you care about.'
+                                    : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
+                                stats={welcomeStats && welcomeStats.userCount > 0 ? [
+                                    { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },
+                                    { label: 'Active (7d)', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.active7d.toLocaleString()}` },
+                                    { label: 'Posts (24h)', value: `${welcomeStatsStale ? '~' : ''}${(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}` },
+                                ] : []}
+                                links={[
+                                    { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
+                                    { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                                ]}
+                                inviteText="Have an invite code? Join the community today."
+                                primaryLabel="Create account"
+                                secondaryLabel="Sign in"
+                            />}
+
+                            {/* Posts grid - only show to logged-in users */}
+                            {isLoggedIn && !isUrlTopicBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                                const family = getThemeFamily(state?.themeId);
+                                const FeedComponent = family.Feed;
+                                const visiblePosts = orderedPosts.filter(p => {
+                                    const hasValidTitle = p && typeof p.title === 'string' && p.title.trim().length > 0;
+                                    const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
+                                    return hasValidTitle && hasValidTopic && !p.deleted;
+                                });
+                                // Feed header is now owned by ListFeedView (sort + view controls only).
+                                // Create-post action and nav tabs live in the left rail / sidebar,
+                                // so we no longer inject a sidebar column here.
+                                // Feed header is shown on all/topic feeds only.
+                                // Home/following keep the toolbar controls without an
+                                // extra title header above the posts.
+                                const isTopicFeed = !!urlTopic && !['home', 'following', 'all'].includes(urlTopic);
+                                const showFeedToolbar = urlTopic === 'all' || isTopicFeed;
+                                let feedTitle = null;
+                                if (urlTopic === 'all') feedTitle = 'All';
+                                else if (isTopicFeed) feedTitle = `#${urlTopic}`;
+                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
+                            })()}
+
+                            {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
+                                <FeedSkeletonColumn $feedViewMode={feedViewMode}>
+                                    <FeedCardSkeleton />
+                                </FeedSkeletonColumn>
+                            )}
+                            {isLoggedIn && <div ref={bottomSentinelRef} style={{
+                                width: '100%',
+                                minHeight: '1px'
+                            }}>
+                                {hasMorePosts && !isLoadingMore && !isLoading && !showEmptyHome && !showNoPostsAvailable && (
+                                    <ShowMoreButton onClick={loadMore}>Show more</ShowMoreButton>
+                                )}
+                            </div>}
+                        </ModernPostFeed>
+                    </MainFeedPanel>
+                </FeedCol>
+                {isLoggedIn && <FeedRightRail />}
             </FeedRailRow>
 
             {/* Invite Code Modal */}

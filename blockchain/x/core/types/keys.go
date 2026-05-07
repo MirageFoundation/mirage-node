@@ -75,6 +75,15 @@ const (
 	EnvelopeNoncePrefix       = "envelope_nonce/"       // envelope_nonce/{pubkey_hash}/{nonce} -> empty value (existence check)
 	EnvelopeNonceExpiryPrefix = "envelope_nonce_expiry/" // envelope_nonce_expiry/{expiry_unix}/{pubkey_hash}/{nonce} -> empty value (for pruning)
 
+	// RecentBlockHashesKey stores a deterministic, on-chain rolling window of
+	// the most recently committed block hashes (lowercase hex). The PoW ante
+	// uses this window to validate that an envelope's `last_block_hash`
+	// references a recent committed block. Storing the window in state
+	// (instead of a per-process in-memory cache) makes acceptance identical
+	// across restarts and across peers. Written by BeginBlock; read by the
+	// PoW ante decorator. Window length is bounded by params.BlockHashWindow.
+	RecentBlockHashesKey = "recent_block_hashes"
+
 	// Bridge-related prefixes (defined in bridge.go for detailed comments)
 	// BridgeAttestationsPrefix = "bridge_attestations/"
 	// BridgePendingCountKey = "bridge_pending_count"

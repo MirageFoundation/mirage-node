@@ -1577,7 +1577,7 @@ const MainView = ({
                                     <strong>Users:</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}
                                 </InviteOnlyHeroStat>
                                 <InviteOnlyHeroStat>
-                                    <strong>Active (24h):</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}
+                                    <strong>Active (7d):</strong> {welcomeStatsStale ? '~' : ''}{welcomeStats.active7d.toLocaleString()}
                                 </InviteOnlyHeroStat>
                                 <InviteOnlyHeroStat>
                                     <strong>Posts (24h):</strong> {welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}

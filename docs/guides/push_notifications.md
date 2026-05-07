@@ -175,7 +175,7 @@ When the backend sends a push notification, the payload looks like:
 }
 ```
 
-The `data.type` field is one of: `"reply"`, `"mention"`, `"award"`, `"summary"`.
+The `data.type` field is one of: `"reply"`, `"mention"`, `"award"`, `"summary"`, `"trending"`.
 
 Summary notifications are sent automatically by the server when the user's 30-minute throttle window expires with suppressed events. They look like:
 

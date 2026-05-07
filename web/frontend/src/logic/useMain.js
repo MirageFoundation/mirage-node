@@ -616,7 +616,7 @@ export function useMain({
         };
     }, [isLoggedIn, viewerAddress, inviteCodesEnabled]);
 
-    // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
+    // Fetch welcome stats for logged-out users (user count, posts in 24h, 7d active)
     // Uses lightweight endpoint that only returns essential counts (fast, cached)
     // Implements stale-while-revalidate: show cached value immediately, update when fresh
     useEffect(() => {
@@ -634,7 +634,7 @@ export function useMain({
                         userCount: data.registered_users || 0,
                         posts24h: data.posts_24h || 0,
                         comments24h: 0,
-                        active24h: data.active_24h || 0
+                        active7d: data.active_7d || 0
                     };
                     setWelcomeStats(freshStats);
                     setWelcomeStatsStale(false);

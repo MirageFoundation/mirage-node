@@ -308,9 +308,10 @@ func New(
 
 			ensure := NewEnsureAccountsDecorator(app.AuthKeeper)
 
-			// Initialize PowDecorator (params will be refreshed at runtime)
+			// Initialize PowDecorator. The recent-block-hash window is now
+			// read from on-chain state (params.BlockHashWindow controls its
+			// length); no per-process cache or window field is required.
 			powDec := &PowDecorator{
-				Window: 60,         // Initial value, will be updated from params
 				MinFee: sdk.Coin{}, // do not skip PoW based on SDK fee; node pays gas separately
 				Keeper: app.CoreKeeper,
 			}

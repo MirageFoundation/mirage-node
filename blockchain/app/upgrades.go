@@ -1958,6 +1958,86 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.25.0: Consensus determinism hardening ──
+	//
+	// Reverses the v1.24.0 "never halt the chain" invariant for consensus-
+	// critical decode paths. The v1.24.0 silent-fallback behavior was the root
+	// cause of the mirage.talk app-hash divergence at height 4,349,996 (May 4,
+	// 2026): a single node hit a transient PebbleDB read failure inside
+	// GetParams, fell back to DefaultParams while every peer used the stored
+	// params, and emitted a divergent app-hash on the next consensus round.
+	//
+	// Changes (state-machine-breaking — must run on a coordinated upgrade):
+	//   - core.GetParams panics with CONSENSUS_FATAL on store-get / empty /
+	//     unmarshal / validate failure (no DefaultParams fallback).
+	//   - deductRelayGasFee, processSubscriptions and the PoW ante
+	//     (getUserLevel / checkReserveOrDowngrade / routePoWTx) return tagged
+	//     CONSENSUS_FATAL errors on profile decode/missing failures, rejecting
+	//     the offending tx. Peers with the same corrupt bytes reject identically,
+	//     so consensus is preserved without silent skew.
+	//   - EndBlock now propagates iterator failures from
+	//     GetExpiredSubscriptions; a halt is detected by the v1.24-introduced
+	//     divergence watchdog and recovered via state-sync.
+	//   - NEW state key types.RecentBlockHashesKey ("recent_block_hashes")
+	//     stores a deterministic, on-chain rolling window of recently
+	//     committed block hashes (lowercase hex, length bounded by
+	//     params.BlockHashWindow). Written by BeginBlock from
+	//     ctx.BlockHeader().LastBlockId.Hash. Replaces the per-process
+	//     in-memory PoW recent-hash cache, eliminating restart-vs-warm-node
+	//     divergence (a freshly restarted node had an empty cache and
+	//     rejected envelopes that warm peers accepted).
+	//   - PowDecorator no longer carries Window/recent/mu; the on-chain
+	//     window is consulted through Keeper.GetRecentBlockHashes.
+	//
+	// No new chain params (BlockHashWindow already exists). No genesis
+	// migration: the recent-block-hashes window starts empty at the upgrade
+	// height and refills over BlockHashWindow blocks. During that brief
+	// window, PoW envelopes referencing pre-upgrade block hashes are rejected
+	// (only the current LastBlockId equality check applies); clients
+	// transparently retry with the new last_block_hash.
+	//
+	// Operator runbook: docs/troubleshooting/incident-recovery.md §2.2.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.25.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.25.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.25.0: RunMigrations failed",
+					"from_vm", fmt.Sprintf("%v", fromVM),
+					"err", err,
+				)
+				return nil, fmt.Errorf("v1.25.0: RunMigrations failed (fromVM=%v): %w", fromVM, err)
+			}
+
+			// Defensive sanity check: the new fail-fast GetParams MUST find
+			// stored params here — if it didn't, every subsequent BeginBlock
+			// would panic and the chain would be stuck. Surface the failure
+			// during the upgrade so operators can roll back the binary
+			// rather than discover it one block later.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.25.0: post-migration params failed validation: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.25.0: params validated post-migration",
+				"block_hash_window", params.BlockHashWindow,
+				"min_difficulty", params.MinDifficulty,
+				"pow_message_window", params.PowMessageWindow,
+			)
+
+			// The recent_block_hashes store key is intentionally NOT
+			// pre-populated here: BeginBlock will start writing
+			// LastBlockId.Hash from the block following the upgrade, and the
+			// window will be full again after BlockHashWindow blocks. The
+			// brief PoW UX dip is documented in the proposal summary.
+
+			sdkCtx.Logger().Info("Upgrade to v1.25.0 complete - consensus determinism hardening active (fail-fast params/profile decode, on-chain recent-block-hashes window)")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

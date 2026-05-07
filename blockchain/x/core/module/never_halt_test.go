@@ -9,25 +9,33 @@ import (
 	"mirage/x/core/types"
 )
 
-// These tests codify the "NEVER HALT THE CHAIN" invariant for BeginBlock,
-// EndBlock, and their critical helpers (GetParams, MintIfNeeded, etc.). Any
-// change to those code paths that reintroduces a non-nil return or a panic
-// from an ABCI handler MUST break a test in this file.
+// CONSENSUS DETERMINISM CONTRACT for BeginBlock / EndBlock / GetParams /
+// MintIfNeeded:
 //
-// Paths that require a real bank / staking keeper (e.g. BeginBlock's
-// BurnAllFromModuleName → k.bank.GetBalance, MintIfNeeded's staking iterator
-// and mint/burn/send calls on a mint-interval boundary) are not exercised
-// here because the shared mock wires nil concrete keepers. mintAndDistribute
-// (the extracted pure-logic core of MintIfNeeded) is covered independently
-// under keeper/mint_distribute_test.go using a narrow mockMintBank that
-// injects mint/send/burn failures. Together the two suites cover both the
-// outer short-circuit paths here and the bank-failure fan-out there.
+// The previous "NEVER HALT THE CHAIN" invariant has been replaced by a
+// FAIL-FAST contract for consensus-critical decode failures. Silently
+// substituting defaults on one node while peers used the stored bytes
+// produced single-node app-hash divergence — the very class of bug that
+// jailed mirage.talk in production. The new contract:
+//
+//   * Consensus-critical reads (params, profile lookups for paid users,
+//     recent-block-hashes window) MUST panic on store/decode/validate
+//     failure. The chain halts cleanly; the auto-recovery watchdog
+//     state-syncs from healthy peers.
+//
+//   * Non-consensus-critical writes (PruneExpiredNonces,
+//     SetCurrentDifficulty, SetConsecutiveLowUsage, etc.) STILL log and
+//     continue. Those failures affect ALL nodes equally — same operation,
+//     same in-memory inputs, same outcome — and so do not cause divergence.
+//
+// Tests in this file pin both contracts.
 
-// --- EndBlock ---------------------------------------------------------------
+// --- EndBlock: writes still log-and-continue --------------------------------
 
 // TestEndBlockNeverReturnsError_EmptyState verifies the baseline: on a fresh
-// store with no PoW messages, no expired nonces, and no subscriptions, the
-// calm-increment path is taken and EndBlock returns nil.
+// store with default params (seeded by newMockKeeper) and no PoW messages /
+// expired nonces / subscriptions, the calm-increment path is taken and
+// EndBlock returns nil without panicking.
 func TestEndBlockNeverReturnsError_EmptyState(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -42,41 +50,10 @@ func TestEndBlockNeverReturnsError_EmptyState(t *testing.T) {
 		"EndBlock should advance the calm sequence on a zero-message block")
 }
 
-// TestEndBlockNeverReturnsError_CorruptParams ensures that even when stored
-// params are unreadable, EndBlock still returns nil. GetParams falls back to
-// DefaultParams and the rest of the function proceeds on defaults.
-func TestEndBlockNeverReturnsError_CorruptParams(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	mk.storeService.store["params"] = []byte{0xff, 0xff, 0xff, 0xff, 0xff}
-
-	require.NotPanics(t, func() {
-		require.NoError(t, am.EndBlock(ctx))
-	})
-}
-
-// TestEndBlockNeverReturnsError_OnParamsStoreGetFailure forces a store.Get
-// failure on the "params" key (GetParams returns DefaultParams) and asserts
-// EndBlock still returns nil.
-func TestEndBlockNeverReturnsError_OnParamsStoreGetFailure(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	mk.storeService.getErrors = map[string]error{
-		"params": errors.New("simulated store.Get failure on params"),
-	}
-
-	require.NotPanics(t, func() {
-		require.NoError(t, am.EndBlock(ctx))
-	})
-}
-
 // TestEndBlockNeverReturnsError_OnSetConsecutiveLowUsageFailure forces the
-// calm-increment write to fail. EndBlock logs the failure and returns nil
-// (the sequence simply does not advance this block).
+// calm-increment write to fail. Set failures are non-consensus-critical
+// (they fail equally on all nodes; the sequence simply does not advance
+// this block on any node). EndBlock logs and returns nil.
 func TestEndBlockNeverReturnsError_OnSetConsecutiveLowUsageFailure(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -98,7 +75,7 @@ func TestEndBlockNeverReturnsError_OnSetConsecutiveLowUsageFailure(t *testing.T)
 // TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease
 // forces the calm-decrease branch: start at difficulty 3, seed a calm
 // sequence >= threshold, and inject a Set failure on "current_difficulty".
-// EndBlock must still return nil.
+// EndBlock must still return nil — Set failures are non-divergent.
 func TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -121,11 +98,18 @@ func TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease(t *
 		"failed SetCurrentDifficulty must leave the difficulty unchanged")
 }
 
-// TestEndBlockNeverReturnsError_OnParamsIteratorFailure forces iterator
-// errors (used by PruneExpiredNonces, GetExpiredSubscriptions,
-// GetPoWMessageCount). Any iterator open failure must be logged and the
-// handler must still return nil.
-func TestEndBlockNeverReturnsError_OnParamsIteratorFailure(t *testing.T) {
+// TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions: an
+// iterator-open failure on the subscriptions prefix is itself evidence of
+// per-node store divergence (deterministic data should iterate identically
+// on all nodes). processSubscriptions returns the error and EndBlock now
+// halts the chain rather than silently skipping renewals/expiries on this
+// node only — the previous "log and continue" let one node skip mutations
+// that peers performed, producing app-hash divergence on the next round.
+//
+// PruneExpiredNonces and GetPoWMessageCount also iterate from EndBlock but
+// are non-consensus-critical (their failure paths log and continue without
+// state mutation). The blocking case is the subscriptions iterator.
+func TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
@@ -133,17 +117,78 @@ func TestEndBlockNeverReturnsError_OnParamsIteratorFailure(t *testing.T) {
 	mk.storeService.iterError = errors.New("simulated iterator failure")
 
 	require.NotPanics(t, func() {
-		require.NoError(t, am.EndBlock(ctx))
+		err := am.EndBlock(ctx)
+		require.Error(t, err, "iterator failure must propagate so the chain halts (auto-recovery state-syncs)")
 	})
 }
 
-// --- MintIfNeeded -----------------------------------------------------------
+// --- EndBlock / BeginBlock: consensus-critical decode failures fail fast ---
+
+// TestEndBlockPanicsOnCorruptParams: corrupt stored params bytes MUST halt
+// the chain. The prior behavior (silently fall back to DefaultParams) caused
+// per-node app-hash divergence whenever one node's params bytes diverged
+// from peers'.
+func TestEndBlockPanicsOnCorruptParams(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	mk.storeService.store["params"] = []byte{0xff, 0xff, 0xff, 0xff, 0xff}
+
+	require.Panics(t, func() {
+		_ = am.EndBlock(ctx)
+	}, "EndBlock must panic on corrupt params (no silent fallback to defaults)")
+}
+
+// TestEndBlockPanicsOnParamsStoreGetFailure: a raw store.Get failure on the
+// "params" key MUST halt the chain. Silently returning defaults on the
+// affected node only would diverge it from peers.
+func TestEndBlockPanicsOnParamsStoreGetFailure(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	mk.storeService.getErrors = map[string]error{
+		"params": errors.New("simulated store.Get failure on params"),
+	}
+
+	require.Panics(t, func() {
+		_ = am.EndBlock(ctx)
+	}, "EndBlock must panic on store.Get failure for params")
+}
+
+// TestRecordRecentBlockHashPanicsOnReadFailure (proxy for BeginBlock fail-fast
+// on recent-block-hashes read): when the on-chain window cannot be read, the
+// keeper helper MUST surface the error so BeginBlock can halt rather than
+// silently writing an empty window. A divergent window across nodes flips
+// PoW tx acceptance per-node and produces app-hash divergence.
+//
+// We test the keeper helper directly because BeginBlock's first call is
+// BurnAllFromModuleName(fee_collector) which dereferences the bank keeper
+// (nil in this mock setup) before reaching the recent-hashes write — so a
+// full BeginBlock path would panic on the bank dereference, not on the
+// behavior we want to pin.
+func TestRecordRecentBlockHashFailsOnReadFailure(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	mk.storeService.getErrors = map[string]error{
+		types.RecentBlockHashesKey: errors.New("simulated store.Get failure on recent_block_hashes"),
+	}
+
+	err := mk.RecordRecentBlockHash(ctx, "deadbeef", 10)
+	require.Error(t, err, "RecordRecentBlockHash must propagate read failures")
+	require.Contains(t, err.Error(), "CONSENSUS_FATAL:RECENT_HASHES_GET",
+		"error must be tagged for incident triage")
+}
+
+// --- MintIfNeeded: consensus-critical reads fail fast ----------------------
 
 // TestMintIfNeededNeverReturnsError_BelowInterval exercises the
-// height < MintInterval short-circuit. With default params (MintInterval
-// = 200) at height 100, MintIfNeeded returns nil before touching bank or
-// staking. Any future refactor that moves bank / staking calls above this
-// gate would fail this test (nil-panic on k.bank).
+// height < MintInterval short-circuit. With seeded default params
+// (MintInterval = 200) at height 100, MintIfNeeded returns nil without
+// touching bank or staking. (newMockKeeper now seeds default params, so
+// this test no longer depends on the old "fall back to defaults" path.)
 func TestMintIfNeededNeverReturnsError_BelowInterval(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithBlockHeight(100)
@@ -165,27 +210,23 @@ func TestMintIfNeededNeverReturnsError_NonIntervalBoundary(t *testing.T) {
 	})
 }
 
-// TestMintIfNeededNeverReturnsError_CorruptParams ensures that corrupt
-// stored params do not cause MintIfNeeded to panic or return an error.
-// GetParams falls back to DefaultParams (interval 200), so at height 100
-// we take the below-interval short-circuit. The explicit assertion is
-// that no combination of corrupt-bytes + early-exit ever surfaces an error
-// from MintIfNeeded.
-func TestMintIfNeededNeverReturnsError_CorruptParams(t *testing.T) {
+// TestMintIfNeededPanicsOnCorruptParams: corrupt params now halt MintIfNeeded
+// (via GetParams panic). Previously this test asserted the chain stayed up
+// on defaults — which is exactly the silent-divergence vector being closed.
+func TestMintIfNeededPanicsOnCorruptParams(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithBlockHeight(100)
 
 	mk.storeService.store["params"] = []byte{0x00, 0xff, 0x13, 0x37}
 
-	require.NotPanics(t, func() {
-		require.NoError(t, mk.MintIfNeeded(ctx))
-	})
+	require.Panics(t, func() {
+		_ = mk.MintIfNeeded(ctx)
+	}, "MintIfNeeded must panic on corrupt params (no silent fallback)")
 }
 
-// TestMintIfNeededNeverReturnsError_ParamsStoreGetFailure forces GetParams
-// to go through its store.Get-error fallback and verifies MintIfNeeded
-// still returns nil without panicking.
-func TestMintIfNeededNeverReturnsError_ParamsStoreGetFailure(t *testing.T) {
+// TestMintIfNeededPanicsOnParamsStoreGetFailure: store.Get failure on the
+// params key now halts MintIfNeeded.
+func TestMintIfNeededPanicsOnParamsStoreGetFailure(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithBlockHeight(100)
 
@@ -193,7 +234,7 @@ func TestMintIfNeededNeverReturnsError_ParamsStoreGetFailure(t *testing.T) {
 		"params": errors.New("simulated params store.Get failure"),
 	}
 
-	require.NotPanics(t, func() {
-		require.NoError(t, mk.MintIfNeeded(ctx))
-	})
+	require.Panics(t, func() {
+		_ = mk.MintIfNeeded(ctx)
+	}, "MintIfNeeded must panic on store.Get failure for params")
 }

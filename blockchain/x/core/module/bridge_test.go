@@ -163,11 +163,20 @@ func newMockKeeper() *mockKeeper {
 	// Create a real keeper with nil/empty keepers (we'll override what we need)
 	k := keeper.NewKeeper(storeService, cdc, nil, nil, nil, slashingkeeper.Keeper{})
 
-	return &mockKeeper{
+	mk := &mockKeeper{
 		Keeper:          k,
 		storeService:    storeService,
 		bondedValidator: testValoperAddressString(),
 	}
+
+	// Seed default params so GetParams' fail-fast contract (panic on empty
+	// store) does not fire from unrelated tests. Tests that exercise the
+	// fail-fast path itself bypass this by deleting / corrupting the
+	// "params" key before calling GetParams.
+	if err := mk.SetParams(newMockContext(), types.DefaultParams()); err != nil {
+		panic("test setup: SetParams failed: " + err.Error())
+	}
+	return mk
 }
 
 func (mk *mockKeeper) IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error) {

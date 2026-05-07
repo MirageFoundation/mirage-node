@@ -129,6 +129,47 @@ docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto    
 - Does not auto-unjail; after catchup, run §3.
 - Does not restore application/backend data on `mirage.talk` (intentional; chain-state-only).
 
+### 2.2 Consensus-determinism fail-fast (panic / EndBlock error)
+
+After the determinism-hardening release, several previously-silent fallbacks in
+the consensus path now halt the chain immediately rather than diverge silently.
+**This is by design.** A clean halt is detected by §2.1 and recovered via state-
+sync from healthy peers; silent divergence — the original `mirage.talk` failure
+mode — would have jailed the validator instead.
+
+**Triggers** (search `miraged` logs for any of these strings):
+
+| Tag | Where | Cause | Operator action |
+| --- | --- | --- | --- |
+| `CONSENSUS_FATAL:PARAMS_STORE_GET` | `core.GetParams` (BeginBlock / EndBlock / handler) | Raw KVStore.Get failed for the `params` key (disk / wrapper I/O error). | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:PARAMS_EMPTY` | `core.GetParams` | `params` key missing post-genesis. Indicates state truncation or genesis-ordering corruption. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:PARAMS_UNMARSHAL` | `core.GetParams` | Stored params bytes failed to decode. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:PARAMS_VALIDATE` | `core.GetParams` | Stored params decoded but failed `Validate()` (e.g. governance proposal that bypassed validation). | Halt is correct; investigate the proposal that wrote them, then upgrade-migrate or state-sync. |
+| `CONSENSUS_FATAL:PROFILE_GET` | `deductRelayGasFee`, `processSubscriptions`, ante `getUserLevel` / `checkReserveOrDowngrade` | Raw KVStore.Get failed for a `profiles/<addr>` key. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:PROFILE_DECODE` | same | A stored ProfileCore JSON blob failed to unmarshal. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:PROFILE_MISSING` | `deductRelayGasFee`, `processSubscriptions` | A paid-tier user (or an active subscription index entry) has no profile. State inconsistency. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:RECENT_HASHES_GET` | `RecordRecentBlockHash` (BeginBlock) | Raw KVStore.Get failed for the on-chain recent-block-hashes window. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:RECENT_HASHES_DECODE` | `GetRecentBlockHashes` (ante) | The on-chain window bytes failed to decode. | Watchdog recovers via state-sync. |
+
+**What changed for the PoW ante (state-derived recent-hash window)**:
+
+Before: each validator process kept a private in-memory ring of recently-seen
+block hashes. After a restart this ring was empty and the node would reject
+PoW envelopes referencing block hashes within the window — a per-node accept/
+reject flip and therefore an app-hash divergence vs warm peers.
+
+After: the recent-block-hashes window is stored on-chain (key
+`recent_block_hashes`, written each `BeginBlock` from
+`ctx.BlockHeader().LastBlockId.Hash`, length bounded by
+`params.BlockHashWindow`). Acceptance is identical across all peers and across
+process restarts.
+
+**Operational implication**: immediately after the upgrade activation height,
+the on-chain window starts empty and grows up to `BlockHashWindow` (default 10)
+over the next 10 blocks. PoW envelopes referencing pre-upgrade block hashes
+will be rejected for those first 10 blocks. This is a brief, planned UX dip;
+clients automatically retry with the new last-block-hash on the next refresh.
+
 ## 3. Unjailing a validator
 
 **Script**: [`scripts/unjail_validator.sh`](../../scripts/unjail_validator.sh). **Troubleshooting**: [`docs/troubleshooting/validator-unjail-failure.md`](validator-unjail-failure.md).

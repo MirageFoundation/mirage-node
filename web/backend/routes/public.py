@@ -8199,26 +8199,26 @@ def get_welcome_stats():
         return jsonify(_welcome_stats_cache["data"])
 
     try:
-        today_start = now - 86400  # last 24h window
+        day_start = now - 86400
+        week_start = now - (7 * 86400)
 
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
             cur = conn.cursor()
-            # Query 1: registered users count
             cur.execute("SELECT COUNT(*) FROM profiles")
             registered_users = cur.fetchone()[0] or 0
 
-            # Query 2: posts + comments in last 24h
             cur.execute(
                 """
                 SELECT COUNT(*) FROM posts
                 WHERE deleted = FALSE
                   AND created_at >= %s
                 """,
-                (today_start,),
+                (day_start,),
             )
             posts_24h = cur.fetchone()[0] or 0
 
-        # Query 3: active users from last_seen (backend DB)
+        # Active users over a 7-day window — captures lurkers that don't show
+        # up every day but still belong to the community on this node.
         with connect_backend_db() as bconn:
             bcur = bconn.cursor()
             bcur.execute(
@@ -8227,14 +8227,14 @@ def get_welcome_stats():
                 FROM user_last_seen
                 WHERE last_seen_at >= %s
                 """,
-                (today_start,),
+                (week_start,),
             )
-            active_24h = bcur.fetchone()[0] or 0
+            active_7d = bcur.fetchone()[0] or 0
 
         result = {
             "registered_users": registered_users,
             "posts_24h": posts_24h,
-            "active_24h": active_24h,
+            "active_7d": active_7d,
         }
 
         # Cache the result
