@@ -537,23 +537,22 @@ export function useMain({
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
 
-    // Welcome stats for logged-out users (user count, posts, DAU)
-    // Initialize from cache for instant display (stale-while-revalidate pattern)
-    const [welcomeStats, setWelcomeStats] = useState(() => {
+    // Welcome stats for logged-out users (user count, posts, 7d active)
+    // Initialize from cache for instant display (stale-while-revalidate pattern).
+    // Discard caches missing the current shape — schema changed from `active24h`
+    // to `active7d`, and stale shapes would crash the render with `undefined`.
+    const _loadValidWelcomeCache = () => {
         try {
-            return Storage.load('welcome_stats_cache', null);
+            const cached = Storage.load('welcome_stats_cache', null);
+            if (!cached || typeof cached !== 'object') return null;
+            if (typeof cached.active7d !== 'number') return null;
+            return cached;
         } catch (_) {
             return null;
         }
-    });
-    const [welcomeStatsStale, setWelcomeStatsStale] = useState(() => {
-        // If we have cached stats, they're stale until fresh data loads
-        try {
-            return Storage.load('welcome_stats_cache', null) !== null;
-        } catch (_) {
-            return false;
-        }
-    });
+    };
+    const [welcomeStats, setWelcomeStats] = useState(_loadValidWelcomeCache);
+    const [welcomeStatsStale, setWelcomeStatsStale] = useState(() => _loadValidWelcomeCache() !== null);
 
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {

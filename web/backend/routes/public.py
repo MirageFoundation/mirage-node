@@ -8217,19 +8217,35 @@ def get_welcome_stats():
             )
             posts_24h = cur.fetchone()[0] or 0
 
-        # Active users over a 7-day window — captures lurkers that don't show
-        # up every day but still belong to the community on this node.
+            # Network-wide chain-active addresses in the last 7 days.
+            # Posts (root + comments) and votes are chain data, identical
+            # on every node, so this catches users who participate via ANY
+            # node. Pure lurkers on other nodes remain invisible — a known
+            # limitation, since no chain action records their presence.
+            cur.execute(
+                """
+                SELECT LOWER(owner) FROM posts
+                WHERE created_at >= %s AND deleted = FALSE
+                UNION
+                SELECT LOWER(owner) FROM votes
+                WHERE created_at >= %s
+                """,
+                (week_start, week_start),
+            )
+            chain_active = {row[0] for row in cur.fetchall()}
+
+        # This-node logged-in users (incl. lurkers) in the last 7 days.
+        # Combined with chain_active via set union, addresses that show up
+        # in both are counted once.
         with connect_backend_db() as bconn:
             bcur = bconn.cursor()
             bcur.execute(
-                """
-                SELECT COUNT(*)
-                FROM user_last_seen
-                WHERE last_seen_at >= %s
-                """,
+                "SELECT LOWER(owner) FROM user_last_seen WHERE last_seen_at >= %s",
                 (week_start,),
             )
-            active_7d = bcur.fetchone()[0] or 0
+            local_active = {row[0] for row in bcur.fetchall()}
+
+        active_7d = len(chain_active | local_active)
 
         result = {
             "registered_users": registered_users,

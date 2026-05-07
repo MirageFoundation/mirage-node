@@ -14,10 +14,13 @@ export function getCachedWelcomeStats() {
     }
     if (!cached || typeof cached !== "object") return [];
     if (!cached.userCount || cached.userCount <= 0) return [];
+    // Discard stale shape (pre-7d migration). Without this, the card would
+    // render "Active (7d): 0" until fresh data arrives.
+    if (typeof cached.active7d !== "number") return [];
 
     const prefix = cached.stale ? "~" : "";
-    const users = Number(cached.userCount || 0);
-    const active = Number(cached.active7d || 0);
+    const users = Number(cached.userCount);
+    const active = Number(cached.active7d);
     const posts = Number(cached.posts24h || 0) + Number(cached.comments24h || 0);
 
     return [
