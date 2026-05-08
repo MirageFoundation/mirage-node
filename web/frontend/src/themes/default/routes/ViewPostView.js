@@ -3444,7 +3444,7 @@ function ViewPostView({
                                 ...prev,
                                 [post.post_id]: progress ?? undefined
                             }));
-                        }} suffixLabel={limits.willPayFee ? '(paid tier)' : '(free tier)'} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
+                        }} suffixLabel={limits.unlimited ? '(admin)' : (limits.willPayFee ? '(paid tier)' : '(free tier)')} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
                     </div>
                     <ReplyActionsRow>
                         <div style={{
@@ -3455,8 +3455,8 @@ function ViewPostView({
                             flex: '1 1 auto',
                             alignSelf: 'flex-start'
                         }}>
-                            <ReplyCounter $warn={replyText.length >= limits.maxContent}>
-                                {replyText.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
+                            <ReplyCounter $warn={!limits.unlimited && replyText.length >= limits.maxContent}>
+                                {limits.unlimited ? `${replyText.length} / unlimited (admin)` : `${replyText.length} / ${limits.maxContent} ${limits.willPayFee ? '(paid tier)' : '(free tier)'}`}
                             </ReplyCounter>
                         </div>
                         <StyledSubmitButtonContainer>

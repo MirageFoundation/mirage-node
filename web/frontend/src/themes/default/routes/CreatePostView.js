@@ -982,7 +982,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         handleTopicChange(e);
     };
 
-    const tierLabel = limits.willPayFee ? 'paid tier' : 'free tier';
+    const tierLabel = limits.unlimited ? 'admin' : (limits.willPayFee ? 'paid tier' : 'free tier');
 
     const submitLabel = isSubmitting
         ? submitStatus === 'verifying'
@@ -1213,8 +1213,8 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                             </svg>
                                         </ValidCheck>
                                     )}
-                                    <Counter $warn={getByteLength(titleValue) >= limits.maxTitle}>
-                                        ({tierLabel}) {getByteLength(titleValue)}/{limits.maxTitle}
+                                    <Counter $warn={!limits.unlimited && getByteLength(titleValue) >= limits.maxTitle}>
+                                        ({tierLabel}) {limits.unlimited ? `${getByteLength(titleValue)} / unlimited` : `${getByteLength(titleValue)}/${limits.maxTitle}`}
                                     </Counter>
                                 </InputShell>
                             </Field>
@@ -1325,8 +1325,8 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                     </EditorShell>
                                 </Field>
                                 <ContentCounterRow>
-                                    <ContentCounter $warn={contentValue.length >= limits.maxContent}>
-                                        ({tierLabel}) {contentValue.length}/{limits.maxContent}
+                                    <ContentCounter $warn={!limits.unlimited && contentValue.length >= limits.maxContent}>
+                                        ({tierLabel}) {limits.unlimited ? `${contentValue.length} / unlimited` : `${contentValue.length}/${limits.maxContent}`}
                                     </ContentCounter>
                                 </ContentCounterRow>
                             </EditorMount>

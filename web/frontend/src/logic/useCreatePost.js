@@ -212,12 +212,28 @@ export function useCreatePost({
     };
   }, []);
   useEffect(() => {
-    if (!tx.needsChainConfigRefresh()) return;
-    Api.get('get_chain_config', undefined).then(cfg => {
-      if (cfg) try {
-        tx.cacheChainConfig(cfg);
-      } catch (_) {}
-    }).catch(() => {});
+    // Always refresh on mount of the composer so tier-aware limits
+    // (max_title_length / max_content_length) are not stuck on a stale
+    // cache. If the cached config is also missing or has no tiers, this
+    // ensures we hydrate before the user starts typing.
+    let cancelled = false;
+    const refresh = () => {
+      Api.get('get_chain_config', undefined).then(cfg => {
+        if (cancelled || !cfg) return;
+        try { tx.cacheChainConfig(cfg); } catch (_) {}
+      }).catch(() => {});
+    };
+    let tiersOk = false;
+    try {
+      const raw = localStorage.getItem('chainConfig');
+      const parsed = raw ? JSON.parse(raw) : null;
+      tiersOk = !!(parsed && Array.isArray(parsed.tiers) && parsed.tiers.length > 0
+        && parseInt(parsed.tiers[0]?.max_title_length) > 0);
+    } catch (_) { tiersOk = false; }
+    if (!tiersOk || tx.needsChainConfigRefresh()) {
+      refresh();
+    }
+    return () => { cancelled = true; };
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,26 +245,38 @@ export function useCreatePost({
       const userLevel = parseInt(Storage.load('user_level', '0'));
       const tiers = chain.tiers || [];
       const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
-      const tier = tiers[tierIndex] || {};
-
-      // Get limits from chain params tiers, with sensible fallbacks
-      const maxTitle = parseInt(tier.max_title_length) || 130;
-      const maxContent = parseInt(tier.max_content_length) || 1000;
+      // Admins (>=100) are uncapped on the client — no maxLength enforced.
+      // Use Number.MAX_SAFE_INTEGER as a sentinel so existing maxLength
+      // checks become effectively no-ops while remaining numeric.
+      const isAdmin = userLevel >= 100;
+      let tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
+      let maxTitle = parseInt(tier.max_title_length) || 0;
+      let maxContent = parseInt(tier.max_content_length) || 0;
+      if (isAdmin) {
+        maxTitle = Number.MAX_SAFE_INTEGER;
+        maxContent = Number.MAX_SAFE_INTEGER;
+      } else {
+        // Sensible fallbacks if chain config hasn't loaded yet.
+        if (!maxTitle) maxTitle = 150;
+        if (!maxContent) maxContent = 1000;
+      }
       return {
         maxTitle,
         maxContent,
         maxTopic: parseInt(chain.max_topic_size) || 50,
         minTopic: parseInt(chain.min_topic_size) || 2,
-        willPayFee: userLevel >= 1
+        willPayFee: userLevel >= 1,
+        unlimited: isAdmin
       };
     } catch (e) {
       console.error('[CreatePostView] Error calculating limits:', e);
       return {
-        maxTitle: 130,
+        maxTitle: 150,
         maxContent: 1000,
         maxTopic: 50,
         minTopic: 2,
-        willPayFee: false
+        willPayFee: false,
+        unlimited: false
       };
     }
   }, [configUpdateTrigger]);
