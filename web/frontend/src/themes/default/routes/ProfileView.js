@@ -430,7 +430,7 @@ const Avatar = ({ $size, src: _src, ...rest }) => (
     <UserAvatar
         size={$size || 64}
         shape="rounded"
-        paddingRatio={0.15}
+        paddingRatio={0}
         {...rest}
     />
 );
