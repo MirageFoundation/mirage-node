@@ -22,6 +22,8 @@ import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import Api from "../../../utils/api";
+import Tooltip from "../components/Tooltip.js";
+import { AWARD_TYPES } from "../../../logic/usePostGifts";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -1452,6 +1454,19 @@ function ProfileCommentRow({ post }) {
                 </CommentUserLink>
                 <CommentDot>·</CommentDot>
                 <CommentTime>{formatCommentAge(ts)}</CommentTime>
+                {Array.isArray(post?.awards) && post.awards.length > 0 && (
+                    <>
+                        <CommentDot>·</CommentDot>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.7rem' }} onClick={e => e.stopPropagation()}>
+                            {post.awards.map(a => {
+                                const def = AWARD_TYPES.find(t => t.name === a.type);
+                                if (!def) return null;
+                                const cnt = Number(a.count || 0);
+                                return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                            })}
+                        </span>
+                    </>
+                )}
             </CommentHeader>
             <CommentBody onClick={e => e.stopPropagation()}>
                 <MarkdownRenderer text={fullBody} />

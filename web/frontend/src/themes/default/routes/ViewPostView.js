@@ -3806,6 +3806,22 @@ function ViewPostView({
                                                     <ContentTagBadge tag={tagLabel} size="md" />
                                                 </> : null;
                                             })()}
+                                            {post?.awards?.length > 0 && <>
+                                                <MetaSeparator>·</MetaSeparator>
+                                                <span style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.1rem',
+                                                    fontSize: '0.6rem'
+                                                }}>
+                                                    {post.awards.map(a => {
+                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
+                                                        if (!def) return null;
+                                                        const cnt = Number(a.count || 0);
+                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                                    })}
+                                                </span>
+                                            </>}
                                             {/* Collapse/expand chevron for comments — rendered AFTER the
                                               * content-warning tag so the chevron sits to the right of the
                                               * tag badge rather than between the timestamp and the tag. */}
@@ -3826,22 +3842,6 @@ function ViewPostView({
                                                 }}>
                                                     edited {formatElapsed(post.edited_ts)} ago
                                                 </Tooltip>
-                                            </>}
-                                            {post?.awards?.length > 0 && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <span style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.1rem',
-                                                    fontSize: '0.6rem'
-                                                }}>
-                                                    {post.awards.map(a => {
-                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
-                                                        if (!def) return null;
-                                                        const cnt = Number(a.count || 0);
-                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
-                                                    })}
-                                                </span>
                                             </>}
                                             {post.agent_edited && <>
                                                 <MetaSeparator>·</MetaSeparator>

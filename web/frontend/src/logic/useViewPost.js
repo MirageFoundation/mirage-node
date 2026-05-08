@@ -1412,6 +1412,29 @@ export function useViewPost({
         setConfirmAward({
             postId
         });
+        // Ensure the award_configs are available so the dialog doesn't
+        // get stuck on "Loading…" — happens when the user lands on this
+        // view via a deep link (e.g. profile → post) before App.js'
+        // bootstrap fetch finished, or when that boot fetch returned an
+        // empty payload. Mirrors the inline fetch used by `usePostGifts`.
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            const hasAwards = Array.isArray(cfg?.award_configs) && cfg.award_configs.length > 0;
+            if (!hasAwards) {
+                Api.get('get_chain_config', undefined)
+                    .then(fetched => {
+                        if (fetched && typeof fetched === 'object') {
+                            try { tx.cacheChainConfig(fetched); } catch (_) { }
+                        } else {
+                            try { tx.releaseChainConfigClaim && tx.releaseChainConfigClaim(); } catch (_) { }
+                        }
+                    })
+                    .catch(() => {
+                        try { tx.releaseChainConfigClaim && tx.releaseChainConfigClaim(); } catch (_) { }
+                    });
+            }
+        } catch (_) { /* noop */ }
         setTimeout(() => {
             const el = document.getElementById(`comment-${postId.toLowerCase()}`);
             if (el) el.scrollIntoView({

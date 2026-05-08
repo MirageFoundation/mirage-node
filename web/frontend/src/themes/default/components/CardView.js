@@ -1005,7 +1005,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
      * were mid-scroll). The hook exposes three `confirm*` state objects
      * that drive the matching `GiftDialogs` component rendered below.
      */
-    const gifts = usePostGifts({ post });
+    const gifts = usePostGifts({ post, updatePost });
     const {
         handleGiveAward: giftGiveAwardOpen,
         handleGiftMirage: giftMirageOpen,
@@ -1247,6 +1247,19 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <>
                             <HeaderDot>·</HeaderDot>
                             <ContentTagBadge tag={normalizedTag} />
+                        </>
+                    )}
+                    {post?.awards?.length > 0 && (
+                        <>
+                            <HeaderDot>·</HeaderDot>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.7rem' }}>
+                                {post.awards.map(a => {
+                                    const def = awardTypes?.find(t => t.name === a.type);
+                                    if (!def) return null;
+                                    const cnt = Number(a.count || 0);
+                                    return <Tooltip key={a.type} data-tooltip={def.label} onClick={stop}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                })}
+                            </span>
                         </>
                     )}
                 </HeaderMeta>

@@ -46,7 +46,7 @@ function friendlyAwardError(raw) {
     return raw || 'Something went wrong. Please try again.';
 }
 
-export default function usePostGifts({ post } = {}) {
+export default function usePostGifts({ post, updatePost } = {}) {
     const postId = post?.post_id || null;
     const targetUserId = post?.user_id || null;
     const targetUsername = typeof post?.username === 'string' ? post.username.trim() : '';
@@ -154,9 +154,13 @@ export default function usePostGifts({ post } = {}) {
                     .then(fetched => {
                         if (fetched && typeof fetched === 'object') {
                             try { tx.cacheChainConfig(fetched); } catch (_) { }
+                        } else {
+                            try { tx.releaseChainConfigClaim && tx.releaseChainConfigClaim(); } catch (_) { }
                         }
                     })
-                    .catch(() => { });
+                    .catch(() => {
+                        try { tx.releaseChainConfigClaim && tx.releaseChainConfigClaim(); } catch (_) { }
+                    });
             }
         } catch (_) { /* noop */ }
     }, [postId]);
@@ -325,12 +329,26 @@ export default function usePostGifts({ post } = {}) {
         if (!targetPostId || isAwarding) return;
         const costUmirage = getAwardCost(awardType);
         if (costUmirage == null) return;
+        const prevAwards = Array.isArray(post?.awards) ? [...post.awards] : [];
+        const applyOptimisticAward = () => {
+            if (typeof updatePost !== 'function') return;
+            const existing = prevAwards.find(a => a.type === awardType);
+            const nextAwards = existing
+                ? prevAwards.map(a => a.type === awardType ? { ...a, count: (Number(a.count) || 0) + 1 } : a)
+                : [...prevAwards, { type: awardType, count: 1 }];
+            try { updatePost(targetPostId, { awards: nextAwards }); } catch (_) { }
+        };
+        const revertOptimisticAward = () => {
+            if (typeof updatePost !== 'function') return;
+            try { updatePost(targetPostId, { awards: prevAwards }); } catch (_) { }
+        };
         try {
             setIsAwarding(true);
             setConfirmAward(null);
             if (costUmirage > 0) {
                 try { tx.adjustBalanceOptimistic(-costUmirage); } catch (_) { }
             }
+            applyOptimisticAward();
             const result = await tx.giveAward(targetPostId, awardType);
             if (result && result.success) {
                 const label = AWARD_TYPES.find(a => a.name === awardType)?.label || awardType;
@@ -340,6 +358,7 @@ export default function usePostGifts({ post } = {}) {
                 if (costUmirage > 0) {
                     try { tx.adjustBalanceOptimistic(costUmirage); } catch (_) { }
                 }
+                revertOptimisticAward();
                 try { tx.refreshBalance(); } catch (_) { }
                 setAwardMessage({ type: 'error', message: friendlyAwardError(result?.error) });
             }
@@ -347,13 +366,14 @@ export default function usePostGifts({ post } = {}) {
             if (costUmirage > 0) {
                 try { tx.adjustBalanceOptimistic(costUmirage); } catch (_) { }
             }
+            revertOptimisticAward();
             try { tx.refreshBalance(); } catch (_) { }
             setAwardMessage({ type: 'error', message: friendlyAwardError(error?.message || String(error)) });
         } finally {
             setIsAwarding(false);
             setTimeout(() => setAwardMessage(null), 5000);
         }
-    }, [confirmAward, isAwarding, getAwardCost]);
+    }, [confirmAward, isAwarding, getAwardCost, post, updatePost]);
 
     const handleDonateAmountChange = useCallback((value) => {
         setDonateAmountRaw(String(value || '').replace(/[^\d]/g, ''));
