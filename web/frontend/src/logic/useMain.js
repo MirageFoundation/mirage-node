@@ -286,7 +286,17 @@ export function useMain({
         }
         return mode;
     });
-    const [oldRedditSort, setOldRedditSort] = useState('best');
+    const [oldRedditSort, setOldRedditSort] = useState(() => {
+        // Derive from the persisted home_sort_mode so the toggle survives refresh.
+        // 'newest' -> 'new', anything else -> 'best'. Without this the effect below
+        // resets home_sort_mode back to 'magic' on every mount.
+        try {
+            const saved = Storage.load('home_sort_mode', 'magic');
+            return saved === 'newest' ? 'new' : 'best';
+        } catch (_) {
+            return 'best';
+        }
+    });
     const handleOldRedditSortChange = useCallback(mode => {
         if (mode !== 'best' && mode !== 'new') return;
         console.debug('[OldReddit] sort.select', {
