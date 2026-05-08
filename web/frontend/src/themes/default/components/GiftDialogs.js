@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import styled from "styled-components";
 import ConfirmDialog from "./ConfirmDialog";
-import { formatMirageCompact } from "../../../utils/formatters";
+import { formatMirageBalance } from "../../../utils/formatters";
+import Api from "../../../utils/api";
+import Storage from "../../../utils/Storage";
 
 /**
  * GiftDialogs — default modal wrappers for the three "pay something to
@@ -261,16 +263,55 @@ const AwardCost = styled.span`
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
-/** Format umirage as `N MIRAGE` using the project's compact formatter.
- *  `formatMirageCompact` returns lowercase k/m/b suffixes; the default
- *  theme displays them uppercase (K/M/B) in the TopBar and profile stats,
- *  so we normalize here too to keep the balance value consistent across
- *  every gift dialog. */
+/** Format umirage as `N MIRAGE` using the same balance formatter the
+ *  TopBar / MobileHeader / ProfileView already use. Keeps the dialog
+ *  and the rest of the UI in lock-step. */
 function formatMirage(umirage) {
     const n = Number(umirage);
     if (!isFinite(n)) return '— MIRAGE';
-    const compact = formatMirageCompact(n).replace(/([kmb])$/, s => s.toUpperCase());
-    return `${compact} MIRAGE`;
+    return `${formatMirageBalance(n)} MIRAGE`;
+}
+
+/** Fetch the viewer's *current* balance straight from the API. Returns
+ *  null if the user is logged out or the request fails. We use this
+ *  instead of relying on the `userBalanceUmirage` prop because that
+ *  prop is sourced from `useBalance()` which reads `localStorage.user_balance`,
+ *  and that key can be stale or zeroed (e.g. fresh signup, or a viewer
+ *  who's never visited their own profile in this session). */
+async function fetchViewerBalance() {
+    try {
+        const publicKey = Storage.load('publicKey', '');
+        if (!publicKey) return null;
+        const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() });
+        if (!data) return null;
+        const raw = data.balance !== undefined ? data.balance : data.user_balance;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+/** Hook that returns the viewer's freshly-fetched balance whenever the
+ *  dialog opens. Falls back to the parent-supplied prop while the fetch
+ *  is in flight so we never display a stale "0 MIRAGE" the way the
+ *  pre-fix code did. */
+function useLiveViewerBalance(open, fallbackUmirage) {
+    const [fresh, setFresh] = useState(null);
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        (async () => {
+            const bal = await fetchViewerBalance();
+            if (!cancelled && bal !== null) setFresh(bal);
+        })();
+        return () => { cancelled = true; };
+    }, [open]);
+    if (fresh !== null) return fresh;
+    if (fallbackUmirage != null && Number.isFinite(Number(fallbackUmirage))) {
+        return Number(fallbackUmirage);
+    }
+    return null;
 }
 
 /** Convert a raw digit string (MIRAGE whole units) to a thousands-separated
@@ -303,15 +344,25 @@ export function GiftMirageDialog({
     const belowMin = !empty && parsedMirage < minAmount;
     const formatter = typeof formatAmount === 'function' ? formatAmount : defaultAmountFormatter;
 
-    // Balance check — `parsedMirage` is whole MIRAGE; balance is umirage.
-    const balanceMirage = userBalanceUmirage != null && isFinite(Number(userBalanceUmirage))
-        ? Number(userBalanceUmirage) / 1_000_000
+    // Pull the live on-chain balance for the logged-in viewer. The hook
+    // re-fetches every time the dialog opens, so we never rely on a
+    // stale `localStorage.user_balance` (which previously caused the
+    // popup to render "0 MIRAGE" + Insufficient banner even when the
+    // user had plenty on chain).
+    const balanceUmirageNum = useLiveViewerBalance(open, userBalanceUmirage);
+    const balanceMirage = balanceUmirageNum !== null
+        ? balanceUmirageNum / 1_000_000
         : null;
-    const insufficient = balanceMirage !== null && parsedMirage > 0 && parsedMirage > balanceMirage;
+    // Compare in umirage to avoid float precision loss when the entered
+    // amount has many digits.
+    const amountUmirage = parsedMirage * 1_000_000;
+    const insufficient = balanceUmirageNum !== null
+        && parsedMirage > 0
+        && balanceUmirageNum < amountUmirage;
 
     const minLabel = minAmount.toLocaleString();
     const balanceDisplay = balanceMirage !== null
-        ? formatMirage(userBalanceUmirage)
+        ? formatMirage(balanceUmirageNum)
         : '—';
 
     const recipient = recipientLabel || 'this user';
@@ -391,15 +442,17 @@ export function GiftSubscriptionDialog({
         ? formatMirage(feeUmirage)
         : (feeLabel || null);
 
-    const balanceDisplay = userBalanceUmirage != null && isFinite(Number(userBalanceUmirage))
-        ? formatMirage(userBalanceUmirage)
+    // Live viewer balance — fetched on each open, falls back to the
+    // parent prop while the request is in flight.
+    const balanceUmirageNum = useLiveViewerBalance(open, userBalanceUmirage);
+    const balanceDisplay = balanceUmirageNum !== null
+        ? formatMirage(balanceUmirageNum)
         : '—';
 
     const insufficient = feeUmirage != null
-        && userBalanceUmirage != null
         && isFinite(Number(feeUmirage))
-        && isFinite(Number(userBalanceUmirage))
-        && Number(userBalanceUmirage) < Number(feeUmirage);
+        && balanceUmirageNum !== null
+        && balanceUmirageNum < Number(feeUmirage);
 
     const confirmBlocked = loading || !!error || !expiryLabel || insufficient;
 
@@ -476,10 +529,9 @@ export function GiveAwardDialog({
         if (!open) setSelected(null);
     }, [open]);
 
-    // Compute affordability per-award + global (can the user afford ANY of them).
-    const balance = userBalanceUmirage != null && isFinite(Number(userBalanceUmirage))
-        ? Number(userBalanceUmirage)
-        : null;
+    // Live viewer balance — fetched fresh on every open. Compute
+    // affordability per-award + global (can the user afford ANY of them).
+    const balance = useLiveViewerBalance(open, userBalanceUmirage);
     const balanceDisplay = balance !== null ? formatMirage(balance) : '—';
 
     let anyAffordable = false;
