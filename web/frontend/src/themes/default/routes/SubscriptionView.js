@@ -796,6 +796,7 @@ export default function SubscriptionView({ state }) {
         handleCancelAutoRenew,
         buildTierDetails,
         handleUpgrade,
+        canAfford,
     } = useSubscription({ state });
 
     if (isLoading) {
@@ -859,9 +860,15 @@ export default function SubscriptionView({ state }) {
                 );
             }
 
-            /* TEMP (testing): insufficient-funds branch removed so the
-               Upgrade button is always active. Re-enable when flows are
-               ready by restoring the !canAfford(tier) check here. */
+            // Insufficient balance: disable the CTA and surface the
+            // reason inline so users know to top up before retrying.
+            if (tier.level > 0 && !canAfford(tier)) {
+                return (
+                    <PlanCTA type="button" $intent="disabled" disabled>
+                        Insufficient Funds
+                    </PlanCTA>
+                );
+            }
 
             if (tier.level < userLevel) {
                 return (

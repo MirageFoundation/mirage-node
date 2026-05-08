@@ -1855,6 +1855,21 @@ function ProfileViewAuthenticated({
                                             </GiftMirageBtn>
                                         </HideOnMobile>
                                     )}
+                                    {isOwnProfile && userLevel === 0 && (() => {
+                                        const insufficient = subFeeUmirage != null && Number(balance) < Number(subFeeUmirage);
+                                        return (
+                                            <Button
+                                                size="sm"
+                                                variant="subtle"
+                                                mobileFullWidth
+                                                disabled={insufficient}
+                                                onClick={() => navigate('/subscription')}
+                                                title={insufficient ? 'Insufficient balance to upgrade' : undefined}
+                                            >
+                                                {insufficient ? 'Insufficient Funds' : 'Upgrade'}
+                                            </Button>
+                                        );
+                                    })()}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             {/* Gift Subscription confirmation moved to a root-level
@@ -1990,16 +2005,13 @@ function ProfileViewAuthenticated({
                                         }}>
                                             {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
                                         </Mono>
-                                        {isOwnProfile && canHaveBiography && <IconActionButton type="button" onClick={() => {
+                                        {isOwnProfile && <IconActionButton type="button" onClick={() => {
                                             setBioDraft(biography);
                                             setBioEditing(true);
                                             setBioError('');
                                         }} title={biography ? 'Edit biography' : 'Add biography'} aria-label={biography ? 'Edit biography' : 'Add biography'}>
                                             <HiPencilSquare aria-hidden="true" />
                                         </IconActionButton>}
-                                        {isOwnProfile && !canHaveBiography && <Button size="sm" variant="subtle" mobileFullWidth onClick={() => navigate('/subscription')}>
-                                            Upgrade
-                                        </Button>}
                                     </ProfileFieldValue>}
                                 </ProfileFieldValuePlain>
                             </ProfileFieldRow>
