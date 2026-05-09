@@ -300,7 +300,7 @@ export default function ConfirmDialog({
                                             ? <ReasonError>Reason is required.</ReasonError>
                                             : "Keep it short and specific."}
                                     </span>
-                                    <span>{trimmed.length}/{reasonMaxLength}</span>
+                                    <span>{trimmed.length} / {reasonMaxLength}</span>
                                 </ReasonMeta>
                             </>
                         )}

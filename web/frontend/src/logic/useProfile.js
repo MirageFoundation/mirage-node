@@ -672,7 +672,7 @@ export function useProfile({
         } catch (_) { }
         navigate(getPostUrl(post));
     };
-    const usernameDisplay = profileUsername || (isOwnProfile ? username : '') || '(not set)';
+    const usernameDisplay = profileUsername || (isOwnProfile ? username : '') || '(loading...)';
     const balanceDisplay = profileAddress ? balance === null ? '(loading...)' : `${formatMirage(balance)} MIRAGE` : '(address required)';
     const reserveDisplay = profileAddress ? reserveFunds === null ? '(loading...)' : `${formatMirage(reserveFunds)} MIRAGE` : '(address required)';
     const registeredDisplay = formatRegistrationDate(profileRegisteredAt);

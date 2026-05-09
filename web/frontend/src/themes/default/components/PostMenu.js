@@ -101,11 +101,11 @@ const MenuItemBtn = styled.button`
 
     &:hover {
         background: ${({ theme, $active }) =>
-            $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
+        $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
         color: ${({ theme, $active, $danger }) => {
-            if ($danger) return theme.colors.voteDown;
-            return $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText;
-        }};
+        if ($danger) return theme.colors.voteDown;
+        return $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText;
+    }};
     }
 
     & > svg {
@@ -275,7 +275,7 @@ export function MoreMenuChip({
 
     /**
      * Sub-plan 06.11 E — feed-row admin parity. Adds Mark deleted /
-     * Suspend / Unsuspend rows for admins viewing other people's posts
+     * Suspend / Unsuspend rows for admins viewing other users' posts
      * on a quests-enabled node. Suspension status is fetched lazily the
      * first time the menu opens (mirrors bluemoon).
      */
@@ -439,125 +439,125 @@ export function MoreMenuChip({
 
     return (
         <>
-        <PopoverRoot ref={rootRef} onClick={stop} data-no-card-click>
-            <MoreButton
-                type="button"
-                aria-label="Post menu"
-                aria-haspopup="menu"
-                aria-expanded={open}
-                onClick={handleToggle}
-            >
-                <EllipsisIcon />
-            </MoreButton>
-            {open && (
-                <Menu role="menu" aria-label="Post menu" $align={align}>
-                    <MenuItemBtn type="button" onClick={handleCopyLink}>
-                        <HiOutlineLink />
-                        <span>{copied ? 'Copied!' : 'Copy link'}</span>
-                    </MenuItemBtn>
-                    <MenuItemBtn type="button" onClick={handleCopyText}>
-                        <HiOutlineClipboardDocument />
-                        <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
-                    </MenuItemBtn>
-                    {isLoggedIn && isOwnPost && (
-                        <>
-                            <MenuItemBtn type="button" onClick={handleEdit}>
-                                <HiOutlinePencilSquare />
-                                <span>Edit post</span>
-                            </MenuItemBtn>
-                            <MenuItemBtn type="button" $danger onClick={handleDelete}>
-                                <HiOutlineTrash />
-                                <span>Delete post</span>
-                            </MenuItemBtn>
-                        </>
-                    )}
-                    {isLoggedIn && !isOwnPost && (
-                        <>
-                            <MenuItemBtn type="button" onClick={handleFollowUser}>
-                                {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
-                                <span>{followingUser ? 'Unfollow user' : 'Follow user'}</span>
-                            </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={handleFollowTopic}>
-                                <HiOutlineHashtag />
-                                <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
-                            </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={handleGiveAward}>
-                                <HiOutlineSparkles />
-                                <span>Give Award</span>
-                            </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={handleGiftMirage}>
-                                <HiOutlineGift />
-                                <span>Gift Mirage</span>
-                            </MenuItemBtn>
-                            <MenuItemBtn type="button" onClick={handleGiftSubscription}>
-                                <HiOutlineGift />
-                                <span>Gift Subscription</span>
-                            </MenuItemBtn>
-                        </>
-                    )}
-                    {isAdminVisible && adminMenuItems.length > 0 && adminMenuItems.map(item => (
-                        <MenuItemBtn
-                            key={item.key}
-                            type="button"
-                            $danger={item.danger || undefined}
-                            onClick={(e) => { stop(e); item.onClick(); }}
-                        >
-                            {item.icon}
-                            <span>{item.label}</span>
+            <PopoverRoot ref={rootRef} onClick={stop} data-no-card-click>
+                <MoreButton
+                    type="button"
+                    aria-label="Post menu"
+                    aria-haspopup="menu"
+                    aria-expanded={open}
+                    onClick={handleToggle}
+                >
+                    <EllipsisIcon />
+                </MoreButton>
+                {open && (
+                    <Menu role="menu" aria-label="Post menu" $align={align}>
+                        <MenuItemBtn type="button" onClick={handleCopyLink}>
+                            <HiOutlineLink />
+                            <span>{copied ? 'Copied!' : 'Copy link'}</span>
                         </MenuItemBtn>
-                    ))}
-                </Menu>
-            )}
-        </PopoverRoot>
-        {adminDialogs}
-        <ConfirmDialog
-            open={deleteDialogOpen}
-            title="Delete this post?"
-            message="This will mark the post as deleted on-chain. You can't undo this action."
-            confirmLabel="Delete post"
-            confirmVariant="danger"
-            pending={deletePending}
-            onConfirm={confirmDeletePost}
-            onCancel={cancelDeletePost}
-        />
-        <GiftMirageDialog
-            open={!!confirmDonate}
-            recipientLabel={confirmDonate?.username ? `@${confirmDonate.username}` : authorLabelShort}
-            amountRaw={donateAmountRaw}
-            formatAmount={formatDonateAmount}
-            onAmountChange={handleDonateAmountChange}
-            pending={donatePending}
-            userBalanceUmirage={viewerBalanceUmirage}
-            onConfirm={confirmDonateAction}
-            onCancel={cancelDonate}
-        />
-        <GiftSubscriptionDialog
-            open={!!confirmGiftSub}
-            recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : authorLabelShort}
-            level={confirmGiftSub?.level}
-            feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
-            feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
-            loading={!!confirmGiftSub?.loading}
-            expiryLabel={confirmGiftSub?.expiryLabel}
-            error={confirmGiftSub?.error}
-            pending={giftSubPending}
-            userBalanceUmirage={viewerBalanceUmirage}
-            onConfirm={confirmGiftSubAction}
-            onCancel={cancelGiftSub}
-        />
-        <GiveAwardDialog
-            open={!!confirmAward}
-            awardTypes={awardTypes}
-            getAwardCost={getAwardCost}
-            userBalanceUmirage={viewerBalanceUmirage}
-            isAwarding={isAwarding}
-            onPick={(awardName) => {
-                if (confirmAward?.postId) {
-                    confirmAwardAction(awardName);
-                }
-            }}
-            onCancel={cancelAward}
-        />
+                        <MenuItemBtn type="button" onClick={handleCopyText}>
+                            <HiOutlineClipboardDocument />
+                            <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
+                        </MenuItemBtn>
+                        {isLoggedIn && isOwnPost && (
+                            <>
+                                <MenuItemBtn type="button" onClick={handleEdit}>
+                                    <HiOutlinePencilSquare />
+                                    <span>Edit post</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" $danger onClick={handleDelete}>
+                                    <HiOutlineTrash />
+                                    <span>Delete post</span>
+                                </MenuItemBtn>
+                            </>
+                        )}
+                        {isLoggedIn && !isOwnPost && (
+                            <>
+                                <MenuItemBtn type="button" onClick={handleFollowUser}>
+                                    {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
+                                    <span>{followingUser ? 'Unfollow user' : 'Follow user'}</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" onClick={handleFollowTopic}>
+                                    <HiOutlineHashtag />
+                                    <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" onClick={handleGiveAward}>
+                                    <HiOutlineSparkles />
+                                    <span>Give Award</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" onClick={handleGiftMirage}>
+                                    <HiOutlineGift />
+                                    <span>Gift Mirage</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" onClick={handleGiftSubscription}>
+                                    <HiOutlineGift />
+                                    <span>Gift Subscription</span>
+                                </MenuItemBtn>
+                            </>
+                        )}
+                        {isAdminVisible && adminMenuItems.length > 0 && adminMenuItems.map(item => (
+                            <MenuItemBtn
+                                key={item.key}
+                                type="button"
+                                $danger={item.danger || undefined}
+                                onClick={(e) => { stop(e); item.onClick(); }}
+                            >
+                                {item.icon}
+                                <span>{item.label}</span>
+                            </MenuItemBtn>
+                        ))}
+                    </Menu>
+                )}
+            </PopoverRoot>
+            {adminDialogs}
+            <ConfirmDialog
+                open={deleteDialogOpen}
+                title="Delete this post?"
+                message="This will mark the post as deleted on-chain. You can't undo this action."
+                confirmLabel="Delete post"
+                confirmVariant="danger"
+                pending={deletePending}
+                onConfirm={confirmDeletePost}
+                onCancel={cancelDeletePost}
+            />
+            <GiftMirageDialog
+                open={!!confirmDonate}
+                recipientLabel={confirmDonate?.username ? `@${confirmDonate.username}` : authorLabelShort}
+                amountRaw={donateAmountRaw}
+                formatAmount={formatDonateAmount}
+                onAmountChange={handleDonateAmountChange}
+                pending={donatePending}
+                userBalanceUmirage={viewerBalanceUmirage}
+                onConfirm={confirmDonateAction}
+                onCancel={cancelDonate}
+            />
+            <GiftSubscriptionDialog
+                open={!!confirmGiftSub}
+                recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : authorLabelShort}
+                level={confirmGiftSub?.level}
+                feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
+                feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+                loading={!!confirmGiftSub?.loading}
+                expiryLabel={confirmGiftSub?.expiryLabel}
+                error={confirmGiftSub?.error}
+                pending={giftSubPending}
+                userBalanceUmirage={viewerBalanceUmirage}
+                onConfirm={confirmGiftSubAction}
+                onCancel={cancelGiftSub}
+            />
+            <GiveAwardDialog
+                open={!!confirmAward}
+                awardTypes={awardTypes}
+                getAwardCost={getAwardCost}
+                userBalanceUmirage={viewerBalanceUmirage}
+                isAwarding={isAwarding}
+                onPick={(awardName) => {
+                    if (confirmAward?.postId) {
+                        confirmAwardAction(awardName);
+                    }
+                }}
+                onCancel={cancelAward}
+            />
         </>
     );
 }
@@ -630,7 +630,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
 
     if (!post || !postId) return null;
     // Matches CardView: the block chip only shows for logged-in viewers on
-    // other people's posts.
+    // other users' posts.
     if (!isLoggedIn || isOwnPost) return null;
 
     return (

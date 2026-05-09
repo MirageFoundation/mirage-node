@@ -1362,7 +1362,7 @@ const MainView = ({
         // Full-width main column + shell header (no left sidebar; old Reddit style)
         const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : `#${urlTopic}`;
         const noPostsMessage = urlTopic === 'following'
-            ? 'No posts available. Follow people or topics to populate this feed.'
+            ? 'No posts available. Follow users or topics to populate this feed.'
             : 'No posts available';
         return <ContentGrid>
             <Helmet>
@@ -1417,7 +1417,7 @@ const MainView = ({
                                 </HomeFeedModeInline>
                             </TopicHeroHeader>
                             <TopicHeroDescription>
-                                Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
+                                Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from users actively contributing to this topic.
                             </TopicHeroDescription>
                         </TopicHeroCard>}
 
@@ -1439,7 +1439,7 @@ const MainView = ({
                             {!inviteBannerCollapsed && <InviteBannerContentWrapper>
                                 <InviteBannerTextContent>
                                     <HomeFeedInfoDescription>
-                                        Mirage is now invite-only — because great conversations require great people!
+                                        Mirage is now invite-only — because great conversations require great users!
                                         {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
                                     </HomeFeedInfoDescription>
                                 </InviteBannerTextContent>
@@ -1542,7 +1542,7 @@ const MainView = ({
                                 </HomeFeedModeInline>
                             </HomeFeedHeaderRow>
                             <HomeFeedInfoDescription>
-                                <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
+                                <strong>Only posts from topics and users you follow.</strong> A focused view of your communities without discovery content.
                             </HomeFeedInfoDescription>
                         </HomeFeedInfoCard>}
 

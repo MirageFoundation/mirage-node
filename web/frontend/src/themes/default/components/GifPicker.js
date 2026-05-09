@@ -227,7 +227,12 @@ const GifIcon = () => (
     </svg>
 );
 
-export default function GifPicker({ onSelect, disabled = false }) {
+/* renderTrigger (optional): ({ buttonRef, isOpen, toggle, disabled }) => ReactNode
+ *   When provided, replaces the default icon button. The picker still
+ *   owns open/close state and popover positioning — the consumer only
+ *   supplies the trigger element and must attach `buttonRef` so
+ *   positioning math works. */
+export default function GifPicker({ onSelect, disabled = false, renderTrigger }) {
     const [isOpen, setIsOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [gifs, setGifs] = useState([]);
@@ -369,19 +374,26 @@ export default function GifPicker({ onSelect, disabled = false }) {
         }
     };
 
+    const toggle = () => setIsOpen(prev => !prev);
+    const triggerDisabled = disabled || !apiKey;
+
     return (
         <PickerWrapper>
-            <PickerButton
-                ref={buttonRef}
-                type="button"
-                tabIndex={-1}
-                onClick={() => setIsOpen(!isOpen)}
-                disabled={disabled || !apiKey}
-                aria-label="GIFs"
-                title={apiKey ? 'GIFs' : 'GIFs disabled (missing API key)'}
-            >
-                <GifIcon />
-            </PickerButton>
+            {renderTrigger ? (
+                renderTrigger({ buttonRef, isOpen, toggle, disabled: triggerDisabled })
+            ) : (
+                <PickerButton
+                    ref={buttonRef}
+                    type="button"
+                    tabIndex={-1}
+                    onClick={toggle}
+                    disabled={triggerDisabled}
+                    aria-label="GIFs"
+                    title={apiKey ? 'GIFs' : 'GIFs disabled (missing API key)'}
+                >
+                    <GifIcon />
+                </PickerButton>
+            )}
 
             {isOpen && ReactDOM.createPortal(
                 <Popover

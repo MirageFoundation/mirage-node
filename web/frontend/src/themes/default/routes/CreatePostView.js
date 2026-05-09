@@ -1,23 +1,23 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
-import { HiArrowUpTray, HiPlus, HiTrash, HiChevronLeft, HiChevronRight } from "react-icons/hi2";
+import { HiTrash, HiChevronLeft, HiChevronRight, HiChevronDown, HiArrowUpTray } from "react-icons/hi2";
 import { TopicSelector } from "../components/TopicSelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
+import ConfirmDialog from "../components/ConfirmDialog.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import FeedRightRail from "../components/FeedRightRail.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
-import { MediaRow } from "../components/MediaAttachmentLayout.js";
-import StickerPicker from "../components/StickerPicker.js";
-import GifPicker from "../components/GifPicker.js";
-import { RadioInput } from "../../../logic/useSettings.js";
+import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
+import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
 import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost";
 
 /**
- * default `CreatePostView` — Reddit-inspired, default-tokenized.
+ * default `CreatePostView` — Twitter-style single composer.
  *
  * Follows R1 (bg canvas), R2 (tokens only), R3 (border dividers),
  * R5 (neutral input focus), R6 (HiChevronDown), R7 (compact font scale).
@@ -26,11 +26,25 @@ import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost
  *  - Header row mirrors `InboxView::HeaderRow`/`HeaderTitle` (1.1rem/700,
  *    `0.25rem 1rem 0.5rem` padding) plus a trailing "Drafts" hint.
  *  - 820px capped `ComposerColumn` (matches Inbox width).
- *  - Stacked blocks: topic pill → tabs → title input (shared across tabs)
- *    → tag pill → tab body (editor / carousel / link input) → bottom bar.
+ *  - Stacked: topic → title → action chip row → unfurled artifacts
+ *    (link input, media carousel) → body editor → submit row.
+ *  - Action chips ("+ Link", "+ Media", "+ Tag") sit between Title and
+ *    Body. "+ Link" and "+ Media" each unfurl their artifact directly
+ *    below the row so attached content sits above the body — matching
+ *    how the post will render in the feed. "+ Media" toggles an inline
+ *    drop panel that stays open across uploads (drop multiple files one
+ *    by one) and also exposes a "Choose file" button. Whole-page
+ *    drag/drop still uploads via the outer `ContentGrid` handlers.
+ *  - "+ Tag" is a self-contained inline dropdown — clicking it pops a
+ *    small radio menu beneath the chip and the chip text rewrites
+ *    itself to "Tag: <Name>" once a tag is picked, so the selection
+ *    reads inline without burning vertical space on a card.
+ *  - GIF / Sticker pickers live inline in the body editor's toolbar
+ *    (via `toolbarExtra`) since they decorate the body rather than
+ *    standing alongside the structural Link / Media / Tag chips.
  *
  * Typography (R7)
- *  - All inputs, pills, tab labels, help text: 0.75rem / 500 (inputs),
+ *  - All inputs, pills, help text: 0.75rem / 500 (inputs),
  *    0.62rem floating labels, 0.7rem helper copy.
  *  - Page heading: 1.1rem / 700 (matches Inbox).
  *  - Draft & Post buttons share a 2rem pill height.
@@ -52,19 +66,27 @@ const HeaderRow = styled.div`
     }
 `;
 
+/* ─── Typography scale ────────────────────────────────────────────────────
+ *
+ * The composer uses a tight 5-step scale. Reach for one of these instead
+ * of inventing a new size — every drift adds visual noise.
+ *
+ *   1.05rem   — page header only (HeaderTitle)
+ *   0.78rem   — primary inputs, textarea body, preview body, drop heading
+ *   0.7rem    — buttons, chips, menu items, advisory + error notes
+ *   0.62rem   — floating labels, counters, badges, hint subtitles
+ *   0.55rem   — uppercase section microcopy (Preview header, Edit Hash)
+ *
+ * Decorative SVG/glyph sizes (0.8 / 0.85 / 0.9rem) sit outside the text
+ * scale on purpose — they're icon dimensions, not type. */
+
 const HeaderTitle = styled.div`
     display: flex;
     align-items: center;
     color: ${({ theme }) => theme.colors.text};
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
     letter-spacing: -0.01em;
-`;
-
-const DraftsHint = styled.span`
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.62rem;
-    font-weight: 500;
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -135,7 +157,7 @@ const ShellInput = styled.input`
     background: transparent;
     color: ${({ theme }) => theme.colors.text};
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     /* Light weight — matches Link input exactly (R7). */
     font-weight: 400;
     line-height: 1.4;
@@ -190,14 +212,14 @@ const FieldError = styled.div`
     border: 1px solid rgba(255, 69, 58, 0.35);
     background: rgba(255, 69, 58, 0.06);
     color: ${({ theme }) => theme.colors.voteDown};
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-weight: 500;
     line-height: 1.45;
 
     &::before {
         content: '⚠';
         line-height: 1.2;
-        font-size: 0.75rem;
+        font-size: 0.78rem;
         flex: 0 0 auto;
     }
 `;
@@ -206,82 +228,81 @@ const FieldError = styled.div`
 /* Add tags pill + radio card                                                 */
 /* -------------------------------------------------------------------------- */
 
-const TagPill = styled.button`
-    align-self: flex-start;
+/* -------------------------------------------------------------------------- */
+/* Tag chip dropdown                                                          */
+/*                                                                            */
+/* The "+ Tag" chip is a self-contained SELECT control: clicking it opens a   */
+/* small popover-style menu anchored beneath the chip with the tag options.   */
+/* Picking one closes the menu and rewrites the chip text to "Tag: <Name>"   */
+/* (parentheticals stripped from the option label) so the selection is       */
+/* readable inline and the radio-card real estate disappears.                */
+/* -------------------------------------------------------------------------- */
+
+/* Anchor for the absolutely-positioned `TagMenu`. Inline-flex so it sits
+ * naturally inside the action chip row and inherits `flex-wrap` behavior. */
+const TagChipWrap = styled.div`
+    position: relative;
     display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0 0.7rem;
-    height: 1.65rem;
-    border-radius: 9999px;
+`;
+
+const TagMenu = styled.div`
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 12rem;
+    background: ${({ theme }) => theme.colors.menuBg};
     border: 1px solid ${({ theme }) => theme.colors.border};
-    background: ${({ $active, theme }) => ($active ? theme.colors.panelAlt : 'transparent')};
-    color: ${({ theme }) => theme.colors.subtleText};
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+    z-index: 1000;
+    padding: 0.25rem 0;
+    display: flex;
+    flex-direction: column;
+`;
+
+const TagMenuItem = styled.button`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.45rem 0.85rem;
+    background: transparent;
+    border: none;
+    color: ${({ $selected, theme }) => ($selected ? theme.colors.followBtnBg : theme.colors.sidebarItemText)};
     font-family: inherit;
-    font-size: 0.68rem;
-    font-weight: 500;
+    font-size: 0.7rem;
+    font-weight: ${({ $selected }) => ($selected ? 600 : 500)};
+    text-align: left;
     cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: background 0.12s ease, color 0.12s ease;
 
     &:hover:not(:disabled) {
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-        color: ${({ theme }) => theme.colors.text};
-        background: ${({ theme }) => theme.colors.hoverBg};
+        background: ${({ theme }) => theme.colors.menuSelectedBg};
+        color: ${({ $selected, theme }) => ($selected ? theme.colors.followBtnBg : theme.colors.menuItemHoverText)};
     }
-
     &:disabled { opacity: 0.5; cursor: not-allowed; }
-
     &:focus { outline: none; }
-    &:focus-visible { border-color: ${({ theme }) => theme.colors.borderStrong}; }
 `;
 
-const TagIcon = styled.span`
-    font-size: 0.8rem;
+const TagMenuCheck = styled.span`
+    font-size: 0.85rem;
     line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    color: ${({ theme }) => theme.colors.followBtnBg};
+`;
+
+const TagMenuDivider = styled.hr`
+    border: none;
+    border-top: 1px solid ${({ theme }) => theme.colors.borderSubtle};
+    margin: 0.25rem 0;
+`;
+
+const TagMenuFooter = styled.div`
+    padding: 0.4rem 0.85rem 0.5rem;
     color: ${({ theme }) => theme.colors.subtleText};
-`;
-
-const TagRadioCard = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.6rem 0.8rem;
-    border: 1px solid ${({ theme }) => theme.colors.borderSubtle};
-    border-radius: 12px;
-    background: ${({ theme }) => theme.colors.bg};
-`;
-
-const RadioGroup = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-`;
-
-const RadioLabel = styled.label`
-    display: inline-grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 0.5rem;
-    align-items: center;
-    color: ${({ theme }) => theme.colors.text};
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1.25;
-    cursor: pointer;
-    user-select: none;
-
-    &:has(input:disabled) { cursor: not-allowed; opacity: 0.5; }
-`;
-
-const HelpText = styled.div`
     font-size: 0.62rem;
     font-weight: 500;
-    color: ${({ theme }) => theme.colors.subtleText};
-    line-height: 1.5;
-
-    b { color: ${({ theme }) => theme.colors.text}; font-weight: 600; }
+    line-height: 1.45;
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -309,105 +330,16 @@ const EditorShell = styled.div`
     &:hover { border-color: ${({ theme }) => theme.colors.borderStrong}; }
     &:focus-within { border-color: ${({ theme }) => theme.colors.borderStrong}; }
 
-    /* Toolbar row (MarkdownEditor's first inner row) — divider below. */
-    > div > div:first-child {
-        padding: 0.4rem 0.55rem;
-        border-bottom: 1px solid ${({ theme }) => theme.colors.borderSubtle};
-        background: transparent;
-        margin: 0;
-    }
-
-    /* Toolbar icon buttons — transparent tile, no hover fill. */
-    button[type='button'] {
-        background: transparent !important;
-        background-color: transparent !important;
-        border: 1px solid transparent !important;
-        border-radius: 6px !important;
-        min-width: 1.6rem !important;
-        height: 1.6rem !important;
-        padding: 0.15rem 0.3rem !important;
-        color: ${({ theme }) => theme.colors.feedCtrlText} !important;
-        transition: color 0.12s ease !important;
-        box-shadow: none !important;
-    }
-    button[type='button'] svg,
-    button[type='button'] .md-icon {
-        max-width: 0.9rem !important;
-        max-height: 0.9rem !important;
-    }
-    /* Bold (B) and Italic (I) render as letter glyphs inside a <span>.
-     * Bump the size so they read as prominent as the Lucide icons next to them. */
-    button[type='button'] > span {
-        font-size: 0.95rem !important;
-        line-height: 1 !important;
-    }
-    button[type='button']:hover:not(:disabled) {
-        background: transparent !important;
-        background-color: transparent !important;
-        color: ${({ theme }) => theme.colors.text} !important;
-    }
-    button[type='button'][data-active='true'] {
-        background: transparent !important;
-        background-color: transparent !important;
-        color: ${({ theme }) => theme.colors.followBtnBg} !important;
-        border-color: transparent !important;
-    }
-
-    /* Preview toggle — ghost pill; checkbox = transparent square with a
-     * blue (followBtnBg) checkmark glyph when checked. */
-    label {
-        background: transparent !important;
-        background-color: transparent !important;
-        border: 1px solid ${({ theme }) => theme.colors.border} !important;
-        border-radius: 9999px !important;
-        padding: 0 0.55rem !important;
-        font-size: 0.62rem !important;
-        font-weight: 500 !important;
-        color: ${({ theme }) => theme.colors.subtleText} !important;
-        gap: 0.35rem !important;
-        height: 1.5rem !important;
-        transition: color 0.12s ease, border-color 0.12s ease !important;
-    }
-    label:hover {
-        background: transparent !important;
-        background-color: transparent !important;
-        color: ${({ theme }) => theme.colors.text} !important;
-        border-color: ${({ theme }) => theme.colors.borderStrong} !important;
-    }
-    label input[type='checkbox'] {
-        appearance: none !important;
-        -webkit-appearance: none !important;
-        width: 0.9rem !important;
-        height: 0.9rem !important;
-        border-radius: 4px !important;
-        border: 1px solid ${({ theme }) => theme.colors.borderStrong} !important;
-        background: transparent !important;
-        background-color: transparent !important;
-        cursor: pointer !important;
-        position: relative !important;
-        margin: 0 !important;
-        flex-shrink: 0 !important;
-        transition: border-color 0.12s ease !important;
-    }
-    /* Checked state — filled blue (rgb(68,109,228)) square with a centered
-     * white checkmark. Centering uses left/top 50% + translate so the
-     * rotated glyph lands visually in the middle regardless of box size. */
-    label input[type='checkbox']:checked {
-        background: rgb(68, 109, 228) !important;
-        background-color: rgb(68, 109, 228) !important;
-        border-color: rgb(68, 109, 228) !important;
-    }
-    label input[type='checkbox']:checked::after {
-        content: '' !important;
-        position: absolute !important;
-        left: 50% !important;
-        top: 46% !important;
-        width: 4px !important;
-        height: 8px !important;
-        border: solid #ffffff !important;
-        border-width: 0 2px 2px 0 !important;
-        transform: translate(-50%, -55%) rotate(45deg) !important;
-        background: transparent !important;
+    /* Toolbar styling — entirely owned by DefaultEditorChrome so the
+     * toolbar in this composer is byte-identical to the one in the
+     * comments reply editor (StickerPicker / GifPicker / divider all
+     * look and lay out the same in both contexts). The only thing this
+     * shell adds is a tiny inset so toolbar buttons aren't pressed
+     * against the rounded outer border. */
+    > div > div > div:first-child {
+        padding-left: 0.35rem;
+        padding-right: 0.35rem;
+        padding-top: 0.3rem;
     }
 
     /* Textarea — transparent inside the bordered shell. */
@@ -418,7 +350,7 @@ const EditorShell = styled.div`
         background-color: transparent !important;
         color: ${({ theme }) => theme.colors.text} !important;
         padding: 0.7rem 0.85rem !important;
-        font-size: 0.75rem !important;
+        font-size: 0.78rem !important;
         font-weight: 500 !important;
         line-height: 1.55 !important;
         transition: none !important;
@@ -440,17 +372,17 @@ const EditorShell = styled.div`
         color: ${({ theme }) => theme.colors.subtleText} !important;
     }
 
-    /* Live preview tile. */
-    > div > :last-child {
+    /* Live preview tile (extra hop through DefaultEditorChrome). */
+    > div > div > :last-child {
         background: ${({ theme }) => theme.colors.composerPreviewBg} !important;
         border: 1px solid ${({ theme }) => theme.colors.borderSubtle} !important;
         border-radius: 10px !important;
         padding: 0.65rem 0.85rem !important;
         margin: 0.5rem 0.55rem 0.55rem !important;
-        font-size: 0.75rem !important;
+        font-size: 0.78rem !important;
         color: ${({ theme }) => theme.colors.text} !important;
     }
-    > div > :last-child > div:first-child {
+    > div > div > :last-child > div:first-child {
         font-size: 0.55rem !important;
         font-weight: 600 !important;
         color: ${({ theme }) => theme.colors.subtleText} !important;
@@ -468,31 +400,126 @@ const EditorMount = styled.div`
     display: ${({ $hidden }) => ($hidden ? 'none' : 'block')};
 `;
 
-/* Unified inline media toolbar (sticker / gif / attach) — lives below the
- * editor in the Text tab. Keeps media pickers out of the primary body
- * UI while remaining reachable. */
-/* MediaToolbar
- * - Normalizes the StickerPicker/GifPicker buttons so their icons share one
- *   baseline. The GifPicker renders a 28x28 SVG inside a 28px tall button,
- *   which visually nudges above the StickerPicker's 16x16 icon. We scope a
- *   descendant rule to bring the GIF svg to 16px and keep its button at
- *   28x28 for pixel-perfect alignment with the sticker button. */
-const MediaToolbar = styled.div`
+/* Action chip row (sits between Title and Body — Twitter-style composer).
+ *
+ * Houses the structural "add something to the post" affordances: link,
+ * media upload, content tag. Each chip is a text pill button so the
+ * affordance reads at a glance ("+ Link", "+ Media") rather than
+ * relying on icon recognition. GIF / Sticker pickers live inside the
+ * body editor toolbar instead — they decorate the body and matter less
+ * than the structural chips.
+ *
+ * Active-state semantics, per chip:
+ *   - "+ Link"  — active while the URL input is open or non-empty.
+ *   - "+ Media" — active while the drop panel is open or items attached.
+ *   - "+ Tag"   — active while the dropdown is open or a tag is set.
+ *     Once a tag is picked the chip rewrites to "Tag: <Name>". */
+const ActionRow = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding-top: 0.25rem;
+    gap: 0.4rem;
     flex-wrap: wrap;
+`;
 
-    button {
-        width: 28px !important;
-        height: 28px !important;
-        padding: 0 !important;
+/* Inline drop panel — toggled by the "+ Media" chip. Stays open across
+ * uploads so users can drop multiple files one by one. Dashed border +
+ * drag-active highlight mirror the old empty-state CarouselTile so the
+ * affordance reads as "drop target". A "Choose file" button covers the
+ * fallback path for users who prefer the OS picker. */
+const MediaDropZone = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    padding: 1.1rem 1rem;
+    border: 1.5px dashed ${({ $dragging, theme }) => ($dragging ? theme.colors.borderStrong : theme.colors.border)};
+    border-radius: 14px;
+    background: ${({ $dragging, theme }) => ($dragging ? theme.colors.hoverBg : 'transparent')};
+    color: ${({ theme }) => theme.colors.subtleText};
+    text-align: center;
+    transition: border-color 0.15s ease, background 0.15s ease;
+`;
+
+const MediaDropIcon = styled.span`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 50%;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    color: ${({ theme }) => theme.colors.text};
+
+    svg { width: 1.1rem; height: 1.1rem; }
+`;
+
+const MediaDropText = styled.div`
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme.colors.text};
+    line-height: 1.4;
+`;
+
+const MediaDropHint = styled.div`
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme.colors.subtleText};
+    margin-top: -0.15rem;
+`;
+
+/* Tri-state action chip:
+ *   default — neutral ghost (chip available, nothing committed yet)
+ *   $active — borderStrong + panelAlt fill (e.g. an attached panel is open
+ *             but no value is locked in)
+ *   $set    — amber palette signaling "value committed" (used by the tag
+ *             chip so a chosen content-warning tag is impossible to miss
+ *             at a glance, matching the amber palette of NewTopicNote
+ *             which sits in the same content-warning vocabulary)
+ *
+ * `$set` wins over `$active` visually so a user re-opening the menu on
+ * an already-set tag still sees the committed state. */
+const ActionChip = styled.button`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0 0.7rem;
+    height: 1.65rem;
+    border-radius: 9999px;
+    border: 1px solid ${({ $set, $active, theme }) =>
+        $set ? 'rgba(245, 158, 11, 0.5)'
+            : $active ? theme.colors.borderStrong
+                : theme.colors.border};
+    background: ${({ $set, $active, theme }) =>
+        $set ? 'rgba(245, 158, 11, 0.12)'
+            : $active ? theme.colors.panelAlt
+                : 'transparent'};
+    color: ${({ $set, $active, theme }) =>
+        $set ? '#f59e0b'
+            : $active ? theme.colors.text
+                : theme.colors.subtleText};
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: ${({ $set }) => ($set ? 600 : 500)};
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+    &:hover:not(:disabled) {
+        border-color: ${({ $set, theme }) =>
+        $set ? 'rgba(245, 158, 11, 0.7)' : theme.colors.borderStrong};
+        background: ${({ $set, theme }) =>
+        $set ? 'rgba(245, 158, 11, 0.18)' : theme.colors.hoverBg};
+        color: ${({ $set, theme }) => ($set ? '#f59e0b' : theme.colors.text)};
     }
-    button svg {
-        width: 16px !important;
-        height: 16px !important;
-        display: block !important;
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
+    &:focus { outline: none; }
+    &:focus-visible { border-color: ${({ theme }) => theme.colors.borderStrong}; }
+
+    svg {
+        width: 0.85rem;
+        height: 0.85rem;
+        display: block;
     }
 `;
 
@@ -526,7 +553,10 @@ const CarouselTile = styled.div`
     ${({ $dragging, theme }) => $dragging && `background: ${theme.colors.hoverBg};`}
 `;
 
-/* Header row above the media slide holding Add (left) and Delete (right). */
+/* Header row above the media slide. Holds a position counter on the
+ * left ("3 / 5") and Delete on the right. The "Add" affordance lives
+ * in the inline drop panel above the carousel — when the panel is
+ * closed the user reopens it via the "+ Media" chip. */
 const CarouselHeader = styled.div`
     display: flex;
     align-items: center;
@@ -534,41 +564,35 @@ const CarouselHeader = styled.div`
     padding: 0 0.2rem;
 `;
 
-const EmptyDropLabel = styled.div`
+/* Capacity pill — "attached / max", e.g. "3 / 10". Small, pill-shaped,
+ * neutral fill so it reads as a status indicator rather than a button.
+ * Static during navigation between items (capacity doesn't change as
+ * you click prev/next) — increments only when media is added or
+ * removed, signalling the user's progress against the MAX_MEDIA cap. */
+const SlideCounter = styled.span`
     display: inline-flex;
     align-items: center;
-    gap: 0.6rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.7rem;
-    font-weight: 500;
-`;
-
-const EmptyUploadBtn = styled.button`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    border-radius: 50%;
+    height: 1.6rem;
+    padding: 0 0.65rem;
+    border-radius: 9999px;
     border: 1px solid ${({ theme }) => theme.colors.border};
     background: ${({ theme }) => theme.colors.panelAlt};
-    color: ${({ theme }) => theme.colors.text};
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
-
-    &:hover:not(:disabled) {
-        background: ${({ theme }) => theme.colors.surface2};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-    }
-    &:disabled { opacity: 0.5; cursor: not-allowed; }
-    svg { font-size: 0.95rem; }
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    user-select: none;
 `;
 
+/* Fixed-height stage: every slide renders inside the same 22rem-tall
+ * frame regardless of the image's intrinsic aspect ratio, so navigating
+ * between media items doesn't reflow the composer. The image is sized
+ * via `max-*: 100%` and centered by the parent flex container — small
+ * images render at natural pixels, large images shrink to fit. */
 const MediaSlide = styled.div`
     position: relative;
     width: 100%;
-    flex: 1;
-    min-height: 12rem;
+    height: 22rem;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -578,11 +602,10 @@ const MediaSlide = styled.div`
 
 const MediaSlideImage = styled.img`
     max-width: 100%;
-    max-height: 26rem;
-    height: auto;
+    max-height: 100%;
     width: auto;
+    height: auto;
     display: ${({ $loaded }) => ($loaded ? 'block' : 'none')};
-    object-fit: contain;
 `;
 
 /* Loading skeleton shown while a newly added media item is still uploading
@@ -637,16 +660,6 @@ const CornerButton = styled.button`
     &:disabled { opacity: 0.5; cursor: not-allowed; }
 
     svg { font-size: 0.9rem; }
-`;
-
-/* Add pill lives in the CarouselHeader (not on top of the image). */
-const HeaderAdd = styled(CornerButton)`
-    padding: 0 0.55rem;
-    height: 1.6rem;
-    font-size: 0.65rem;
-    gap: 0.25rem;
-
-    svg { font-size: 0.78rem; }
 `;
 
 /* Delete button lives in the CarouselHeader, right aligned. */
@@ -734,28 +747,6 @@ const SubmitGroup = styled.div`
 
 const BTN_HEIGHT = '1.7rem';
 
-const DraftButton = styled.button`
-    height: ${BTN_HEIGHT};
-    padding: 0 0.9rem;
-    border-radius: 9999px;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    background: transparent;
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-family: inherit;
-    font-size: 0.7rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-
-    &:hover:not(:disabled) {
-        background: ${({ theme }) => theme.colors.hoverBg};
-        color: ${({ theme }) => theme.colors.text};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-    }
-
-    &:disabled { opacity: 0.5; cursor: not-allowed; }
-`;
-
 const PostBtn = styled.button`
     height: ${BTN_HEIGHT};
     padding: 0 1rem;
@@ -790,14 +781,14 @@ const NewTopicNote = styled.div`
     border-radius: 10px;
     background: rgba(245, 158, 11, 0.06);
     color: #f59e0b;
-    font-size: 0.68rem;
+    font-size: 0.7rem;
     font-weight: 500;
     line-height: 1.45;
 
     &::before {
         content: '⚠';
         line-height: 1.2;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         flex: 0 0 auto;
     }
 
@@ -818,21 +809,6 @@ const ContentCounterRow = styled.div`
 /* -------------------------------------------------------------------------- */
 /* Misc                                                                       */
 /* -------------------------------------------------------------------------- */
-
-const GlobalDropOverlay = styled.div`
-    position: fixed;
-    inset: 0;
-    border: 2px dashed ${({ theme }) => theme.colors.borderStrong};
-    background-color: ${({ theme }) => theme.colors.overlay};
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-    z-index: 250;
-    color: ${({ theme }) => theme.colors.text};
-    font-size: 0.85rem;
-    font-weight: 600;
-`;
 
 const ErrorMessage = styled.div`
     background-color: ${({ theme }) => theme.colors.buttonDangerBg};
@@ -867,7 +843,7 @@ const EditHashLabel = styled.span`
 
 const Mono = styled.span`
     color: ${({ theme }) => theme.colors.text};
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     word-break: break-all;
     overflow-wrap: anywhere;
@@ -942,8 +918,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         submitStatus,
         editorUpload,
         setEditorUpload,
-        globalDragging,
-        setGlobalDragging,
         attachedMedia,
         setAttachedMedia,
         MAX_MEDIA,
@@ -971,8 +945,202 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     } = useCreatePost({ state, setPosts, updatePost });
 
     const [linkUrl, setLinkUrl] = useState('');
+    const [linkOpen, setLinkOpen] = useState(false);
     const [slideIndex, setSlideIndex] = useState(0);
     const [topicIsNew, setTopicIsNew] = useState(false);
+    /* Picker-attached image (GIF / sticker). Single-slot, mirrors the
+     * comments reply editor's `replyAttachedUrl` pattern. The body
+     * textarea stays clean; the URL is prepended to `contentValue` at
+     * submit time so the renderer turns it into an inline image — same
+     * trick `useViewPost.handleSubmit` uses for replies. */
+    const [pickerMediaUrl, setPickerMediaUrl] = useState(null);
+    const [pickerThumbLoading, setPickerThumbLoading] = useState(false);
+    /* "+ Media" chip toggles a persistent inline drop panel — stays open
+     * across uploads so users can drop multiple files one at a time. */
+    const [mediaPanelOpen, setMediaPanelOpen] = useState(false);
+    const [mediaPanelDragging, setMediaPanelDragging] = useState(false);
+    /* `panelOpenedByDragRef` remembers whether the currently-open panel
+     * was auto-opened by a file drag (so dragleave should auto-close
+     * it) vs. opened by an explicit "+ Media" click (which dragleave
+     * must not stomp). */
+    const panelOpenedByDragRef = useRef(false);
+    /* "+ Tag" chip is a self-contained dropdown — clicking it pops a small
+     * radio-style menu of tag options anchored beneath the chip. The chip
+     * label rewrites itself to "Tag: <Name>" once a tag is selected so
+     * the choice reads inline without burning vertical space on a card. */
+    const [tagMenuOpen, setTagMenuOpen] = useState(false);
+    const tagMenuWrapRef = useRef(null);
+
+    /* Display name for the chip — strips parentheticals out of option
+     * labels (e.g. "Sensitive (blur content)" → "Sensitive") so the chip
+     * stays compact. Returns null when no tag is set; the chip then
+     * falls back to the default "+ Tag" label. */
+    const tagDisplayLabel = useMemo(() => {
+        if (!tagEnabled || !tagValue) return null;
+        const opt = TAG_OPTIONS_ENABLED.find(o => o.value === tagValue);
+        if (!opt) return null;
+        return String(opt.label || '').replace(/\s*\(.*?\)\s*/g, '').trim();
+    }, [tagEnabled, tagValue]);
+
+    const handleTagSelect = value => {
+        if (!value) {
+            setTagEnabled(false);
+            setTagValue('');
+        } else {
+            setTagEnabled(true);
+            setTagValue(value);
+        }
+        setTagManuallySet(true);
+        setTagMenuOpen(false);
+        if (submitError) setSubmitError('');
+    };
+
+    /* Close the tag menu on click-outside or Escape. Both listeners are
+     * attached only while the menu is open so they don't leak. */
+    useEffect(() => {
+        if (!tagMenuOpen) return;
+        const onMouseDown = e => {
+            if (tagMenuWrapRef.current && !tagMenuWrapRef.current.contains(e.target)) {
+                setTagMenuOpen(false);
+            }
+        };
+        const onKey = e => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setTagMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onMouseDown);
+            window.removeEventListener('keydown', onKey);
+        };
+    }, [tagMenuOpen]);
+
+    /* -------------------------------------------------------------------- */
+    /* Unsaved-changes guard                                                */
+    /*                                                                      */
+    /* Replaces the old draft system. There is no autosave and no restore.  */
+    /* If the user has typed/attached anything and tries to leave the page  */
+    /* before submitting, we prompt them to discard.                        */
+    /*                                                                      */
+    /* Two surfaces, two coverage levels:                                   */
+    /*   - `beforeunload`: tab close / refresh / hard URL change. Browser   */
+    /*     shows its own native "Leave site?" prompt (the message text is   */
+    /*     ignored by all modern browsers — that's a 2018+ change, not a    */
+    /*     bug here).                                                       */
+    /*   - Document-level click capture for SPA `<a>` clicks: we intercept  */
+    /*     the click before it triggers in-app navigation and show our own  */
+    /*     `ConfirmDialog`. On confirm we forward to the captured href via  */
+    /*     `useNavigate`.                                                   */
+    /*                                                                      */
+    /* Known holes (acknowledged, not in scope):                            */
+    /*   - Programmatic `useNavigate()` calls fired from OTHER components   */
+    /*     while CreatePostView is mounted. Nothing in the app navigates    */
+    /*     while sitting on /create-post in practice.                       */
+    /*   - Browser back/forward. `<BrowserRouter>` (this codebase) doesn't  */
+    /*     expose a stable blocker API for popstate without a data router.  */
+    /*                                                                      */
+    /* Bypassed entirely while `isSubmitting` is true so the post-and-      */
+    /* redirect flow doesn't trip its own guard.                            */
+    /* -------------------------------------------------------------------- */
+    const navigate = useNavigate();
+    const [pendingNavHref, setPendingNavHref] = useState(null);
+
+    const hasUnsavedContent = useMemo(() => {
+        if (isEditMode) return false;
+        return !!(
+            (topicValue && topicValue.trim())
+            || (titleValue && titleValue.trim())
+            || (contentValue && contentValue.trim())
+            || (linkUrl && linkUrl.trim())
+            || tagEnabled
+            || (attachedMedia && attachedMedia.length > 0)
+            || pickerMediaUrl
+        );
+    }, [isEditMode, topicValue, titleValue, contentValue, linkUrl, tagEnabled, attachedMedia, pickerMediaUrl]);
+
+    /* Browser-level guard — covers tab close, refresh, hard URL changes.
+     * `returnValue = ''` is the legacy contract that triggers the prompt;
+     * `preventDefault()` is the spec-correct one. Set both for safety. */
+    useEffect(() => {
+        if (!hasUnsavedContent || isSubmitting) return;
+        const handler = e => {
+            e.preventDefault();
+            e.returnValue = '';
+        };
+        window.addEventListener('beforeunload', handler);
+        return () => window.removeEventListener('beforeunload', handler);
+    }, [hasUnsavedContent, isSubmitting]);
+
+    /* In-app guard — capture-phase click listener at the document root so
+     * we run BEFORE React's synthetic handlers (React listens on the app
+     * root in capture phase too, but document captures fire first).
+     *
+     * We only swallow clicks that look like a real same-origin SPA
+     * navigation: primary mouse button, no modifier keys, an `<a>` with
+     * a same-origin path that isn't `target=_blank` / download. Anything
+     * else (external link, ctrl-click for new tab, etc.) is left alone. */
+    useEffect(() => {
+        if (!hasUnsavedContent || isSubmitting) return;
+        const handler = e => {
+            if (e.defaultPrevented) return;
+            if (e.button !== 0) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            const link = e.target?.closest?.('a[href]');
+            if (!link) return;
+            if (link.target && link.target !== '' && link.target !== '_self') return;
+            if (link.hasAttribute('download')) return;
+            const href = link.getAttribute('href');
+            if (!href) return;
+            // External / cross-origin → let it go (beforeunload will catch it).
+            if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setPendingNavHref(href);
+        };
+        document.addEventListener('click', handler, true);
+        return () => document.removeEventListener('click', handler, true);
+    }, [hasUnsavedContent, isSubmitting]);
+
+    const handleConfirmDiscard = () => {
+        const href = pendingNavHref;
+        setPendingNavHref(null);
+        if (href) navigate(href);
+    };
+
+    const handleCancelDiscard = () => setPendingNavHref(null);
+
+    /* See `pickerMediaUrl` declaration above. `handlePickerSelect` is
+     * the GIF/sticker `onSelect` callback; the URL becomes a thumbnail
+     * tile rendered right above the body editor and is prepended to
+     * `contentValue` at submit time. */
+    const handlePickerSelect = url => {
+        if (!url) return;
+        setPickerMediaUrl(url);
+        setPickerThumbLoading(true);
+    };
+    const handleRemovePickerMedia = () => {
+        if (isSubmitting) return;
+        setPickerMediaUrl(null);
+        setPickerThumbLoading(false);
+    };
+
+    /* Toggle the link input chip. Active state = chip is "on", which
+     * happens whenever the input is open OR a URL has been typed. Clicking
+     * an active chip collapses + clears the URL — "disable wipes value"
+     * so users always know what's queued for submission. */
+    const showLinkInput = linkOpen || !!linkUrl;
+    const handleLinkToggle = () => {
+        if (showLinkInput) {
+            setLinkOpen(false);
+            setLinkUrl('');
+        } else {
+            setLinkOpen(true);
+        }
+        if (submitError) setSubmitError('');
+    };
 
     /* Wrap the hook's topic change handler so we can surface a guidance
      * note when the user picks the "Create #xyz" option in TopicSelector. */
@@ -1042,73 +1210,133 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     const canPrev = attachedMedia.length > 1 && slideIndex > 0;
     const canNext = attachedMedia.length > 1 && slideIndex < attachedMedia.length - 1;
 
-    /* Auto-advance to the most recently added media slide. */
+    /* Auto-advance to the most recently added media slide AND collapse
+     * the drop panel after a successful upload. The panel is treated
+     * as a one-shot affordance: open it via "+ Media" (or auto-open on
+     * drag), drop a file, panel closes. To attach another, click
+     * "+ Media" again or drag a new file — the auto-open-on-drag
+     * effect will reopen it. */
     const lastMediaCountRef = useRef(attachedMedia.length);
     useEffect(() => {
         const prev = lastMediaCountRef.current;
         const next = attachedMedia.length;
-        if (next > prev) setSlideIndex(next - 1);
-        else if (next === 0) setSlideIndex(0);
-        else if (slideIndex > next - 1) setSlideIndex(Math.max(0, next - 1));
+        if (next > prev) {
+            setSlideIndex(next - 1);
+            setMediaPanelOpen(false);
+            setMediaPanelDragging(false);
+        } else if (next === 0) {
+            setSlideIndex(0);
+        } else if (slideIndex > next - 1) {
+            setSlideIndex(Math.max(0, next - 1));
+        }
         lastMediaCountRef.current = next;
     }, [attachedMedia.length, slideIndex]);
 
-    const onDragOver = e => {
-        try {
-            if (isUploading) return;
+    /* -------------------------------------------------------------------- */
+    /* Auto-open / auto-close the media panel on file drag                  */
+    /*                                                                      */
+    /* The panel is the *single* drop target — drops outside it do nothing */
+    /* (we only suppress the browser-default of navigating to the file).   */
+    /* Window-level handlers do two things:                                 */
+    /*                                                                      */
+    /* 1. Surface the panel automatically when a file is dragged anywhere   */
+    /*    over the page so the user always sees where to drop, without     */
+    /*    needing to click "+ Media" first.                                 */
+    /* 2. Hide it again if the user drags back out without dropping.        */
+    /*                                                                      */
+    /* Implementation notes:                                                */
+    /*                                                                      */
+    /* - We detect "drag truly left the viewport" via dragleave's          */
+    /*    `e.relatedTarget`: when moving across child elements within the  */
+    /*    page, relatedTarget is the element being entered (non-null);     */
+    /*    when the drag exits the window entirely, relatedTarget is null.  */
+    /*    This is more reliable than counter or timer schemes — those     */
+    /*    fight against the noisy enter/leave events that fire on every    */
+    /*    child transition and produce flicker. With relatedTarget, in-    */
+    /*    page moves are a clean no-op.                                    */
+    /* - `panelOpenedByDragRef` ensures we only auto-close panels we       */
+    /*    auto-opened — a manually-clicked "+ Media" panel is immune.     */
+    /* - `drop` outside the panel is a no-op upload-wise (we honor the     */
+    /*    user's "single area" rule) but we still preventDefault to stop   */
+    /*    the browser from navigating to the file URL, and we close the    */
+    /*    panel if it was drag-owned so the user can re-open with a clean  */
+    /*    slate.                                                            */
+    /* - The panel's own `onDrop` calls e.stopPropagation(), so this       */
+    /*    listener never sees drops that landed inside the panel.          */
+    /* -------------------------------------------------------------------- */
+    useEffect(() => {
+        const hasFiles = e => {
+            const types = Array.from(e?.dataTransfer?.types ?? []);
+            return types.includes('Files');
+        };
+        const closeIfDragOwned = () => {
+            if (!panelOpenedByDragRef.current) return;
+            panelOpenedByDragRef.current = false;
+            setMediaPanelOpen(false);
+            setMediaPanelDragging(false);
+        };
+        const onWindowDragEnter = e => {
+            if (!hasFiles(e)) return;
+            if (isSubmitting || isUploading) return;
+            if (attachedMedia.length >= MAX_MEDIA) return;
+            setMediaPanelOpen(prev => {
+                if (!prev) {
+                    panelOpenedByDragRef.current = true;
+                    return true;
+                }
+                return prev;
+            });
+        };
+        const onWindowDragOver = e => {
             const types = Array.from(e?.dataTransfer?.types ?? []);
             if (!types.includes('Files')) return;
             e.preventDefault();
-            e.stopPropagation();
-            if (!globalDragging) setGlobalDragging(true);
-        } catch (_) { /* noop */ }
-    };
-    const onDragLeave = e => {
-        try {
-            if (isUploading) return;
-            const types = Array.from(e?.dataTransfer?.types ?? []);
-            if (!types.includes('Files')) return;
+        };
+        const onWindowDragLeave = e => {
+            // In-page moves: relatedTarget is the new element under the
+            // cursor (non-null) — ignore. Truly leaving the window:
+            // relatedTarget is null — close the panel if drag-owned.
+            if (e.relatedTarget) return;
+            closeIfDragOwned();
+        };
+        const onWindowDrop = e => {
+            if (!hasFiles(e)) return;
             e.preventDefault();
-            e.stopPropagation();
-            if (!e.currentTarget.contains(e.relatedTarget)) setGlobalDragging(false);
-        } catch (_) { /* noop */ }
-    };
-    const onDrop = e => {
-        try {
-            if (isUploading || attachedMedia.length >= MAX_MEDIA) {
-                e.preventDefault();
-                e.stopPropagation();
-                return;
-            }
-            const files = Array.from(e?.dataTransfer?.files ?? []);
-            if (!files || files.length === 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-            setGlobalDragging(false);
-            if (editorUpload && typeof editorUpload.uploadFile === 'function') {
-                editorUpload.uploadFile(files[0]);
-            }
-        } catch (_) { /* noop */ }
-    };
-
-    const handleTagToggle = () => {
-        const enabled = !tagEnabled;
-        setTagEnabled(enabled);
-        if (enabled) {
-            setTagValue(prev => prev || (TAG_OPTIONS_ENABLED.find(o => o.value)?.value) || 'sensitive');
-            setTagManuallySet(true);
-        } else {
-            setTagValue('');
-            setTagManuallySet(true);
-        }
-        if (submitError) setSubmitError('');
-    };
+            // Drops outside the panel are intentionally not uploaded —
+            // the panel is the single designated drop target. We just
+            // suppress the browser-default and close the panel if it
+            // was opened by this drag.
+            closeIfDragOwned();
+        };
+        window.addEventListener('dragenter', onWindowDragEnter);
+        window.addEventListener('dragover', onWindowDragOver);
+        window.addEventListener('dragleave', onWindowDragLeave);
+        window.addEventListener('drop', onWindowDrop);
+        return () => {
+            window.removeEventListener('dragenter', onWindowDragEnter);
+            window.removeEventListener('dragover', onWindowDragOver);
+            window.removeEventListener('dragleave', onWindowDragLeave);
+            window.removeEventListener('drop', onWindowDrop);
+        };
+    }, [isSubmitting, isUploading, attachedMedia.length, MAX_MEDIA]);
 
     const handleWrappedSubmit = e => {
-        if (linkUrl.trim() && linkValid && !contentValue) {
-            setContentValue(linkUrl);
+        /* Resolve the body string for this submit synchronously — React
+         * state updates are async, so we can't `setContentValue(...)` and
+         * then call `handleSubmit` and expect the new value to land. We
+         * pass the resolved body through `opts.content` instead, same
+         * shape comments use (see useViewPost.handleSubmit's
+         * `${mediaUrl}\n\n${replyString}` trick). */
+        let bodyForSubmit = (linkUrl.trim() && linkValid && !contentValue)
+            ? linkUrl
+            : contentValue;
+        if (pickerMediaUrl) {
+            const trimmed = String(bodyForSubmit || '').trim();
+            bodyForSubmit = trimmed
+                ? `${pickerMediaUrl}\n\n${trimmed}`
+                : pickerMediaUrl;
         }
-        return handleSubmit(e);
+        return handleSubmit(e, { content: bodyForSubmit });
     };
 
     const handleRemoveActiveMedia = () => {
@@ -1120,12 +1348,64 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         });
     };
 
-    const handleUploadClick = () => {
+    /* Toggle the inline media panel. One-shot: clicking opens the panel,
+     * a successful upload closes it (handled by the auto-advance effect),
+     * and the user reopens it via another "+ Media" click for the next
+     * file. Dragging a file anywhere on the page also auto-opens it.
+     * We clear the drag-ownership flag here so a stray dragleave can't
+     * close a panel the user explicitly opened with the chip. */
+    const handleMediaChipClick = () => {
+        panelOpenedByDragRef.current = false;
+        setMediaPanelOpen(prev => {
+            const next = !prev;
+            if (!next) setMediaPanelDragging(false);
+            return next;
+        });
+    };
+
+    /* Choose-file button inside the panel. Routes to the editor's hidden
+     * file input. The panel will auto-close on successful upload; if the
+     * user wants another file they re-click "+ Media". */
+    const handleMediaPanelChoose = () => {
         try { editorUpload && editorUpload.selectFile(); } catch (_) { /* noop */ }
     };
 
+    const handleMediaPanelDrop = e => {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+            setMediaPanelDragging(false);
+            if (isUploading || attachedMedia.length >= MAX_MEDIA) return;
+            const files = Array.from(e?.dataTransfer?.files ?? []);
+            if (!files || files.length === 0) return;
+            if (editorUpload && typeof editorUpload.uploadFile === 'function') {
+                editorUpload.uploadFile(files[0]);
+            }
+        } catch (_) { /* noop */ }
+    };
+
+    const handleMediaPanelDragOver = e => {
+        try {
+            const types = Array.from(e?.dataTransfer?.types ?? []);
+            if (!types.includes('Files')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (!mediaPanelDragging) setMediaPanelDragging(true);
+        } catch (_) { /* noop */ }
+    };
+
+    const handleMediaPanelDragLeave = e => {
+        try {
+            const types = Array.from(e?.dataTransfer?.types ?? []);
+            if (!types.includes('Files')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (!e.currentTarget.contains(e.relatedTarget)) setMediaPanelDragging(false);
+        } catch (_) { /* noop */ }
+    };
+
     return (
-        <ContentGrid onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+        <ContentGrid>
             <Helmet>
                 <title>{isEditMode ? 'Edit Post' : 'Create Post'} | Mirage</title>
             </Helmet>
@@ -1133,406 +1413,523 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                 <FeedCol>
                     <ModernPostFeed>
                         <ComposerColumn>
-                        <HeaderRow>
-                            <HeaderTitle>{isEditMode ? 'Edit post' : 'Create post'}</HeaderTitle>
-                            <DraftsHint aria-hidden="true">Drafts(0)</DraftsHint>
-                        </HeaderRow>
-                        <Stack
-                            id="create-post-form"
-                            onSubmit={handleWrappedSubmit}
-                            autoComplete="off"
-                            onKeyDown={e => {
-                                if (e.key !== 'Tab') return;
-                                const form = e.currentTarget;
-                                const focusable = form.querySelectorAll('input:not([type="hidden"]):not([tabindex="-1"]):not(:disabled), textarea:not(:disabled), button[type="submit"]:not(:disabled)');
-                                if (focusable.length === 0) return;
-                                const first = focusable[0];
-                                const last = focusable[focusable.length - 1];
-                                if (e.shiftKey && document.activeElement === first) {
-                                    e.preventDefault();
-                                    last.focus();
-                                } else if (!e.shiftKey && document.activeElement === last) {
-                                    e.preventDefault();
-                                    first.focus();
-                                }
-                            }}
-                        >
-                            {isEditMode && (
-                                <EditHashRow>
-                                    <EditHashLabel>Tx hash</EditHashLabel>
-                                    <Mono>{overrideId}</Mono>
-                                </EditHashRow>
-                            )}
-
-                            <TopicSelector
-                                value={topicValue}
-                                maxLength={limits.maxTopic}
-                                minLength={limits.minTopic}
-                                onChange={wrappedTopicChange}
-                                disabled={isSubmitting}
-                                aria-label="Topic"
-                            />
-
-                            {topicIsNew && (
-                                <NewTopicNote role="note">
-                                    <span>
-                                        Topics are communities centered around specific interests. Posting in the wrong topic may affect your overall trust status on Mirage. Make sure to post into the right category!
-                                    </span>
-                                </NewTopicNote>
-                            )}
-
-                            <Field>
-                                <InputShell>
-                                    <FloatLabel htmlFor="title">Title</FloatLabel>
-                                    <ShellInput
-                                        ref={titleInputRef}
-                                        name="title"
-                                        id="title"
-                                        value={titleValue}
-                                        placeholder="Title"
-                                        onPaste={handleTitlePaste}
-                                        autoComplete="off"
-                                        autoCorrect="on"
-                                        autoCapitalize="sentences"
-                                        spellCheck
-                                        maxLength={limits.maxTitle}
-                                        onChange={handleTitleChange}
-                                        disabled={isSubmitting}
-                                        aria-label="Title"
-                                        onKeyDown={e => {
-                                            if (e.key === 'Enter') {
-                                                e.preventDefault();
-                                                if (contentEditorRef.current) contentEditorRef.current.focus();
-                                            }
-                                        }}
-                                    />
-                                    {titleValid && (
-                                        <ValidCheck aria-hidden="true">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                <polyline points="20 6 9 17 4 12" />
-                                            </svg>
-                                        </ValidCheck>
-                                    )}
-                                    <Counter $warn={!limits.unlimited && getByteLength(titleValue) >= limits.maxTitle}>
-                                        ({tierLabel}) {limits.unlimited ? `${getByteLength(titleValue)} / unlimited` : `${getByteLength(titleValue)}/${limits.maxTitle}`}
-                                    </Counter>
-                                </InputShell>
-                            </Field>
-
-                            <Field style={{ gap: '0.5rem', marginTop: '0.6rem' }}>
-                                <TagPill
-                                    type="button"
-                                    onClick={handleTagToggle}
-                                    $active={tagEnabled}
-                                    disabled={isSubmitting}
-                                    aria-pressed={tagEnabled}
-                                    aria-label="Add tags"
-                                >
-                                    <TagIcon aria-hidden="true">{tagEnabled ? '✓' : '+'}</TagIcon>
-                                    {tagEnabled ? 'Tagged' : 'Add tags'}
-                                </TagPill>
-                                {tagEnabled && (
-                                    <TagRadioCard>
-                                        <RadioGroup>
-                                            {TAG_OPTIONS_ENABLED.filter(opt => opt.value).map(opt => (
-                                                <RadioLabel key={opt.value}>
-                                                    <RadioInput
-                                                        name="content_warning"
-                                                        value={opt.value}
-                                                        checked={tagValue === opt.value}
-                                                        onChange={() => {
-                                                            setTagValue(opt.value);
-                                                            setTagManuallySet(true);
-                                                            if (submitError) setSubmitError('');
-                                                        }}
-                                                        disabled={isSubmitting}
-                                                    />
-                                                    <span>{opt.label}</span>
-                                                </RadioLabel>
-                                            ))}
-                                        </RadioGroup>
-                                        <HelpText>
-                                            Flag posts with sensitive material so users can opt in or filter them out.
-                                        </HelpText>
-                                    </TagRadioCard>
+                            <HeaderRow>
+                                <HeaderTitle>{isEditMode ? 'Edit post' : 'Create post'}</HeaderTitle>
+                            </HeaderRow>
+                            <Stack
+                                id="create-post-form"
+                                onSubmit={handleWrappedSubmit}
+                                autoComplete="off"
+                                onKeyDown={e => {
+                                    if (e.key !== 'Tab') return;
+                                    const form = e.currentTarget;
+                                    const focusable = form.querySelectorAll('input:not([type="hidden"]):not([tabindex="-1"]):not(:disabled), textarea:not(:disabled), button[type="submit"]:not(:disabled)');
+                                    if (focusable.length === 0) return;
+                                    const first = focusable[0];
+                                    const last = focusable[focusable.length - 1];
+                                    if (e.shiftKey && document.activeElement === first) {
+                                        e.preventDefault();
+                                        last.focus();
+                                    } else if (!e.shiftKey && document.activeElement === last) {
+                                        e.preventDefault();
+                                        first.focus();
+                                    }
+                                }}
+                            >
+                                {isEditMode && (
+                                    <EditHashRow>
+                                        <EditHashLabel>Tx hash</EditHashLabel>
+                                        <Mono>{overrideId}</Mono>
+                                    </EditHashRow>
                                 )}
-                            </Field>
 
-                            {/* Content editor is shown on every tab: Text
-                              * uses it as the primary body, Images/Video and
-                              * Link surface it below their own input so the
-                              * author can still add a caption / description.
-                              * Always-mounted keeps the editorUpload API
-                              * registered for the Media tile too. */}
-                            <EditorMount>
+                                <TopicSelector
+                                    value={topicValue}
+                                    maxLength={limits.maxTopic}
+                                    minLength={limits.minTopic}
+                                    onChange={wrappedTopicChange}
+                                    disabled={isSubmitting}
+                                    aria-label="Topic"
+                                />
+
+                                {topicIsNew && (
+                                    <NewTopicNote role="note">
+                                        <span>
+                                            Topics are communities centered around specific interests. Posting in the wrong topic may affect your overall trust status on Mirage. Make sure to post into the right category!
+                                        </span>
+                                    </NewTopicNote>
+                                )}
+
                                 <Field>
-                                    <EditorShell data-default-editor>
-                                        <MarkdownEditor
-                                            value={contentValue}
-                                            onChange={v => setContentValue(v)}
-                                            maxLength={limits.maxContent}
+                                    <InputShell>
+                                        <FloatLabel htmlFor="title">Title</FloatLabel>
+                                        <ShellInput
+                                            ref={titleInputRef}
+                                            name="title"
+                                            id="title"
+                                            value={titleValue}
+                                            placeholder="Title"
+                                            onPaste={handleTitlePaste}
+                                            autoComplete="off"
+                                            autoCorrect="on"
+                                            autoCapitalize="sentences"
+                                            spellCheck
+                                            maxLength={limits.maxTitle}
+                                            onChange={handleTitleChange}
                                             disabled={isSubmitting}
-                                            uploadBlocked={attachedMedia.length >= MAX_MEDIA}
-                                            onSubmitShortcut={() => {
-                                                try {
-                                                    const form = document.getElementById('create-post-form');
-                                                    if (form) form.requestSubmit();
-                                                } catch (_) { /* noop */ }
-                                            }}
-                                            showCounters={false}
-                                            renderHelperRow={false}
-                                            toolbarButtonSize="1.6rem"
-                                            toolbarIconSize="0.9rem"
-                                            minHeight="6rem"
-                                            registerUploadHandler={setEditorUpload}
-                                            editorRef={ref => { contentEditorRef.current = ref; }}
-                                            belowElement={submitError ? <ErrorMessage role="alert">{submitError}</ErrorMessage> : null}
-                                            onMediaUploaded={(type, url, error) => {
-                                                if (error) {
-                                                    if (errorClearTimeoutRef.current) {
-                                                        clearTimeout(errorClearTimeoutRef.current);
-                                                        errorClearTimeoutRef.current = null;
-                                                    }
-                                                    errorSetTimeRef.current = Date.now();
-                                                    setSubmitError(error);
-                                                    errorClearTimeoutRef.current = setTimeout(() => {
-                                                        setSubmitError('');
-                                                        errorSetTimeRef.current = null;
-                                                        errorClearTimeoutRef.current = null;
-                                                    }, 5000);
-                                                } else if (!type || !url) {
-                                                    if (errorClearTimeoutRef.current) {
-                                                        clearTimeout(errorClearTimeoutRef.current);
-                                                        errorClearTimeoutRef.current = null;
-                                                    }
-                                                    errorSetTimeRef.current = Date.now();
-                                                    setSubmitError('Media upload failed. Please try again.');
-                                                    errorClearTimeoutRef.current = setTimeout(() => {
-                                                        setSubmitError('');
-                                                        errorSetTimeRef.current = null;
-                                                        errorClearTimeoutRef.current = null;
-                                                    }, 5000);
-                                                } else {
-                                                    addMediaItem(type, url);
+                                            aria-label="Title"
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    if (contentEditorRef.current) contentEditorRef.current.focus();
                                                 }
                                             }}
-                                            onUploadStateChange={uploading => {
-                                                setIsUploading(uploading);
-                                                if (!uploading) setUploadProgress(null);
-                                            }}
-                                            onUploadProgress={progress => setUploadProgress(progress)}
                                         />
-                                    </EditorShell>
-                                </Field>
-                                <ContentCounterRow>
-                                    <ContentCounter $warn={!limits.unlimited && contentValue.length >= limits.maxContent}>
-                                        ({tierLabel}) {limits.unlimited ? `${contentValue.length} / unlimited` : `${contentValue.length}/${limits.maxContent}`}
-                                    </ContentCounter>
-                                </ContentCounterRow>
-                            </EditorMount>
-
-                            <Field>
-                                    {(() => {
-                                        const activeUrl = activeMedia?.url;
-                                        const activeLoading = !!(activeUrl && thumbsLoading && thumbsLoading.has(activeUrl));
-                                        const showLoadingState = isUploading || activeLoading;
-                                        return (
-                                    <CarouselTile
-                                        $dragging={globalDragging}
-                                        $hasMedia={attachedMedia.length > 0}
-                                        $loading={showLoadingState}
-                                    >
-                                        {attachedMedia.length === 0 && !isUploading && (
-                                            <EmptyDropLabel>
-                                                Drag and drop or upload media
-                                                <EmptyUploadBtn
-                                                    type="button"
-                                                    tabIndex={-1}
-                                                    onClick={handleUploadClick}
-                                                    disabled={isSubmitting || attachedMedia.length >= MAX_MEDIA}
-                                                    aria-label="Upload image or video"
-                                                    title="Upload"
-                                                >
-                                                    <HiArrowUpTray aria-hidden="true" />
-                                                </EmptyUploadBtn>
-                                            </EmptyDropLabel>
-                                        )}
-                                        {attachedMedia.length === 0 && isUploading && (
-                                            <MediaSlidePlaceholder>
-                                                <MediaSpinnerRing aria-hidden="true" />
-                                                <span>
-                                                    Uploading{uploadProgress !== null ? ` ${Math.round(uploadProgress)}%` : '...'}
-                                                </span>
-                                            </MediaSlidePlaceholder>
-                                        )}
-                                        {attachedMedia.length > 0 && (
-                                            <>
-                                                <CarouselHeader>
-                                                    <HeaderAdd
-                                                        type="button"
-                                                        tabIndex={-1}
-                                                        onClick={handleUploadClick}
-                                                        disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
-                                                        aria-label="Add media"
-                                                    >
-                                                        <HiPlus aria-hidden="true" />
-                                                        Add
-                                                    </HeaderAdd>
-                                                    <HeaderDelete
-                                                        type="button"
-                                                        tabIndex={-1}
-                                                        onClick={handleRemoveActiveMedia}
-                                                        disabled={isSubmitting}
-                                                        aria-label="Remove media"
-                                                        title="Remove"
-                                                    >
-                                                        <HiTrash aria-hidden="true" />
-                                                    </HeaderDelete>
-                                                </CarouselHeader>
-                                                <MediaSlide>
-                                                    {activeLoading && (
-                                                        <MediaSlidePlaceholder>
-                                                            <MediaSpinnerRing aria-hidden="true" />
-                                                            <span>Processing media…</span>
-                                                        </MediaSlidePlaceholder>
-                                                    )}
-                                                    <MediaSlideImage
-                                                        $loaded={!activeLoading}
-                                                        src={activeMedia?.type === 'image' ? activeMedia.url : getVideoThumbnailUrl(activeMedia?.url) || activeMedia?.url}
-                                                        alt=""
-                                                        onLoad={() => {
-                                                            if (!activeMedia) return;
-                                                            setThumbsLoading(prev => {
-                                                                const n = new Set(prev);
-                                                                n.delete(activeMedia.url);
-                                                                return n;
-                                                            });
-                                                        }}
-                                                        onError={() => {
-                                                            if (!activeMedia) return;
-                                                            setThumbsLoading(prev => {
-                                                                const n = new Set(prev);
-                                                                n.delete(activeMedia.url);
-                                                                return n;
-                                                            });
-                                                        }}
-                                                    />
-                                                    {canPrev && (
-                                                        <NavPrev
-                                                            type="button"
-                                                            tabIndex={-1}
-                                                            onClick={() => setSlideIndex(i => Math.max(0, i - 1))}
-                                                            aria-label="Previous media"
-                                                            $iconOnly
-                                                        >
-                                                            <HiChevronLeft aria-hidden="true" />
-                                                        </NavPrev>
-                                                    )}
-                                                    {canNext && (
-                                                        <NavNext
-                                                            type="button"
-                                                            tabIndex={-1}
-                                                            onClick={() => setSlideIndex(i => Math.min(attachedMedia.length - 1, i + 1))}
-                                                            aria-label="Next media"
-                                                            $iconOnly
-                                                        >
-                                                            <HiChevronRight aria-hidden="true" />
-                                                        </NavNext>
-                                                    )}
-                                                </MediaSlide>
-                                            </>
-                                        )}
-                                        {isUploading && attachedMedia.length > 0 && (
-                                            <UploadingBadge>
-                                                Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '...'}
-                                                <Button
-                                                    variant="danger"
-                                                    size="xs"
-                                                    tabIndex={-1}
-                                                    onClick={() => {
-                                                        try {
-                                                            if (editorUpload && editorUpload.cancelUpload) {
-                                                                editorUpload.cancelUpload();
-                                                            }
-                                                        } catch (_) { /* noop */ }
-                                                    }}
-                                                >
-                                                    Cancel
-                                                </Button>
-                                            </UploadingBadge>
-                                        )}
-                                    </CarouselTile>
-                                        );
-                                    })()}
-                                    <MediaToolbar>
-                                        <MediaRow>
-                                            <StickerPicker
-                                                onSelect={stickerUrl => {
-                                                    if (attachedMedia.length >= MAX_MEDIA) return;
-                                                    addMediaItem('image', stickerUrl);
-                                                }}
-                                                disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
-                                            />
-                                            <GifPicker
-                                                onSelect={gifUrl => {
-                                                    if (attachedMedia.length >= MAX_MEDIA) return;
-                                                    addMediaItem('image', gifUrl);
-                                                }}
-                                                disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
-                                            />
-                                        </MediaRow>
-                                    </MediaToolbar>
-                            </Field>
-
-                            <Field>
-                                    <InputShell>
-                                        <FloatLabel htmlFor="link-url">Link URL</FloatLabel>
-                                        <ShellInput
-                                            id="link-url"
-                                            name="link-url"
-                                            type="url"
-                                            value={linkUrl}
-                                            placeholder="Link URL (optional)"
-                                            autoComplete="off"
-                                            spellCheck={false}
-                                            onChange={e => setLinkUrl(e.target.value)}
-                                            disabled={isSubmitting}
-                                            aria-label="Link URL"
-                                        />
-                                        {linkValid && (
+                                        {titleValid && (
                                             <ValidCheck aria-hidden="true">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                                     <polyline points="20 6 9 17 4 12" />
                                                 </svg>
                                             </ValidCheck>
                                         )}
+                                        <Counter $warn={!limits.unlimited && getByteLength(titleValue) >= limits.maxTitle}>
+                                            ({tierLabel}) {limits.unlimited ? `${getByteLength(titleValue)} / unlimited` : `${getByteLength(titleValue)} / ${limits.maxTitle}`}
+                                        </Counter>
                                     </InputShell>
-                                    {linkUrl.trim() && linkValidation.error && (
-                                        <FieldError role="alert">{linkValidation.error}</FieldError>
-                                    )}
-                                    {submitError && <ErrorMessage role="alert">{submitError}</ErrorMessage>}
-                            </Field>
+                                </Field>
 
-                            <BottomBar>
-                                <span aria-hidden="true" />
-                                <SubmitGroup>
-                                    <DraftButton type="button" disabled={isSubmitting}>Save Draft</DraftButton>
-                                    <PostBtn
-                                        type="submit"
-                                        disabled={!canSubmit}
-                                        aria-disabled={!canSubmit}
+                                {/* Action chips — text-label pill buttons that
+                                  * sit between Title and Body. Each chip
+                                  * unfurls its artifact (tag card, link
+                                  * input, media carousel) right below the
+                                  * row, so attached content sits above the
+                                  * body just like it will in the rendered
+                                  * post. Sticker / GIF use the picker's
+                                  * `renderTrigger` to swap in a chip while
+                                  * keeping the picker's popover behavior. */}
+                                <ActionRow>
+                                    <ActionChip
+                                        type="button"
+                                        onClick={handleLinkToggle}
+                                        disabled={isSubmitting}
+                                        $active={showLinkInput}
+                                        aria-pressed={showLinkInput}
+                                        aria-label="Add link"
                                     >
-                                        {submitLabel}
-                                    </PostBtn>
-                                </SubmitGroup>
-                            </BottomBar>
-                        </Stack>
+                                        + Link
+                                    </ActionChip>
+                                    <ActionChip
+                                        type="button"
+                                        onClick={handleMediaChipClick}
+                                        disabled={isSubmitting}
+                                        $active={mediaPanelOpen || attachedMedia.length > 0}
+                                        aria-pressed={mediaPanelOpen}
+                                        aria-expanded={mediaPanelOpen}
+                                        aria-controls="media-drop-panel"
+                                        aria-label="Add image or video"
+                                    >
+                                        + Media
+                                    </ActionChip>
+                                    <TagChipWrap ref={tagMenuWrapRef}>
+                                        <ActionChip
+                                            type="button"
+                                            onClick={() => setTagMenuOpen(prev => !prev)}
+                                            disabled={isSubmitting}
+                                            $set={!!tagDisplayLabel}
+                                            $active={tagMenuOpen}
+                                            aria-haspopup="menu"
+                                            aria-expanded={tagMenuOpen}
+                                            aria-label={tagDisplayLabel ? `Content tag: ${tagDisplayLabel}` : 'Add content tag'}
+                                        >
+                                            {tagDisplayLabel ? `Tag: ${tagDisplayLabel}` : '+ Tag'}
+                                            <HiChevronDown aria-hidden="true" />
+                                        </ActionChip>
+                                        {tagMenuOpen && (
+                                            <TagMenu role="menu">
+                                                {TAG_OPTIONS_ENABLED.map(opt => {
+                                                    const shortLabel = String(opt.label || '').replace(/\s*\(.*?\)\s*/g, '').trim();
+                                                    const checked = tagEnabled && tagValue === opt.value;
+                                                    return (
+                                                        <TagMenuItem
+                                                            key={opt.value}
+                                                            type="button"
+                                                            role="menuitemradio"
+                                                            aria-checked={checked}
+                                                            $selected={checked}
+                                                            disabled={isSubmitting}
+                                                            onClick={() => handleTagSelect(opt.value)}
+                                                        >
+                                                            <span>{shortLabel}</span>
+                                                            {checked && <TagMenuCheck aria-hidden="true">✓</TagMenuCheck>}
+                                                        </TagMenuItem>
+                                                    );
+                                                })}
+                                                {tagEnabled && tagValue && (
+                                                    <>
+                                                        <TagMenuDivider />
+                                                        <TagMenuItem
+                                                            type="button"
+                                                            role="menuitem"
+                                                            disabled={isSubmitting}
+                                                            onClick={() => handleTagSelect('')}
+                                                        >
+                                                            <span>Remove tag</span>
+                                                        </TagMenuItem>
+                                                    </>
+                                                )}
+                                                <TagMenuDivider />
+                                                <TagMenuFooter>
+                                                    Flag posts with sensitive material so users can opt in or filter them out.
+                                                </TagMenuFooter>
+                                            </TagMenu>
+                                        )}
+                                    </TagChipWrap>
+                                </ActionRow>
+
+                                {/* Link URL — unfurls when the link chip is
+                                  * active. autoFocus so users can type
+                                  * immediately after clicking the chip. */}
+                                {showLinkInput && (
+                                    <Field>
+                                        <InputShell>
+                                            <FloatLabel htmlFor="link-url">Link URL</FloatLabel>
+                                            <ShellInput
+                                                id="link-url"
+                                                name="link-url"
+                                                type="url"
+                                                value={linkUrl}
+                                                placeholder="Link URL (optional)"
+                                                autoComplete="off"
+                                                spellCheck={false}
+                                                autoFocus
+                                                onChange={e => setLinkUrl(e.target.value)}
+                                                disabled={isSubmitting}
+                                                aria-label="Link URL"
+                                            />
+                                            {linkValid && (
+                                                <ValidCheck aria-hidden="true">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <polyline points="20 6 9 17 4 12" />
+                                                    </svg>
+                                                </ValidCheck>
+                                            )}
+                                        </InputShell>
+                                        {linkUrl.trim() && linkValidation.error && (
+                                            <FieldError role="alert">{linkValidation.error}</FieldError>
+                                        )}
+                                    </Field>
+                                )}
+
+                                {/* Inline media drop panel — one-shot: opens
+                                  * via the "+ Media" chip (or auto-opens
+                                  * when a file is dragged anywhere over
+                                  * the page) and closes itself once the
+                                  * upload completes. To attach another
+                                  * file the user clicks "+ Media" again
+                                  * or drags. "Choose file" covers the
+                                  * OS-picker fallback. */}
+                                {mediaPanelOpen && (
+                                    <Field>
+                                        <MediaDropZone
+                                            id="media-drop-panel"
+                                            $dragging={mediaPanelDragging}
+                                            onDragOver={handleMediaPanelDragOver}
+                                            onDragLeave={handleMediaPanelDragLeave}
+                                            onDrop={handleMediaPanelDrop}
+                                        >
+                                            <MediaDropIcon aria-hidden="true">
+                                                <HiArrowUpTray />
+                                            </MediaDropIcon>
+                                            {/* Upload status lives solely in the carousel below to
+                                              * avoid double "Uploading…" labels — when isUploading
+                                              * we hide this row entirely. */}
+                                            {!isUploading && (
+                                                <MediaDropText>
+                                                    {attachedMedia.length >= MAX_MEDIA
+                                                        ? `Max ${MAX_MEDIA} attachments reached`
+                                                        : 'Drag and drop an image or video here'}
+                                                </MediaDropText>
+                                            )}
+                                            {attachedMedia.length < MAX_MEDIA && !isUploading && (
+                                                <>
+                                                    <MediaDropHint>or</MediaDropHint>
+                                                    <Button
+                                                        variant="primary"
+                                                        size="sm"
+                                                        type="button"
+                                                        onClick={handleMediaPanelChoose}
+                                                        disabled={isSubmitting}
+                                                    >
+                                                        Choose file
+                                                    </Button>
+                                                </>
+                                            )}
+                                        </MediaDropZone>
+                                    </Field>
+                                )}
+
+                                {/* Media carousel — only renders once at least
+                                  * one media item is attached or an upload
+                                  * is in flight. The empty drop-zone tile
+                                  * is gone; the + Media chip above is now
+                                  * the entry point. Whole-page drag/drop
+                                  * still works via the outer ContentGrid
+                                  * handlers. */}
+                                {(attachedMedia.length > 0 || isUploading) && (
+                                    <Field>
+                                        {(() => {
+                                            const activeUrl = activeMedia?.url;
+                                            const activeLoading = !!(activeUrl && thumbsLoading && thumbsLoading.has(activeUrl));
+                                            const showLoadingState = isUploading || activeLoading;
+                                            return (
+                                                <CarouselTile
+                                                    $hasMedia={attachedMedia.length > 0}
+                                                    $loading={showLoadingState}
+                                                >
+                                                    {attachedMedia.length === 0 && isUploading && (
+                                                        <MediaSlidePlaceholder>
+                                                            <MediaSpinnerRing aria-hidden="true" />
+                                                            <span>
+                                                                Uploading{uploadProgress !== null ? ` ${Math.round(uploadProgress)}%` : '...'}
+                                                            </span>
+                                                        </MediaSlidePlaceholder>
+                                                    )}
+                                                    {attachedMedia.length > 0 && (
+                                                        <>
+                                                            <CarouselHeader>
+                                                                <SlideCounter
+                                                                    aria-live="polite"
+                                                                    aria-atomic="true"
+                                                                    title={`${attachedMedia.length} of ${MAX_MEDIA} attachments`}
+                                                                >
+                                                                    {attachedMedia.length} / {MAX_MEDIA}
+                                                                </SlideCounter>
+                                                                <HeaderDelete
+                                                                    type="button"
+                                                                    tabIndex={-1}
+                                                                    onClick={handleRemoveActiveMedia}
+                                                                    disabled={isSubmitting}
+                                                                    aria-label="Remove media"
+                                                                    title="Remove"
+                                                                >
+                                                                    <HiTrash aria-hidden="true" />
+                                                                </HeaderDelete>
+                                                            </CarouselHeader>
+                                                            <MediaSlide>
+                                                                {activeLoading && (
+                                                                    <MediaSlidePlaceholder>
+                                                                        <MediaSpinnerRing aria-hidden="true" />
+                                                                        <span>Processing media…</span>
+                                                                    </MediaSlidePlaceholder>
+                                                                )}
+                                                                <MediaSlideImage
+                                                                    $loaded={!activeLoading}
+                                                                    src={activeMedia?.type === 'image' ? activeMedia.url : getVideoThumbnailUrl(activeMedia?.url) || activeMedia?.url}
+                                                                    alt=""
+                                                                    onLoad={() => {
+                                                                        if (!activeMedia) return;
+                                                                        setThumbsLoading(prev => {
+                                                                            const n = new Set(prev);
+                                                                            n.delete(activeMedia.url);
+                                                                            return n;
+                                                                        });
+                                                                    }}
+                                                                    onError={() => {
+                                                                        if (!activeMedia) return;
+                                                                        setThumbsLoading(prev => {
+                                                                            const n = new Set(prev);
+                                                                            n.delete(activeMedia.url);
+                                                                            return n;
+                                                                        });
+                                                                    }}
+                                                                />
+                                                                {canPrev && (
+                                                                    <NavPrev
+                                                                        type="button"
+                                                                        tabIndex={-1}
+                                                                        onClick={() => setSlideIndex(i => Math.max(0, i - 1))}
+                                                                        aria-label="Previous media"
+                                                                        $iconOnly
+                                                                    >
+                                                                        <HiChevronLeft aria-hidden="true" />
+                                                                    </NavPrev>
+                                                                )}
+                                                                {canNext && (
+                                                                    <NavNext
+                                                                        type="button"
+                                                                        tabIndex={-1}
+                                                                        onClick={() => setSlideIndex(i => Math.min(attachedMedia.length - 1, i + 1))}
+                                                                        aria-label="Next media"
+                                                                        $iconOnly
+                                                                    >
+                                                                        <HiChevronRight aria-hidden="true" />
+                                                                    </NavNext>
+                                                                )}
+                                                            </MediaSlide>
+                                                        </>
+                                                    )}
+                                                    {isUploading && attachedMedia.length > 0 && (
+                                                        <UploadingBadge>
+                                                            Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '...'}
+                                                            <Button
+                                                                variant="danger"
+                                                                size="xs"
+                                                                tabIndex={-1}
+                                                                onClick={() => {
+                                                                    try {
+                                                                        if (editorUpload && editorUpload.cancelUpload) {
+                                                                            editorUpload.cancelUpload();
+                                                                        }
+                                                                    } catch (_) { /* noop */ }
+                                                                }}
+                                                            >
+                                                                Cancel
+                                                            </Button>
+                                                        </UploadingBadge>
+                                                    )}
+                                                </CarouselTile>
+                                            );
+                                        })()}
+                                    </Field>
+                                )}
+
+                                {/* Picker-attached image preview tile. Same shape the
+                                  * reply editor uses (MediaRow > MediaPreviewWrapper >
+                                  * MediaPreviewImage + MediaRemoveButton). Sits right
+                                  * above the body editor so the user actually sees the
+                                  * picked GIF / sticker without flipping a preview pane. */}
+                                {pickerMediaUrl && (
+                                    <Field>
+                                        <MediaRow>
+                                            <MediaPreviewWrapper>
+                                                <MediaPreviewImage
+                                                    src={pickerMediaUrl}
+                                                    alt=""
+                                                    onLoad={() => setPickerThumbLoading(false)}
+                                                    onError={() => setPickerThumbLoading(false)}
+                                                />
+                                                {pickerThumbLoading && <MediaSpinner />}
+                                                <MediaRemoveButton
+                                                    type="button"
+                                                    tabIndex={-1}
+                                                    disabled={isSubmitting}
+                                                    onClick={handleRemovePickerMedia}
+                                                    aria-label="Remove attached image"
+                                                    title="Remove attached image"
+                                                >
+                                                    ×
+                                                </MediaRemoveButton>
+                                            </MediaPreviewWrapper>
+                                        </MediaRow>
+                                    </Field>
+                                )}
+
+                                {/* Body editor — primary input. Optional. */}
+                                <EditorMount>
+                                    <Field>
+                                        <EditorShell>
+                                            <DefaultEditorChrome>
+                                                <MarkdownEditor
+                                                    value={contentValue}
+                                                    onChange={v => setContentValue(v)}
+                                                    maxLength={limits.maxContent}
+                                                    disabled={isSubmitting}
+                                                    uploadBlocked={attachedMedia.length >= MAX_MEDIA}
+                                                    placeholder="Body (optional)"
+                                                    toolbarExtra={
+                                                        <EditorMediaTools
+                                                            onSelect={handlePickerSelect}
+                                                            disabled={isSubmitting || !!pickerMediaUrl}
+                                                        />
+                                                    }
+                                                    onSubmitShortcut={() => {
+                                                        try {
+                                                            const form = document.getElementById('create-post-form');
+                                                            if (form) form.requestSubmit();
+                                                        } catch (_) { /* noop */ }
+                                                    }}
+                                                    showCounters={false}
+                                                    renderHelperRow={false}
+                                                    toolbarButtonSize="1.6rem"
+                                                    toolbarIconSize="0.9rem"
+                                                    minHeight="6rem"
+                                                    registerUploadHandler={setEditorUpload}
+                                                    editorRef={ref => { contentEditorRef.current = ref; }}
+                                                    onMediaUploaded={(type, url, error) => {
+                                                        if (error) {
+                                                            if (errorClearTimeoutRef.current) {
+                                                                clearTimeout(errorClearTimeoutRef.current);
+                                                                errorClearTimeoutRef.current = null;
+                                                            }
+                                                            errorSetTimeRef.current = Date.now();
+                                                            setSubmitError(error);
+                                                            errorClearTimeoutRef.current = setTimeout(() => {
+                                                                setSubmitError('');
+                                                                errorSetTimeRef.current = null;
+                                                                errorClearTimeoutRef.current = null;
+                                                            }, 5000);
+                                                        } else if (!type || !url) {
+                                                            if (errorClearTimeoutRef.current) {
+                                                                clearTimeout(errorClearTimeoutRef.current);
+                                                                errorClearTimeoutRef.current = null;
+                                                            }
+                                                            errorSetTimeRef.current = Date.now();
+                                                            setSubmitError('Media upload failed. Please try again.');
+                                                            errorClearTimeoutRef.current = setTimeout(() => {
+                                                                setSubmitError('');
+                                                                errorSetTimeRef.current = null;
+                                                                errorClearTimeoutRef.current = null;
+                                                            }, 5000);
+                                                        } else {
+                                                            addMediaItem(type, url);
+                                                        }
+                                                    }}
+                                                    onUploadStateChange={uploading => {
+                                                        setIsUploading(uploading);
+                                                        if (!uploading) setUploadProgress(null);
+                                                    }}
+                                                    onUploadProgress={progress => setUploadProgress(progress)}
+                                                />
+                                            </DefaultEditorChrome>
+                                        </EditorShell>
+                                    </Field>
+                                    <ContentCounterRow>
+                                        <ContentCounter $warn={!limits.unlimited && contentValue.length >= limits.maxContent}>
+                                            ({tierLabel}) {limits.unlimited ? `${contentValue.length} / unlimited` : `${contentValue.length} / ${limits.maxContent}`}
+                                        </ContentCounter>
+                                    </ContentCounterRow>
+                                </EditorMount>
+
+                                {submitError && <ErrorMessage role="alert">{submitError}</ErrorMessage>}
+
+                                <BottomBar>
+                                    <span aria-hidden="true" />
+                                    <SubmitGroup>
+                                        <PostBtn
+                                            type="submit"
+                                            disabled={!canSubmit}
+                                            aria-disabled={!canSubmit}
+                                        >
+                                            {submitLabel}
+                                        </PostBtn>
+                                    </SubmitGroup>
+                                </BottomBar>
+                            </Stack>
                         </ComposerColumn>
                     </ModernPostFeed>
                 </FeedCol>
                 <FeedRightRail />
             </FeedRailRow>
-            {globalDragging && <GlobalDropOverlay>Drop image or video to upload</GlobalDropOverlay>}
+            <ConfirmDialog
+                open={!!pendingNavHref}
+                title="Discard post?"
+                message="You have unsaved content. If you leave now, what you've typed will be lost."
+                confirmLabel="Discard"
+                cancelLabel="Keep editing"
+                confirmVariant="danger"
+                onConfirm={handleConfirmDiscard}
+                onCancel={handleCancelDiscard}
+            />
         </ContentGrid>
     );
 }

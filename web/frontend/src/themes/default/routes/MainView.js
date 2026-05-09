@@ -1646,7 +1646,7 @@ const MainView = ({
         // Full-width main column + shell header (no left sidebar; old Reddit style)
         const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : `#${urlTopic}`;
         const noPostsMessage = urlTopic === 'following'
-            ? 'No posts available. Follow people or topics to populate this feed.'
+            ? 'No posts available. Follow users or topics to populate this feed.'
             : 'No posts available';
         return <ContentGrid>
             <Helmet>
@@ -1701,7 +1701,7 @@ const MainView = ({
                                     </HomeFeedModeInline>
                                 </TopicHeroHeader>
                                 <TopicHeroDescription>
-                                    Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
+                                    Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from users actively contributing to this topic.
                                 </TopicHeroDescription>
                             </TopicHeroCard>}
 
@@ -1745,7 +1745,7 @@ const MainView = ({
                                     </InviteHeaderButton>
                                     {!inviteBannerCollapsed && <InviteContent>
                                         <InviteSubtitleBody>
-                                            Mirage is now invite-only — because great conversations require great people!
+                                            Mirage is now invite-only — because great conversations require great users!
                                             {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
                                         </InviteSubtitleBody>
                                         <InviteBannerButton
@@ -1882,10 +1882,10 @@ const MainView = ({
                             {!isLoggedIn && <LoggedOutPromptCard
                                 role="region"
                                 aria-label="Welcome to Mirage"
-                                title={urlTopic === 'following' ? 'Sign in to follow people' : 'Welcome to Mirage'}
+                                title={urlTopic === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
                                 notice="Currently in Private Beta, Invite Only."
                                 description={urlTopic === 'following'
-                                    ? 'Sign in to unlock your following feed and keep up with the people and topics you care about.'
+                                    ? 'Sign in to unlock your following feed and keep up with the users and topics you care about.'
                                     : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
                                 stats={welcomeStats && welcomeStats.userCount > 0 ? [
                                     { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },

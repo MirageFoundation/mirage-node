@@ -424,15 +424,10 @@ const ProfileIdentityActions = styled.div`
 
 // Profile-header / aside-card dicebear avatar — thin alias around the
 // shared `UserAvatar` so the bg color, retina seed, and 20% inner
-// padding match every other avatar surface in the app. Renders as a
-// rounded-square tile (vs the circular default used elsewhere) to
-// give the main profile chips a slightly more \"identity card\" feel
-// on both own- and other-user profile views.
+// padding match every other avatar surface in the app.
 const Avatar = ({ $size, src: _src, ...rest }) => (
     <UserAvatar
         size={$size || 64}
-        shape="rounded"
-        paddingRatio={0}
         {...rest}
     />
 );
@@ -506,10 +501,8 @@ const AsideIdentityRow = styled.div`
 
 const AsideAvatarWrap = styled.div`
     padding: 3px;
-    /* Match the rounded-square avatar shape. UserAvatar shape=rounded
-     * uses a 4px radius; the wrapper sits 3px outside the avatar tile
-     * so we bump to 7px to keep the curve visually parallel. */
-    border-radius: 7px;
+    /* Concentric ring around the circular avatar. */
+    border-radius: 50%;
     background: ${({ theme }) => theme.colors.panel};
     flex-shrink: 0;
 `;
@@ -653,15 +646,15 @@ const CompactFollowBtn = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({ $danger, $active, theme }) => ($danger
-            ? theme.colors.buttonDangerBg
-            : $active
-                ? theme.colors.hoverBg
-                : theme.colors.followBtnBgHover)};
+        ? theme.colors.buttonDangerBg
+        : $active
+            ? theme.colors.hoverBg
+            : theme.colors.followBtnBgHover)};
         border-color: ${({ $danger, $active, theme }) => ($danger
-            ? theme.colors.buttonDangerBorder
-            : $active
-                ? theme.colors.borderStrong
-                : theme.colors.followBtnBgHover)};
+        ? theme.colors.buttonDangerBorder
+        : $active
+            ? theme.colors.borderStrong
+            : theme.colors.followBtnBgHover)};
     }
 
     &:disabled { cursor: not-allowed; opacity: 0.55; }
@@ -1036,13 +1029,13 @@ const AlgoWeightPill = styled.span`
     border-radius: 9999px;
     background: ${({ $tone, theme }) => (
         $tone === 'up' ? theme.colors.voteUpBg
-        : $tone === 'down' ? theme.colors.voteDownBg
-        : theme.colors.actionIconBg
+            : $tone === 'down' ? theme.colors.voteDownBg
+                : theme.colors.actionIconBg
     )};
     color: ${({ $tone, theme }) => (
         $tone === 'up' ? theme.colors.voteUp
-        : $tone === 'down' ? theme.colors.voteDown
-        : theme.colors.subtleText
+            : $tone === 'down' ? theme.colors.voteDown
+                : theme.colors.subtleText
     )};
     font-size: 0.62rem;
     font-weight: 700;
@@ -1429,48 +1422,48 @@ function ProfileCommentRow({ post }) {
     return (
         <CommentRowSlot>
             <CommentRoot as={Link} to={linkTarget} role="link" tabIndex={0} style={{ textDecoration: 'none' }}>
-            <CommentHeader>
-                {parentTitle ? (
-                    <>
-                        <CommentTopicLink to={parentLink} onClick={e => e.stopPropagation()}>
-                            {parentTitle}
-                        </CommentTopicLink>
-                        <CommentDot>·</CommentDot>
-                    </>
-                ) : hasRealTopic && (
-                    <>
-                        <CommentTopicLink to={`/t/${encodeURIComponent(displayTopic)}`} onClick={e => e.stopPropagation()}>
-                            #{displayTopic}
-                        </CommentTopicLink>
-                        <CommentDot>·</CommentDot>
-                    </>
-                )}
-                <CommentUserLink
-                    to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
-                    onClick={e => e.stopPropagation()}
-                    $tierColor={authorColor}
-                >
-                    @{displayAuthor}
-                </CommentUserLink>
-                <CommentDot>·</CommentDot>
-                <CommentTime>{formatCommentAge(ts)}</CommentTime>
-                {Array.isArray(post?.awards) && post.awards.length > 0 && (
-                    <>
-                        <CommentDot>·</CommentDot>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.7rem' }} onClick={e => e.stopPropagation()}>
-                            {post.awards.map(a => {
-                                const def = AWARD_TYPES.find(t => t.name === a.type);
-                                if (!def) return null;
-                                const cnt = Number(a.count || 0);
-                                return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
-                            })}
-                        </span>
-                    </>
-                )}
-            </CommentHeader>
-            <CommentBody onClick={e => e.stopPropagation()}>
-                <MarkdownRenderer text={fullBody} />
-            </CommentBody>
+                <CommentHeader>
+                    {parentTitle ? (
+                        <>
+                            <CommentTopicLink to={parentLink} onClick={e => e.stopPropagation()}>
+                                {parentTitle}
+                            </CommentTopicLink>
+                            <CommentDot>·</CommentDot>
+                        </>
+                    ) : hasRealTopic && (
+                        <>
+                            <CommentTopicLink to={`/t/${encodeURIComponent(displayTopic)}`} onClick={e => e.stopPropagation()}>
+                                #{displayTopic}
+                            </CommentTopicLink>
+                            <CommentDot>·</CommentDot>
+                        </>
+                    )}
+                    <CommentUserLink
+                        to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
+                        onClick={e => e.stopPropagation()}
+                        $tierColor={authorColor}
+                    >
+                        @{displayAuthor}
+                    </CommentUserLink>
+                    <CommentDot>·</CommentDot>
+                    <CommentTime>{formatCommentAge(ts)}</CommentTime>
+                    {Array.isArray(post?.awards) && post.awards.length > 0 && (
+                        <>
+                            <CommentDot>·</CommentDot>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.7rem' }} onClick={e => e.stopPropagation()}>
+                                {post.awards.map(a => {
+                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                    if (!def) return null;
+                                    const cnt = Number(a.count || 0);
+                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                })}
+                            </span>
+                        </>
+                    )}
+                </CommentHeader>
+                <CommentBody onClick={e => e.stopPropagation()}>
+                    <MarkdownRenderer text={fullBody} />
+                </CommentBody>
             </CommentRoot>
         </CommentRowSlot>
     );
@@ -1811,445 +1804,445 @@ function ProfileViewAuthenticated({
                                     )}
                                 </ProfileIdentity>
                                 <TabsRow role="tablist" aria-label="Profile sections">
-                                {VALID_TABS.map(tab => <TabButton key={tab} type="button" role="tab" aria-selected={activeTab === tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
-                                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                                </TabButton>)}
-                                {activeTab === 'submissions' && (
-                                    <TabsRowRight>
-                                        <FeedViewToggle
-                                            viewMode={profileFeedView}
-                                            onChange={handleProfileFeedViewChange}
-                                        />
-                                    </TabsRowRight>
-                                )}
-                            </TabsRow>
-                            <TabContent $flush={isPostsTab}>
-                        {activeTab === 'profile' && <>
-                            <ProfileFieldRow>
-                                <Label>Username:</Label>
-                                <ProfileFieldValue>
-                                    <InlineMono title={profileUsername}>{usernameDisplay}</InlineMono>
-                                    {canEditProfile && <IconActionButton type="button" onClick={() => navigate('/change_username')} title="Change username" aria-label="Change username">
-                                        <HiPencilSquare aria-hidden="true" />
-                                    </IconActionButton>}
-                                </ProfileFieldValue>
-                            </ProfileFieldRow>
-                            <ProfileFieldRow>
-                                <Label>Address:</Label>
-                                <ProfileFieldValue>
-                                    <InlineMono title={profileAddress}>{profileAddress || '(unavailable)'}</InlineMono>
-                                    {profileAddress && <IconActionButton type="button" onClick={() => {
-                                        navigator.clipboard.writeText(profileAddress);
-                                        setAddressCopied(true);
-                                        setTimeout(() => setAddressCopied(false), 1500);
-                                    }} $success={addressCopied} title={addressCopied ? 'Copied!' : 'Copy address'} aria-label={addressCopied ? 'Copied' : 'Copy address'}>
-                                        {addressCopied ? <HiCheck aria-hidden="true" /> : <HiClipboardDocument aria-hidden="true" />}
-                                    </IconActionButton>}
-                                </ProfileFieldValue>
-                            </ProfileFieldRow>
-                            <ProfileFieldRow>
-                                <Label>Tier:</Label>
-                                <ProfileFieldValue>
-                                    <span style={{ display: 'flex', alignItems: 'center' }}>
-                                        <Mono style={userLevel > 0 ? { color: getTierColor(userLevel) } : undefined}>
-                                            {getTierName(userLevel)}
-                                        </Mono>
-                                        {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
-                                            marginLeft: '0.5rem',
-                                            fontSize: '0.7rem',
-                                            color: theme.colors.subtleText
-                                        }}>
-                                            ({formatSubscriptionExpiry(subscriptionExpiry)})
-                                        </span>}
-                                    </span>
-                                    {!isOwnProfile && profileAddress && hasValidAccount && (
-                                        <HideOnMobile>
-                                            <GiftMirageBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
-                                                <HiGift aria-hidden="true" />{' '}
-                                                {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
-                                            </GiftMirageBtn>
-                                        </HideOnMobile>
+                                    {VALID_TABS.map(tab => <TabButton key={tab} type="button" role="tab" aria-selected={activeTab === tab} $active={activeTab === tab} onClick={() => setActiveTab(tab)}>
+                                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                    </TabButton>)}
+                                    {activeTab === 'submissions' && (
+                                        <TabsRowRight>
+                                            <FeedViewToggle
+                                                viewMode={profileFeedView}
+                                                onChange={handleProfileFeedViewChange}
+                                            />
+                                        </TabsRowRight>
                                     )}
-                                    {isOwnProfile && userLevel === 0 && (() => {
-                                        const insufficient = subFeeUmirage != null && Number(balance) < Number(subFeeUmirage);
-                                        return (
-                                            <Button
-                                                size="sm"
-                                                variant="subtle"
-                                                mobileFullWidth
-                                                disabled={insufficient}
-                                                onClick={() => navigate('/subscription')}
-                                                title={insufficient ? 'Insufficient balance to upgrade' : undefined}
-                                            >
-                                                {insufficient ? 'Insufficient Funds' : 'Upgrade'}
-                                            </Button>
-                                        );
-                                    })()}
-                                </ProfileFieldValue>
-                            </ProfileFieldRow>
-                            {/* Gift Subscription confirmation moved to a root-level
+                                </TabsRow>
+                                <TabContent $flush={isPostsTab}>
+                                    {activeTab === 'profile' && <>
+                                        <ProfileFieldRow>
+                                            <Label>Username:</Label>
+                                            <ProfileFieldValue>
+                                                <InlineMono title={profileUsername}>{usernameDisplay}</InlineMono>
+                                                {canEditProfile && <IconActionButton type="button" onClick={() => navigate('/change_username')} title="Change username" aria-label="Change username">
+                                                    <HiPencilSquare aria-hidden="true" />
+                                                </IconActionButton>}
+                                            </ProfileFieldValue>
+                                        </ProfileFieldRow>
+                                        <ProfileFieldRow>
+                                            <Label>Address:</Label>
+                                            <ProfileFieldValue>
+                                                <InlineMono title={profileAddress}>{profileAddress || '(unavailable)'}</InlineMono>
+                                                {profileAddress && <IconActionButton type="button" onClick={() => {
+                                                    navigator.clipboard.writeText(profileAddress);
+                                                    setAddressCopied(true);
+                                                    setTimeout(() => setAddressCopied(false), 1500);
+                                                }} $success={addressCopied} title={addressCopied ? 'Copied!' : 'Copy address'} aria-label={addressCopied ? 'Copied' : 'Copy address'}>
+                                                    {addressCopied ? <HiCheck aria-hidden="true" /> : <HiClipboardDocument aria-hidden="true" />}
+                                                </IconActionButton>}
+                                            </ProfileFieldValue>
+                                        </ProfileFieldRow>
+                                        <ProfileFieldRow>
+                                            <Label>Tier:</Label>
+                                            <ProfileFieldValue>
+                                                <span style={{ display: 'flex', alignItems: 'center' }}>
+                                                    <Mono style={userLevel > 0 ? { color: getTierColor(userLevel) } : undefined}>
+                                                        {getTierName(userLevel)}
+                                                    </Mono>
+                                                    {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
+                                                        marginLeft: '0.5rem',
+                                                        fontSize: '0.7rem',
+                                                        color: theme.colors.subtleText
+                                                    }}>
+                                                        ({formatSubscriptionExpiry(subscriptionExpiry)})
+                                                    </span>}
+                                                </span>
+                                                {!isOwnProfile && profileAddress && hasValidAccount && (
+                                                    <HideOnMobile>
+                                                        <GiftMirageBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
+                                                            <HiGift aria-hidden="true" />{' '}
+                                                            {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                                        </GiftMirageBtn>
+                                                    </HideOnMobile>
+                                                )}
+                                                {isOwnProfile && userLevel === 0 && (() => {
+                                                    const insufficient = subFeeUmirage != null && Number(balance) < Number(subFeeUmirage);
+                                                    return (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="subtle"
+                                                            mobileFullWidth
+                                                            disabled={insufficient}
+                                                            onClick={() => navigate('/subscription')}
+                                                            title={insufficient ? 'Insufficient balance to upgrade' : undefined}
+                                                        >
+                                                            {insufficient ? 'Insufficient Funds' : 'Upgrade'}
+                                                        </Button>
+                                                    );
+                                                })()}
+                                            </ProfileFieldValue>
+                                        </ProfileFieldRow>
+                                        {/* Gift Subscription confirmation moved to a root-level
                               * default `GiftSubscriptionDialog` modal (matches
                               * the Block / Report dialog visual language). The
                               * `confirmGiftSub` state still drives visibility;
                               * we just render it differently. The success /
                               * error banner below remains inline so the user
                               * sees "Subscription gifted!" next to the Tier row. */}
-                            {giftSubMessage && <ProfileFieldRow>
-                                <div aria-hidden="true" />
-                                <ProfileFieldValuePlain>
-                                    <div style={{
-                                        background: giftSubMessage.type === 'success' ? theme.colors.buttonSuccessBg : theme.colors.buttonDangerBg,
-                                        border: `1px solid ${giftSubMessage.type === 'success' ? theme.colors.buttonSuccessBorder : theme.colors.buttonDangerBorder}`,
-                                        padding: '0.6rem 0.85rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        color: giftSubMessage.type === 'success' ? theme.colors.voteUp : theme.colors.voteDown,
-                                        fontSize: '0.8rem',
-                                        boxSizing: 'border-box'
-                                    }}>
-                                        <span>{giftSubMessage.type === 'success' ? '✓' : '⚠'}</span>
-                                        {giftSubMessage.message}
-                                    </div>
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>}
-                            <ProfileFieldRow>
-                                <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
-                                    Balance:
-                                </HoverableLabel>
-                                <ProfileFieldValue>
-                                    <Mono title={balanceDisplay}>{compactMirageLabel(balance)}</Mono>
-                                    {!isOwnProfile && profileAddress && hasValidAccount && (
-                                        <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
-                                            <HiGift aria-hidden="true" />{' '}
-                                            {donatePending ? (donateStatus || 'Sending...') : (<>
-                                                <GiftBtnLabelFull>Gift Mirage</GiftBtnLabelFull>
-                                                <GiftBtnLabelShort>Gift</GiftBtnLabelShort>
-                                            </>)}
-                                        </GiftMirageBtn>
-                                    )}
-                                </ProfileFieldValue>
-                            </ProfileFieldRow>
-                            {/* Gift Mirage confirmation moved to a root-level
+                                        {giftSubMessage && <ProfileFieldRow>
+                                            <div aria-hidden="true" />
+                                            <ProfileFieldValuePlain>
+                                                <div style={{
+                                                    background: giftSubMessage.type === 'success' ? theme.colors.buttonSuccessBg : theme.colors.buttonDangerBg,
+                                                    border: `1px solid ${giftSubMessage.type === 'success' ? theme.colors.buttonSuccessBorder : theme.colors.buttonDangerBorder}`,
+                                                    padding: '0.6rem 0.85rem',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.5rem',
+                                                    color: giftSubMessage.type === 'success' ? theme.colors.voteUp : theme.colors.voteDown,
+                                                    fontSize: '0.8rem',
+                                                    boxSizing: 'border-box'
+                                                }}>
+                                                    <span>{giftSubMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                                    {giftSubMessage.message}
+                                                </div>
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>}
+                                        <ProfileFieldRow>
+                                            <HoverableLabel tabIndex={0} data-tooltip={`Spendable wallet balance in MIRAGE.\n\nThis is what a subscription will be paid with.`}>
+                                                Balance:
+                                            </HoverableLabel>
+                                            <ProfileFieldValue>
+                                                <Mono title={balanceDisplay}>{compactMirageLabel(balance)}</Mono>
+                                                {!isOwnProfile && profileAddress && hasValidAccount && (
+                                                    <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
+                                                        <HiGift aria-hidden="true" />{' '}
+                                                        {donatePending ? (donateStatus || 'Sending...') : (<>
+                                                            <GiftBtnLabelFull>Gift Mirage</GiftBtnLabelFull>
+                                                            <GiftBtnLabelShort>Gift</GiftBtnLabelShort>
+                                                        </>)}
+                                                    </GiftMirageBtn>
+                                                )}
+                                            </ProfileFieldValue>
+                                        </ProfileFieldRow>
+                                        {/* Gift Mirage confirmation moved to a root-level
                               * default `GiftMirageDialog` modal. Success /
                               * error banner still renders inline below so the
                               * user sees the outcome next to the Balance row. */}
-                            {donateMessage && <ProfileFieldRow>
-                                <div aria-hidden="true" />
-                                <ProfileFieldValuePlain>
-                                    <div style={{
-                                        background: donateMessage.type === 'success' ? theme.colors.buttonSuccessBg : theme.colors.buttonDangerBg,
-                                        border: `1px solid ${donateMessage.type === 'success' ? theme.colors.buttonSuccessBorder : theme.colors.buttonDangerBorder}`,
-                                        padding: '0.6rem 0.85rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        color: donateMessage.type === 'success' ? theme.colors.voteUp : theme.colors.voteDown,
-                                        fontSize: '0.8rem',
-                                        boxSizing: 'border-box'
-                                    }}>
-                                        <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
-                                        {donateMessage.message}
-                                    </div>
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>}
-                            <ProfileFieldRow>
-                                <HoverableLabel tabIndex={0} data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
-                                    Reserve:
-                                </HoverableLabel>
-                                <ProfileFieldValuePlain>
-                                    <Mono title={reserveDisplay}>{compactMirageLabel(reserveFunds)}</Mono>
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>
-                            <ProfileFieldRow>
-                                <Label>Registered:</Label>
-                                <ProfileFieldValuePlain>
-                                    <Mono title={registeredDisplay}>{profileRegisteredAt ? formatAccountAgeLong(profileRegisteredAt) : registeredDisplay}</Mono>
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>
-                            <ProfileFieldRow>
-                                <Label>Biography:</Label>
-                                <ProfileFieldValuePlain style={{
-                                    width: '100%'
-                                }}>
-                                    {bioEditing ? <div style={{
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '0.5rem'
-                                    }}>
-                                        <BioTextarea value={bioDraft} onChange={e => setBioDraft(e.target.value)} maxLength={BIO_MAX} rows={4} disabled={bioSaving} placeholder="Write a short biography..." autoFocus />
-                                        <div style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            gap: '0.5rem',
-                                            flexWrap: 'wrap'
-                                        }}>
-                                            <span style={{
-                                                fontSize: '0.6rem',
-                                                fontWeight: 500,
-                                                color: bioDraft.length > BIO_MAX ? theme.colors.voteDown : theme.colors.subtleText
-                                            }}>
-                                                {bioDraft.length}/{BIO_MAX}
-                                            </span>
-                                            <div style={{
-                                                display: 'flex',
-                                                gap: '0.5rem'
-                                            }}>
-                                                <BioPillButton type="button" $variant="ghost" disabled={bioSaving} onClick={() => {
-                                                    setBioEditing(false);
-                                                    setBioError('');
-                                                    setBioDraft(biography);
+                                        {donateMessage && <ProfileFieldRow>
+                                            <div aria-hidden="true" />
+                                            <ProfileFieldValuePlain>
+                                                <div style={{
+                                                    background: donateMessage.type === 'success' ? theme.colors.buttonSuccessBg : theme.colors.buttonDangerBg,
+                                                    border: `1px solid ${donateMessage.type === 'success' ? theme.colors.buttonSuccessBorder : theme.colors.buttonDangerBorder}`,
+                                                    padding: '0.6rem 0.85rem',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.5rem',
+                                                    color: donateMessage.type === 'success' ? theme.colors.voteUp : theme.colors.voteDown,
+                                                    fontSize: '0.8rem',
+                                                    boxSizing: 'border-box'
                                                 }}>
-                                                    Cancel
-                                                </BioPillButton>
-                                                <BioPillButton type="button" disabled={bioSaving || bioDraft.length > BIO_MAX} onClick={handleBioSave}>
-                                                    {bioSaving ? (bioButtonStatus || 'Saving...') : (bioButtonStatus || 'Save')}
-                                                </BioPillButton>
-                                            </div>
-                                        </div>
-                                        {bioError && <span style={{
-                                            fontSize: '0.75rem',
-                                            color: theme.colors.voteDown
-                                        }}>{bioError}</span>}
-                                    </div> : <ProfileFieldValue>
-                                        <Mono style={{
-                                            whiteSpace: 'pre-wrap',
-                                            wordBreak: 'break-word',
-                                            color: biography ? undefined : theme.colors.subtleText
-                                        }}>
-                                            {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
-                                        </Mono>
-                                        {isOwnProfile && <IconActionButton type="button" onClick={() => {
-                                            setBioDraft(biography);
-                                            setBioEditing(true);
-                                            setBioError('');
-                                        }} title={biography ? 'Edit biography' : 'Add biography'} aria-label={biography ? 'Edit biography' : 'Add biography'}>
-                                            <HiPencilSquare aria-hidden="true" />
-                                        </IconActionButton>}
-                                    </ProfileFieldValue>}
-                                </ProfileFieldValuePlain>
-                            </ProfileFieldRow>
-                        </>}
-
-                        {activeTab === 'submissions' && profileUsesListFeed && <>
-                            {isLoadingRecentPosts && recentPosts.length === 0 && (
-                                <FeedCardSkeletonList count={4} />
-                            )}
-                            {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
-                                color: theme.colors.voteDown
-                            }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
-                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
-                            {recentPosts.length > 0 && (
-                                <FeedComponent
-                                    key={profileFeedView}
-                                    posts={recentPosts}
-                                    state={state}
-                                    showSortTabs={false}
-                                    bleedShell={false}
-                                />
-                            )}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
-                                <FeedCardSkeleton />
-                            )}
-                            <div ref={recentBottomSentinelRef} style={{
-                                width: '100%',
-                                height: '20px',
-                                minHeight: '20px'
-                            }} />
-                        </>}
-
-                        {activeTab === 'comments' && profileUsesListFeed && <>
-                            {isLoadingRecentPosts && recentPosts.length === 0 && (
-                                <ListRowSkeletonList count={6} hasAvatar={false} showMeta={true} />
-                            )}
-                            {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
-                                color: theme.colors.voteDown
-                            }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
-                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No comments yet.</SubtleMono></ProfilePostsTabGutter>}
-                            {recentPosts.length > 0 && recentPosts.map(post => (
-                                <ProfileCommentRow key={post.post_id} post={post} />
-                            ))}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
-                                <ListRowSkeleton hasAvatar={false} showMeta={false} />
-                            )}
-                            <div ref={recentBottomSentinelRef} style={{
-                                width: '100%',
-                                height: '20px',
-                                minHeight: '20px'
-                            }} />
-                        </>}
-
-                        {isPostsTab && !profileUsesListFeed && <>
-                            {!profileHideFilterSelect && profileAddress && <ProfilePostsTabGutter><FilterSelect value={recentPostsFilter} onChange={e => setRecentPostsFilter(e.target.value)}>
-                                <option value="all">All</option>
-                                <option value="submissions">Submissions</option>
-                                <option value="comments">Comments</option>
-                            </FilterSelect></ProfilePostsTabGutter>}
-                            {isLoadingRecentPosts && (
-                                <ListRowSkeletonList count={5} hasAvatar={false} />
-                            )}
-                            {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
-                                color: theme.colors.voteDown
-                            }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
-                            {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
-                            {!recentPostsError && recentPosts.length > 0 && <PostsList>
-                                {recentPosts.map(post => <PostItem key={post.post_id} href={getPostUrl(post)} isActive={activeRecentPost === post.post_id} onClick={e => handleRecentPostClick(post, e)}>
-                                    <PostPreview>{renderPostPreview(post)}</PostPreview>
-                                    <PostMeta>{buildMetaLine(post)}</PostMeta>
-                                </PostItem>)}
-                            </PostsList>}
-                            {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
-                                <ListRowSkeleton hasAvatar={false} />
-                            )}
-                            <div ref={recentBottomSentinelRef} style={{
-                                width: '100%',
-                                height: '20px',
-                                minHeight: '20px'
-                            }} />
-                        </>}
-
-                        {activeTab === 'algo' && <>
-                            {/* Topic preferences — "#" chip per topic, weight pill */}
-                            <AlgoSection>
-                                <AlgoSectionHead>
-                                    <AlgoSectionHeadText>
-                                        <AlgoSectionTitle>Topic preferences</AlgoSectionTitle>
-                                        <AlgoSectionSubtitle>Topics this account engages with the most</AlgoSectionSubtitle>
-                                    </AlgoSectionHeadText>
-                                    {!prefsLoading && !prefsError && prefsTopics.length > 0 && (
-                                        <AlgoSectionCount>{prefsTopics.length}</AlgoSectionCount>
-                                    )}
-                                </AlgoSectionHead>
-                                <AlgoList>
-                                    {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={false} />}
-                                    {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
-                                    {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No topic preference data yet.</AlgoEmpty>}
-                                    {!prefsError && prefsTopics.length > 0 && (() => {
-                                        const CAP = 5;
-                                        const needsCollapse = prefsTopics.length > CAP * 2;
-                                        const visible = needsCollapse && !showAllTopicPrefs ? [...prefsTopics.slice(0, CAP), null, ...prefsTopics.slice(-CAP)] : prefsTopics;
-                                        return <>
-                                            {visible.map(t => {
-                                                if (t === null) {
-                                                    const hidden = prefsTopics.length - CAP * 2;
-                                                    return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
-                                                }
-                                                const tone = t.weight > 0 ? 'up' : t.weight < 0 ? 'down' : 'neutral';
-                                                return <AlgoRow key={t.topic} href={`/t/${encodeURIComponent(t.topic)}`} onClick={e => {
-                                                    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
-                                                        e.preventDefault();
-                                                        navigate(`/t/${encodeURIComponent(t.topic)}`);
-                                                    }
-                                                }}>
-                                                    <AlgoTopicChip aria-hidden="true"><HiHashtag /></AlgoTopicChip>
-                                                    <AlgoIdentity>
-                                                        <AlgoIdentityTitle>{t.topic}</AlgoIdentityTitle>
-                                                    </AlgoIdentity>
-                                                    <AlgoWeightPill $tone={tone}>{formatPrefWeight(t.weight)}</AlgoWeightPill>
-                                                </AlgoRow>;
-                                            })}
-                                            {showAllTopicPrefs && prefsTopics.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
-                                        </>;
-                                    })()}
-                                </AlgoList>
-                            </AlgoSection>
-
-                            {/* User preferences — dicebear avatar per author, weight pill */}
-                            <AlgoSection>
-                                <AlgoSectionHead>
-                                    <AlgoSectionHeadText>
-                                        <AlgoSectionTitle>User preferences</AlgoSectionTitle>
-                                        <AlgoSectionSubtitle>Authors this account engages with the most</AlgoSectionSubtitle>
-                                    </AlgoSectionHeadText>
-                                    {!prefsLoading && !prefsError && prefsAuthors.length > 0 && (
-                                        <AlgoSectionCount>{prefsAuthors.length}</AlgoSectionCount>
-                                    )}
-                                </AlgoSectionHead>
-                                <AlgoList>
-                                    {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={true} />}
-                                    {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
-                                    {!prefsLoading && !prefsError && prefsAuthors.length === 0 && <AlgoEmpty>No user preference data yet.</AlgoEmpty>}
-                                    {!prefsError && prefsAuthors.length > 0 && (() => {
-                                        const CAP = 5;
-                                        const needsCollapse = prefsAuthors.length > CAP * 2;
-                                        const visible = needsCollapse && !showAllAuthorPrefs ? [...prefsAuthors.slice(0, CAP), null, ...prefsAuthors.slice(-CAP)] : prefsAuthors;
-                                        return <>
-                                            {visible.map(u => {
-                                                if (u === null) {
-                                                    const hidden = prefsAuthors.length - CAP * 2;
-                                                    return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
-                                                }
-                                                const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
-                                                const displayName = uname && uname !== u.user ? uname : shortenAddress(u.user);
-                                                const avatarSeed = u.user || uname || 'user';
-                                                const tone = u.weight > 0 ? 'up' : u.weight < 0 ? 'down' : 'neutral';
-                                                return <AlgoRow key={u.user} href={`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`} onClick={e => {
-                                                    if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
-                                                        e.preventDefault();
-                                                        navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`);
-                                                    }
-                                                }}>
-                                                    <AlgoAvatar seed={avatarSeed} alt={`${displayName} avatar`} />
-                                                    <AlgoIdentity>
-                                                        <AlgoIdentityTitle>{uname && uname !== u.user ? uname : displayName}</AlgoIdentityTitle>
-                                                        <AlgoIdentityMono title={u.user}>{shortenAddress(u.user)}</AlgoIdentityMono>
-                                                    </AlgoIdentity>
-                                                    <AlgoWeightPill $tone={tone}>{formatPrefWeight(u.weight)}</AlgoWeightPill>
-                                                </AlgoRow>;
-                                            })}
-                                            {showAllAuthorPrefs && prefsAuthors.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
-                                        </>;
-                                    })()}
-                                </AlgoList>
-                            </AlgoSection>
-
-                            {/* Similar users — dicebear avatar + similarity score */}
-                            <AlgoSection>
-                                <AlgoSectionHead>
-                                    <AlgoSectionHeadText>
-                                        <AlgoSectionTitle>Similar users</AlgoSectionTitle>
-                                        <AlgoSectionSubtitle>Accounts whose taste overlaps with this profile</AlgoSectionSubtitle>
-                                    </AlgoSectionHeadText>
-                                    {!similarUsersLoading && !similarUsersError && similarUsers.length > 0 && (
-                                        <AlgoSectionCount>{similarUsers.length}</AlgoSectionCount>
-                                    )}
-                                </AlgoSectionHead>
-                                <AlgoList>
-                                    {similarUsersLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={true} />}
-                                    {!similarUsersLoading && similarUsersError && <AlgoEmpty $danger>{similarUsersError}</AlgoEmpty>}
-                                    {!similarUsersLoading && !similarUsersError && similarUsers.length === 0 && <AlgoEmpty>No similar users found yet.</AlgoEmpty>}
-                                    {!similarUsersError && similarUsers.length > 0 && <>
-                                        {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map(u => {
-                                            const displayName = u.username || shortenAddress(u.address);
-                                            const avatarSeed = u.address || u.username || 'user';
-                                            const tone = u.similarity >= 0 ? 'up' : 'down';
-                                            const pct = `${u.similarity >= 0 ? '+' : ''}${Math.round(u.similarity * 100)}%`;
-                                            return <AlgoRow key={u.address} href={`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`} onClick={e => {
-                                                if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`);
-                                                }
+                                                    <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
+                                                    {donateMessage.message}
+                                                </div>
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>}
+                                        <ProfileFieldRow>
+                                            <HoverableLabel tabIndex={0} data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
+                                                Reserve:
+                                            </HoverableLabel>
+                                            <ProfileFieldValuePlain>
+                                                <Mono title={reserveDisplay}>{compactMirageLabel(reserveFunds)}</Mono>
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>
+                                        <ProfileFieldRow>
+                                            <Label>Registered:</Label>
+                                            <ProfileFieldValuePlain>
+                                                <Mono title={registeredDisplay}>{profileRegisteredAt ? formatAccountAgeLong(profileRegisteredAt) : registeredDisplay}</Mono>
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>
+                                        <ProfileFieldRow>
+                                            <Label>Biography:</Label>
+                                            <ProfileFieldValuePlain style={{
+                                                width: '100%'
                                             }}>
-                                                <AlgoAvatar seed={avatarSeed} alt={`${displayName} avatar`} />
-                                                <AlgoIdentity>
-                                                    <AlgoIdentityTitle>{displayName}</AlgoIdentityTitle>
-                                                    <AlgoIdentityMono title={u.address}>{shortenAddress(u.address)}</AlgoIdentityMono>
-                                                </AlgoIdentity>
-                                                <AlgoWeightStack>
-                                                    <AlgoWeightPill $tone={tone}>{pct}</AlgoWeightPill>
-                                                    <AlgoWeightSub>{u.shared_dimensions} shared</AlgoWeightSub>
-                                                </AlgoWeightStack>
-                                            </AlgoRow>;
-                                        })}
-                                        {!showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(true)}>Show {similarUsers.length - 5} more</AlgoExpandPill></AlgoExpandRow>}
-                                        {showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                                {bioEditing ? <div style={{
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    gap: '0.5rem'
+                                                }}>
+                                                    <BioTextarea value={bioDraft} onChange={e => setBioDraft(e.target.value)} maxLength={BIO_MAX} rows={4} disabled={bioSaving} placeholder="Write a short biography..." autoFocus />
+                                                    <div style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center',
+                                                        gap: '0.5rem',
+                                                        flexWrap: 'wrap'
+                                                    }}>
+                                                        <span style={{
+                                                            fontSize: '0.6rem',
+                                                            fontWeight: 500,
+                                                            color: bioDraft.length > BIO_MAX ? theme.colors.voteDown : theme.colors.subtleText
+                                                        }}>
+                                                            {bioDraft.length}/{BIO_MAX}
+                                                        </span>
+                                                        <div style={{
+                                                            display: 'flex',
+                                                            gap: '0.5rem'
+                                                        }}>
+                                                            <BioPillButton type="button" $variant="ghost" disabled={bioSaving} onClick={() => {
+                                                                setBioEditing(false);
+                                                                setBioError('');
+                                                                setBioDraft(biography);
+                                                            }}>
+                                                                Cancel
+                                                            </BioPillButton>
+                                                            <BioPillButton type="button" disabled={bioSaving || bioDraft.length > BIO_MAX} onClick={handleBioSave}>
+                                                                {bioSaving ? (bioButtonStatus || 'Saving...') : (bioButtonStatus || 'Save')}
+                                                            </BioPillButton>
+                                                        </div>
+                                                    </div>
+                                                    {bioError && <span style={{
+                                                        fontSize: '0.75rem',
+                                                        color: theme.colors.voteDown
+                                                    }}>{bioError}</span>}
+                                                </div> : <ProfileFieldValue>
+                                                    <Mono style={{
+                                                        whiteSpace: 'pre-wrap',
+                                                        wordBreak: 'break-word',
+                                                        color: biography ? undefined : theme.colors.subtleText
+                                                    }}>
+                                                        {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
+                                                    </Mono>
+                                                    {isOwnProfile && <IconActionButton type="button" onClick={() => {
+                                                        setBioDraft(biography);
+                                                        setBioEditing(true);
+                                                        setBioError('');
+                                                    }} title={biography ? 'Edit biography' : 'Add biography'} aria-label={biography ? 'Edit biography' : 'Add biography'}>
+                                                        <HiPencilSquare aria-hidden="true" />
+                                                    </IconActionButton>}
+                                                </ProfileFieldValue>}
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>
                                     </>}
-                                </AlgoList>
-                            </AlgoSection>
-                        </>}
 
-                            </TabContent>
+                                    {activeTab === 'submissions' && profileUsesListFeed && <>
+                                        {isLoadingRecentPosts && recentPosts.length === 0 && (
+                                            <FeedCardSkeletonList count={4} />
+                                        )}
+                                        {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
+                                            color: theme.colors.voteDown
+                                        }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
+                                        {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
+                                        {recentPosts.length > 0 && (
+                                            <FeedComponent
+                                                key={profileFeedView}
+                                                posts={recentPosts}
+                                                state={state}
+                                                showSortTabs={false}
+                                                bleedShell={false}
+                                            />
+                                        )}
+                                        {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                            <FeedCardSkeleton />
+                                        )}
+                                        <div ref={recentBottomSentinelRef} style={{
+                                            width: '100%',
+                                            height: '20px',
+                                            minHeight: '20px'
+                                        }} />
+                                    </>}
+
+                                    {activeTab === 'comments' && profileUsesListFeed && <>
+                                        {isLoadingRecentPosts && recentPosts.length === 0 && (
+                                            <ListRowSkeletonList count={6} hasAvatar={false} showMeta={true} />
+                                        )}
+                                        {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
+                                            color: theme.colors.voteDown
+                                        }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
+                                        {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No comments yet.</SubtleMono></ProfilePostsTabGutter>}
+                                        {recentPosts.length > 0 && recentPosts.map(post => (
+                                            <ProfileCommentRow key={post.post_id} post={post} />
+                                        ))}
+                                        {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                            <ListRowSkeleton hasAvatar={false} showMeta={false} />
+                                        )}
+                                        <div ref={recentBottomSentinelRef} style={{
+                                            width: '100%',
+                                            height: '20px',
+                                            minHeight: '20px'
+                                        }} />
+                                    </>}
+
+                                    {isPostsTab && !profileUsesListFeed && <>
+                                        {!profileHideFilterSelect && profileAddress && <ProfilePostsTabGutter><FilterSelect value={recentPostsFilter} onChange={e => setRecentPostsFilter(e.target.value)}>
+                                            <option value="all">All</option>
+                                            <option value="submissions">Submissions</option>
+                                            <option value="comments">Comments</option>
+                                        </FilterSelect></ProfilePostsTabGutter>}
+                                        {isLoadingRecentPosts && (
+                                            <ListRowSkeletonList count={5} hasAvatar={false} />
+                                        )}
+                                        {!isLoadingRecentPosts && recentPostsError && <ProfilePostsTabGutter><Mono style={{
+                                            color: theme.colors.voteDown
+                                        }}>{recentPostsError}</Mono></ProfilePostsTabGutter>}
+                                        {!isLoadingRecentPosts && !recentPostsError && recentPosts.length === 0 && <ProfilePostsTabGutter><SubtleMono>No {effectivePostsFilter === 'all' ? 'posts' : effectivePostsFilter === 'submissions' ? 'submissions' : 'comments'} yet.</SubtleMono></ProfilePostsTabGutter>}
+                                        {!recentPostsError && recentPosts.length > 0 && <PostsList>
+                                            {recentPosts.map(post => <PostItem key={post.post_id} href={getPostUrl(post)} isActive={activeRecentPost === post.post_id} onClick={e => handleRecentPostClick(post, e)}>
+                                                <PostPreview>{renderPostPreview(post)}</PostPreview>
+                                                <PostMeta>{buildMetaLine(post)}</PostMeta>
+                                            </PostItem>)}
+                                        </PostsList>}
+                                        {(recentAutoLoading || (isLoadingRecentPosts && recentPage > 1)) && (
+                                            <ListRowSkeleton hasAvatar={false} />
+                                        )}
+                                        <div ref={recentBottomSentinelRef} style={{
+                                            width: '100%',
+                                            height: '20px',
+                                            minHeight: '20px'
+                                        }} />
+                                    </>}
+
+                                    {activeTab === 'algo' && <>
+                                        {/* Topic preferences — "#" chip per topic, weight pill */}
+                                        <AlgoSection>
+                                            <AlgoSectionHead>
+                                                <AlgoSectionHeadText>
+                                                    <AlgoSectionTitle>Topic preferences</AlgoSectionTitle>
+                                                    <AlgoSectionSubtitle>Topics this account engages with the most</AlgoSectionSubtitle>
+                                                </AlgoSectionHeadText>
+                                                {!prefsLoading && !prefsError && prefsTopics.length > 0 && (
+                                                    <AlgoSectionCount>{prefsTopics.length}</AlgoSectionCount>
+                                                )}
+                                            </AlgoSectionHead>
+                                            <AlgoList>
+                                                {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={false} />}
+                                                {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
+                                                {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No topic preference data yet.</AlgoEmpty>}
+                                                {!prefsError && prefsTopics.length > 0 && (() => {
+                                                    const CAP = 5;
+                                                    const needsCollapse = prefsTopics.length > CAP * 2;
+                                                    const visible = needsCollapse && !showAllTopicPrefs ? [...prefsTopics.slice(0, CAP), null, ...prefsTopics.slice(-CAP)] : prefsTopics;
+                                                    return <>
+                                                        {visible.map(t => {
+                                                            if (t === null) {
+                                                                const hidden = prefsTopics.length - CAP * 2;
+                                                                return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
+                                                            }
+                                                            const tone = t.weight > 0 ? 'up' : t.weight < 0 ? 'down' : 'neutral';
+                                                            return <AlgoRow key={t.topic} href={`/t/${encodeURIComponent(t.topic)}`} onClick={e => {
+                                                                if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    navigate(`/t/${encodeURIComponent(t.topic)}`);
+                                                                }
+                                                            }}>
+                                                                <AlgoTopicChip aria-hidden="true"><HiHashtag /></AlgoTopicChip>
+                                                                <AlgoIdentity>
+                                                                    <AlgoIdentityTitle>{t.topic}</AlgoIdentityTitle>
+                                                                </AlgoIdentity>
+                                                                <AlgoWeightPill $tone={tone}>{formatPrefWeight(t.weight)}</AlgoWeightPill>
+                                                            </AlgoRow>;
+                                                        })}
+                                                        {showAllTopicPrefs && prefsTopics.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                                    </>;
+                                                })()}
+                                            </AlgoList>
+                                        </AlgoSection>
+
+                                        {/* User preferences — dicebear avatar per author, weight pill */}
+                                        <AlgoSection>
+                                            <AlgoSectionHead>
+                                                <AlgoSectionHeadText>
+                                                    <AlgoSectionTitle>User preferences</AlgoSectionTitle>
+                                                    <AlgoSectionSubtitle>Authors this account engages with the most</AlgoSectionSubtitle>
+                                                </AlgoSectionHeadText>
+                                                {!prefsLoading && !prefsError && prefsAuthors.length > 0 && (
+                                                    <AlgoSectionCount>{prefsAuthors.length}</AlgoSectionCount>
+                                                )}
+                                            </AlgoSectionHead>
+                                            <AlgoList>
+                                                {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={true} />}
+                                                {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
+                                                {!prefsLoading && !prefsError && prefsAuthors.length === 0 && <AlgoEmpty>No user preference data yet.</AlgoEmpty>}
+                                                {!prefsError && prefsAuthors.length > 0 && (() => {
+                                                    const CAP = 5;
+                                                    const needsCollapse = prefsAuthors.length > CAP * 2;
+                                                    const visible = needsCollapse && !showAllAuthorPrefs ? [...prefsAuthors.slice(0, CAP), null, ...prefsAuthors.slice(-CAP)] : prefsAuthors;
+                                                    return <>
+                                                        {visible.map(u => {
+                                                            if (u === null) {
+                                                                const hidden = prefsAuthors.length - CAP * 2;
+                                                                return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
+                                                            }
+                                                            const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
+                                                            const displayName = uname && uname !== u.user ? uname : shortenAddress(u.user);
+                                                            const avatarSeed = u.user || uname || 'user';
+                                                            const tone = u.weight > 0 ? 'up' : u.weight < 0 ? 'down' : 'neutral';
+                                                            return <AlgoRow key={u.user} href={`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`} onClick={e => {
+                                                                if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`);
+                                                                }
+                                                            }}>
+                                                                <AlgoAvatar seed={avatarSeed} alt={`${displayName} avatar`} />
+                                                                <AlgoIdentity>
+                                                                    <AlgoIdentityTitle>{uname && uname !== u.user ? uname : displayName}</AlgoIdentityTitle>
+                                                                    <AlgoIdentityMono title={u.user}>{shortenAddress(u.user)}</AlgoIdentityMono>
+                                                                </AlgoIdentity>
+                                                                <AlgoWeightPill $tone={tone}>{formatPrefWeight(u.weight)}</AlgoWeightPill>
+                                                            </AlgoRow>;
+                                                        })}
+                                                        {showAllAuthorPrefs && prefsAuthors.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllAuthorPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                                    </>;
+                                                })()}
+                                            </AlgoList>
+                                        </AlgoSection>
+
+                                        {/* Similar users — dicebear avatar + similarity score */}
+                                        <AlgoSection>
+                                            <AlgoSectionHead>
+                                                <AlgoSectionHeadText>
+                                                    <AlgoSectionTitle>Similar users</AlgoSectionTitle>
+                                                    <AlgoSectionSubtitle>Accounts whose taste overlaps with this profile</AlgoSectionSubtitle>
+                                                </AlgoSectionHeadText>
+                                                {!similarUsersLoading && !similarUsersError && similarUsers.length > 0 && (
+                                                    <AlgoSectionCount>{similarUsers.length}</AlgoSectionCount>
+                                                )}
+                                            </AlgoSectionHead>
+                                            <AlgoList>
+                                                {similarUsersLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={true} />}
+                                                {!similarUsersLoading && similarUsersError && <AlgoEmpty $danger>{similarUsersError}</AlgoEmpty>}
+                                                {!similarUsersLoading && !similarUsersError && similarUsers.length === 0 && <AlgoEmpty>No similar users found yet.</AlgoEmpty>}
+                                                {!similarUsersError && similarUsers.length > 0 && <>
+                                                    {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map(u => {
+                                                        const displayName = u.username || shortenAddress(u.address);
+                                                        const avatarSeed = u.address || u.username || 'user';
+                                                        const tone = u.similarity >= 0 ? 'up' : 'down';
+                                                        const pct = `${u.similarity >= 0 ? '+' : ''}${Math.round(u.similarity * 100)}%`;
+                                                        return <AlgoRow key={u.address} href={`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`} onClick={e => {
+                                                            if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`);
+                                                            }
+                                                        }}>
+                                                            <AlgoAvatar seed={avatarSeed} alt={`${displayName} avatar`} />
+                                                            <AlgoIdentity>
+                                                                <AlgoIdentityTitle>{displayName}</AlgoIdentityTitle>
+                                                                <AlgoIdentityMono title={u.address}>{shortenAddress(u.address)}</AlgoIdentityMono>
+                                                            </AlgoIdentity>
+                                                            <AlgoWeightStack>
+                                                                <AlgoWeightPill $tone={tone}>{pct}</AlgoWeightPill>
+                                                                <AlgoWeightSub>{u.shared_dimensions} shared</AlgoWeightSub>
+                                                            </AlgoWeightStack>
+                                                        </AlgoRow>;
+                                                    })}
+                                                    {!showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(true)}>Show {similarUsers.length - 5} more</AlgoExpandPill></AlgoExpandRow>}
+                                                    {showAllSimilarUsers && similarUsers.length > 5 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllSimilarUsers(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                                </>}
+                                            </AlgoList>
+                                        </AlgoSection>
+                                    </>}
+
+                                </TabContent>
                             </ProfileMainColumn>
                             <ProfileAside>
                                 <AsideCard>

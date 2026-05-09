@@ -330,11 +330,11 @@ const CopyIconButton = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({ $copied, theme }) =>
-            $copied ? theme.colors.buttonSuccessHoverBg : theme.colors.hoverBg};
+        $copied ? theme.colors.buttonSuccessHoverBg : theme.colors.hoverBg};
         border-color: ${({ $copied, theme }) =>
-            $copied ? theme.colors.buttonSuccessBorder : theme.colors.borderStrong};
+        $copied ? theme.colors.buttonSuccessBorder : theme.colors.borderStrong};
         color: ${({ $copied, theme }) =>
-            $copied ? theme.colors.voteUp : theme.colors.text};
+        $copied ? theme.colors.voteUp : theme.colors.text};
     }
 
     &:focus { outline: none; }
@@ -595,9 +595,9 @@ const WeekMenuItem = styled.button`
 
     &:hover {
         background: ${({ $active, theme }) =>
-            $active ? theme.colors.menuSelectedBg : theme.colors.menuSelectedBg};
+        $active ? theme.colors.menuSelectedBg : theme.colors.menuSelectedBg};
         color: ${({ $active, theme }) =>
-            $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText};
+        $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText};
     }
 
     &:focus { outline: none; }
@@ -1159,7 +1159,7 @@ const StateIcon = styled.div`
         width: 22px;
         height: 22px;
         color: ${({ $tone, theme }) =>
-            $tone === 'danger' ? theme.colors.voteDown : theme.colors.gradientStart};
+        $tone === 'danger' ? theme.colors.voteDown : theme.colors.gradientStart};
     }
 `;
 
@@ -1358,10 +1358,10 @@ function ReferralsView({ state }) {
                             </HeroTopRow>
 
                             <HeroTextStack>
-                                <HeroTitle>Bring your people to Mirage.</HeroTitle>
+                                <HeroTitle>Bring your users to Mirage.</HeroTitle>
                                 <HeroSubtitle>
                                     {inviteCodesRequired && !referralPrecheckEnabled
-                                        ? "Your referral link is currently off — turn it on below to let people sign up through it."
+                                        ? "Your referral link is currently off — turn it on below to let users sign up through it."
                                         : "Share your link — when they sign up, they appear here and you'll see their weekly activity at a glance."}
                                 </HeroSubtitle>
                             </HeroTextStack>
@@ -1397,7 +1397,7 @@ function ReferralsView({ state }) {
                                         <ToggleText>
                                             <ToggleLabel>Enable referral links</ToggleLabel>
                                             <ToggleDesc>
-                                                Lets people sign up via your personal link instead of
+                                                Lets users sign up via your personal link instead of
                                                 sharing invite codes directly.
                                             </ToggleDesc>
                                         </ToggleText>

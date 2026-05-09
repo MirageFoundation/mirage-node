@@ -752,9 +752,9 @@ const CelebrationContent = styled.div`
             90deg,
             transparent 0%,
             ${({ theme }) =>
-                theme.name === 'dark' ? theme.colors.followBtnBg : theme.colors.link} 30%,
+        theme.name === 'dark' ? theme.colors.followBtnBg : theme.colors.link} 30%,
             ${({ theme }) =>
-                theme.name === 'dark' ? theme.colors.followBtnBgHover : theme.colors.linkHover} 70%,
+        theme.name === 'dark' ? theme.colors.followBtnBgHover : theme.colors.linkHover} 70%,
             transparent 100%
         );
     }
@@ -1377,7 +1377,7 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
 
     /* Subtitle: just "X/Y completed" — the reset timer is shown on its
      * own live-ticking pill next to the title. */
-    const headerSubtitle = `${completedCount}/${totalCount} completed`;
+    const headerSubtitle = `${completedCount} / ${totalCount} completed`;
 
     /* Header reward chip */
     let headerChip = null;
@@ -1442,29 +1442,29 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
                             <>
                                 <SectionLabel>Flash Quest</SectionLabel>
                                 <FlashCard>
-                                <FlashHeader>
-                                    <FlashBadge>
-                                        <span aria-hidden="true">⚡</span> Flash
-                                    </FlashBadge>
-                                    {!flashQuest.completed && (
-                                        <FlashTimer $urgent={flashUrgent}>
-                                            <span aria-hidden="true">⏱</span>
-                                            {formatTimeCompact(liveFlashSeconds)}
-                                        </FlashTimer>
-                                    )}
-                                </FlashHeader>
-                                <FlashRow>
-                                    <QuestStatusIcon $completed={flashQuest.completed} aria-hidden="true" />
-                                    <FlashTitleText $completed={flashQuest.completed}>
-                                        {flashQuest.title}
-                                    </FlashTitleText>
-                                    <FlashProgressText>
-                                        {flashProgress}/{flashQuest.target}
-                                    </FlashProgressText>
-                                </FlashRow>
-                                <FlashProgressTrack>
-                                    <FlashProgressFill $pct={flashPct} $completed={flashQuest.completed} />
-                                </FlashProgressTrack>
+                                    <FlashHeader>
+                                        <FlashBadge>
+                                            <span aria-hidden="true">⚡</span> Flash
+                                        </FlashBadge>
+                                        {!flashQuest.completed && (
+                                            <FlashTimer $urgent={flashUrgent}>
+                                                <span aria-hidden="true">⏱</span>
+                                                {formatTimeCompact(liveFlashSeconds)}
+                                            </FlashTimer>
+                                        )}
+                                    </FlashHeader>
+                                    <FlashRow>
+                                        <QuestStatusIcon $completed={flashQuest.completed} aria-hidden="true" />
+                                        <FlashTitleText $completed={flashQuest.completed}>
+                                            {flashQuest.title}
+                                        </FlashTitleText>
+                                        <FlashProgressText>
+                                            {flashProgress}/{flashQuest.target}
+                                        </FlashProgressText>
+                                    </FlashRow>
+                                    <FlashProgressTrack>
+                                        <FlashProgressFill $pct={flashPct} $completed={flashQuest.completed} />
+                                    </FlashProgressTrack>
                                 </FlashCard>
                             </>
                         )}

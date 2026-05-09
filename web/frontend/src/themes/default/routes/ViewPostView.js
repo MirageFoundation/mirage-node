@@ -12,13 +12,12 @@ import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import FeedRightRail from "../components/FeedRightRail.js";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
+import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
 import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
-import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
+import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
-import StickerPicker from "../components/StickerPicker.js";
-import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
@@ -143,37 +142,49 @@ const COMMENT_CURVE_RADIUS_PX = 10;
 const COMMENT_CURVE_RADIUS_PX_MOBILE = 9;
 const COMMENT_CONTENT_GAP_PX = 8;
 const COMMENT_CONTENT_GAP_PX_MOBILE = 6;
-/* Avatar center y — used by the J-curve elbow (::before) and the
- * descendant spine (::after) on `CommentCard` so the rail visually lands
- * on the avatar's center. The avatar itself is rendered inline inside
- * the meta row using `align-items: center`, so it auto-centers with the
- * username text regardless of font metrics. These constants only need
- * to mirror where the meta row's vertical center actually sits relative
- * to the card's top edge.
- *
- * Center = padding-top + (avatar-size / 2), because the avatar (24px)
- * is the tallest item on the meta row and therefore sets the row
- * height when `align-items: center` is in effect.
- *
- *   collapsed padding-top = 0.45rem = 9px  → center =  9 + 12 = 21px
- *   expanded  padding-top = 0.55rem = 11px → center = 11 + 12 = 23px
- * Mobile (< 1000px) — avatar 22px, padding 0.4rem / 0.5rem → 19 / 21px. */
-const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX = 21;
-const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX = 23;
-const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE = 19;
-const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE = 21;
+/* Padding-top values for collapsed / expanded comment cards (and their
+ * mobile counterparts), expressed in `rem` so the avatar-center math
+ * below tracks the actual root font-size. The default theme bumps
+ * `html { font-size }` from 20px to 22px at viewports >= 1900px (and
+ * applies a 1.08 body zoom on top), so any `px`-baked center value goes
+ * stale on wide displays. Keeping the padding side as `rem` and adding
+ * the (px) avatar half-height lets the browser do the math at render
+ * time instead. */
+const COMMENT_PAD_TOP_COLLAPSED_REM = 0.45;
+const COMMENT_PAD_TOP_EXPANDED_REM = 0.55;
+const COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE = 0.4;
+const COMMENT_PAD_TOP_EXPANDED_REM_MOBILE = 0.5;
+
+/* Effective height of the comment meta row. The 3-dot `MenuButton`
+ * (28×28, rendered to the right of `MetaInfoRowLeft`) is the tallest
+ * item on the row — taller than both the desktop (24) and mobile (22)
+ * avatars — so with `align-items: center` the row height locks to 28
+ * regardless of viewport. The avatar therefore sits centered inside
+ * a 28px row rather than centered inside its own 24/22px footprint,
+ * and its vertical center lives at `padding-top + 14` (NOT
+ * `padding-top + avatar-size/2`). The J-curve elbow needs that exact
+ * Y to land on the leftmost point of the now-circular avatar.
+ * Kept in sync with `MenuButton`'s `width/height` further down. */
+const COMMENT_META_ROW_HALF_PX = 14;
+
+/* Y of the avatar's vertical CENTER inside its `CommentCard`. */
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED = `calc(${COMMENT_PAD_TOP_COLLAPSED_REM}rem + ${COMMENT_META_ROW_HALF_PX}px)`;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED = `calc(${COMMENT_PAD_TOP_EXPANDED_REM}rem + ${COMMENT_META_ROW_HALF_PX}px)`;
+const COMMENT_AVATAR_CENTER_Y_COLLAPSED_MOBILE = `calc(${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem + ${COMMENT_META_ROW_HALF_PX}px)`;
+const COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE = `calc(${COMMENT_PAD_TOP_EXPANDED_REM_MOBILE}rem + ${COMMENT_META_ROW_HALF_PX}px)`;
 
 /* Y of the avatar's BOTTOM edge for each (collapsed/expanded, viewport)
  * pair. The own-spine (`&::after` on `CommentCard`) starts here rather
  * than at the avatar's center, so the thread line never bleeds through
  * transparent regions of the identicon glyph (most visible in light
- * theme where `UserAvatar`'s wrapper bg is transparent). The J-curve
- * elbow still terminates at the avatar's left-center, so the visual
- * "delivery" into the avatar is unchanged. */
-const COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX = COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX + COMMENT_AVATAR_SIZE_PX / 2;
-const COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX = COMMENT_AVATAR_CENTER_Y_EXPANDED_PX + COMMENT_AVATAR_SIZE_PX / 2;
-const COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX_MOBILE = COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE + COMMENT_AVATAR_SIZE_PX_MOBILE / 2;
-const COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX_MOBILE = COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE + COMMENT_AVATAR_SIZE_PX_MOBILE / 2;
+ * theme where `UserAvatar`'s wrapper bg is transparent).
+ * Bottom = padding-top + (row_height + avatar_size) / 2:
+ * desktop = padding-top + (28 + 24) / 2 = padding-top + 26
+ * mobile  = padding-top + (28 + 22) / 2 = padding-top + 25 */
+const COMMENT_AVATAR_BOTTOM_Y_COLLAPSED = `calc(${COMMENT_PAD_TOP_COLLAPSED_REM}rem + ${COMMENT_META_ROW_HALF_PX + COMMENT_AVATAR_SIZE_PX / 2}px)`;
+const COMMENT_AVATAR_BOTTOM_Y_EXPANDED = `calc(${COMMENT_PAD_TOP_EXPANDED_REM}rem + ${COMMENT_META_ROW_HALF_PX + COMMENT_AVATAR_SIZE_PX / 2}px)`;
+const COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_MOBILE = `calc(${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem + ${COMMENT_META_ROW_HALF_PX + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px)`;
+const COMMENT_AVATAR_BOTTOM_Y_EXPANDED_MOBILE = `calc(${COMMENT_PAD_TOP_EXPANDED_REM_MOBILE}rem + ${COMMENT_META_ROW_HALF_PX + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px)`;
 
 function commentAvatarLeftPx(level, baseLeft, indent) {
     const lvl = Math.max(Number(level) || 0, 1);
@@ -292,12 +303,12 @@ const CommentCard = styled(PostCard)`
         position: absolute;
         display: ${({ $level, $hasChildren, $isCollapsed }) => (Number($level) > 0 && $hasChildren && !$isCollapsed ? 'block' : 'none')};
         top: ${({ $isCollapsed }) =>
-            ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX)}px;
+        ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED : COMMENT_AVATAR_BOTTOM_Y_EXPANDED)};
         left: ${({ $level }) =>
-            `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`};
+        `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`};
         width: ${COMMENT_RAIL_WIDTH_PX}px;
         height: calc(100% - ${({ $isCollapsed }) =>
-            ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX)}px);
+        ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED : COMMENT_AVATAR_BOTTOM_Y_EXPANDED)});
         background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         pointer-events: none;
     }
@@ -314,10 +325,10 @@ const CommentCard = styled(PostCard)`
         display: ${({ $level }) => (Number($level) >= 2 ? 'block' : 'none')};
         top: 0;
         left: ${({ $level }) =>
-            `${commentRailXPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`};
+        `${commentRailXPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`};
         width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
         height: ${({ $isCollapsed }) =>
-            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+        ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED : COMMENT_AVATAR_CENTER_Y_EXPANDED)};
         border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
@@ -329,8 +340,8 @@ const CommentCard = styled(PostCard)`
         const leftPad = lvl > 0
             ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX)}px`
             : '1rem';
-        if ($isCollapsed) return `0.45rem 1rem 0.45rem ${leftPad}`;
-        return `0.55rem 1rem 0.7rem ${leftPad}`;
+        if ($isCollapsed) return `${COMMENT_PAD_TOP_COLLAPSED_REM}rem 1rem ${COMMENT_PAD_TOP_COLLAPSED_REM}rem ${leftPad}`;
+        return `${COMMENT_PAD_TOP_EXPANDED_REM}rem 1rem 0.7rem ${leftPad}`;
     }};
 
     &:hover {
@@ -344,44 +355,44 @@ const CommentCard = styled(PostCard)`
 
     @media (max-width: 1000px) {
         ${({ $level, $activeDepths, theme }) => {
-            const r = buildAncestorRails(
-                $level,
-                COMMENT_BASE_LEFT_PX_MOBILE,
-                COMMENT_INDENT_PX_MOBILE,
-                COMMENT_AVATAR_SIZE_PX_MOBILE,
-                theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
-                $activeDepths,
-            );
-            return `
+        const r = buildAncestorRails(
+            $level,
+            COMMENT_BASE_LEFT_PX_MOBILE,
+            COMMENT_INDENT_PX_MOBILE,
+            COMMENT_AVATAR_SIZE_PX_MOBILE,
+            theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
+            $activeDepths,
+        );
+        return `
                 background-image: ${r.image};
                 background-position: ${r.position};
                 background-size: ${r.size};
             `;
-        }}
+    }}
         &::after {
             left: ${({ $level }) =>
-                `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`};
+        `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`};
             top: ${({ $isCollapsed }) =>
-                ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX_MOBILE)}px;
+        ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_MOBILE : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_MOBILE)};
             height: calc(100% - ${({ $isCollapsed }) =>
-                ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX_MOBILE)}px);
+        ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_MOBILE : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_MOBILE)});
         }
         &::before {
             left: ${({ $level }) =>
-                `${commentRailXPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`};
+        `${commentRailXPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`};
             width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
             height: ${({ $isCollapsed }) =>
-                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+        ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE)};
             border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
         }
         padding: ${({ $isCollapsed, $level }) => {
-            const lvl = Math.max(Number($level) || 0, 0);
-            const leftPad = lvl > 0
-                ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE)}px`
-                : '0.85rem';
-            if ($isCollapsed) return `0.4rem 0.85rem 0.4rem ${leftPad}`;
-            return `0.5rem 0.85rem 0.6rem ${leftPad}`;
-        }};
+        const lvl = Math.max(Number($level) || 0, 0);
+        const leftPad = lvl > 0
+            ? `${commentContentLeftPx(lvl, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE)}px`
+            : '0.85rem';
+        if ($isCollapsed) return `${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem 0.85rem ${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem ${leftPad}`;
+        return `${COMMENT_PAD_TOP_EXPANDED_REM_MOBILE}rem 0.85rem 0.6rem ${leftPad}`;
+    }};
     }
 `;
 
@@ -505,13 +516,13 @@ const ContinueThreadLink = styled(Link)`
     &::after {
         content: '';
         position: absolute;
-        top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
+        top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED};
         left: ${({ $level }) => {
-            const effective = (Number($level) || 0) + 1;
-            return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`;
-        }};
+        const effective = (Number($level) || 0) + 1;
+        return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`;
+    }};
         width: ${COMMENT_RAIL_WIDTH_PX}px;
-        height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px);
+        height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED});
         background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         pointer-events: none;
     }
@@ -521,11 +532,11 @@ const ContinueThreadLink = styled(Link)`
         position: absolute;
         top: 0;
         left: ${({ $level }) => {
-            const effective = (Number($level) || 0) + 1;
-            return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`;
-        }};
+        const effective = (Number($level) || 0) + 1;
+        return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`;
+    }};
         width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
-        height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX}px;
+        height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED};
         border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
@@ -535,54 +546,54 @@ const ContinueThreadLink = styled(Link)`
     padding: ${({ $level }) => {
         const effective = (Number($level) || 0) + 1;
         const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX);
-        return `0.55rem 1rem 0.55rem ${leftPad}px`;
+        return `${COMMENT_PAD_TOP_EXPANDED_REM}rem 1rem ${COMMENT_PAD_TOP_EXPANDED_REM}rem ${leftPad}px`;
     }};
 
     &:hover {
         background-color: ${({ theme }) => theme.colors.hoverBg};
         color: ${({
-    theme
-}) => theme.colors.linkHover};
+        theme
+    }) => theme.colors.linkHover};
     }
 
     @media (max-width: 1000px) {
         ${({ $activeDepths, theme }) => {
-            const r = buildAncestorRails(
-                0,
-                COMMENT_BASE_LEFT_PX_MOBILE,
-                COMMENT_INDENT_PX_MOBILE,
-                COMMENT_AVATAR_SIZE_PX_MOBILE,
-                theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
-                $activeDepths,
-            );
-            return `
+        const r = buildAncestorRails(
+            0,
+            COMMENT_BASE_LEFT_PX_MOBILE,
+            COMMENT_INDENT_PX_MOBILE,
+            COMMENT_AVATAR_SIZE_PX_MOBILE,
+            theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border,
+            $activeDepths,
+        );
+        return `
                 background-image: ${r.image};
                 background-position: ${r.position};
                 background-size: ${r.size};
             `;
-        }}
+    }}
         &::after {
             left: ${({ $level }) => {
-                const effective = (Number($level) || 0) + 1;
-                return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`;
-            }};
-            top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px;
-            height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px);
+        const effective = (Number($level) || 0) + 1;
+        return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`;
+    }};
+            top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE};
+            height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE});
         }
         &::before {
             left: ${({ $level }) => {
-                const effective = (Number($level) || 0) + 1;
-                return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`;
-            }};
+        const effective = (Number($level) || 0) + 1;
+        return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`;
+    }};
             width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
-            height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE}px;
+            height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE};
             border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
         }
         padding: ${({ $level }) => {
-            const effective = (Number($level) || 0) + 1;
-            const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE);
-            return `0.4rem 0.85rem 0.4rem ${leftPad}px`;
-        }};
+        const effective = (Number($level) || 0) + 1;
+        const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE);
+        return `${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem 0.85rem ${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem ${leftPad}px`;
+    }};
     }
 `;
 
@@ -667,7 +678,7 @@ const TopicFollowButton = styled.button`
     cursor: pointer;
     border: 1.5px solid
         ${({ $active, theme }) =>
-            $active ? theme.colors.followBtnBorder : theme.colors.followBtnBg};
+        $active ? theme.colors.followBtnBorder : theme.colors.followBtnBg};
     background: ${({ $active, theme }) =>
         $active ? 'transparent' : theme.colors.followBtnBg};
     color: ${({ $active, theme }) =>
@@ -676,9 +687,9 @@ const TopicFollowButton = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({ $active, theme }) =>
-            $active ? 'transparent' : theme.colors.followBtnBgHover};
+        $active ? 'transparent' : theme.colors.followBtnBgHover};
         border-color: ${({ $active, theme }) =>
-            $active ? theme.colors.followBtnBorderHover : theme.colors.followBtnBgHover};
+        $active ? theme.colors.followBtnBorderHover : theme.colors.followBtnBgHover};
     }
     &:disabled { opacity: 0.6; cursor: default; }
 `;
@@ -1165,158 +1176,11 @@ const StyledReply = styled.div`
         opacity: 0.55 !important;
     }
 
-    /* --- MarkdownEditor toolbar override -------------------------------
-     * Scoped to [data-default-editor]. Toolbar buttons render as quiet
-     * 24x24 pills that lift to feedCtrlHoverBg on hover.
-     */
-    [data-default-editor] button[type='button'] {
-        background: transparent !important;
-        border: 1px solid transparent !important;
-        border-radius: 6px !important;
-        box-sizing: border-box !important;
-        width: 24px !important;
-        min-width: 24px !important;
-        height: 24px !important;
-        padding: 2px 4px !important;
-        color: ${({ theme }) => theme.colors.feedCtrlText} !important;
-        transition: background 0.12s ease, color 0.12s ease !important;
-        box-shadow: none !important;
-        vertical-align: middle !important;
-    }
-    /* Center all toolbar children on the same baseline so the right
-     * icon group (sticker/GIF/upload) lines up with the left formatting
-     * icons. Scoped to the Toolbar (first child of EditorContainer)
-     * only — must NOT touch the textarea wrapper below it.
-     */
-    [data-default-editor] > div:first-child > div:first-child {
-        align-items: center !important;
-    }
-    /* The toolbarExtra wrapper is the only plain <div> directly inside
-     * Toolbar; flatten its child spacing so it matches the Toolbar gap.
-     */
-    [data-default-editor] > div:first-child > div:first-child > div {
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 0.25rem !important;
-    }
-    /* StickerPicker / GifPicker wrap their button in a PickerWrapper
-     * (inline-block). Promote it to a 24px flex row so its <button>
-     * sits on the same baseline as the sibling MediaIconButton (which
-     * is a direct button in the flex row).
-     */
-    [data-default-editor] > div:first-child > div:first-child > div > * {
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        height: 24px !important;
-        line-height: 1 !important;
-        vertical-align: middle !important;
-    }
-    [data-default-editor] button[type='button'] svg,
-    [data-default-editor] button[type='button'] img,
-    [data-default-editor] button[type='button'] .md-icon {
-        max-width: 14px !important;
-        max-height: 14px !important;
-        width: 14px !important;
-        height: 14px !important;
-        font-size: 0.78rem !important;
-    }
-    /* The GIF icon is a text-in-svg glyph; bump it slightly so the
-     * "GIF" label reads clearly at toolbar scale.
-     */
-    [data-default-editor] button[type='button'][aria-label='GIFs'] svg,
-    [data-default-editor] button[type='button'][aria-label='GIFs'] svg text {
-        max-width: 20px !important;
-        max-height: 20px !important;
-        width: 20px !important;
-        height: 20px !important;
-    }
-    [data-default-editor] button[type='button'][aria-label='GIFs'] {
-        padding: 0 !important;
-    }
-    /* Bold (B) and Italic (I) glyphs render as text via styled spans, so
-     * the SVG/font-size rules above don't reach them. Shrink them here.
-     */
-    [data-default-editor] button[type='button'] > span {
-        font-size: 0.6rem !important;
-        line-height: 1 !important;
-    }
-    [data-default-editor] button[type='button']:hover:not(:disabled) {
-        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
-        color: ${({ theme }) => theme.colors.text} !important;
-        border-color: transparent !important;
-    }
-    [data-default-editor] button[type='button'][data-active='true'] {
-        background: ${({ theme }) => theme.colors.feedCtrlHoverBg} !important;
-        color: ${({ theme }) => theme.colors.text} !important;
-        border-color: transparent !important;
-    }
-
-    /* Normalize gap between the toolbarExtra (sticker/GIF/upload)
-     * buttons so their spacing matches the left-side formatting icons
-     * (Toolbar uses gap: 0.25rem).
-     */
-    [data-default-editor] > div:first-child > div {
-        gap: 0.25rem !important;
-    }
-
-    /* --- Preview toggle (custom checkmark) ----------------------------
-     * Matches the CreatePostView preview pill exactly: rounded ghost pill
-     * with a small square checkbox. Checked state fills rgb(68,109,228)
-     * and centers a white checkmark via translate(-50%, -55%) so the
-     * rotated glyph lands visually in the middle of the box.
-     */
-    [data-default-editor] label {
-        background: transparent !important;
-        background-color: transparent !important;
-        border: 1px solid ${({ theme }) => theme.colors.border} !important;
-        border-radius: 9999px !important;
-        padding: 0 0.55rem !important;
-        font-size: 0.62rem !important;
-        font-weight: 500 !important;
-        color: ${({ theme }) => theme.colors.subtleText} !important;
-        gap: 0.35rem !important;
-        height: 1.5rem !important;
-        transition: color 0.12s ease, border-color 0.12s ease !important;
-    }
-    [data-default-editor] label:hover {
-        background: transparent !important;
-        background-color: transparent !important;
-        color: ${({ theme }) => theme.colors.text} !important;
-        border-color: ${({ theme }) => theme.colors.borderStrong} !important;
-    }
-    [data-default-editor] label input[type='checkbox'] {
-        appearance: none !important;
-        -webkit-appearance: none !important;
-        width: 0.9rem !important;
-        height: 0.9rem !important;
-        border-radius: 4px !important;
-        border: 1px solid ${({ theme }) => theme.colors.borderStrong} !important;
-        background: transparent !important;
-        background-color: transparent !important;
-        cursor: pointer !important;
-        position: relative !important;
-        margin: 0 !important;
-        flex-shrink: 0 !important;
-        transition: border-color 0.12s ease !important;
-    }
-    [data-default-editor] label input[type='checkbox']:checked {
-        background: rgb(68, 109, 228) !important;
-        background-color: rgb(68, 109, 228) !important;
-        border-color: rgb(68, 109, 228) !important;
-    }
-    [data-default-editor] label input[type='checkbox']:checked::after {
-        content: '' !important;
-        position: absolute !important;
-        left: 50% !important;
-        top: 46% !important;
-        width: 4px !important;
-        height: 8px !important;
-        border: solid #ffffff !important;
-        border-width: 0 2px 2px 0 !important;
-        transform: translate(-50%, -55%) rotate(45deg) !important;
-        background: transparent !important;
-    }
+    /* Toolbar / icon / preview-toggle styling lives in
+     * DefaultEditorChrome, the shared wrapper around <MarkdownEditor>
+     * used by both this composer and CreatePostView. Only context-
+     * specific stuff (textarea size, preview pane size, submit/cancel
+     * pills) stays here. */
 
     /* --- Preview pane --------------------------------------------------
      * LivePreviewContainer is the LAST child of EditorContainer (which is
@@ -1395,21 +1259,6 @@ const StyledReply = styled.div`
         border-color: ${({ theme }) => theme.colors.borderStrong} !important;
         transform: none !important;
     }
-`;
-
-/* Thin vertical rule used inside the reply's MarkdownEditor toolbar to
- * separate the formatting icon group (B, I, link, quote, code, lists,
- * spoiler) from the media icon group (sticker/emoji, GIF, upload) we
- * render on the right side via `toolbarExtra`.
- */
-const ToolbarDivider = styled.span`
-    display: inline-block;
-    width: 1px;
-    height: 18px;
-    background: ${({ theme }) => theme.colors.border};
-    margin: 0;
-    align-self: center;
-    flex-shrink: 0;
 `;
 
 // Mobile reply overlay - fullscreen focused reply experience (leaves room for bottom nav)
@@ -1755,9 +1604,9 @@ const ActionButton = styled.a`
     &:hover,
     &:visited:hover {
         background: ${({ theme, $success }) =>
-            $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconHoverBg};
+        $success ? theme.colors.buttonSuccessBg : theme.colors.actionIconHoverBg};
         color: ${({ theme, $danger, $success }) =>
-            $success ? theme.colors.voteUp : $danger ? theme.colors.voteDown : theme.colors.text};
+        $success ? theme.colors.voteUp : $danger ? theme.colors.voteDown : theme.colors.text};
     }
 
     svg { width: 16px; height: 16px; fill: currentColor; }
@@ -3253,54 +3102,21 @@ function ViewPostView({
                             </div>}
                         </MediaPreviewWrapper>
                     </MediaRow>}
-                    <div data-default-editor style={{
-                        position: 'relative'
-                    }}>
-                        <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} toolbarExtra={<>
-                            <ToolbarDivider />
-                            <StickerPicker onSelect={stickerUrl => {
-                                setReplyAttachedType(prev => ({
-                                    ...prev,
-                                    [post.post_id]: 'image'
-                                }));
-                                setReplyAttachedUrl(prev => ({
-                                    ...prev,
-                                    [post.post_id]: stickerUrl
-                                }));
-                                setReplyThumbLoading(prev => ({
-                                    ...prev,
-                                    [post.post_id]: true
-                                }));
-                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
-                            <GifPicker onSelect={gifUrl => {
-                                setReplyAttachedType(prev => ({
-                                    ...prev,
-                                    [post.post_id]: 'image'
-                                }));
-                                setReplyAttachedUrl(prev => ({
-                                    ...prev,
-                                    [post.post_id]: gifUrl
-                                }));
-                                setReplyThumbLoading(prev => ({
-                                    ...prev,
-                                    [post.post_id]: true
-                                }));
-                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]} />
-                            <MediaIconButton type="button" tabIndex={-1} onClick={() => {
-                                try {
-                                    const api = replyEditorUpload[post.post_id];
-                                    if (!api || typeof api.selectFile !== 'function') return;
-                                    if (replyIsUploading[post.post_id]) return;
-                                    api.selectFile();
-                                } catch (_) { }
-                            }} disabled={isBusy || !!replyIsUploading[post.post_id] || !replyEditorUpload[post.post_id] || !!replyAttachedUrl[post.post_id]} aria-label="Upload" title="Upload">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                    <polyline points="17 8 12 3 7 8" />
-                                    <line x1="12" y1="3" x2="12" y2="15" />
-                                </svg>
-                            </MediaIconButton>
-                        </>} onSubmitShortcut={() => {
+                    <DefaultEditorChrome>
+                        <MarkdownEditor value={replyText} onChange={v => handleReplyChange(post.post_id, v)} maxLength={limits.maxContent} disabled={isBusy} autoFocus={true} toolbarExtra={
+                            /* Same shared component as the post composer in
+                             * CreatePostView. No explicit upload button here —
+                             * drag-drop and paste-upload still flow through
+                             * MarkdownEditor's built-in handlers. */
+                            <EditorMediaTools
+                                onSelect={pickedUrl => {
+                                    setReplyAttachedType(prev => ({ ...prev, [post.post_id]: 'image' }));
+                                    setReplyAttachedUrl(prev => ({ ...prev, [post.post_id]: pickedUrl }));
+                                    setReplyThumbLoading(prev => ({ ...prev, [post.post_id]: true }));
+                                }}
+                                disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]}
+                            />
+                        } onSubmitShortcut={() => {
                             if (isEdit) {
                                 handleEditSubmit(post);
                             } else {
@@ -3471,7 +3287,7 @@ function ViewPostView({
                                 [post.post_id]: progress ?? undefined
                             }));
                         }} suffixLabel={limits.unlimited ? '(admin)' : (limits.willPayFee ? '(paid tier)' : '(free tier)')} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
-                    </div>
+                    </DefaultEditorChrome>
                     <ReplyActionsRow>
                         <div style={{
                             display: 'flex',
@@ -3607,428 +3423,428 @@ function ViewPostView({
                 <FeedCol>
                     <MainContentWrapper>
                         <Helmet>
-                    <title>{postTitle} | Mirage</title>
-                    <meta name="description" content={postDescription} />
-                    <meta property="og:type" content="article" />
-                    <meta property="og:url" content={postUrl} />
-                    <meta property="og:title" content={postTitle} />
-                    <meta property="og:description" content={postDescription} />
-                    <meta property="og:image" content={imageUrl} />
-                    <meta name="twitter:card" content="summary" />
-                    <meta name="twitter:url" content={postUrl} />
-                    <meta name="twitter:title" content={postTitle} />
-                    <meta name="twitter:description" content={postDescription} />
-                    <meta name="twitter:image" content={imageUrl} />
-                </Helmet>
-                <ModernPostFeed>
-                    {/* Topic Hero Card */}
-                    {(() => {
-                        const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || actualRootPost?.topic || '';
-                        const topicLower = displayTopic.toLowerCase();
-                        const isTopicFollowing = isSubscribedTopic(topicLower);
-                        const isTopicInProgress = isTopicPending(topicLower);
-                        const hasValidAccount = state.publicKey && state.publicKey !== 'guest';
-                        return <TopicHeroWrapper>
-                            <TopicHeroCard role="region" aria-label="Topic context">
-                                {/* Mobile: Top row with Back button and Follow button */}
-                                <TopicHeroTopRow>
-                                    <BackButton onClick={goBackToFeed} style={{
-                                        padding: 0,
-                                        margin: 0,
-                                        fontSize: '0.8rem'
-                                    }}>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{
-                                            width: '14px',
-                                            height: '14px'
-                                        }}>
-                                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                                            <polyline points="12 19 5 12 12 5"></polyline>
-                                        </svg>
-                                        Back
-                                    </BackButton>
-                                    {hasValidAccount && <TopicFollowButton
-                                        type="button"
-                                        $active={isTopicFollowing}
-                                        onMouseEnter={() => setTopicFollowHover(true)}
-                                        onMouseLeave={() => setTopicFollowHover(false)}
-                                        onClick={() => {
-                                            if (!isTopicInProgress && displayTopic) {
-                                                handleTopicFollowToggle(displayTopic);
-                                            }
-                                        }}
-                                        disabled={isTopicInProgress}
-                                    >
-                                        {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? 'Unfollow' : 'Following') : 'Follow'}
-                                    </TopicFollowButton>}
-                                </TopicHeroTopRow>
-
-                                {/* Desktop: Back section */}
-                                <TopicHeroBackSection>
-                                    <BackButton onClick={goBackToFeed} style={{
-                                        padding: 0,
-                                        margin: 0,
-                                        fontSize: '0.8rem'
-                                    }}>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{
-                                            width: '14px',
-                                            height: '14px'
-                                        }}>
-                                            <line x1="19" y1="12" x2="5" y2="12"></line>
-                                            <polyline points="12 19 5 12 12 5"></polyline>
-                                        </svg>
-                                        Back
-                                    </BackButton>
-                                </TopicHeroBackSection>
-
-                                {/* Desktop: Follow button */}
-                                <TopicAction>
-                                    {hasValidAccount && <TopicFollowButton
-                                        type="button"
-                                        $active={isTopicFollowing}
-                                        onMouseEnter={() => setTopicFollowHover(true)}
-                                        onMouseLeave={() => setTopicFollowHover(false)}
-                                        onClick={() => {
-                                            if (!isTopicInProgress && displayTopic) {
-                                                handleTopicFollowToggle(displayTopic);
-                                            }
-                                        }}
-                                        disabled={isTopicInProgress}
-                                    >
-                                        {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Unfollow #${displayTopic}` : `Following #${displayTopic}`) : `Follow #${displayTopic}`}
-                                    </TopicFollowButton>}
-                                </TopicAction>
-                            </TopicHeroCard>
-                        </TopicHeroWrapper>;
-                    })()}
-                    {(() => {
-                        const visibleAnnotated = annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id));
-                        const ancestorDepthsMap = visibleAnnotated.map((_, idx) => getAncestorRailDepths(visibleAnnotated, idx));
-                        return visibleAnnotated.map((post, idx) => {
-                            const normalizedPostId = String(post.post_id).toLowerCase();
-                            const isRoot = post.level === 0;
-                            const isCollapsed = !!(post.level > 0 && post.collapsed);
-                            const CardComponent = isRoot ? PostCard : CommentCard;
-                            const shouldFlash = isRoot ? rootFlash : !!post.flash;
-                            const displayLevel = post.level;
-                            const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
-                            const hasChildren = (post.comments || 0) > 0;
-                            const activeDepths = ancestorDepthsMap[idx];
-                            return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
-                                <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
-                                <ColumnFlex>
-                                    {/* Mobile root post meta - two rows */}
-                                    {isRoot && <MobileRootMeta>
-                                        <MobileRootMetaTop>
-                                            {renderAuthorLink(post)}
-                                            {renderPostMenu(post)}
-                                        </MobileRootMetaTop>
-                                        <MobileRootMetaBottom>
-                                            {(() => {
-                                                const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                return topicLabel ? <StyledTopicLink to={`/t/${encodeURIComponent(topicLabel.toLowerCase())}`}>#{topicLabel}</StyledTopicLink> : null;
-                                            })()}
-                                            <MetaSeparator>·</MetaSeparator>
-                                            <span>{formatElapsed(post.timestamp)} ago</span>
-                                            {(() => {
-                                                const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
-                                                return tagLabel ? <>
-                                                    <MetaSeparator>·</MetaSeparator>
-                                                    <ContentTagBadge tag={tagLabel} size="md" />
-                                                </> : null;
-                                            })()}
-                                            {post.edited && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <span style={{
-                                                    fontStyle: 'italic'
-                                                }}>edited</span>
-                                            </>}
-                                            {post?.awards?.length > 0 && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <span style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.1rem',
-                                                    fontSize: '0.6rem'
+                            <title>{postTitle} | Mirage</title>
+                            <meta name="description" content={postDescription} />
+                            <meta property="og:type" content="article" />
+                            <meta property="og:url" content={postUrl} />
+                            <meta property="og:title" content={postTitle} />
+                            <meta property="og:description" content={postDescription} />
+                            <meta property="og:image" content={imageUrl} />
+                            <meta name="twitter:card" content="summary" />
+                            <meta name="twitter:url" content={postUrl} />
+                            <meta name="twitter:title" content={postTitle} />
+                            <meta name="twitter:description" content={postDescription} />
+                            <meta name="twitter:image" content={imageUrl} />
+                        </Helmet>
+                        <ModernPostFeed>
+                            {/* Topic Hero Card */}
+                            {(() => {
+                                const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || actualRootPost?.topic || '';
+                                const topicLower = displayTopic.toLowerCase();
+                                const isTopicFollowing = isSubscribedTopic(topicLower);
+                                const isTopicInProgress = isTopicPending(topicLower);
+                                const hasValidAccount = state.publicKey && state.publicKey !== 'guest';
+                                return <TopicHeroWrapper>
+                                    <TopicHeroCard role="region" aria-label="Topic context">
+                                        {/* Mobile: Top row with Back button and Follow button */}
+                                        <TopicHeroTopRow>
+                                            <BackButton onClick={goBackToFeed} style={{
+                                                padding: 0,
+                                                margin: 0,
+                                                fontSize: '0.8rem'
+                                            }}>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{
+                                                    width: '14px',
+                                                    height: '14px'
                                                 }}>
-                                                    {post.awards.map(a => {
-                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
-                                                        if (!def) return null;
-                                                        const cnt = Number(a.count || 0);
-                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
-                                                    })}
-                                                </span>
-                                            </>}
-                                        </MobileRootMetaBottom>
-                                    </MobileRootMeta>}
-                                    {/* Desktop meta info row (hidden on mobile for root posts) */}
-                                    <DesktopMetaInfoRow
-                                        $hideOnMobile={isRoot}
-                                        $clickable={!isRoot}
-                                        onClick={!isRoot ? (e) => {
-                                            // Ignore clicks that landed on interactive children
-                                            // (author/topic links, menu button, tooltips with handlers).
-                                            if (e.target.closest && e.target.closest('a,button')) return;
-                                            toggleCollapsed(post.post_id, !!post.collapsed);
-                                        } : undefined}
-                                    >
-                                        <MetaInfoRowLeft>
-                                            {!isRoot && (() => {
-                                                // Seed dicebear on the bech32 address
-                                                // (`user_id`) — stable across username
-                                                // changes and consistent with every
-                                                // other avatar surface in the app.
-                                                const seed = (post.user_id ? String(post.user_id) : '')
-                                                    || (post.username && String(post.username).trim())
-                                                    || 'anon';
-                                                return <CommentAvatar
-                                                    seed={seed}
-                                                    size={COMMENT_AVATAR_SIZE_PX}
-                                                    alt=""
-                                                />;
-                                            })()}
-                                            {renderAuthorLink(post)}
-                                            <MetaSeparator>·</MetaSeparator>
-                                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
-                                                {formatElapsed(post.timestamp)} ago
-                                            </Tooltip>
-                                            {/* Only show topic for root posts - comments inherit from root */}
-                                            {isRoot && (() => {
-                                                const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                return topicLabel ? <>
-                                                    <MetaSeparator>·</MetaSeparator>
-                                                    <StyledTopicLink to={`/t/${encodeURIComponent(topicLabel.toLowerCase())}`}>#{topicLabel}</StyledTopicLink>
-                                                </> : null;
-                                            })()}
-                                            {(() => {
-                                                const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
-                                                return tagLabel ? <>
-                                                    <MetaSeparator>·</MetaSeparator>
-                                                    <ContentTagBadge tag={tagLabel} size="md" />
-                                                </> : null;
-                                            })()}
-                                            {post?.awards?.length > 0 && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <span style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.1rem',
-                                                    fontSize: '0.6rem'
+                                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                                </svg>
+                                                Back
+                                            </BackButton>
+                                            {hasValidAccount && <TopicFollowButton
+                                                type="button"
+                                                $active={isTopicFollowing}
+                                                onMouseEnter={() => setTopicFollowHover(true)}
+                                                onMouseLeave={() => setTopicFollowHover(false)}
+                                                onClick={() => {
+                                                    if (!isTopicInProgress && displayTopic) {
+                                                        handleTopicFollowToggle(displayTopic);
+                                                    }
+                                                }}
+                                                disabled={isTopicInProgress}
+                                            >
+                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? 'Unfollow' : 'Following') : 'Follow'}
+                                            </TopicFollowButton>}
+                                        </TopicHeroTopRow>
+
+                                        {/* Desktop: Back section */}
+                                        <TopicHeroBackSection>
+                                            <BackButton onClick={goBackToFeed} style={{
+                                                padding: 0,
+                                                margin: 0,
+                                                fontSize: '0.8rem'
+                                            }}>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{
+                                                    width: '14px',
+                                                    height: '14px'
                                                 }}>
-                                                    {post.awards.map(a => {
-                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
-                                                        if (!def) return null;
-                                                        const cnt = Number(a.count || 0);
-                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
-                                                    })}
-                                                </span>
-                                            </>}
-                                            {/* Collapse/expand chevron for comments — rendered AFTER the
+                                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                                </svg>
+                                                Back
+                                            </BackButton>
+                                        </TopicHeroBackSection>
+
+                                        {/* Desktop: Follow button */}
+                                        <TopicAction>
+                                            {hasValidAccount && <TopicFollowButton
+                                                type="button"
+                                                $active={isTopicFollowing}
+                                                onMouseEnter={() => setTopicFollowHover(true)}
+                                                onMouseLeave={() => setTopicFollowHover(false)}
+                                                onClick={() => {
+                                                    if (!isTopicInProgress && displayTopic) {
+                                                        handleTopicFollowToggle(displayTopic);
+                                                    }
+                                                }}
+                                                disabled={isTopicInProgress}
+                                            >
+                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Unfollow #${displayTopic}` : `Following #${displayTopic}`) : `Follow #${displayTopic}`}
+                                            </TopicFollowButton>}
+                                        </TopicAction>
+                                    </TopicHeroCard>
+                                </TopicHeroWrapper>;
+                            })()}
+                            {(() => {
+                                const visibleAnnotated = annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id));
+                                const ancestorDepthsMap = visibleAnnotated.map((_, idx) => getAncestorRailDepths(visibleAnnotated, idx));
+                                return visibleAnnotated.map((post, idx) => {
+                                    const normalizedPostId = String(post.post_id).toLowerCase();
+                                    const isRoot = post.level === 0;
+                                    const isCollapsed = !!(post.level > 0 && post.collapsed);
+                                    const CardComponent = isRoot ? PostCard : CommentCard;
+                                    const shouldFlash = isRoot ? rootFlash : !!post.flash;
+                                    const displayLevel = post.level;
+                                    const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
+                                    const hasChildren = (post.comments || 0) > 0;
+                                    const activeDepths = ancestorDepthsMap[idx];
+                                    return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
+                                        <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
+                                            <ColumnFlex>
+                                                {/* Mobile root post meta - two rows */}
+                                                {isRoot && <MobileRootMeta>
+                                                    <MobileRootMetaTop>
+                                                        {renderAuthorLink(post)}
+                                                        {renderPostMenu(post)}
+                                                    </MobileRootMetaTop>
+                                                    <MobileRootMetaBottom>
+                                                        {(() => {
+                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
+                                                            return topicLabel ? <StyledTopicLink to={`/t/${encodeURIComponent(topicLabel.toLowerCase())}`}>#{topicLabel}</StyledTopicLink> : null;
+                                                        })()}
+                                                        <MetaSeparator>·</MetaSeparator>
+                                                        <span>{formatElapsed(post.timestamp)} ago</span>
+                                                        {(() => {
+                                                            const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
+                                                            return tagLabel ? <>
+                                                                <MetaSeparator>·</MetaSeparator>
+                                                                <ContentTagBadge tag={tagLabel} size="md" />
+                                                            </> : null;
+                                                        })()}
+                                                        {post.edited && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{
+                                                                fontStyle: 'italic'
+                                                            }}>edited</span>
+                                                        </>}
+                                                        {post?.awards?.length > 0 && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.1rem',
+                                                                fontSize: '0.6rem'
+                                                            }}>
+                                                                {post.awards.map(a => {
+                                                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                                                    if (!def) return null;
+                                                                    const cnt = Number(a.count || 0);
+                                                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                                                })}
+                                                            </span>
+                                                        </>}
+                                                    </MobileRootMetaBottom>
+                                                </MobileRootMeta>}
+                                                {/* Desktop meta info row (hidden on mobile for root posts) */}
+                                                <DesktopMetaInfoRow
+                                                    $hideOnMobile={isRoot}
+                                                    $clickable={!isRoot}
+                                                    onClick={!isRoot ? (e) => {
+                                                        // Ignore clicks that landed on interactive children
+                                                        // (author/topic links, menu button, tooltips with handlers).
+                                                        if (e.target.closest && e.target.closest('a,button')) return;
+                                                        toggleCollapsed(post.post_id, !!post.collapsed);
+                                                    } : undefined}
+                                                >
+                                                    <MetaInfoRowLeft>
+                                                        {!isRoot && (() => {
+                                                            // Seed dicebear on the bech32 address
+                                                            // (`user_id`) — stable across username
+                                                            // changes and consistent with every
+                                                            // other avatar surface in the app.
+                                                            const seed = (post.user_id ? String(post.user_id) : '')
+                                                                || (post.username && String(post.username).trim())
+                                                                || 'anon';
+                                                            return <CommentAvatar
+                                                                seed={seed}
+                                                                size={COMMENT_AVATAR_SIZE_PX}
+                                                                alt=""
+                                                            />;
+                                                        })()}
+                                                        {renderAuthorLink(post)}
+                                                        <MetaSeparator>·</MetaSeparator>
+                                                        <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
+                                                            {formatElapsed(post.timestamp)} ago
+                                                        </Tooltip>
+                                                        {/* Only show topic for root posts - comments inherit from root */}
+                                                        {isRoot && (() => {
+                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
+                                                            return topicLabel ? <>
+                                                                <MetaSeparator>·</MetaSeparator>
+                                                                <StyledTopicLink to={`/t/${encodeURIComponent(topicLabel.toLowerCase())}`}>#{topicLabel}</StyledTopicLink>
+                                                            </> : null;
+                                                        })()}
+                                                        {(() => {
+                                                            const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
+                                                            return tagLabel ? <>
+                                                                <MetaSeparator>·</MetaSeparator>
+                                                                <ContentTagBadge tag={tagLabel} size="md" />
+                                                            </> : null;
+                                                        })()}
+                                                        {post?.awards?.length > 0 && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.1rem',
+                                                                fontSize: '0.6rem'
+                                                            }}>
+                                                                {post.awards.map(a => {
+                                                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                                                    if (!def) return null;
+                                                                    const cnt = Number(a.count || 0);
+                                                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                                                })}
+                                                            </span>
+                                                        </>}
+                                                        {/* Collapse/expand chevron for comments — rendered AFTER the
                                               * content-warning tag so the chevron sits to the right of the
                                               * tag badge rather than between the timestamp and the tag. */}
-                                            {!isRoot && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <CollapseToggle
-                                                    type="button"
-                                                    onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
-                                                    aria-label={post.collapsed ? 'Expand' : 'Collapse'}
-                                                >
-                                                    <span aria-hidden="true">{post.collapsed ? '+' : '\u2212'}</span>
-                                                </CollapseToggle>
+                                                        {!isRoot && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <CollapseToggle
+                                                                type="button"
+                                                                onClick={() => toggleCollapsed(post.post_id, !!post.collapsed)}
+                                                                aria-label={post.collapsed ? 'Expand' : 'Collapse'}
+                                                            >
+                                                                <span aria-hidden="true">{post.collapsed ? '+' : '\u2212'}</span>
+                                                            </CollapseToggle>
+                                                        </>}
+                                                        {post.edited && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.edited_ts)} style={{
+                                                                fontStyle: 'italic'
+                                                            }}>
+                                                                edited {formatElapsed(post.edited_ts)} ago
+                                                            </Tooltip>
+                                                        </>}
+                                                        {post.agent_edited && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{
+                                                                opacity: 0.5,
+                                                                fontStyle: 'italic'
+                                                            }}>
+                                                                agent modified
+                                                            </span>
+                                                        </>}
+                                                    </MetaInfoRowLeft>
+                                                    {renderPostMenu(post)}
+                                                </DesktopMetaInfoRow>
+
+                                                {/* Title for root post */}
+                                                {isRoot && <>
+                                                    <RootTitleRow>
+                                                        {post && post.title ? post.title : mergedRoot && mergedRoot.title ? mergedRoot.title : root && root.title ? root.title : ''}
+                                                    </RootTitleRow>
+                                                    <TitleDivider />
+                                                </>}
+
+                                                {/* Content — for the focused post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
+                                                {(() => {
+                                                    const isFocusedPost = post.post_id === root?.post_id;
+                                                    const displayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
+                                                    const displayContent = displayPost.content || '';
+                                                    const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
+                                                    const displayMediaMeta = Array.isArray(displayPost.media_meta) ? displayPost.media_meta : [];
+                                                    const hasContent = !!(displayContent || displayMedia.length > 0);
+                                                    if (isCollapsed || !hasContent) return null;
+                                                    if (state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') return null;
+                                                    return <StyledContentArea>
+                                                        {(() => {
+                                                            const raw = String(displayContent || '');
+                                                            const mediaArr = displayMedia;
+
+                                                            // v1.12.0: Render from dedicated media array if available
+                                                            if (mediaArr.length > 0) {
+                                                                const Inline = require("../components/InlineMedia").default;
+                                                                const Gallery = require("../components/MediaGallery").default;
+                                                                const mediaNode = mediaArr.length > 1 && Gallery ? React.createElement(Gallery, {
+                                                                    items: mediaArr,
+                                                                    variant: isRoot ? 'root_post' : undefined,
+                                                                    mediaMeta: displayMediaMeta
+                                                                }) : Inline ? React.createElement(Inline, {
+                                                                    url: mediaArr[0],
+                                                                    variant: isRoot ? 'root_post' : undefined,
+                                                                    mediaMeta: displayMediaMeta[0] || null
+                                                                }) : null;
+                                                                return <>
+                                                                    {mediaNode}
+                                                                    {raw ? <div style={{
+                                                                        height: '0.5rem'
+                                                                    }} /> : null}
+                                                                    {raw ? <MarkdownRenderer text={raw} /> : null}
+                                                                </>;
+                                                            }
+
+                                                            // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+                                                            // Remove after March 2026 when all old posts have been migrated or expired.
+                                                            const idx = raw.indexOf('\n');
+                                                            const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+                                                            const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
+                                                            const isUrl = /^https?:\/\//i.test(first);
+                                                            if (isUrl) {
+                                                                return <>
+                                                                    {require("../components/InlineMedia").default ? React.createElement(require("../components/InlineMedia").default, {
+                                                                        url: first,
+                                                                        variant: isRoot ? 'root_post' : undefined,
+                                                                        mediaMeta: displayMediaMeta[0] || null
+                                                                    }) : null}
+                                                                    {restRaw ? <div style={{
+                                                                        height: '0.5rem'
+                                                                    }} /> : null}
+                                                                    {restRaw ? <MarkdownRenderer text={restRaw} /> : null}
+                                                                </>;
+                                                            }
+                                                            return <MarkdownRenderer text={raw} />;
+                                                        })()}
+                                                    </StyledContentArea>;
+                                                })()}
+
+                                                {/* Agent annotation appendices */}
+                                                {!isCollapsed && post.appendices && post.appendices.length > 0 && post.appendices.map((a, idx) => {
+                                                    const label = a.agent_username || a.agent || 'Agent';
+                                                    // Appendices are authored by agent-tier accounts
+                                                    // (level 10). Color the @label so the agent tier
+                                                    // is visible in the inline byline.
+                                                    const appendixTierColor = getAuthorColor(Number(a.agent_level) || 10);
+                                                    const appendixTierTooltip = getAuthorTooltip(Number(a.agent_level) || 10);
+                                                    return <div key={`appx-${idx}`} style={{
+                                                        margin: '0.5rem 0'
+                                                    }}>
+                                                        <div style={{
+                                                            marginBottom: '0.2rem'
+                                                        }}>
+                                                            <Link to={`/u/${label}`} title={appendixTierTooltip || undefined} style={{
+                                                                textDecoration: 'underline',
+                                                                fontSize: '0.6rem',
+                                                                color: appendixTierColor || theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
+                                                            }}>@{label}</Link>
+                                                            <span style={{
+                                                                color: theme.colors?.textMuted || '#888',
+                                                                fontSize: '0.6rem'
+                                                            }}>:</span>
+                                                        </div>
+                                                        <div style={{
+                                                            padding: '0.4rem 0.65rem',
+                                                            borderLeft: `3px solid ${theme.colors?.border || '#444'}`,
+                                                            background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
+                                                            borderRadius: '0 6px 6px 0',
+                                                            fontSize: '0.85em'
+                                                        }}>
+                                                            <MarkdownRenderer text={a.text} />
+                                                        </div>
+                                                    </div>;
+                                                })}
+                                                {/* Action bar with horizontal votes */}
+                                                {!isCollapsed && <>
+                                                    {state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit' ? <>
+                                                        {displayReplyBox(post)}
+                                                        {renderActionBar(post)}
+                                                        {displayConfirmation(post)}
+                                                    </> : <>
+                                                        {renderActionBar(post)}
+                                                        {displayConfirmation(post)}
+                                                        {displayReplyBox(post)}
+                                                    </>}
+                                                </>}
+                                            </ColumnFlex>
+                                        </CardComponent>
+                                        {isRoot && !!focusedCommentId && <StyledThreadReminder>
+                                            You are viewing a single comment's thread.{' '}
+                                            {!showContext ? <>
+                                                Click{' '}
+                                                <Link to={`/p/${focusedCommentId}?depth=5`}>
+                                                    here
+                                                </Link>
+                                                {' '}to view the recent context, or{' '}
+                                                <Link to={`/p/${actualRootPostId}`}>here</Link>
+                                                {' '}to view the full thread.
+                                            </> : <>
+                                                Click{' '}
+                                                <Link to={`/p/${actualRootPostId}`}>here</Link>
+                                                {' '}to view the full thread.
                                             </>}
-                                            {post.edited && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <Tooltip $dotted data-tooltip={formatTimeStamp(post.edited_ts)} style={{
-                                                    fontStyle: 'italic'
-                                                }}>
-                                                    edited {formatElapsed(post.edited_ts)} ago
-                                                </Tooltip>
-                                            </>}
-                                            {post.agent_edited && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <span style={{
-                                                    opacity: 0.5,
-                                                    fontStyle: 'italic'
-                                                }}>
-                                                    agent modified
-                                                </span>
-                                            </>}
-                                        </MetaInfoRowLeft>
-                                        {renderPostMenu(post)}
-                                    </DesktopMetaInfoRow>
-
-                                    {/* Title for root post */}
-                                    {isRoot && <>
-                                        <RootTitleRow>
-                                            {post && post.title ? post.title : mergedRoot && mergedRoot.title ? mergedRoot.title : root && root.title ? root.title : ''}
-                                        </RootTitleRow>
-                                        <TitleDivider />
-                                    </>}
-
-                                    {/* Content — for the focused post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
-                                    {(() => {
-                                        const isFocusedPost = post.post_id === root?.post_id;
-                                        const displayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
-                                        const displayContent = displayPost.content || '';
-                                        const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
-                                        const displayMediaMeta = Array.isArray(displayPost.media_meta) ? displayPost.media_meta : [];
-                                        const hasContent = !!(displayContent || displayMedia.length > 0);
-                                        if (isCollapsed || !hasContent) return null;
-                                        if (state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') return null;
-                                        return <StyledContentArea>
-                                            {(() => {
-                                                const raw = String(displayContent || '');
-                                                const mediaArr = displayMedia;
-
-                                                // v1.12.0: Render from dedicated media array if available
-                                                if (mediaArr.length > 0) {
-                                                    const Inline = require("../components/InlineMedia").default;
-                                                    const Gallery = require("../components/MediaGallery").default;
-                                                    const mediaNode = mediaArr.length > 1 && Gallery ? React.createElement(Gallery, {
-                                                        items: mediaArr,
-                                                        variant: isRoot ? 'root_post' : undefined,
-                                                        mediaMeta: displayMediaMeta
-                                                    }) : Inline ? React.createElement(Inline, {
-                                                        url: mediaArr[0],
-                                                        variant: isRoot ? 'root_post' : undefined,
-                                                        mediaMeta: displayMediaMeta[0] || null
-                                                    }) : null;
-                                                    return <>
-                                                        {mediaNode}
-                                                        {raw ? <div style={{
-                                                            height: '0.5rem'
-                                                        }} /> : null}
-                                                        {raw ? <MarkdownRenderer text={raw} /> : null}
-                                                    </>;
-                                                }
-
-                                                // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
-                                                // Remove after March 2026 when all old posts have been migrated or expired.
-                                                const idx = raw.indexOf('\n');
-                                                const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
-                                                const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
-                                                const isUrl = /^https?:\/\//i.test(first);
-                                                if (isUrl) {
-                                                    return <>
-                                                        {require("../components/InlineMedia").default ? React.createElement(require("../components/InlineMedia").default, {
-                                                            url: first,
-                                                            variant: isRoot ? 'root_post' : undefined,
-                                                            mediaMeta: displayMediaMeta[0] || null
-                                                        }) : null}
-                                                        {restRaw ? <div style={{
-                                                            height: '0.5rem'
-                                                        }} /> : null}
-                                                        {restRaw ? <MarkdownRenderer text={restRaw} /> : null}
-                                                    </>;
-                                                }
-                                                return <MarkdownRenderer text={raw} />;
-                                            })()}
-                                        </StyledContentArea>;
-                                    })()}
-
-                                    {/* Agent annotation appendices */}
-                                    {!isCollapsed && post.appendices && post.appendices.length > 0 && post.appendices.map((a, idx) => {
-                                        const label = a.agent_username || a.agent || 'Agent';
-                                        // Appendices are authored by agent-tier accounts
-                                        // (level 10). Color the @label so the agent tier
-                                        // is visible in the inline byline.
-                                        const appendixTierColor = getAuthorColor(Number(a.agent_level) || 10);
-                                        const appendixTierTooltip = getAuthorTooltip(Number(a.agent_level) || 10);
-                                        return <div key={`appx-${idx}`} style={{
-                                            margin: '0.5rem 0'
-                                        }}>
-                                            <div style={{
-                                                marginBottom: '0.2rem'
-                                            }}>
-                                                <Link to={`/u/${label}`} title={appendixTierTooltip || undefined} style={{
-                                                    textDecoration: 'underline',
-                                                    fontSize: '0.6rem',
-                                                    color: appendixTierColor || theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
-                                                }}>@{label}</Link>
-                                                <span style={{
-                                                    color: theme.colors?.textMuted || '#888',
-                                                    fontSize: '0.6rem'
-                                                }}>:</span>
-                                            </div>
-                                            <div style={{
-                                                padding: '0.4rem 0.65rem',
-                                                borderLeft: `3px solid ${theme.colors?.border || '#444'}`,
-                                                background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
-                                                borderRadius: '0 6px 6px 0',
-                                                fontSize: '0.85em'
-                                            }}>
-                                                <MarkdownRenderer text={a.text} />
-                                            </div>
-                                        </div>;
-                                    })}
-                                    {/* Action bar with horizontal votes */}
-                                    {!isCollapsed && <>
-                                        {state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit' ? <>
-                                            {displayReplyBox(post)}
-                                            {renderActionBar(post)}
-                                            {displayConfirmation(post)}
-                                        </> : <>
-                                            {renderActionBar(post)}
-                                            {displayConfirmation(post)}
-                                            {displayReplyBox(post)}
-                                        </>}
-                                    </>}
-                                </ColumnFlex>
-                            </CardComponent>
-                            {isRoot && !!focusedCommentId && <StyledThreadReminder>
-                                You are viewing a single comment's thread.{' '}
-                                {!showContext ? <>
-                                    Click{' '}
-                                    <Link to={`/p/${focusedCommentId}?depth=5`}>
-                                        here
-                                    </Link>
-                                    {' '}to view the recent context, or{' '}
-                                    <Link to={`/p/${actualRootPostId}`}>here</Link>
-                                    {' '}to view the full thread.
-                                </> : <>
-                                    Click{' '}
-                                    <Link to={`/p/${actualRootPostId}`}>here</Link>
-                                    {' '}to view the full thread.
-                                </>}
-                            </StyledThreadReminder>}
-                            {isRoot && <CommentsHeaderRow>
-                                <CommentsHeaderTitle>
-                                    Comments
-                                    {typeof (mergedRoot?.comments ?? root?.comments) === 'number' && <CommentsHeaderCount>({mergedRoot?.comments ?? root?.comments})</CommentsHeaderCount>}
-                                </CommentsHeaderTitle>
-                            </CommentsHeaderRow>}
-                            {isRoot && annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id) && p.level > 0).length === 0 && <VPStateBlock>
-                                <VPStateIcon>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                    </svg>
-                                </VPStateIcon>
-                                <VPStateTitle>No comments yet</VPStateTitle>
-                                <VPStateMessage>Be the first to share your thoughts.</VPStateMessage>
-                            </VPStateBlock>}
-                            {/* Continue thread link for deeply nested comments with unloaded children */}
-                            {(() => {
-                                // Don't show for root post
-                                if (isRoot) return null;
-                                // Don't show if collapsed
-                                if (isCollapsed) return null;
-                                // Don't show for context comments (parent chain in focused view)
-                                if (post.isContextComment) return null;
-                                // Don't show if this IS the focused comment (we're already viewing its thread)
-                                if (focusedCommentId && String(post.post_id).toLowerCase() === String(focusedCommentId).toLowerCase()) return null;
-                                // Don't show if no replies
-                                if ((post.comments || 0) <= 0) return null;
-                                // Check if children are loaded (either in post.children or state.posts)
-                                const stateChildren = state.posts?.[post.post_id]?.children;
-                                const hasLoadedChildren = (post.children && post.children.length > 0) || (stateChildren && stateChildren.length > 0);
-                                if (hasLoadedChildren) return null;
-                                return <ContinueThreadLink to={`/p/${post.post_id}`} $level={displayLevel} $activeDepths={activeDepths}>
-                                    Continue this thread →
-                                </ContinueThreadLink>;
+                                        </StyledThreadReminder>}
+                                        {isRoot && <CommentsHeaderRow>
+                                            <CommentsHeaderTitle>
+                                                Comments
+                                                {typeof (mergedRoot?.comments ?? root?.comments) === 'number' && <CommentsHeaderCount>({mergedRoot?.comments ?? root?.comments})</CommentsHeaderCount>}
+                                            </CommentsHeaderTitle>
+                                        </CommentsHeaderRow>}
+                                        {isRoot && annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id) && p.level > 0).length === 0 && <VPStateBlock>
+                                            <VPStateIcon>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                                </svg>
+                                            </VPStateIcon>
+                                            <VPStateTitle>No comments yet</VPStateTitle>
+                                            <VPStateMessage>Be the first to share your thoughts.</VPStateMessage>
+                                        </VPStateBlock>}
+                                        {/* Continue thread link for deeply nested comments with unloaded children */}
+                                        {(() => {
+                                            // Don't show for root post
+                                            if (isRoot) return null;
+                                            // Don't show if collapsed
+                                            if (isCollapsed) return null;
+                                            // Don't show for context comments (parent chain in focused view)
+                                            if (post.isContextComment) return null;
+                                            // Don't show if this IS the focused comment (we're already viewing its thread)
+                                            if (focusedCommentId && String(post.post_id).toLowerCase() === String(focusedCommentId).toLowerCase()) return null;
+                                            // Don't show if no replies
+                                            if ((post.comments || 0) <= 0) return null;
+                                            // Check if children are loaded (either in post.children or state.posts)
+                                            const stateChildren = state.posts?.[post.post_id]?.children;
+                                            const hasLoadedChildren = (post.children && post.children.length > 0) || (stateChildren && stateChildren.length > 0);
+                                            if (hasLoadedChildren) return null;
+                                            return <ContinueThreadLink to={`/p/${post.post_id}`} $level={displayLevel} $activeDepths={activeDepths}>
+                                                Continue this thread →
+                                            </ContinueThreadLink>;
+                                        })()}
+                                    </div>;
+                                });
                             })()}
-                        </div>;
-                    });
-                })()}
-                </ModernPostFeed>
+                        </ModernPostFeed>
                     </MainContentWrapper>
                 </FeedCol>
                 <FeedRightRail />

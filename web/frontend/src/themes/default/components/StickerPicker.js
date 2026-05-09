@@ -297,7 +297,12 @@ const StickerIcon = () => (
     </svg>
 );
 
-export default function StickerPicker({ onSelect, disabled = false }) {
+/* renderTrigger (optional): ({ buttonRef, isOpen, toggle, disabled }) => ReactNode
+ *   When provided, replaces the default circular icon button. The picker
+ *   still owns open/close state and popover positioning — the consumer
+ *   only supplies the trigger element and must attach `buttonRef` so
+ *   positioning math works. */
+export default function StickerPicker({ onSelect, disabled = false, renderTrigger }) {
     const [isOpen, setIsOpen] = useState(false);
     const [activePack, setActivePack] = useState('meme_stickers');
     const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -376,19 +381,25 @@ export default function StickerPicker({ onSelect, disabled = false }) {
     const packInfo = STICKER_PACKS[activePack];
     const stickers = packInfo.stickers;
 
+    const toggle = () => setIsOpen(prev => !prev);
+
     return (
         <PickerWrapper>
-            <PickerButton
-                ref={buttonRef}
-                type="button"
-                tabIndex={-1}
-                onClick={() => setIsOpen(!isOpen)}
-                disabled={disabled}
-                aria-label="Stickers"
-                title="Stickers"
-            >
-                <StickerIcon />
-            </PickerButton>
+            {renderTrigger ? (
+                renderTrigger({ buttonRef, isOpen, toggle, disabled })
+            ) : (
+                <PickerButton
+                    ref={buttonRef}
+                    type="button"
+                    tabIndex={-1}
+                    onClick={toggle}
+                    disabled={disabled}
+                    aria-label="Stickers"
+                    title="Stickers"
+                >
+                    <StickerIcon />
+                </PickerButton>
+            )}
 
             {isOpen && ReactDOM.createPortal(
                 <Popover

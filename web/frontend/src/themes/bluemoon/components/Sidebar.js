@@ -8,7 +8,7 @@ import { resolveUsernames } from '../../../utils/UsernameCache';
 
 const SidebarContainer = styled.div`
     width: 210px;
-    background: ${({ theme }) => theme.colors.sidebarBg };
+    background: ${({ theme }) => theme.colors.sidebarBg};
     border: 1px solid ${({ theme }) => theme.colors.border};
     border-radius: 8px;
     padding: 0.75rem;
@@ -395,7 +395,7 @@ const Sidebar = ({ currentPath, state }) => {
                 )}
             </div>
 
-            <SectionTitle style={{ marginTop: '1.15rem' }}>People</SectionTitle>
+            <SectionTitle style={{ marginTop: '1.15rem' }}>Users</SectionTitle>
 
             <div>
                 {peopleToShow.length === 0 ? (

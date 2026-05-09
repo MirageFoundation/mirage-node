@@ -592,7 +592,7 @@ export default function SettingsView({
                                     Enable referral links for my account
                                 </CheckboxLabel>
                                 <ExplanationText>
-                                    Lets people sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
+                                    Lets users sign up via your personal link instead of sharing invite codes directly. Anyone with the link can use your codes, so leave this off if you want to hand them out manually.
                                 </ExplanationText>
                                 {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
                                 {referralPrecheckSuccess && <SecuritySuccess>{referralPrecheckSuccess}</SecuritySuccess>}
@@ -756,7 +756,7 @@ export default function SettingsView({
                         </Row>
 
                         <Row>
-                            <Label>Sidebar people:</Label>
+                            <Label>Sidebar users:</Label>
                             <ValueBox>
                                 <div style={{
                                     display: 'flex',
@@ -775,7 +775,7 @@ export default function SettingsView({
                                         <option value="100">100</option>
                                     </ThemeSelect>
                                     <HelperText>
-                                        People shown in sidebar before "show more"
+                                        Users shown in sidebar before "show more"
                                     </HelperText>
                                 </div>
                             </ValueBox>

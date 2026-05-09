@@ -923,7 +923,7 @@ export default function SettingsView({ state }) {
                             </ClickableSettingRow>
 
                             <ClickableSettingRow type="button" onClick={() => setOpenModal('sidebarPeople')}>
-                                <ClickableRowLabel>People shown</ClickableRowLabel>
+                                <ClickableRowLabel>Users shown</ClickableRowLabel>
                                 <ClickableRowRight>
                                     <ClickableRowValue>{String(sidebarPeopleLimit)}</ClickableRowValue>
                                     <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
@@ -938,7 +938,7 @@ export default function SettingsView({ state }) {
                                         <ToggleRow as="div">
                                             <div>
                                                 <ToggleLabel>Enable referral links</ToggleLabel>
-                                                <ToggleDesc>Lets people sign up via your personal link instead of sharing invite codes directly.</ToggleDesc>
+                                                <ToggleDesc>Lets users sign up via your personal link instead of sharing invite codes directly.</ToggleDesc>
                                             </div>
                                             <Toggle checked={referralPrecheckEnabled} disabled={referralPrecheckBusy} onChange={e => handleReferralPrecheckToggle(!!e.target.checked)} />
                                         </ToggleRow>
@@ -1150,7 +1150,7 @@ export default function SettingsView({ state }) {
         />}
 
         {openModal === 'sidebarPeople' && <OptionModal
-            title="Sidebar People Limit"
+            title="Sidebar Users Limit"
             options={limitOptions}
             value={String(sidebarPeopleLimit)}
             onChange={v => handleSidebarPeopleLimitChange({ target: { value: v } })}

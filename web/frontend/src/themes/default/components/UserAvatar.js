@@ -34,13 +34,10 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *     by ReferralsView leaderboard rows for the \"active this week\"
  *     state). Defaults off.
  *   - `paddingRatio` controls the inner inset around the identicon
- *     glyph as a fraction of `size`. Defaults to `0.2` (20%) — the
- *     profile header / aside avatars override this to `0.1` (10%)
- *     so the identicon reads larger in those hero positions.
+ *     glyph as a fraction of `size`. Defaults to `0.2` (20%).
  *   - `shape` selects the wrapper outline:
  *       - `'circle'` (default) — fully round, `border-radius: 50%`.
- *       - `'rounded'` — square tile with a slight `12px` radius,
- *         used by the profile-header / aside-card avatars.
+ *       - `'rounded'` — square tile with a `4px` radius.
  *     `radius` lets callers override the rounded-tile radius if they
  *     need a different curve.
  *   - The component is a `forwardRef` and forwards `className` /
@@ -50,7 +47,7 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  */
 
 const DEFAULT_ROUNDED_RADIUS_PX = 4;
-const DEFAULT_PADDING_RATIO = 0;
+const DEFAULT_PADDING_RATIO = 0.2;
 
 const Wrapper = styled.span`
     display: inline-flex;
@@ -95,7 +92,7 @@ const UserAvatar = forwardRef(function UserAvatar(
         alt = '',
         loading = 'lazy',
         activeBorderColor,
-        shape = 'rounded',
+        shape = 'circle',
         radius = DEFAULT_ROUNDED_RADIUS_PX,
         paddingRatio = DEFAULT_PADDING_RATIO,
         className,

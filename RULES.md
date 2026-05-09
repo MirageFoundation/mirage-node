@@ -18,6 +18,14 @@
 - It is OK to interact with servers in a purely informative way, e.g. getting logs, but not changing anything on the server.
 
 
+### Terminology Consistency
+
+**ALWAYS BE CONSISTENT.** Pick one term per concept and use it everywhere — UI copy, labels, settings, comments, error messages, docs.
+
+- **Platform members are "users", never "people".** Use "users" in all user-facing strings (`Follow users`, `Sidebar users`, `Lets users sign up`, etc.) and in code comments. The only exception: existing localStorage / API keys / wire formats (e.g. `sidebar_people_limit`) — never rename those because the data is already on disk. JS variable names that mirror those storage keys can stay too; just keep visible strings consistent.
+- Before adding a new term for an existing concept, search the codebase first. If a term already exists, reuse it.
+- When you spot a stray inconsistency adjacent to your work, fix it (with a one-line note in the summary). Don't leave a half-consistent codebase.
+
 ### Code Quality
 
 - **No redundant comments**:

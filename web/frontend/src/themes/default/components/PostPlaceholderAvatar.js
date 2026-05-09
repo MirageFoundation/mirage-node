@@ -53,6 +53,10 @@ const PlaceholderRoot = styled.div`
     box-sizing: border-box;
     flex-shrink: 0;
     overflow: hidden;
+    /* Integer padding (vs a percentage of $size) keeps the inner image
+     * dimensions on whole pixels, which prevents the identicon's cell
+     * grid from straddling sub-pixel boundaries and looking fuzzy. */
+    padding: 8px;
 
     @media (max-width: 600px) {
         width: ${({ $mobileSize }) => $mobileSize}px;

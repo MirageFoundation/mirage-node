@@ -246,7 +246,7 @@ const FollowButton = styled.button`
     cursor: pointer;
     border: 1.5px solid
         ${({ $active, theme }) =>
-            $active ? theme.colors.followBtnBorder : theme.colors.followBtnBg};
+        $active ? theme.colors.followBtnBorder : theme.colors.followBtnBg};
     background: ${({ $active, theme }) =>
         $active ? 'transparent' : theme.colors.followBtnBg};
     color: ${({ $active, theme }) =>
@@ -255,9 +255,9 @@ const FollowButton = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({ $active, theme }) =>
-            $active ? 'transparent' : theme.colors.followBtnBgHover};
+        $active ? 'transparent' : theme.colors.followBtnBgHover};
         border-color: ${({ $active, theme }) =>
-            $active ? theme.colors.followBtnBorderHover : theme.colors.followBtnBgHover};
+        $active ? theme.colors.followBtnBorderHover : theme.colors.followBtnBgHover};
     }
     &:disabled { opacity: 0.6; cursor: default; }
 `;
@@ -485,11 +485,11 @@ const MenuItemBtn = styled.button`
      * the red picks up emphasis under the pointer. */
     &:hover {
         background: ${({ theme, $active }) =>
-            $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
+        $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
         color: ${({ theme, $active, $danger }) => {
-            if ($danger) return theme.colors.voteDown;
-            return $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText;
-        }};
+        if ($danger) return theme.colors.voteDown;
+        return $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText;
+    }};
     }
 
     & > svg {
@@ -759,7 +759,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     /**
      * Sub-plan 06.11 E — feed-row admin parity. Adds Mark deleted /
      * Suspend / Unsuspend rows to the more-menu for admins viewing
-     * other people's posts on a quests-enabled node. Suspension status
+     * other users' posts on a quests-enabled node. Suspension status
      * is fetched lazily the first time the menu opens.
      */
     const {

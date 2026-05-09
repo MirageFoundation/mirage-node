@@ -613,6 +613,7 @@ export default function MarkdownEditor({
     autoFocus = false, // optional: focus textarea on mount
     minHeight, // optional: CSS size for minimum height, e.g., "8rem"
     editorRef, // optional: (ref) => void; exposes { focus: () => void } to parent
+    placeholder = "Link or content", // optional: textarea placeholder
 }) {
     const areaRef = useRef(null);
 
@@ -1418,7 +1419,7 @@ export default function MarkdownEditor({
                         onKeyDown(e);
                     }}
                     onPaste={handlePaste}
-                    placeholder="Link or content"
+                    placeholder={placeholder}
                     readOnly={false}
                     $minHeight={minHeight}
                 />

@@ -355,11 +355,11 @@ const UserMenuTrigger = styled.button`
 
 const AvatarGlow = styled.img`
     position: absolute;
-    top: calc(50% + 5px);
+    top: 50%;
     left: 50%;
     width: 36px;
     height: 36px;
-    border-radius: 4px;
+    border-radius: 50%;
     transform: translate(-50%, -50%) scale(0.9);
     filter: ${({ theme }) =>
         theme.name === 'light' ? 'blur(8px)' : 'blur(12px) saturate(1.4)'};
@@ -1072,161 +1072,161 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
 
     return (
         <>
-        <Bar>
-            <BarInner>
-            <SidebarToggleButton
-                type="button"
-                onClick={onToggleDrawer}
-                aria-label="Toggle sidebar"
-            >
-                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                    <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-            </SidebarToggleButton>
+            <Bar>
+                <BarInner>
+                    <SidebarToggleButton
+                        type="button"
+                        onClick={onToggleDrawer}
+                        aria-label="Toggle sidebar"
+                    >
+                        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                            <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </SidebarToggleButton>
 
-            <BrandLink to="/home" aria-label="Mirage home">Mirage</BrandLink>
+                    <BrandLink to="/home" aria-label="Mirage home">Mirage</BrandLink>
 
-            <LeftSpacer />
+                    <LeftSpacer />
 
-            <SearchWrapper ref={searchWrapRef} role="search" onSubmit={handleSearchSubmit}>
-                <SearchInner>
-                    <SearchIcon viewBox="0 0 24 24" aria-hidden="true">
-                        <path
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
-                        />
-                    </SearchIcon>
-                    <SearchInput
-                        ref={searchInputRef}
-                        type="search"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        onFocus={() => setSearchFocused(true)}
-                        onMouseDown={() => setSearchFocused(true)}
-                        onClick={() => setSearchFocused(true)}
-                        onKeyDown={handleSearchKeyDown}
-                        placeholder="Search Mirage"
-                        aria-label="Search"
-                        aria-expanded={searchFocused}
-                        autoComplete="off"
-                    />
-                    {query.length > 0 && (
-                        <ClearButton
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                                resetQuery();
-                                if (searchInputRef.current) searchInputRef.current.focus();
-                            }}
-                            aria-label="Clear search"
-                        >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <SearchWrapper ref={searchWrapRef} role="search" onSubmit={handleSearchSubmit}>
+                        <SearchInner>
+                            <SearchIcon viewBox="0 0 24 24" aria-hidden="true">
                                 <path
                                     fill="none"
                                     stroke="currentColor"
-                                    strokeWidth="2.2"
+                                    strokeWidth="2"
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
-                                    d="M6 6l12 12M18 6L6 18"
+                                    d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
                                 />
-                            </svg>
-                        </ClearButton>
-                    )}
-                </SearchInner>
-                {searchFocused && (
-                    <SearchDropdown
-                        rawQuery={query}
-                        hasQuery={hasQuery}
-                        isSearching={isSearching}
-                        liveResults={liveResults}
-                        liveError={liveError}
-                        hasLiveResults={hasLiveResults}
-                        trendingTopics={trendingTopics}
-                        isLoadingTrending={isLoadingTrending}
-                        recentSearches={recentSearches}
-                        onRecentClick={handleRecentClick}
-                        onRemoveRecent={removeRecentSearch}
-                        onClearRecents={clearRecentSearches}
-                        onResultNavigate={() => setSearchFocused(false)}
-                        onSubmitQuery={submitQuery}
-                    />
-                )}
-            </SearchWrapper>
-
-            <RightSpacer>
-                <CompactSearchButton
-                    type="button"
-                    onClick={() => navigate('/search')}
-                    aria-label="Search"
-                >
-                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                        <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
-                    </svg>
-                </CompactSearchButton>
-                {isLoggedIn && (
-                    <CreateButton to="/create_post" aria-label="Create post">
-                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                            <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M12 5v14M5 12h14" />
-                        </svg>
-                        <span className="create-label">Create</span>
-                    </CreateButton>
-                )}
-
-                {isLoggedIn && (
-                    <IconButton
-                        to="/inbox"
-                        $active={isInbox}
-                        aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} unread` : 'Inbox'}
-                    >
-                        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                            {isInbox
-                                ? <path fill="currentColor" d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
-                                : <path fill="currentColor" d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z" />
-                            }
-                        </svg>
-                        {inboxCount > 0 && <InboxBadge aria-hidden="true">{formatBadgeCount(inboxCount)}</InboxBadge>}
-                    </IconButton>
-                )}
-
-                {isLoggedIn ? (
-                    <UserMenuWrapper ref={menuRef}>
-                        <UserMenuTrigger
-                            type="button"
-                            $open={menuOpen}
-                            onClick={() => setMenuOpen((v) => !v)}
-                            aria-haspopup="menu"
-                            aria-expanded={menuOpen}
-                            aria-label="Account menu"
-                        >
-                            <AvatarGlow src={avatarSrc} alt="" aria-hidden="true" loading="lazy" />
-                            <AvatarChip seed={avatarSeed} size={32} alt="" />
-                        </UserMenuTrigger>
-                        {menuOpen && (
-                            <Dropdown role="menu">
-                                <ProfileMenuContent
-                                    displayName={username}
-                                    onItemClick={() => setMenuOpen(false)}
-                                    onSignOut={() => {
-                                        setMenuOpen(false);
-                                        setSignOutDialogOpen(true);
+                            </SearchIcon>
+                            <SearchInput
+                                ref={searchInputRef}
+                                type="search"
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                onFocus={() => setSearchFocused(true)}
+                                onMouseDown={() => setSearchFocused(true)}
+                                onClick={() => setSearchFocused(true)}
+                                onKeyDown={handleSearchKeyDown}
+                                placeholder="Search Mirage"
+                                aria-label="Search"
+                                aria-expanded={searchFocused}
+                                autoComplete="off"
+                            />
+                            {query.length > 0 && (
+                                <ClearButton
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => {
+                                        resetQuery();
+                                        if (searchInputRef.current) searchInputRef.current.focus();
                                     }}
-                                />
-                            </Dropdown>
+                                    aria-label="Clear search"
+                                >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2.2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M6 6l12 12M18 6L6 18"
+                                        />
+                                    </svg>
+                                </ClearButton>
+                            )}
+                        </SearchInner>
+                        {searchFocused && (
+                            <SearchDropdown
+                                rawQuery={query}
+                                hasQuery={hasQuery}
+                                isSearching={isSearching}
+                                liveResults={liveResults}
+                                liveError={liveError}
+                                hasLiveResults={hasLiveResults}
+                                trendingTopics={trendingTopics}
+                                isLoadingTrending={isLoadingTrending}
+                                recentSearches={recentSearches}
+                                onRecentClick={handleRecentClick}
+                                onRemoveRecent={removeRecentSearch}
+                                onClearRecents={clearRecentSearches}
+                                onResultNavigate={() => setSearchFocused(false)}
+                                onSubmitQuery={submitQuery}
+                            />
                         )}
-                    </UserMenuWrapper>
-                ) : (
-                    <>
-                        <LoginPillLink to="/login">Sign in</LoginPillLink>
-                        <GuestMenu />
-                    </>
-                )}
-            </RightSpacer>
-            </BarInner>
-        </Bar>
+                    </SearchWrapper>
+
+                    <RightSpacer>
+                        <CompactSearchButton
+                            type="button"
+                            onClick={() => navigate('/search')}
+                            aria-label="Search"
+                        >
+                            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                                <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
+                            </svg>
+                        </CompactSearchButton>
+                        {isLoggedIn && (
+                            <CreateButton to="/create_post" aria-label="Create post">
+                                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                                    <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M12 5v14M5 12h14" />
+                                </svg>
+                                <span className="create-label">Create</span>
+                            </CreateButton>
+                        )}
+
+                        {isLoggedIn && (
+                            <IconButton
+                                to="/inbox"
+                                $active={isInbox}
+                                aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} unread` : 'Inbox'}
+                            >
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    {isInbox
+                                        ? <path fill="currentColor" d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+                                        : <path fill="currentColor" d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z" />
+                                    }
+                                </svg>
+                                {inboxCount > 0 && <InboxBadge aria-hidden="true">{formatBadgeCount(inboxCount)}</InboxBadge>}
+                            </IconButton>
+                        )}
+
+                        {isLoggedIn ? (
+                            <UserMenuWrapper ref={menuRef}>
+                                <UserMenuTrigger
+                                    type="button"
+                                    $open={menuOpen}
+                                    onClick={() => setMenuOpen((v) => !v)}
+                                    aria-haspopup="menu"
+                                    aria-expanded={menuOpen}
+                                    aria-label="Account menu"
+                                >
+                                    <AvatarGlow src={avatarSrc} alt="" aria-hidden="true" loading="lazy" />
+                                    <AvatarChip seed={avatarSeed} size={32} alt="" />
+                                </UserMenuTrigger>
+                                {menuOpen && (
+                                    <Dropdown role="menu">
+                                        <ProfileMenuContent
+                                            displayName={username}
+                                            onItemClick={() => setMenuOpen(false)}
+                                            onSignOut={() => {
+                                                setMenuOpen(false);
+                                                setSignOutDialogOpen(true);
+                                            }}
+                                        />
+                                    </Dropdown>
+                                )}
+                            </UserMenuWrapper>
+                        ) : (
+                            <>
+                                <LoginPillLink to="/login">Sign in</LoginPillLink>
+                                <GuestMenu />
+                            </>
+                        )}
+                    </RightSpacer>
+                </BarInner>
+            </Bar>
             {signOutDialogOpen && (
                 <ConfirmDialog
                     open

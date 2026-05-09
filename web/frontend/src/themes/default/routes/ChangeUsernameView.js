@@ -3,13 +3,13 @@ import styled from "styled-components";
 import Button from "../components/Button.js";
 import { Link } from "react-router-dom";
 import {
-  AuthButtonRow,
-  AuthErrorMessage,
-  AuthHelperText,
-  AuthLabel,
-  AuthPanel,
-  AuthStack,
-  AuthSubtlePanel,
+    AuthButtonRow,
+    AuthErrorMessage,
+    AuthHelperText,
+    AuthLabel,
+    AuthPanel,
+    AuthStack,
+    AuthSubtlePanel,
 } from "../components/AuthPageShell.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { getMaxInputLength } from "../../../utils/chainParams";
@@ -136,7 +136,7 @@ const InlineInput = styled.input`
 const WarningPanel = styled(AuthSubtlePanel)`
   border-color: #f59e0b;
   background: ${({ theme }) =>
-    theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
+        theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
 
   a {
     color: #f59e0b;
@@ -210,141 +210,141 @@ const PrimaryButton = styled(Button)`
 `;
 
 function ChangeUsernameView({ state }) {
-  const {
-    currentUsername,
-    usernameInput,
-    setUsernameInput,
-    submitting,
-    buttonStatus,
-    submitError,
-    setSubmitError,
-    cooldownUntil,
-    userLevel,
-    success,
-    handleSubmit,
-    canChangeName,
-  } = useChangeUsername({ state });
+    const {
+        currentUsername,
+        usernameInput,
+        setUsernameInput,
+        submitting,
+        buttonStatus,
+        submitError,
+        setSubmitError,
+        cooldownUntil,
+        userLevel,
+        success,
+        handleSubmit,
+        canChangeName,
+    } = useChangeUsername({ state });
 
-  return (
-    <ContentGrid>
-      <Helmet>
-        <title>Change Username | Mirage</title>
-      </Helmet>
-      {submitting && <BlockingOverlay />}
-      <div>
-        <ModernPostFeed>
-          <HeaderRow>
-            <HeaderTitle>Edit Username</HeaderTitle>
-          </HeaderRow>
-          <Divider />
-          <PageWrapper>
-            <PageTitle>Change your username</PageTitle>
-            <PageDescription>
-              {canChangeName
-                ? "This is how people will find you on Mirage."
-                : "Free tier accounts keep the Anon- prefix."}
-            </PageDescription>
+    return (
+        <ContentGrid>
+            <Helmet>
+                <title>Change Username | Mirage</title>
+            </Helmet>
+            {submitting && <BlockingOverlay />}
+            <div>
+                <ModernPostFeed>
+                    <HeaderRow>
+                        <HeaderTitle>Edit Username</HeaderTitle>
+                    </HeaderRow>
+                    <Divider />
+                    <PageWrapper>
+                        <PageTitle>Change your username</PageTitle>
+                        <PageDescription>
+                            {canChangeName
+                                ? "This is how users will find you on Mirage."
+                                : "Free tier accounts keep the Anon- prefix."}
+                        </PageDescription>
 
-            <AuthStack>
-              {!success && (
-                <>
-                  {!canChangeName && userLevel !== null && (
-                    <WarningPanel>
-                      <WarningText>
-                        Free tier accounts will always have the &quot;Anon-&quot; prefix.{" "}
-                        <Link to="/subscription">Upgrade to remove the &quot;Anon-&quot; prefix</Link>.
-                      </WarningText>
-                    </WarningPanel>
-                  )}
+                        <AuthStack>
+                            {!success && (
+                                <>
+                                    {!canChangeName && userLevel !== null && (
+                                        <WarningPanel>
+                                            <WarningText>
+                                                Free tier accounts will always have the &quot;Anon-&quot; prefix.{" "}
+                                                <Link to="/subscription">Upgrade to remove the &quot;Anon-&quot; prefix</Link>.
+                                            </WarningText>
+                                        </WarningPanel>
+                                    )}
 
-                  <AuthPanel as="form" onSubmit={handleSubmit}>
-                    <AuthLabel htmlFor="change-username-input" style={{ textAlign: "left" }}>New username</AuthLabel>
-                    <InputRow $disabled={submitting}>
-                      {!canChangeName && <InputPrefix>Anon-</InputPrefix>}
-                      <InlineInput
-                        id="change-username-input"
-                        placeholder={
-                          !canChangeName && currentUsername.startsWith("Anon-")
-                            ? currentUsername.slice(5)
-                            : currentUsername || "New username"
-                        }
-                        value={usernameInput}
-                        $hasPrefix={!canChangeName}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
-                          const maxLen = getMaxInputLength(!canChangeName);
-                          setUsernameInput(cleaned.slice(0, maxLen ?? 100));
-                          setSubmitError("");
-                        }}
-                        onKeyDown={async (e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            await handleSubmit(e);
-                          }
-                        }}
-                        onPaste={(e) => {
-                          e.preventDefault();
-                        }}
-                        maxLength={getMaxInputLength(!canChangeName) || 100}
-                        disabled={submitting}
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck="false"
-                      />
-                    </InputRow>
-                    <AuthHelperText style={{ textAlign: "left" }}>Letters, numbers, and hyphens only.</AuthHelperText>
+                                    <AuthPanel as="form" onSubmit={handleSubmit}>
+                                        <AuthLabel htmlFor="change-username-input" style={{ textAlign: "left" }}>New username</AuthLabel>
+                                        <InputRow $disabled={submitting}>
+                                            {!canChangeName && <InputPrefix>Anon-</InputPrefix>}
+                                            <InlineInput
+                                                id="change-username-input"
+                                                placeholder={
+                                                    !canChangeName && currentUsername.startsWith("Anon-")
+                                                        ? currentUsername.slice(5)
+                                                        : currentUsername || "New username"
+                                                }
+                                                value={usernameInput}
+                                                $hasPrefix={!canChangeName}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value;
+                                                    const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                                                    const maxLen = getMaxInputLength(!canChangeName);
+                                                    setUsernameInput(cleaned.slice(0, maxLen ?? 100));
+                                                    setSubmitError("");
+                                                }}
+                                                onKeyDown={async (e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.preventDefault();
+                                                        await handleSubmit(e);
+                                                    }
+                                                }}
+                                                onPaste={(e) => {
+                                                    e.preventDefault();
+                                                }}
+                                                maxLength={getMaxInputLength(!canChangeName) || 100}
+                                                disabled={submitting}
+                                                autoComplete="off"
+                                                autoCorrect="off"
+                                                autoCapitalize="off"
+                                                spellCheck="false"
+                                            />
+                                        </InputRow>
+                                        <AuthHelperText style={{ textAlign: "left" }}>Letters, numbers, and hyphens only.</AuthHelperText>
 
-                    {submitError ? (
-                      <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>
-                    ) : null}
+                                        {submitError ? (
+                                            <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>
+                                        ) : null}
 
-                    <AuthButtonRow>
-                      <PrimaryButton
-                        type="submit"
-                        disabled={
-                          submitting ||
-                          Date.now() < cooldownUntil ||
-                          usernameInput.trim() === ""
-                        }
-                        fullWidth
-                        mobileFullWidth
-                        size="sm"
-                        loading={submitting}
-                      >
-                        {buttonStatus === "checking"
-                          ? "Checking\u2026"
-                          : buttonStatus === "preparing"
-                            ? "Preparing\u2026"
-                            : buttonStatus === "submitting"
-                              ? "Submitting\u2026"
-                              : buttonStatus === "verifying"
-                                ? "Verifying\u2026"
-                                : "Change Username"}
-                      </PrimaryButton>
-                    </AuthButtonRow>
-                  </AuthPanel>
-                </>
-              )}
+                                        <AuthButtonRow>
+                                            <PrimaryButton
+                                                type="submit"
+                                                disabled={
+                                                    submitting ||
+                                                    Date.now() < cooldownUntil ||
+                                                    usernameInput.trim() === ""
+                                                }
+                                                fullWidth
+                                                mobileFullWidth
+                                                size="sm"
+                                                loading={submitting}
+                                            >
+                                                {buttonStatus === "checking"
+                                                    ? "Checking\u2026"
+                                                    : buttonStatus === "preparing"
+                                                        ? "Preparing\u2026"
+                                                        : buttonStatus === "submitting"
+                                                            ? "Submitting\u2026"
+                                                            : buttonStatus === "verifying"
+                                                                ? "Verifying\u2026"
+                                                                : "Change Username"}
+                                            </PrimaryButton>
+                                        </AuthButtonRow>
+                                    </AuthPanel>
+                                </>
+                            )}
 
-              {success && (
-                <AuthPanel style={{ textAlign: "center" }}>
-                  <SuccessIcon aria-hidden="true">✓</SuccessIcon>
-                  <SuccessTitle>Username Changed!</SuccessTitle>
-                  <SuccessText>Your new username is:</SuccessText>
-                  <SuccessHandle>
-                    {canChangeName ? usernameInput : "Anon-" + usernameInput}
-                  </SuccessHandle>
-                  <SuccessSubtext>Redirecting to profile…</SuccessSubtext>
-                </AuthPanel>
-              )}
-            </AuthStack>
-          </PageWrapper>
-        </ModernPostFeed>
-      </div>
-    </ContentGrid>
-  );
+                            {success && (
+                                <AuthPanel style={{ textAlign: "center" }}>
+                                    <SuccessIcon aria-hidden="true">✓</SuccessIcon>
+                                    <SuccessTitle>Username Changed!</SuccessTitle>
+                                    <SuccessText>Your new username is:</SuccessText>
+                                    <SuccessHandle>
+                                        {canChangeName ? usernameInput : "Anon-" + usernameInput}
+                                    </SuccessHandle>
+                                    <SuccessSubtext>Redirecting to profile…</SuccessSubtext>
+                                </AuthPanel>
+                            )}
+                        </AuthStack>
+                    </PageWrapper>
+                </ModernPostFeed>
+            </div>
+        </ContentGrid>
+    );
 }
 
 export default ChangeUsernameView;

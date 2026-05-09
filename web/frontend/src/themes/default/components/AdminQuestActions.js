@@ -476,7 +476,7 @@ export function useAdminQuestActions({ post, state, updatePost, onCloseMenu }) {
     }, [postId, updatePost]);
 
     // The admin section only shows for: logged-in admins viewing other
-    // people's posts on a quests-enabled node. Mirrors bluemoon.
+    // users' posts on a quests-enabled node. Mirrors bluemoon.
     const isAdminVisible = !!(
         isAdmin
         && safePost
