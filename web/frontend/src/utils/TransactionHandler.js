@@ -2568,15 +2568,24 @@ class TransactionHandler {
         }
 
         if (!hadFailure) {
+            // Show a single end-of-queue notification. For multi-tx queues, report
+            // the average elapsed time per transaction rather than firing a toast
+            // after every individual tx.
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            const processed = Math.max(1, this.processedTransactions || 1);
+            const totalElapsed = (Date.now() - this.startTime) / 1000;
             if (this.totalTransactions > 1) {
-                updateNotification("All transactions submitted");
+                if (userLevel >= 1) {
+                    updateNotification("All transactions submitted");
+                } else {
+                    const avg = (totalElapsed / processed).toFixed(1);
+                    updateNotification(`All transactions submitted (avg ${avg}s)`);
+                }
             } else {
-                const userLevel = Number(Storage.load('user_level', '0')) || 0;
                 if (userLevel >= 1) {
                     updateNotification("Transaction submitted");
                 } else {
-                    const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(1);
-                    updateNotification(`Transaction submitted (took ${elapsedTime}s)`);
+                    updateNotification(`Transaction submitted (took ${totalElapsed.toFixed(1)}s)`);
                 }
             }
             // Dispatch event for quest-relevant actions so quest progress can refresh
@@ -5070,7 +5079,9 @@ class TransactionHandler {
                 // For reports, success is determined by the response.success field
                 const success = (endpoint === 'core/report') ? (out && out.success === true) : !!txHash;
                 if (success) {
-                    updateNotification("Transaction submitted");
+                    // Per-tx "Transaction submitted" toast is intentionally suppressed here.
+                    // processTransactions() shows a single summary notification (with the
+                    // average elapsed time across the queue) once the queue is fully drained.
 
                     // For votes, poll for indexed details to show weight
                     if (endpoint === 'core/vote' && txHash) {
@@ -5753,7 +5764,6 @@ class TransactionHandler {
                 this._setStatus("submitting");
                 try {
                     await this.handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);
-                    updateNotification(hashesPerSec ? `Transaction submitted (${hashesPerSec} H/s)` : "Transaction submitted");
                 } finally {
                     this._setStatus("idle");
                 }

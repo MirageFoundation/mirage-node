@@ -17,6 +17,7 @@ import { normalizeTag } from "../../utils/ContentTags";
 import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
 import Storage from "../../utils/Storage";
 import { formatTimeStamp } from "../../logic/useViewPost";
+import { AWARD_TYPES } from "../../logic/usePostGifts";
 
 /**
  * ListFeedView (default) — mobile-app inspired feed list.
@@ -1300,6 +1301,19 @@ function CompactRow({ post, state, updatePost }) {
                         <>
                             <CompactHeaderDot>·</CompactHeaderDot>
                             <ContentTagBadge tag={normalizedTag} />
+                        </>
+                    )}
+                    {post?.awards?.length > 0 && (
+                        <>
+                            <CompactHeaderDot>·</CompactHeaderDot>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.7rem' }}>
+                                {post.awards.map(a => {
+                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                    if (!def) return null;
+                                    const cnt = Number(a.count || 0);
+                                    return <Tooltip key={a.type} data-tooltip={def.label} onClick={stop}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                })}
+                            </span>
                         </>
                     )}
                 </CompactHeader>

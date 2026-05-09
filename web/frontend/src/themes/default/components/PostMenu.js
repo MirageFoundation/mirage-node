@@ -381,7 +381,7 @@ export function MoreMenuChip({
      * we navigated to `/u/<handle>?action=<kind>`, which was jarring
      * mid-scroll). Matches the CardView behavior so both list and card
      * modes feel identical. */
-    const gifts = usePostGifts({ post });
+    const gifts = usePostGifts({ post, updatePost });
     const {
         handleGiveAward: giftGiveAwardOpen,
         handleGiftMirage: giftMirageOpen,

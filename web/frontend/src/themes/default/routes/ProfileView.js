@@ -22,6 +22,8 @@ import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import Api from "../../../utils/api";
+import Tooltip from "../components/Tooltip.js";
+import { AWARD_TYPES } from "../../../logic/usePostGifts";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -430,7 +432,7 @@ const Avatar = ({ $size, src: _src, ...rest }) => (
     <UserAvatar
         size={$size || 64}
         shape="rounded"
-        paddingRatio={0.15}
+        paddingRatio={0}
         {...rest}
     />
 );
@@ -1452,6 +1454,19 @@ function ProfileCommentRow({ post }) {
                 </CommentUserLink>
                 <CommentDot>·</CommentDot>
                 <CommentTime>{formatCommentAge(ts)}</CommentTime>
+                {Array.isArray(post?.awards) && post.awards.length > 0 && (
+                    <>
+                        <CommentDot>·</CommentDot>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.7rem' }} onClick={e => e.stopPropagation()}>
+                            {post.awards.map(a => {
+                                const def = AWARD_TYPES.find(t => t.name === a.type);
+                                if (!def) return null;
+                                const cnt = Number(a.count || 0);
+                                return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                            })}
+                        </span>
+                    </>
+                )}
             </CommentHeader>
             <CommentBody onClick={e => e.stopPropagation()}>
                 <MarkdownRenderer text={fullBody} />
@@ -1855,6 +1870,21 @@ function ProfileViewAuthenticated({
                                             </GiftMirageBtn>
                                         </HideOnMobile>
                                     )}
+                                    {isOwnProfile && userLevel === 0 && (() => {
+                                        const insufficient = subFeeUmirage != null && Number(balance) < Number(subFeeUmirage);
+                                        return (
+                                            <Button
+                                                size="sm"
+                                                variant="subtle"
+                                                mobileFullWidth
+                                                disabled={insufficient}
+                                                onClick={() => navigate('/subscription')}
+                                                title={insufficient ? 'Insufficient balance to upgrade' : undefined}
+                                            >
+                                                {insufficient ? 'Insufficient Funds' : 'Upgrade'}
+                                            </Button>
+                                        );
+                                    })()}
                                 </ProfileFieldValue>
                             </ProfileFieldRow>
                             {/* Gift Subscription confirmation moved to a root-level
@@ -1990,16 +2020,13 @@ function ProfileViewAuthenticated({
                                         }}>
                                             {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
                                         </Mono>
-                                        {isOwnProfile && canHaveBiography && <IconActionButton type="button" onClick={() => {
+                                        {isOwnProfile && <IconActionButton type="button" onClick={() => {
                                             setBioDraft(biography);
                                             setBioEditing(true);
                                             setBioError('');
                                         }} title={biography ? 'Edit biography' : 'Add biography'} aria-label={biography ? 'Edit biography' : 'Add biography'}>
                                             <HiPencilSquare aria-hidden="true" />
                                         </IconActionButton>}
-                                        {isOwnProfile && !canHaveBiography && <Button size="sm" variant="subtle" mobileFullWidth onClick={() => navigate('/subscription')}>
-                                            Upgrade
-                                        </Button>}
                                     </ProfileFieldValue>}
                                 </ProfileFieldValuePlain>
                             </ProfileFieldRow>

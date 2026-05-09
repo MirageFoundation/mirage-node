@@ -163,6 +163,18 @@ const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX = 23;
 const COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE = 19;
 const COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE = 21;
 
+/* Y of the avatar's BOTTOM edge for each (collapsed/expanded, viewport)
+ * pair. The own-spine (`&::after` on `CommentCard`) starts here rather
+ * than at the avatar's center, so the thread line never bleeds through
+ * transparent regions of the identicon glyph (most visible in light
+ * theme where `UserAvatar`'s wrapper bg is transparent). The J-curve
+ * elbow still terminates at the avatar's left-center, so the visual
+ * "delivery" into the avatar is unchanged. */
+const COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX = COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX + COMMENT_AVATAR_SIZE_PX / 2;
+const COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX = COMMENT_AVATAR_CENTER_Y_EXPANDED_PX + COMMENT_AVATAR_SIZE_PX / 2;
+const COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX_MOBILE = COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE + COMMENT_AVATAR_SIZE_PX_MOBILE / 2;
+const COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX_MOBILE = COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE + COMMENT_AVATAR_SIZE_PX_MOBILE / 2;
+
 function commentAvatarLeftPx(level, baseLeft, indent) {
     const lvl = Math.max(Number(level) || 0, 1);
     return baseLeft + (lvl - 1) * indent;
@@ -269,20 +281,23 @@ const CommentCard = styled(PostCard)`
         `;
     }}
 
-    /* Own spine: drops from this comment's avatar center to the card
-     * bottom so descendants can continue the thread. Only drawn when
-     * this comment actually has children. */
+    /* Own spine: drops from this comment's avatar BOTTOM edge to the
+     * card bottom so descendants can continue the thread. Starting at
+     * the avatar's bottom (instead of its center) keeps the rail from
+     * bleeding through transparent regions of the identicon glyph in
+     * light theme, where the avatar wrapper bg is transparent. Only
+     * drawn when this comment actually has children. */
     &::after {
         content: '';
         position: absolute;
         display: ${({ $level, $hasChildren, $isCollapsed }) => (Number($level) > 0 && $hasChildren && !$isCollapsed ? 'block' : 'none')};
         top: ${({ $isCollapsed }) =>
-            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px;
+            ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX)}px;
         left: ${({ $level }) =>
             `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`};
         width: ${COMMENT_RAIL_WIDTH_PX}px;
         height: calc(100% - ${({ $isCollapsed }) =>
-            ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX)}px);
+            ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX)}px);
         background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         pointer-events: none;
     }
@@ -347,9 +362,9 @@ const CommentCard = styled(PostCard)`
             left: ${({ $level }) =>
                 `${commentAvatarLeftPx($level, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`};
             top: ${({ $isCollapsed }) =>
-                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px;
+                ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX_MOBILE)}px;
             height: calc(100% - ${({ $isCollapsed }) =>
-                ($isCollapsed ? COMMENT_AVATAR_CENTER_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_CENTER_Y_EXPANDED_PX_MOBILE)}px);
+                ($isCollapsed ? COMMENT_AVATAR_BOTTOM_Y_COLLAPSED_PX_MOBILE : COMMENT_AVATAR_BOTTOM_Y_EXPANDED_PX_MOBILE)}px);
         }
         &::before {
             left: ${({ $level }) =>
@@ -401,6 +416,17 @@ const CommentAvatar = styled(UserAvatar)`
     pointer-events: none;
     position: relative;
     z-index: 2;
+
+    /* In light theme the shared UserAvatar wrapper is transparent, so
+     * the comment thread spine (drawn behind the avatar) shows through
+     * the identicon's negative space. Force an opaque page-bg fill on
+     * the comment-row avatar specifically so the spine is hidden behind
+     * the chip — matching the dark-theme behavior — without changing
+     * any other avatar surface. */
+    ${({ theme }) =>
+        theme.name === 'light'
+            ? `background: ${theme.colors.bg} !important;`
+            : ''}
 
     @media (max-width: 1000px) {
         margin-left: ${-(COMMENT_AVATAR_SIZE_PX_MOBILE + COMMENT_CONTENT_GAP_PX_MOBILE)}px;
@@ -3444,7 +3470,7 @@ function ViewPostView({
                                 ...prev,
                                 [post.post_id]: progress ?? undefined
                             }));
-                        }} suffixLabel={limits.willPayFee ? '(paid tier)' : '(free tier)'} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
+                        }} suffixLabel={limits.unlimited ? '(admin)' : (limits.willPayFee ? '(paid tier)' : '(free tier)')} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
                     </div>
                     <ReplyActionsRow>
                         <div style={{
@@ -3455,8 +3481,8 @@ function ViewPostView({
                             flex: '1 1 auto',
                             alignSelf: 'flex-start'
                         }}>
-                            <ReplyCounter $warn={replyText.length >= limits.maxContent}>
-                                {replyText.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
+                            <ReplyCounter $warn={!limits.unlimited && replyText.length >= limits.maxContent}>
+                                {limits.unlimited ? `${replyText.length} / unlimited (admin)` : `${replyText.length} / ${limits.maxContent} ${limits.willPayFee ? '(paid tier)' : '(free tier)'}`}
                             </ReplyCounter>
                         </div>
                         <StyledSubmitButtonContainer>
@@ -3780,6 +3806,22 @@ function ViewPostView({
                                                     <ContentTagBadge tag={tagLabel} size="md" />
                                                 </> : null;
                                             })()}
+                                            {post?.awards?.length > 0 && <>
+                                                <MetaSeparator>·</MetaSeparator>
+                                                <span style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.1rem',
+                                                    fontSize: '0.6rem'
+                                                }}>
+                                                    {post.awards.map(a => {
+                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
+                                                        if (!def) return null;
+                                                        const cnt = Number(a.count || 0);
+                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                                    })}
+                                                </span>
+                                            </>}
                                             {/* Collapse/expand chevron for comments — rendered AFTER the
                                               * content-warning tag so the chevron sits to the right of the
                                               * tag badge rather than between the timestamp and the tag. */}
@@ -3800,22 +3842,6 @@ function ViewPostView({
                                                 }}>
                                                     edited {formatElapsed(post.edited_ts)} ago
                                                 </Tooltip>
-                                            </>}
-                                            {post?.awards?.length > 0 && <>
-                                                <MetaSeparator>·</MetaSeparator>
-                                                <span style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.1rem',
-                                                    fontSize: '0.6rem'
-                                                }}>
-                                                    {post.awards.map(a => {
-                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
-                                                        if (!def) return null;
-                                                        const cnt = Number(a.count || 0);
-                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
-                                                    })}
-                                                </span>
                                             </>}
                                             {post.agent_edited && <>
                                                 <MetaSeparator>·</MetaSeparator>

@@ -527,16 +527,25 @@ export function useViewPost({
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
             const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
-            const tier = tiers[tierIndex] || {};
+            const isAdmin = userLevel >= 100;
+            const tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
+            let maxContent = parseInt(tier.max_content_length) || 0;
+            if (isAdmin) {
+                maxContent = Number.MAX_SAFE_INTEGER;
+            } else if (!maxContent) {
+                maxContent = 1000;
+            }
             return {
-                maxContent: parseInt(tier.max_content_length) || 1000,
-                willPayFee: userLevel >= 1
+                maxContent,
+                willPayFee: userLevel >= 1,
+                unlimited: isAdmin
             };
         } catch (e) {
             console.error('[ViewPostView] Error calculating limits:', e);
             return {
                 maxContent: 1000,
-                willPayFee: false
+                willPayFee: false,
+                unlimited: false
             };
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1403,6 +1412,29 @@ export function useViewPost({
         setConfirmAward({
             postId
         });
+        // Ensure the award_configs are available so the dialog doesn't
+        // get stuck on "Loading…" — happens when the user lands on this
+        // view via a deep link (e.g. profile → post) before App.js'
+        // bootstrap fetch finished, or when that boot fetch returned an
+        // empty payload. Mirrors the inline fetch used by `usePostGifts`.
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            const hasAwards = Array.isArray(cfg?.award_configs) && cfg.award_configs.length > 0;
+            if (!hasAwards) {
+                Api.get('get_chain_config', undefined)
+                    .then(fetched => {
+                        if (fetched && typeof fetched === 'object') {
+                            try { tx.cacheChainConfig(fetched); } catch (_) { }
+                        } else {
+                            try { tx.releaseChainConfigClaim && tx.releaseChainConfigClaim(); } catch (_) { }
+                        }
+                    })
+                    .catch(() => {
+                        try { tx.releaseChainConfigClaim && tx.releaseChainConfigClaim(); } catch (_) { }
+                    });
+            }
+        } catch (_) { /* noop */ }
         setTimeout(() => {
             const el = document.getElementById(`comment-${postId.toLowerCase()}`);
             if (el) el.scrollIntoView({

@@ -62,8 +62,8 @@ const PlaceholderRoot = styled.div`
 `;
 
 const AvatarImg = styled.img`
-    width: 60%;
-    height: 60%;
+    width: 100%;
+    height: 100%;
     display: block;
     object-fit: contain;
     background: transparent;

@@ -50,7 +50,7 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  */
 
 const DEFAULT_ROUNDED_RADIUS_PX = 4;
-const DEFAULT_PADDING_RATIO = 0.2;
+const DEFAULT_PADDING_RATIO = 0;
 
 const Wrapper = styled.span`
     display: inline-flex;

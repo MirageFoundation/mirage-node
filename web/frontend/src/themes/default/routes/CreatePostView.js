@@ -94,51 +94,6 @@ const Field = styled.div`
 `;
 
 /* -------------------------------------------------------------------------- */
-/* Tabs (Text / Images & Video / Link)                                        */
-/* -------------------------------------------------------------------------- */
-
-const TabsRow = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-`;
-
-const TabButton = styled.button`
-    position: relative;
-    background: transparent;
-    border: none;
-    padding: 0.4rem 0;
-    margin: 0;
-    font-family: inherit;
-    font-size: 0.75rem;
-    font-weight: ${({ $active }) => ($active ? 600 : 500)};
-    line-height: 1.2;
-    cursor: pointer;
-    color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.subtleText)};
-    transition: color 0.15s ease;
-
-    &:hover:not(:disabled) { color: ${({ theme }) => theme.colors.text}; }
-
-    &:disabled { cursor: not-allowed; opacity: 0.5; }
-
-    &::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: -1px;
-        height: 2px;
-        border-radius: 2px;
-        background: ${({ $active, theme }) => ($active ? theme.colors.focusBlue : 'transparent')};
-        transition: background 0.15s ease;
-    }
-
-    &:focus { outline: none; }
-    &:focus-visible::after { background: ${({ theme }) => theme.colors.borderStrong}; }
-`;
-
-/* -------------------------------------------------------------------------- */
 /* Title / Link inputs — floating-label shell                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -556,8 +511,8 @@ const CarouselTile = styled.div`
     border-radius: 18px;
     background: transparent;
     min-height: ${({ $hasMedia, $loading }) => {
-        if ($loading) return '16rem';
-        return $hasMedia ? '14rem' : '11rem';
+        if ($loading) return '14rem';
+        return $hasMedia ? '12rem' : '9rem';
     }};
     display: flex;
     flex-direction: ${({ $hasMedia }) => ($hasMedia ? 'column' : 'row')};
@@ -932,12 +887,6 @@ const ComposerColumn = styled.div`
     }
 `;
 
-const TABS = [
-    { id: 'text', label: 'Text' },
-    { id: 'media', label: 'Images & Video' },
-    { id: 'link', label: 'Link' },
-];
-
 /* -------------------------------------------------------------------------- */
 /* Component                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -1021,7 +970,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         handleSubmit,
     } = useCreatePost({ state, setPosts, updatePost });
 
-    const [activeTab, setActiveTab] = useState('text');
     const [linkUrl, setLinkUrl] = useState('');
     const [slideIndex, setSlideIndex] = useState(0);
     const [topicIsNew, setTopicIsNew] = useState(false);
@@ -1034,7 +982,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         handleTopicChange(e);
     };
 
-    const tierLabel = limits.willPayFee ? 'paid tier' : 'basic tier';
+    const tierLabel = limits.unlimited ? 'admin' : (limits.willPayFee ? 'paid tier' : 'free tier');
 
     const submitLabel = isSubmitting
         ? submitStatus === 'verifying'
@@ -1086,9 +1034,9 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         if (isSubmitting || isUploading) return false;
         if (!topicValue || topicValue.length < (limits.minTopic || 1)) return false;
         if (!titleValid) return false;
-        if (activeTab === 'link' && !linkValid) return false;
+        if (linkUrl.trim() && !linkValid) return false;
         return true;
-    }, [isSubmitting, isUploading, topicValue, limits.minTopic, titleValid, activeTab, linkValid]);
+    }, [isSubmitting, isUploading, topicValue, limits.minTopic, titleValid, linkUrl, linkValid]);
 
     const activeMedia = attachedMedia[Math.min(slideIndex, Math.max(0, attachedMedia.length - 1))];
     const canPrev = attachedMedia.length > 1 && slideIndex > 0;
@@ -1139,7 +1087,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
             setGlobalDragging(false);
             if (editorUpload && typeof editorUpload.uploadFile === 'function') {
                 editorUpload.uploadFile(files[0]);
-                setActiveTab('media');
             }
         } catch (_) { /* noop */ }
     };
@@ -1158,7 +1105,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     };
 
     const handleWrappedSubmit = e => {
-        if (activeTab === 'link' && linkValid && !contentValue) {
+        if (linkUrl.trim() && linkValid && !contentValue) {
             setContentValue(linkUrl);
         }
         return handleSubmit(e);
@@ -1234,22 +1181,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                 </NewTopicNote>
                             )}
 
-                            <TabsRow role="tablist">
-                                {TABS.map(t => (
-                                    <TabButton
-                                        key={t.id}
-                                        type="button"
-                                        role="tab"
-                                        aria-selected={activeTab === t.id}
-                                        $active={activeTab === t.id}
-                                        onClick={() => setActiveTab(t.id)}
-                                        disabled={isSubmitting}
-                                    >
-                                        {t.label}
-                                    </TabButton>
-                                ))}
-                            </TabsRow>
-
                             <Field>
                                 <InputShell>
                                     <FloatLabel htmlFor="title">Title</FloatLabel>
@@ -1282,8 +1213,8 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                             </svg>
                                         </ValidCheck>
                                     )}
-                                    <Counter $warn={getByteLength(titleValue) >= limits.maxTitle}>
-                                        ({tierLabel}) {getByteLength(titleValue)}/{limits.maxTitle}
+                                    <Counter $warn={!limits.unlimited && getByteLength(titleValue) >= limits.maxTitle}>
+                                        ({tierLabel}) {limits.unlimited ? `${getByteLength(titleValue)} / unlimited` : `${getByteLength(titleValue)}/${limits.maxTitle}`}
                                     </Counter>
                                 </InputShell>
                             </Field>
@@ -1352,10 +1283,10 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                             renderHelperRow={false}
                                             toolbarButtonSize="1.6rem"
                                             toolbarIconSize="0.9rem"
-                                            minHeight="11rem"
+                                            minHeight="6rem"
                                             registerUploadHandler={setEditorUpload}
                                             editorRef={ref => { contentEditorRef.current = ref; }}
-                                            belowElement={submitError && activeTab === 'text' ? <ErrorMessage role="alert">{submitError}</ErrorMessage> : null}
+                                            belowElement={submitError ? <ErrorMessage role="alert">{submitError}</ErrorMessage> : null}
                                             onMediaUploaded={(type, url, error) => {
                                                 if (error) {
                                                     if (errorClearTimeoutRef.current) {
@@ -1383,7 +1314,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                     }, 5000);
                                                 } else {
                                                     addMediaItem(type, url);
-                                                    if (activeTab !== 'text') setActiveTab('media');
                                                 }
                                             }}
                                             onUploadStateChange={uploading => {
@@ -1395,14 +1325,13 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                     </EditorShell>
                                 </Field>
                                 <ContentCounterRow>
-                                    <ContentCounter $warn={contentValue.length >= limits.maxContent}>
-                                        ({tierLabel}) {contentValue.length}/{limits.maxContent}
+                                    <ContentCounter $warn={!limits.unlimited && contentValue.length >= limits.maxContent}>
+                                        ({tierLabel}) {limits.unlimited ? `${contentValue.length} / unlimited` : `${contentValue.length}/${limits.maxContent}`}
                                     </ContentCounter>
                                 </ContentCounterRow>
                             </EditorMount>
 
-                            {activeTab === 'media' && (
-                                <Field>
+                            <Field>
                                     {(() => {
                                         const activeUrl = activeMedia?.url;
                                         const activeLoading = !!(activeUrl && thumbsLoading && thumbsLoading.has(activeUrl));
@@ -1535,7 +1464,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                     </CarouselTile>
                                         );
                                     })()}
-                                    {submitError && <ErrorMessage role="alert">{submitError}</ErrorMessage>}
                                     <MediaToolbar>
                                         <MediaRow>
                                             <StickerPicker
@@ -1554,11 +1482,9 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                             />
                                         </MediaRow>
                                     </MediaToolbar>
-                                </Field>
-                            )}
+                            </Field>
 
-                            {activeTab === 'link' && (
-                                <Field>
+                            <Field>
                                     <InputShell>
                                         <FloatLabel htmlFor="link-url">Link URL</FloatLabel>
                                         <ShellInput
@@ -1566,7 +1492,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                             name="link-url"
                                             type="url"
                                             value={linkUrl}
-                                            placeholder="Link URL"
+                                            placeholder="Link URL (optional)"
                                             autoComplete="off"
                                             spellCheck={false}
                                             onChange={e => setLinkUrl(e.target.value)}
@@ -1581,12 +1507,11 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                             </ValidCheck>
                                         )}
                                     </InputShell>
-                                    {linkValidation.error && (
+                                    {linkUrl.trim() && linkValidation.error && (
                                         <FieldError role="alert">{linkValidation.error}</FieldError>
                                     )}
                                     {submitError && <ErrorMessage role="alert">{submitError}</ErrorMessage>}
-                                </Field>
-                            )}
+                            </Field>
 
                             <BottomBar>
                                 <span aria-hidden="true" />
