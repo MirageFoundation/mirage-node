@@ -1,0 +1,16 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgMintTokens",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "target": "mirage1venw2fdw8wx8mux4gglqjctwwttvw6f2y04qhw",
+            "amount": "50000000000000",
+            "reason": "Mint 50M MIRAGE"
+        }
+    ],
+    "metadata": "",
+    "deposit": "1000000000000umirage",
+    "title": "Mint 50M MIRAGE",
+    "summary": "Mint 50,000,000 MIRAGE to mirage1venw2fdw8wx8mux4gglqjctwwttvw6f2y04qhw.",
+    "expedited": true
+}

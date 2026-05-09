@@ -262,6 +262,111 @@ def test_params(backend: str):
 
 
 # =========================================================================
+# Category 1b: Bootstrap (combined first-paint endpoint)
+# =========================================================================
+
+
+def test_bootstrap(backend: str):
+    """Verify /api/bootstrap returns the expected sections for both anonymous
+    and logged-in callers, with shapes matching the per-endpoint routes."""
+
+    # ----- Anonymous: only node_config populated -----
+    code, body = _get(f"{backend}/api/bootstrap")
+    if code == 200 and isinstance(body, dict):
+        _pass("bootstrap.anonymous returns 200")
+    else:
+        _fail("bootstrap.anonymous returns 200", f"code={code}")
+        return
+
+    expected_keys = {"node_config", "user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary"}
+    missing = expected_keys - set(body.keys())
+    if not missing:
+        _pass("bootstrap.anonymous has all 6 keys")
+    else:
+        _fail("bootstrap.anonymous has all 6 keys", f"missing={sorted(missing)}")
+
+    nc = body.get("node_config")
+    if isinstance(nc, dict) and nc.get("validator_account_address"):
+        _pass("bootstrap.anonymous node_config valid")
+    else:
+        _fail("bootstrap.anonymous node_config valid", f"got={type(nc).__name__}")
+
+    user_sections = {k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary")}
+    if all(v is None for v in user_sections.values()):
+        _pass("bootstrap.anonymous user_* sections are null")
+    else:
+        _fail(
+            "bootstrap.anonymous user_* sections are null",
+            f"non_null={[k for k, v in user_sections.items() if v is not None]}",
+        )
+
+    # ----- Logged-in: all sections populated and shapes match per-endpoint -----
+    wallet = WALLETS.get("free")
+    if not wallet:
+        _skip("bootstrap.logged_in", "free wallet not available")
+        return
+    addr = str(wallet.address())
+
+    code2, body2 = _get(f"{backend}/api/bootstrap", {"address": addr})
+    if code2 == 200 and isinstance(body2, dict):
+        _pass("bootstrap.logged_in returns 200")
+    else:
+        _fail("bootstrap.logged_in returns 200", f"code={code2}")
+        return
+
+    nc2 = body2.get("node_config")
+    if isinstance(nc2, dict) and nc2.get("validator_account_address"):
+        _pass("bootstrap.logged_in node_config valid")
+    else:
+        _fail("bootstrap.logged_in node_config valid", f"got={type(nc2).__name__}")
+
+    us = body2.get("user_status")
+    if isinstance(us, dict) and "balance" in us and "user_level" in us:
+        _pass("bootstrap.logged_in user_status valid")
+    else:
+        _fail("bootstrap.logged_in user_status valid", f"got_keys={list((us or {}).keys())[:8]}")
+
+    uf = body2.get("user_followed")
+    if isinstance(uf, dict) and {"enabled_agents", "followed_topics", "followed_users"} <= set(uf.keys()):
+        _pass("bootstrap.logged_in user_followed valid")
+    else:
+        _fail("bootstrap.logged_in user_followed valid", f"got_keys={list((uf or {}).keys())[:8]}")
+
+    ub = body2.get("user_blocked")
+    if isinstance(ub, dict) and {"blocked_posts", "blocked_users", "blocked_topics"} <= set(ub.keys()):
+        _pass("bootstrap.logged_in user_blocked valid")
+    else:
+        _fail("bootstrap.logged_in user_blocked valid", f"got_keys={list((ub or {}).keys())[:8]}")
+
+    ic = body2.get("invite_codes")
+    if isinstance(ic, dict) and "codes" in ic and "total" in ic and "available" in ic:
+        _pass("bootstrap.logged_in invite_codes valid")
+    else:
+        _fail("bootstrap.logged_in invite_codes valid", f"got_keys={list((ic or {}).keys())[:8]}")
+
+    # rewards_summary may be the disabled stub if QUESTS_ENABLED=false.
+    rs = body2.get("rewards_summary")
+    if isinstance(rs, dict) and "daily_quests" in rs and "pending_rewards" in rs:
+        _pass("bootstrap.logged_in rewards_summary valid")
+    else:
+        _fail("bootstrap.logged_in rewards_summary valid", f"got_keys={list((rs or {}).keys())[:8]}")
+
+    # ----- Cross-check: per-endpoint /api/get_user_followed shape matches the bootstrap section -----
+    code3, ufp = _get(f"{backend}/api/get_user_followed", {"address": addr})
+    if code3 == 200 and isinstance(ufp, dict):
+        # bootstrap section omits the injected balance, so compare lists only.
+        for k in ("enabled_agents", "followed_topics", "followed_users"):
+            if (uf or {}).get(k, []) == ufp.get(k, []):
+                continue
+            _fail(f"bootstrap.user_followed.{k} matches per-endpoint", "lists differ")
+            break
+        else:
+            _pass("bootstrap.user_followed matches per-endpoint")
+    else:
+        _fail("bootstrap.user_followed matches per-endpoint", f"per-endpoint code={code3}")
+
+
+# =========================================================================
 # Category 2: Account & Username
 # =========================================================================
 

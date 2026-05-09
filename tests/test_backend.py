@@ -17,6 +17,7 @@ if REPO_ROOT not in sys.path:
 from tests.common import run_suite
 from tests.cases.test_backend_infra import (
     test_params,
+    test_bootstrap,
     test_search,
     test_reports,
     test_tx_status,
@@ -35,6 +36,7 @@ from tests.cases.test_backend_content import (
     test_edit_target_immutability,
     test_seen_posts,
     test_image_impressions,
+    test_recent_content,
 )
 from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
 from tests.cases.test_backend_tokens import test_pow, test_tokens
@@ -52,6 +54,7 @@ from tests.cases.test_backend_indexer import test_indexer, test_tx_index
 
 ALL_CATEGORIES = {
     "params": test_params,
+    "bootstrap": test_bootstrap,
     "account": test_account,
     "post": test_post_lifecycle,
     "comments": test_comments,
@@ -89,10 +92,12 @@ ALL_CATEGORIES = {
     "subscribe_gift_agent": test_subscribe_gift_agent,
     "seen_posts": test_seen_posts,
     "image_impressions": test_image_impressions,
+    "recent_content": test_recent_content,
 }
 
 STATELESS_CATEGORIES = {
     "params",
+    "bootstrap",
     "search",
     "tier_config_api",
     "image_impressions",

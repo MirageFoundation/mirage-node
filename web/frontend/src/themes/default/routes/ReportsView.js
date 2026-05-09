@@ -17,6 +17,8 @@ import {
     TabbedContainer,
     ContainerBody,
 } from "../Layout";
+import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
+import FeedRightRail from "../components/FeedRightRail.js";
 import { useReports } from "../../../logic/useReports";
 
 /**
@@ -28,6 +30,11 @@ import { useReports } from "../../../logic/useReports";
  *  - R3 rows divided by `1px solid theme.colors.border`.
  *  - R4 data parity with `themes/bluemoon/routes/ReportsView.js`.
  *  - R7 row title 0.78rem/600, meta 0.62rem/500 subtleText.
+ *
+ * Shell structure mirrors `InboxView` / `FollowsView` / `BlocksView` /
+ * `AgentsView`: `FeedRailRow` + `FeedCol` + `FeedRightRail` so the page
+ * keeps the standard right rail and responsive width bumps every other
+ * list route in the theme uses.
  */
 
 const ReportsWrap = styled.div`
@@ -39,11 +46,12 @@ const ReportsWrap = styled.div`
         margin-top: -0.5rem;
     }
 
-    @media (min-width: 1001px) {
-        [data-sidebar-hidden='true'] & {
-            width: 80%;
-            max-width: none;
-        }
+    @media (min-width: 1500px) {
+        max-width: 960px;
+    }
+
+    @media (min-width: 1900px) {
+        max-width: 1200px;
     }
 `;
 
@@ -327,27 +335,30 @@ export default function ReportsView({ state }) {
             <Helmet>
                 <title>Reports | Mirage</title>
             </Helmet>
-            <div>
-                <ModernPostFeed>
-                    <TabbedContainer>
-                        <ContainerBody $fullWidth>
-                            <ReportsWrap>
-                                {loadingHeader ? (
-                                    <PageHeaderSkeleton showSubtitle={false} titleWidth="30%" />
-                                ) : (
-                                    <HeaderRow>
-                                        <HeaderTitle>Reports</HeaderTitle>
-                                        {typeof titleCount === 'number' && (
-                                            <HeaderCount>({titleCount})</HeaderCount>
-                                        )}
-                                    </HeaderRow>
-                                )}
-                                {body}
-                            </ReportsWrap>
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
+            <FeedRailRow $feedViewMode="card">
+                <FeedCol>
+                    <ModernPostFeed>
+                        <TabbedContainer>
+                            <ContainerBody $fullWidth>
+                                <ReportsWrap>
+                                    {loadingHeader ? (
+                                        <PageHeaderSkeleton showSubtitle={false} titleWidth="30%" />
+                                    ) : (
+                                        <HeaderRow>
+                                            <HeaderTitle>Reports</HeaderTitle>
+                                            {typeof titleCount === 'number' && (
+                                                <HeaderCount>({titleCount})</HeaderCount>
+                                            )}
+                                        </HeaderRow>
+                                    )}
+                                    {body}
+                                </ReportsWrap>
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </FeedCol>
+                <FeedRightRail />
+            </FeedRailRow>
         </ContentGrid>
     );
 

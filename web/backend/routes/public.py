@@ -12,6 +12,8 @@ Endpoints:
 - GET /api/get_posts: List recent posts with aggregates.
 - GET /api/get_user_posts: List recent posts for a specific owner.
 - GET /api/get_comments: Root post and nested comments tree.
+- GET /api/get_recent_content: Combined chronological stream of recent posts and comments
+  (raw, no viewer-specific filtering) for external bot scanning.
 """
 
 import bisect
@@ -3170,6 +3172,106 @@ def get_parameters():
         return safe_error(e)
 
 
+def _build_user_status(addr: str) -> dict:
+    """Pure helper: build the user-status payload for a given address.
+
+    Caller must ensure addr is non-empty and the node is not catching up.
+    Used by both /api/get_user_status and the consolidated /api/bootstrap route.
+    """
+    username = None
+    user_level = 0
+    profile_registered_at = None
+    subscription_expiry = 0
+    auto_renew = False
+    reserve_funds = 0
+    inbox_last_viewed_at = 0
+    referral_precheck_enabled = False
+
+    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT username, level, created_at, subscription_expiry FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+            (addr,),
+        )
+        row = cur.fetchone()
+        if row:
+            username = row[0] if row[0] else None
+            user_level = int(row[1]) if row[1] is not None else 0
+            profile_registered_at = int(row[2]) if row[2] is not None else None
+            subscription_expiry = int(row[3]) if row[3] is not None else 0
+
+    addr_lower = addr.lower()
+    with connect_backend_db() as conn_ib:
+        cur_ib = conn_ib.cursor()
+        cur_ib.execute(
+            "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+            (addr_lower,),
+        )
+        row_ib = cur_ib.fetchone()
+        if row_ib and row_ib[0] is not None:
+            inbox_last_viewed_at = int(row_ib[0])
+        cur_ib.execute(
+            "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
+            (addr_lower,),
+        )
+        row_ref = cur_ib.fetchone()
+        if row_ref and row_ref[0] is not None:
+            referral_precheck_enabled = bool(row_ref[0])
+
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn2:
+        cur2 = conn2.cursor()
+        cur2.execute(
+            "SELECT auto_renew, reserve_funds FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+            (addr,),
+        )
+        row2 = cur2.fetchone()
+        if row2:
+            auto_renew = bool(row2[0]) if row2[0] is not None else False
+            reserve_funds = int(row2[1]) if row2[1] is not None else 0
+
+    balance = int(_get_balance(addr))
+
+    recent_votes: list = []
+    try:
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT target, user_vote, created_at
+            FROM votes
+            WHERE LOWER(owner) = LOWER(%s)
+            ORDER BY created_at DESC
+            LIMIT 100
+            """,
+            (addr,),
+        )
+        for tgt, user_vote, ts in cur.fetchall():
+            if tgt is not None:
+                recent_votes.append(
+                    {
+                        "target": str(tgt).lower(),
+                        "direction": int(user_vote or 0),
+                        "timestamp": int(ts or 0),
+                    }
+                )
+        conn.close()
+    except Exception:
+        pass
+
+    return {
+        "username": username,
+        "balance": balance,
+        "user_level": user_level,
+        "subscription_expiry": subscription_expiry,
+        "auto_renew": auto_renew,
+        "reserve_funds": reserve_funds,
+        "profile_registered_at": profile_registered_at,
+        "recent_votes": recent_votes,
+        "inbox_last_viewed_at": inbox_last_viewed_at,
+        "referral_precheck_enabled": referral_precheck_enabled,
+    }
+
+
 @public_bp.route("/api/get_user_status")
 def get_user_status():
     """Get user-specific dynamic data (balance, level, subscription info)."""
@@ -3181,109 +3283,49 @@ def get_user_status():
             return jsonify({"error": "address required"}), 400
         if _is_catching_up():
             return api_error_code("node_catching_up", 503)
-
-        username = None
-        user_level = 0
-        profile_registered_at = None
-        subscription_expiry = 0
-        auto_renew = False
-        reserve_funds = 0
-        inbox_last_viewed_at = 0
-        referral_precheck_enabled = False
-
-        # Query DB for profile
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT username, level, created_at, subscription_expiry FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
-                (addr,),
-            )
-            row = cur.fetchone()
-            if row:
-                username = row[0] if row[0] else None
-                user_level = int(row[1]) if row[1] is not None else 0
-                profile_registered_at = int(row[2]) if row[2] is not None else None
-                subscription_expiry = int(row[3]) if row[3] is not None else 0
-
-        addr_lower = addr.lower()
-        with connect_backend_db() as conn_ib:
-            cur_ib = conn_ib.cursor()
-            cur_ib.execute(
-                "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
-                (addr_lower,),
-            )
-            row_ib = cur_ib.fetchone()
-            if row_ib and row_ib[0] is not None:
-                inbox_last_viewed_at = int(row_ib[0])
-            cur_ib.execute(
-                "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
-                (addr_lower,),
-            )
-            row_ref = cur_ib.fetchone()
-            if row_ref and row_ref[0] is not None:
-                referral_precheck_enabled = bool(row_ref[0])
-
-        # Read subscription data from indexer DB (auto_renew, reserve_funds)
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn2:
-            cur2 = conn2.cursor()
-            cur2.execute(
-                "SELECT auto_renew, reserve_funds FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
-                (addr,),
-            )
-            row2 = cur2.fetchone()
-            if row2:
-                auto_renew = bool(row2[0]) if row2[0] is not None else False
-                reserve_funds = int(row2[1]) if row2[1] is not None else 0
-
-        # Get balance
-        balance = int(_get_balance(addr))
-
-        # Get recent votes (limit 100 for login sync) and inbox timestamp
-        recent_votes = []
-        inbox_ts = None
-        try:
-            conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT target, user_vote, created_at
-                FROM votes
-                WHERE LOWER(owner) = LOWER(%s)
-                ORDER BY created_at DESC
-                LIMIT 100
-                """,
-                (addr,),
-            )
-            for tgt, user_vote, ts in cur.fetchall():
-                if tgt is not None:
-                    recent_votes.append(
-                        {
-                            "target": str(tgt).lower(),
-                            "direction": int(user_vote or 0),
-                            "timestamp": int(ts or 0),
-                        }
-                    )
-            conn.close()
-        except Exception:
-            pass
-
-        resp = {
-            "username": username,
-            "balance": balance,
-            "user_level": user_level,
-            "subscription_expiry": subscription_expiry,
-            "auto_renew": auto_renew,
-            "reserve_funds": reserve_funds,
-            "profile_registered_at": profile_registered_at,
-            "recent_votes": recent_votes,
-            "inbox_last_viewed_at": inbox_last_viewed_at,
-            "referral_precheck_enabled": referral_precheck_enabled,
-        }
-        log_event(rid, "get_user_status.ok", user_level=user_level)
+        resp = _build_user_status(addr)
+        log_event(rid, "get_user_status.ok", user_level=resp.get("user_level", 0))
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_user_status.err", error=str(e))
         return safe_error(e)
+
+
+def _build_user_followed(addr: str) -> dict:
+    """Pure helper: build the user-followed payload for a given address.
+
+    Caller must ensure addr is non-empty. Does NOT inject balance — that's the
+    standalone route's responsibility. Used by /api/get_user_followed and
+    /api/bootstrap.
+    """
+    enabled_agents: list = []
+    followed_topics: list = []
+    followed_users: list = []
+
+    try:
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
+            (addr,),
+        )
+        enabled_agents = [row[0] for row in cur.fetchall()]
+        cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
+        followed_topics = [row[0] for row in cur.fetchall()]
+        cur.execute(
+            "SELECT target FROM followed_users WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
+            (addr,),
+        )
+        followed_users = [row[0] for row in cur.fetchall()]
+        conn.close()
+    except Exception:
+        pass
+
+    return {
+        "enabled_agents": enabled_agents,
+        "followed_topics": followed_topics,
+        "followed_users": followed_users,
+    }
 
 
 @public_bp.route("/api/get_user_followed")
@@ -3295,44 +3337,13 @@ def get_user_followed():
     try:
         if not addr:
             return jsonify({"error": "address required"}), 400
-
-        enabled_agents = []
-        followed_topics = []
-        followed_users = []
-
-        try:
-            conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-            cur = conn.cursor()
-            # Enabled agents (preserve order)
-            cur.execute(
-                "SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
-                (addr,),
-            )
-            enabled_agents = [row[0] for row in cur.fetchall()]
-            # Followed topics
-            cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
-            followed_topics = [row[0] for row in cur.fetchall()]
-            # Followed users
-            cur.execute(
-                "SELECT target FROM followed_users WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
-                (addr,),
-            )
-            followed_users = [row[0] for row in cur.fetchall()]
-            conn.close()
-        except Exception:
-            pass
-
-        resp = {
-            "enabled_agents": enabled_agents,
-            "followed_topics": followed_topics,
-            "followed_users": followed_users,
-        }
+        resp = _build_user_followed(addr)
         log_event(
             rid,
             "get_user_followed.ok",
-            agents=len(enabled_agents),
-            topics=len(followed_topics),
-            users=len(followed_users),
+            agents=len(resp.get("enabled_agents", [])),
+            topics=len(resp.get("followed_topics", [])),
+            users=len(resp.get("followed_users", [])),
         )
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
@@ -3409,6 +3420,36 @@ def get_agents():
         return safe_error(e)
 
 
+def _build_user_blocked(addr: str) -> dict:
+    """Pure helper: build the user-blocked payload for a given address.
+
+    Caller must ensure addr is non-empty. Does NOT inject balance.
+    Used by /api/get_user_blocked and /api/bootstrap.
+    """
+    blocked_posts: list = []
+    blocked_users: list = []
+    blocked_topics: list = []
+
+    try:
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        cur = conn.cursor()
+        cur.execute("SELECT target FROM blocked_posts WHERE LOWER(owner)=LOWER(%s)", (addr,))
+        blocked_posts = [row[0] for row in cur.fetchall()]
+        cur.execute("SELECT target FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
+        blocked_users = [row[0] for row in cur.fetchall()]
+        cur.execute("SELECT target FROM blocked_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
+        blocked_topics = [row[0] for row in cur.fetchall()]
+        conn.close()
+    except Exception:
+        pass
+
+    return {
+        "blocked_posts": blocked_posts,
+        "blocked_users": blocked_users,
+        "blocked_topics": blocked_topics,
+    }
+
+
 @public_bp.route("/api/get_user_blocked")
 def get_user_blocked():
     """Get user's block lists (posts, users, topics)."""
@@ -3418,33 +3459,13 @@ def get_user_blocked():
     try:
         if not addr:
             return jsonify({"error": "address required"}), 400
-
-        blocked_posts = []
-        blocked_users = []
-        blocked_topics = []
-
-        try:
-            conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-            cur = conn.cursor()
-            # Blocked posts
-            cur.execute("SELECT target FROM blocked_posts WHERE LOWER(owner)=LOWER(%s)", (addr,))
-            blocked_posts = [row[0] for row in cur.fetchall()]
-            # Blocked users
-            cur.execute("SELECT target FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
-            blocked_users = [row[0] for row in cur.fetchall()]
-            # Blocked topics
-            cur.execute("SELECT target FROM blocked_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
-            blocked_topics = [row[0] for row in cur.fetchall()]
-            conn.close()
-        except Exception:
-            pass
-
-        resp = {
-            "blocked_posts": blocked_posts,
-            "blocked_users": blocked_users,
-            "blocked_topics": blocked_topics,
-        }
-        log_event(rid, "get_user_blocked.ok", posts=len(blocked_posts), users=len(blocked_users))
+        resp = _build_user_blocked(addr)
+        log_event(
+            rid,
+            "get_user_blocked.ok",
+            posts=len(resp.get("blocked_posts", [])),
+            users=len(resp.get("blocked_users", [])),
+        )
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_blocked.err", error=str(e))
@@ -3943,60 +3964,122 @@ _NODE_CONFIG_CACHE_TIME: float = 0.0
 _NODE_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — these almost never change
 
 
+def _build_node_config() -> dict:
+    """Pure helper: build the node-config payload (with 24h server-side memoization).
+
+    Cache hits are safe while the node is catching up. Cache misses require the
+    caller to enforce catch-up semantics before this helper touches runtime data.
+    """
+    global _NODE_CONFIG_CACHE, _NODE_CONFIG_CACHE_TIME
+
+    now = time.monotonic()
+    if _NODE_CONFIG_CACHE is not None and (now - _NODE_CONFIG_CACHE_TIME) < _NODE_CONFIG_CACHE_TTL:
+        return dict(_NODE_CONFIG_CACHE)
+
+    rt = require_runtime()
+
+    valoper = rt.validator_operator_address
+    valcons = rt.validator_consensus_address
+    val_account = rt.validator_payer_addr
+
+    validator_moniker = ""
+    if valoper:
+        val_info = _get_validator(valoper)
+        validator_moniker = val_info.get("moniker", "")
+
+    resp: Dict[str, Any] = {
+        "validator_account_address": val_account,
+        "validator_operator_address": valoper,
+        "validator_consensus_address": valcons,
+        "validator_moniker": validator_moniker,
+        "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
+        "registration_enabled": REGISTRATION_ENABLED,
+        "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
+        "quests_enabled": QUESTS_ENABLED,
+        "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
+        "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
+        "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
+        "android_banner_enabled": ANDROID_BANNER_ENABLED,
+        "ios_banner_enabled": IOS_BANNER_ENABLED,
+    }
+
+    _NODE_CONFIG_CACHE = dict(resp)
+    _NODE_CONFIG_CACHE_TIME = now
+    return dict(resp)
+
+
 @public_bp.route("/api/get_node_config")
 def get_node_config():
     """Per-node static settings (validator info, feature flags, API keys).
 
     These are deployment-specific and don't change at runtime. Cached 24h server-side.
     """
-    global _NODE_CONFIG_CACHE, _NODE_CONFIG_CACHE_TIME
-
     rid = next_request_id()
     log_event(rid, "get_node_config.begin")
     try:
-        now = time.monotonic()
-        if _NODE_CONFIG_CACHE is not None and (now - _NODE_CONFIG_CACHE_TIME) < _NODE_CONFIG_CACHE_TTL:
-            log_event(rid, "get_node_config.cached")
-            return jsonify(_NODE_CONFIG_CACHE)
-
-        if _is_catching_up():
+        if _NODE_CONFIG_CACHE is None and _is_catching_up():
             return api_error_code("node_catching_up", 503)
-
-        rt = require_runtime()
-
-        valoper = rt.validator_operator_address
-        valcons = rt.validator_consensus_address
-        val_account = rt.validator_payer_addr
-
-        validator_moniker = ""
-        if valoper:
-            val_info = _get_validator(valoper)
-            validator_moniker = val_info.get("moniker", "")
-
-        resp: Dict[str, Any] = {
-            "validator_account_address": val_account,
-            "validator_operator_address": valoper,
-            "validator_consensus_address": valcons,
-            "validator_moniker": validator_moniker,
-            "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
-            "registration_enabled": REGISTRATION_ENABLED,
-            "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
-            "quests_enabled": QUESTS_ENABLED,
-            "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
-            "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
-            "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
-            "android_banner_enabled": ANDROID_BANNER_ENABLED,
-            "ios_banner_enabled": IOS_BANNER_ENABLED,
-        }
-
-        _NODE_CONFIG_CACHE = resp
-        _NODE_CONFIG_CACHE_TIME = now
-
+        resp = _build_node_config()
         log_event(rid, "get_node_config.ok")
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_node_config.err", error=str(e))
         return safe_error(e)
+
+
+@public_bp.route("/api/bootstrap")
+def bootstrap():
+    """Combined first-paint endpoint.
+
+    Returns node_config (always) plus, when ?address=<addr> is provided,
+    user_status, user_followed, user_blocked, invite_codes, and rewards_summary
+    in a single response. Replaces the home-page cold-load fan-out of 6+
+    /api/* requests with one. Per-section failures degrade gracefully —
+    a failing sub-handler returns null for that key, and the client is
+    expected to fall through to the per-endpoint route.
+    """
+    rid = next_request_id()
+    address = (request.args.get("address") or "").strip() or None
+    log_event(rid, "bootstrap.begin", address=address)
+
+    if _is_catching_up() and (address or _NODE_CONFIG_CACHE is None):
+        return api_error_code("node_catching_up", 503)
+
+    def _safe(name: str, builder):
+        try:
+            return builder()
+        except Exception as e:
+            log_event(rid, f"bootstrap.{name}.err", error=str(e))
+            return None
+
+    resp: Dict[str, Any] = {
+        "node_config": _safe("node_config", _build_node_config),
+        "user_status": None,
+        "user_followed": None,
+        "user_blocked": None,
+        "invite_codes": None,
+        "rewards_summary": None,
+    }
+
+    if address:
+        # Lazy import to avoid module-load ordering issues with routes.quests.
+        from routes.quests import _build_rewards_summary
+
+        resp["user_status"] = _safe("user_status", lambda: _build_user_status(address))
+        resp["user_followed"] = _safe("user_followed", lambda: _build_user_followed(address))
+        resp["user_blocked"] = _safe("user_blocked", lambda: _build_user_blocked(address))
+        resp["invite_codes"] = _safe("invite_codes", lambda: _build_invite_codes(address))
+        resp["rewards_summary"] = _safe(
+            "rewards_summary",
+            lambda: _build_rewards_summary(address.lower()),
+        )
+
+    log_event(
+        rid,
+        "bootstrap.ok",
+        sections=[k for k, v in resp.items() if v is not None],
+    )
+    return jsonify(resp)
 
 
 def _get_peer_info(peer: Dict[str, str]) -> Dict[str, str]:
@@ -5986,6 +6069,112 @@ def get_user_posts():
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
         return jsonify(_inject_balance(resp, viewer))
+    except Exception as e:
+        return safe_error(e)
+
+
+@public_bp.route("/api/get_recent_content")
+def get_recent_content():
+    """Return recent non-deleted posts and comments in one chronological stream.
+
+    Designed for external Mirage bots that need to scan recent public content
+    without walking get_posts plus get_comments trees. Raw output: no viewer
+    filtering, agent overlays, ranking, vote/comment aggregation, or media
+    enrichment.
+    """
+    rid = next_request_id()
+    try:
+        limit = request.args.get("limit", default=100, type=int)
+        if limit is None:
+            limit = 100
+        limit = min(max(1, limit), 500)
+
+        before = request.args.get("before", default=None, type=int)
+        before_id = (request.args.get("before_id", default="", type=str) or "").strip().lower()
+
+        deleted_clause = _deleted_filter()
+        before_clause = ""
+        params: list = []
+        if before is not None and before_id:
+            before_clause = "AND (p.created_at < %s OR (p.created_at = %s AND LOWER(p.txhash) < %s))"
+            params.extend([int(before), int(before), before_id])
+        elif before is not None:
+            before_clause = "AND p.created_at < %s"
+            params.append(int(before))
+        params.append(limit + 1)
+
+        log_event(
+            rid,
+            "get_recent_content.query",
+            limit=limit,
+            before=before,
+            before_id=before_id,
+        )
+
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                SELECT p.txhash,
+                       p.owner,
+                       COALESCE(pr.username, '') AS username,
+                       p.created_at,
+                       COALESCE(p.topic, '') AS topic,
+                       COALESCE(p.root_topic, p.topic, '') AS root_topic,
+                       COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
+                       COALESCE(p.target, '') AS target,
+                       COALESCE(p.title, '') AS title,
+                       COALESCE(p.content, '') AS content,
+                       COALESCE(p.tag, '') AS tag,
+                       COALESCE(p.edited_at, 0) AS edited_at
+                FROM posts p
+                LEFT JOIN profiles pr ON pr.owner = p.owner
+                WHERE TRUE
+                  {before_clause}
+                  {deleted_clause}
+                ORDER BY p.created_at DESC, LOWER(p.txhash) DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+
+        items: list[dict] = []
+        for r in rows:
+            target = r[7] or ""
+            items.append(
+                {
+                    "post_id": r[0],
+                    "author": r[1],
+                    "username": r[2] or "",
+                    "timestamp": int(r[3]) if r[3] is not None else 0,
+                    "topic": r[4] or "",
+                    "root_topic": r[5] or "",
+                    "root_post_id": r[6] or "",
+                    "target": target,
+                    "title": r[8] or "",
+                    "content": r[9] or "",
+                    "tag": r[10] or "",
+                    "edited_at": int(r[11]) if r[11] is not None else 0,
+                    "is_comment": bool(target),
+                }
+            )
+
+        next_before = items[-1]["timestamp"] if (has_more and items) else None
+        next_before_id = items[-1]["post_id"] if (has_more and items) else None
+
+        return jsonify(
+            {
+                "items": items,
+                "limit": limit,
+                "next_before": next_before,
+                "next_before_id": next_before_id,
+                "has_more": has_more,
+            }
+        )
     except Exception as e:
         return safe_error(e)
 
@@ -9188,6 +9377,43 @@ def _is_main_site() -> bool:
     return host in ("mirage.talk", "localhost", "127.0.0.1")
 
 
+def _build_invite_codes(address: str) -> dict:
+    """Pure helper: build the invite-codes payload for a given address.
+
+    Caller must ensure address is non-empty. Does NOT inject balance.
+    Used by /api/get_invite_codes and /api/bootstrap.
+    """
+    conn = connect_backend_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT code, used_by, created_at, used_at
+        FROM invite_codes
+        WHERE LOWER(owner) = LOWER(%s)
+        ORDER BY created_at ASC
+        """,
+        (address,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    codes = []
+    for row in rows:
+        codes.append(
+            {
+                "code": row[0],
+                "used_by": row[1],
+                "created_at": row[2],
+                "used_at": row[3],
+                "is_used": row[1] is not None,
+            }
+        )
+
+    available_count = sum(1 for c in codes if not c["is_used"])
+    return {"codes": codes, "total": len(codes), "available": available_count}
+
+
 @public_bp.route("/api/get_invite_codes")
 def get_invite_codes():
     """Get all invite codes owned by the given address."""
@@ -9197,36 +9423,14 @@ def get_invite_codes():
         return jsonify({"error": "address required"}), 400
 
     try:
-        conn = connect_backend_db()
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT code, used_by, created_at, used_at
-            FROM invite_codes
-            WHERE LOWER(owner) = LOWER(%s)
-            ORDER BY created_at ASC
-            """,
-            (address,),
+        resp = _build_invite_codes(address)
+        log_event(
+            rid,
+            "invite.get_codes.ok",
+            address=address[:12],
+            total=resp.get("total", 0),
+            available=resp.get("available", 0),
         )
-        rows = cur.fetchall()
-        conn.close()
-
-        codes = []
-        for row in rows:
-            codes.append(
-                {
-                    "code": row[0],
-                    "used_by": row[1],
-                    "created_at": row[2],
-                    "used_at": row[3],
-                    "is_used": row[1] is not None,
-                }
-            )
-
-        available_count = sum(1 for c in codes if not c["is_used"])
-        log_event(rid, "invite.get_codes.ok", address=address[:12], total=len(codes), available=available_count)
-        resp = {"codes": codes, "total": len(codes), "available": available_count}
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "invite.get_codes.err", error=str(e))

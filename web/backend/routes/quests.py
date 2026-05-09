@@ -422,6 +422,275 @@ def _assign_daily_quests_if_needed(
     return quest_ids
 
 
+def _build_rewards_summary(owner: str) -> dict:
+    """Pure helper: build the rewards summary payload for a given owner address.
+
+    Caller is responsible for input validation (owner non-empty) and for wrapping
+    the result in jsonify / _inject_balance. Used by both the public
+    /api/rewards/summary route and the consolidated /api/bootstrap route.
+
+    Returns the same dict shape the route returns for both the disabled and
+    suspended short-circuits as well as the normal path."""
+    rid = next_request_id()
+    log_event(rid, "rewards.summary.build", owner=owner)
+
+    if not QUESTS_ENABLED:
+        return {
+            "disabled": True,
+            "daily_quests": [],
+            "flash_quest": None,
+            "pending_rewards": [],
+            "seconds_until_reset": 0,
+            "reward_multiplier": 1,
+            "total_mirage": 0,
+            "total_mirage_after_multiplier": 0,
+            "pending_invite_codes": 0,
+            "claiming_available": False,
+            "debug": BACKEND_DEBUG,
+        }
+
+    ts = int(time.time())
+    day_utc = _get_utc_julian_day(ts)
+
+    if _is_user_suspended(owner, ts):
+        suspension = _get_suspension_info(owner)
+        return {
+            "suspended": True,
+            "suspension": suspension,
+            "daily_quests": [],
+            "flash_quest": None,
+            "pending_rewards": [],
+            "seconds_until_reset": _get_seconds_until_reset(ts),
+            "reward_multiplier": 1.0,
+            "total_mirage": 0,
+            "total_mirage_after_multiplier": 0,
+            "pending_invite_codes": 0,
+            "claiming_available": False,
+            "debug": BACKEND_DEBUG,
+        }
+
+    defs = _load_quest_definitions()
+    daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+    special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
+    flash_defs = {q["id"]: q for q in defs.get("flash_quest_templates", [])}
+    all_defs = {**daily_defs, **special_defs}
+
+    # ===== DAILY QUESTS =====
+    _assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
+
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT quest_id, progress, progress_meta, completed_at
+                FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                ORDER BY quest_id ASC
+                """,
+                (owner, day_utc),
+            )
+            daily_rows = cur.fetchall()
+
+    daily_quests = []
+    for row in daily_rows:
+        quest_id = row[0]
+        progress = row[1]
+        progress_meta = row[2] if isinstance(row[2], dict) else {}
+        completed_at = row[3]
+        quest_def = all_defs.get(quest_id, {})
+        if not quest_def:
+            continue
+        quest_data = {
+            "id": quest_id,
+            "title": quest_def.get("title", ""),
+            "description": quest_def.get("description", ""),
+            "action_type": quest_def.get("action_type", ""),
+            "progress": progress,
+            "completed": completed_at is not None,
+            "rewards": quest_def.get("rewards", []),
+            "min_content_length": quest_def.get("min_content_length"),
+            "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
+            "unique_target": quest_def.get("unique_target"),
+            "unique_topics_min": quest_def.get("unique_topics_min"),
+            "quality_threshold": quest_def.get("quality_threshold"),
+            "count_vote_changes": quest_def.get("count_vote_changes", True),
+        }
+        if quest_def.get("action_type") == "balanced_vote":
+            target_up = quest_def.get("target_upvotes", 0) or 0
+            target_down = quest_def.get("target_downvotes", 0) or 0
+            target_total = target_up + target_down
+            if target_total <= 0:
+                raise ValueError(f"Quest {quest_id} requires non-zero balanced_vote targets")
+            quest_data["target"] = target_total
+            quest_data["upvotes"] = progress_meta.get("upvotes", 0)
+            quest_data["downvotes"] = progress_meta.get("downvotes", 0)
+            quest_data["target_upvotes"] = target_up
+            quest_data["target_downvotes"] = target_down
+            if completed_at is None and progress >= target_total:
+                quest_data["progress"] = target_total - 1
+        else:
+            target = quest_def.get("target_count", 1)
+            quest_data["target"] = target
+            unique_topics_min = quest_def.get("unique_topics_min")
+            if unique_topics_min and completed_at is None and progress >= target:
+                if len(progress_meta.get("topics", [])) < unique_topics_min:
+                    quest_data["progress"] = target - 1
+        daily_quests.append(quest_data)
+
+    # ===== FLASH QUEST =====
+    flash_quest_data = None
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
+                FROM user_flash_quests
+                WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
+                ORDER BY starts_at DESC
+                LIMIT 1
+                """,
+                (owner, ts),
+            )
+            flash_row = cur.fetchone()
+
+    if not flash_row:
+        assigned = _maybe_assign_flash_quest(owner, ts, flash_defs)
+        if assigned:
+            with connect_backend_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
+                        FROM user_flash_quests
+                        WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
+                        ORDER BY starts_at DESC
+                        LIMIT 1
+                        """,
+                        (owner, ts),
+                    )
+                    flash_row = cur.fetchone()
+
+    if flash_row:
+        template_id = flash_row[0]
+        quest_def = flash_defs.get(template_id, {})
+        if quest_def:
+            progress = flash_row[3]
+            progress_meta = flash_row[4] if isinstance(flash_row[4], dict) else {}
+            completed_at = flash_row[5]
+            action_type = quest_def.get("action_type", "")
+
+            quest_data = {
+                "id": template_id,
+                "title": quest_def.get("title", ""),
+                "description": quest_def.get("description", ""),
+                "action_type": action_type,
+                "completed": completed_at is not None,
+                "starts_at": flash_row[1],
+                "ends_at": flash_row[2],
+                "seconds_remaining": max(0, flash_row[2] - ts),
+                "rewards": quest_def.get("rewards", []),
+                "min_content_length": quest_def.get("min_content_length"),
+                "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
+                "unique_target": quest_def.get("unique_target"),
+                "unique_topics_min": quest_def.get("unique_topics_min"),
+                "quality_threshold": quest_def.get("quality_threshold"),
+                "count_vote_changes": quest_def.get("count_vote_changes", True),
+            }
+
+            if action_type == "balanced_vote":
+                target_up = quest_def.get("target_upvotes", 0) or 0
+                target_down = quest_def.get("target_downvotes", 0) or 0
+                target_total = target_up + target_down
+                if target_total <= 0:
+                    raise ValueError(f"Flash quest {template_id} requires non-zero balanced_vote targets")
+                if completed_at is None and progress >= target_total:
+                    progress = target_total - 1
+                quest_data["target"] = target_total
+                quest_data["upvotes"] = progress_meta.get("upvotes", 0)
+                quest_data["downvotes"] = progress_meta.get("downvotes", 0)
+                quest_data["target_upvotes"] = target_up
+                quest_data["target_downvotes"] = target_down
+            else:
+                target = quest_def.get("target_count", 1)
+                unique_topics_min = quest_def.get("unique_topics_min")
+                if unique_topics_min and completed_at is None and progress >= target:
+                    if len(progress_meta.get("topics", [])) < unique_topics_min:
+                        progress = target - 1
+                quest_data["target"] = target
+
+            quest_data["progress"] = progress
+            flash_quest_data = quest_data
+
+    # ===== PENDING REWARDS =====
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, reward_type, reward_data, reason, created_at
+                FROM pending_rewards
+                WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
+                ORDER BY created_at ASC
+                """,
+                (owner,),
+            )
+            reward_rows = cur.fetchall()
+
+    pending_rewards = []
+    total_mirage_with_multiplier = 0
+    total_mirage_no_multiplier = 0
+    pending_invite_codes = 0
+
+    for row in reward_rows:
+        reward_data = row[2] if isinstance(row[2], dict) else {}
+        pending_rewards.append(
+            {
+                "id": row[0],
+                "type": row[1],
+                "data": reward_data,
+                "reason": row[3],
+                "created_at": row[4],
+            }
+        )
+        if row[1] == "mirage":
+            amount = reward_data.get("amount", 0)
+            apply_multiplier = reward_data.get("apply_multiplier", True)
+            if apply_multiplier:
+                total_mirage_with_multiplier += amount
+            else:
+                total_mirage_no_multiplier += amount
+        elif row[1] == "invite_code":
+            pending_invite_codes += reward_data.get("amount", 1)
+
+    multiplier = _get_user_reward_multiplier(owner)
+    total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
+    total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
+
+    distributor = get_distributor()
+    claiming_available = distributor.is_configured()
+
+    log_event(
+        rid,
+        "rewards.summary.ok",
+        owner=owner,
+        daily=len(daily_quests),
+        flash=flash_quest_data is not None,
+        pending=len(pending_rewards),
+    )
+    return {
+        "suspended": False,
+        "daily_quests": daily_quests,
+        "flash_quest": flash_quest_data,
+        "pending_rewards": pending_rewards,
+        "seconds_until_reset": _get_seconds_until_reset(ts),
+        "reward_multiplier": round(multiplier, 4),
+        "total_mirage": total_mirage,
+        "total_mirage_after_multiplier": total_mirage_after_multiplier,
+        "pending_invite_codes": pending_invite_codes,
+        "claiming_available": claiming_available,
+        "debug": BACKEND_DEBUG,
+    }
+
+
 @quests_bp.route("/api/rewards/summary", methods=["GET"])
 def get_rewards_summary():
     """Combined endpoint: daily quests + flash quest + pending rewards in one call.
@@ -431,276 +700,14 @@ def get_rewards_summary():
     """
     rid = next_request_id()
     log_event(rid, "rewards.summary.begin")
-
-    # -- disabled check --
-    if not QUESTS_ENABLED:
-        return jsonify(
-            {
-                "disabled": True,
-                "daily_quests": [],
-                "flash_quest": None,
-                "pending_rewards": [],
-                "seconds_until_reset": 0,
-                "reward_multiplier": 1,
-                "total_mirage": 0,
-                "total_mirage_after_multiplier": 0,
-                "pending_invite_codes": 0,
-                "claiming_available": False,
-                "debug": BACKEND_DEBUG,
-            }
-        )
-
     try:
         owner = (request.args.get("owner") or "").strip().lower()
-        if not owner:
+        if not owner and QUESTS_ENABLED:
             return jsonify({"error": "owner required"}), 400
-
-        ts = int(time.time())
-        day_utc = _get_utc_julian_day(ts)
-
-        # -- suspension check (shared across all sections) --
-        if _is_user_suspended(owner, ts):
-            suspension = _get_suspension_info(owner)
-            return jsonify(
-                {
-                    "suspended": True,
-                    "suspension": suspension,
-                    "daily_quests": [],
-                    "flash_quest": None,
-                    "pending_rewards": [],
-                    "seconds_until_reset": _get_seconds_until_reset(ts),
-                    "reward_multiplier": 1.0,
-                    "total_mirage": 0,
-                    "total_mirage_after_multiplier": 0,
-                    "pending_invite_codes": 0,
-                    "claiming_available": False,
-                    "debug": BACKEND_DEBUG,
-                }
-            )
-
-        # -- load quest definitions once --
-        defs = _load_quest_definitions()
-        daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
-        special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
-        flash_defs = {q["id"]: q for q in defs.get("flash_quest_templates", [])}
-        all_defs = {**daily_defs, **special_defs}
-
-        # ===== DAILY QUESTS =====
-        _assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
-
-        with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT quest_id, progress, progress_meta, completed_at
-                    FROM user_daily_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
-                    ORDER BY quest_id ASC
-                    """,
-                    (owner, day_utc),
-                )
-                daily_rows = cur.fetchall()
-
-        daily_quests = []
-        for row in daily_rows:
-            quest_id = row[0]
-            progress = row[1]
-            progress_meta = row[2] if isinstance(row[2], dict) else {}
-            completed_at = row[3]
-            quest_def = all_defs.get(quest_id, {})
-            if not quest_def:
-                continue
-            quest_data = {
-                "id": quest_id,
-                "title": quest_def.get("title", ""),
-                "description": quest_def.get("description", ""),
-                "action_type": quest_def.get("action_type", ""),
-                "progress": progress,
-                "completed": completed_at is not None,
-                "rewards": quest_def.get("rewards", []),
-                "min_content_length": quest_def.get("min_content_length"),
-                "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
-                "unique_target": quest_def.get("unique_target"),
-                "unique_topics_min": quest_def.get("unique_topics_min"),
-                "quality_threshold": quest_def.get("quality_threshold"),
-                "count_vote_changes": quest_def.get("count_vote_changes", True),
-            }
-            if quest_def.get("action_type") == "balanced_vote":
-                target_up = quest_def.get("target_upvotes", 0) or 0
-                target_down = quest_def.get("target_downvotes", 0) or 0
-                target_total = target_up + target_down
-                if target_total <= 0:
-                    raise ValueError(f"Quest {quest_id} requires non-zero balanced_vote targets")
-                quest_data["target"] = target_total
-                quest_data["upvotes"] = progress_meta.get("upvotes", 0)
-                quest_data["downvotes"] = progress_meta.get("downvotes", 0)
-                quest_data["target_upvotes"] = target_up
-                quest_data["target_downvotes"] = target_down
-                if completed_at is None and progress >= target_total:
-                    quest_data["progress"] = target_total - 1
-            else:
-                target = quest_def.get("target_count", 1)
-                quest_data["target"] = target
-                unique_topics_min = quest_def.get("unique_topics_min")
-                if unique_topics_min and completed_at is None and progress >= target:
-                    if len(progress_meta.get("topics", [])) < unique_topics_min:
-                        quest_data["progress"] = target - 1
-            daily_quests.append(quest_data)
-
-        # ===== FLASH QUEST =====
-        flash_quest_data = None
-        with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
-                    FROM user_flash_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
-                    ORDER BY starts_at DESC
-                    LIMIT 1
-                    """,
-                    (owner, ts),
-                )
-                flash_row = cur.fetchone()
-
-        if not flash_row:
-            assigned = _maybe_assign_flash_quest(owner, ts, flash_defs)
-            if assigned:
-                with connect_backend_db() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
-                            FROM user_flash_quests
-                            WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
-                            ORDER BY starts_at DESC
-                            LIMIT 1
-                            """,
-                            (owner, ts),
-                        )
-                        flash_row = cur.fetchone()
-
-        if flash_row:
-            template_id = flash_row[0]
-            quest_def = flash_defs.get(template_id, {})
-            if quest_def:
-                progress = flash_row[3]
-                progress_meta = flash_row[4] if isinstance(flash_row[4], dict) else {}
-                completed_at = flash_row[5]
-                action_type = quest_def.get("action_type", "")
-
-                quest_data = {
-                    "id": template_id,
-                    "title": quest_def.get("title", ""),
-                    "description": quest_def.get("description", ""),
-                    "action_type": action_type,
-                    "completed": completed_at is not None,
-                    "starts_at": flash_row[1],
-                    "ends_at": flash_row[2],
-                    "seconds_remaining": max(0, flash_row[2] - ts),
-                    "rewards": quest_def.get("rewards", []),
-                    "min_content_length": quest_def.get("min_content_length"),
-                    "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
-                    "unique_target": quest_def.get("unique_target"),
-                    "unique_topics_min": quest_def.get("unique_topics_min"),
-                    "quality_threshold": quest_def.get("quality_threshold"),
-                    "count_vote_changes": quest_def.get("count_vote_changes", True),
-                }
-
-                if action_type == "balanced_vote":
-                    target_up = quest_def.get("target_upvotes", 0) or 0
-                    target_down = quest_def.get("target_downvotes", 0) or 0
-                    target_total = target_up + target_down
-                    if target_total <= 0:
-                        raise ValueError(f"Flash quest {template_id} requires non-zero balanced_vote targets")
-                    if completed_at is None and progress >= target_total:
-                        progress = target_total - 1
-                    quest_data["target"] = target_total
-                    quest_data["upvotes"] = progress_meta.get("upvotes", 0)
-                    quest_data["downvotes"] = progress_meta.get("downvotes", 0)
-                    quest_data["target_upvotes"] = target_up
-                    quest_data["target_downvotes"] = target_down
-                else:
-                    target = quest_def.get("target_count", 1)
-                    unique_topics_min = quest_def.get("unique_topics_min")
-                    if unique_topics_min and completed_at is None and progress >= target:
-                        if len(progress_meta.get("topics", [])) < unique_topics_min:
-                            progress = target - 1
-                    quest_data["target"] = target
-
-                quest_data["progress"] = progress
-                flash_quest_data = quest_data
-
-        # ===== PENDING REWARDS =====
-        with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, reward_type, reward_data, reason, created_at
-                    FROM pending_rewards
-                    WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
-                    ORDER BY created_at ASC
-                    """,
-                    (owner,),
-                )
-                reward_rows = cur.fetchall()
-
-        pending_rewards = []
-        total_mirage_with_multiplier = 0
-        total_mirage_no_multiplier = 0
-        pending_invite_codes = 0
-
-        for row in reward_rows:
-            reward_data = row[2] if isinstance(row[2], dict) else {}
-            pending_rewards.append(
-                {
-                    "id": row[0],
-                    "type": row[1],
-                    "data": reward_data,
-                    "reason": row[3],
-                    "created_at": row[4],
-                }
-            )
-            if row[1] == "mirage":
-                amount = reward_data.get("amount", 0)
-                apply_multiplier = reward_data.get("apply_multiplier", True)
-                if apply_multiplier:
-                    total_mirage_with_multiplier += amount
-                else:
-                    total_mirage_no_multiplier += amount
-            elif row[1] == "invite_code":
-                pending_invite_codes += reward_data.get("amount", 1)
-
-        # -- shared multiplier --
-        multiplier = _get_user_reward_multiplier(owner)
-        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
-        total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
-
-        distributor = get_distributor()
-        claiming_available = distributor.is_configured()
-
-        log_event(
-            rid,
-            "rewards.summary.ok",
-            owner=owner,
-            daily=len(daily_quests),
-            flash=flash_quest_data is not None,
-            pending=len(pending_rewards),
-        )
-        resp = {
-            "suspended": False,
-            "daily_quests": daily_quests,
-            "flash_quest": flash_quest_data,
-            "pending_rewards": pending_rewards,
-            "seconds_until_reset": _get_seconds_until_reset(ts),
-            "reward_multiplier": round(multiplier, 4),
-            "total_mirage": total_mirage,
-            "total_mirage_after_multiplier": total_mirage_after_multiplier,
-            "pending_invite_codes": pending_invite_codes,
-            "claiming_available": claiming_available,
-            "debug": BACKEND_DEBUG,
-        }
-        return jsonify(_inject_balance(resp, owner))
+        resp = _build_rewards_summary(owner)
+        if owner and not resp.get("disabled"):
+            resp = _inject_balance(resp, owner)
+        return jsonify(resp)
     except Exception as e:
         log_event(rid, "rewards.summary.err", error=str(e))
         return safe_error(e)

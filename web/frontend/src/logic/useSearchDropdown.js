@@ -21,10 +21,35 @@ import Api from "../utils/api";
  */
 
 const RECENTS_KEY = "mirage_recent_searches";
+const TRENDING_CACHE_KEY = "mirage_trending_topics_cache";
+const TRENDING_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_RECENTS = 8;
 const DEBOUNCE_MS = 300;
 const LIVE_LIMIT = 5;
 const TRENDING_LIMIT = 10;
+
+function loadTrendingCache(viewerKey) {
+    try {
+        const raw = localStorage.getItem(TRENDING_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+        if (parsed.viewer !== viewerKey) return null;
+        if (Date.now() - Number(parsed.at || 0) > TRENDING_CACHE_TTL_MS) return null;
+        return Array.isArray(parsed.topics) ? parsed.topics : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function persistTrendingCache(viewerKey, topics) {
+    try {
+        localStorage.setItem(
+            TRENDING_CACHE_KEY,
+            JSON.stringify({ viewer: viewerKey, at: Date.now(), topics })
+        );
+    } catch (_) { }
+}
 
 function loadRecents() {
     try {
@@ -49,11 +74,19 @@ function loadRecents() {
 function persistRecents(list) {
     try {
         localStorage.setItem(RECENTS_KEY, JSON.stringify(list));
-    } catch (_) {}
+    } catch (_) { }
 }
 
-export function useSearchDropdown() {
+export function useSearchDropdown(options = {}) {
+    // `trendingEnabled`: when true (e.g. on the /search results route), trending
+    // topics load eagerly on mount — the user is already on a search-focused
+    // surface, no point waiting. When false (e.g. the TopBar search dropdown,
+    // which mounts on every page), trending stays dormant and the caller fires
+    // `loadTrending()` on first focus / dropdown-open. Defaults to true to
+    // preserve existing call-site behavior.
+    const { trendingEnabled = true } = options;
     const viewerAddress = Storage.load("publicKey", "") || "";
+    const viewerKey = viewerAddress || "guest";
     const mountedRef = useRef(true);
 
     const [rawQuery, setRawQuery] = useState("");
@@ -66,8 +99,9 @@ export function useSearchDropdown() {
     });
     const [liveError, setLiveError] = useState("");
 
-    const [trendingTopics, setTrendingTopics] = useState([]);
+    const [trendingTopics, setTrendingTopics] = useState(() => loadTrendingCache(viewerKey) || []);
     const [isLoadingTrending, setIsLoadingTrending] = useState(false);
+    const trendingFetchedRef = useRef(false);
 
     const [recentSearches, setRecentSearches] = useState(() => loadRecents());
 
@@ -135,22 +169,33 @@ export function useSearchDropdown() {
         };
     }, [debouncedQuery, viewerAddress]);
 
-    // Load trending topics once (matches mobile `useTopics(20)`).
-    useEffect(() => {
-        let cancelled = false;
+    // Lazy trending-topics fetch. Single-shot per hook instance, with a 5-min
+    // localStorage cache to avoid re-fetching across re-mounts inside the
+    // session. Callers that care (TopBar) invoke `loadTrending()` when the
+    // user opens the dropdown; callers that don't (SearchResultsView, mobile
+    // search route) opt into eager via `trendingEnabled: true`.
+    const loadTrending = useCallback(() => {
+        if (trendingFetchedRef.current) return;
+        const cached = loadTrendingCache(viewerKey);
+        if (cached && cached.length > 0) {
+            trendingFetchedRef.current = true;
+            setTrendingTopics(cached);
+            return;
+        }
+        trendingFetchedRef.current = true;
         setIsLoadingTrending(true);
         Api.get(
             "get_topics",
             {
                 limit: 40,
                 min_posts: 10,
-                address: viewerAddress || "guest",
+                address: viewerKey,
                 allowed_tags: getAllowedTagsParam(),
             },
             { timeoutMs: 10000 }
         )
             .then((data) => {
-                if (cancelled || !mountedRef.current) return;
+                if (!mountedRef.current) return;
                 const list = Array.isArray(data?.topics) ? data.topics : [];
                 const sorted = [...list]
                     .filter((t) => t && t.topic)
@@ -162,16 +207,26 @@ export function useSearchDropdown() {
                     .slice(0, TRENDING_LIMIT);
                 setTrendingTopics(sorted);
                 setIsLoadingTrending(false);
+                persistTrendingCache(viewerKey, sorted);
             })
             .catch(() => {
-                if (cancelled || !mountedRef.current) return;
+                if (!mountedRef.current) return;
                 setTrendingTopics([]);
                 setIsLoadingTrending(false);
+                // Allow retry on next caller-initiated open.
+                trendingFetchedRef.current = false;
             });
-        return () => {
-            cancelled = true;
-        };
-    }, [viewerAddress]);
+    }, [viewerKey]);
+
+    useEffect(() => {
+        trendingFetchedRef.current = false;
+        setTrendingTopics(loadTrendingCache(viewerKey) || []);
+    }, [viewerKey]);
+
+    useEffect(() => {
+        if (!trendingEnabled) return;
+        loadTrending();
+    }, [trendingEnabled, loadTrending]);
 
     const addRecentSearch = useCallback((query) => {
         const trimmed = String(query || "").trim();
@@ -236,6 +291,7 @@ export function useSearchDropdown() {
         hasLiveResults,
         trendingTopics,
         isLoadingTrending,
+        loadTrending,
         recentSearches,
         addRecentSearch,
         removeRecentSearch,

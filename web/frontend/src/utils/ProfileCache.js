@@ -182,3 +182,20 @@ export function updateCacheUsers(users, address = null) {
 export function scheduleRefresh(address) {
     startNoCacheWindow();
 }
+
+// Seed the profile_followed_cache from the /api/bootstrap response so the
+// sidebar's followed topics/users/enabled agents render instantly on cold load
+// without firing a separate /api/get_user_followed request. Honors the
+// no-cache window — if the user just performed a follow/unfollow we keep the
+// stale-bypass active and do nothing.
+export function seedFromBootstrap(address, data) {
+    if (!address || !data || typeof data !== 'object') return;
+    if (isInNoCacheWindow()) return;
+    const addr = String(address).trim().toLowerCase();
+    if (!addr || addr === 'guest') return;
+    saveToStorage(addr, {
+        followed_topics: Array.isArray(data.followed_topics) ? data.followed_topics : [],
+        followed_users: Array.isArray(data.followed_users) ? data.followed_users : [],
+        enabled_agents: Array.isArray(data.enabled_agents) ? data.enabled_agents : [],
+    });
+}

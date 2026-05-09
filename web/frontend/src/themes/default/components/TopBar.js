@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Storage from '../../../utils/Storage';
+import Api from '../../../utils/api';
 import { THEME_MANIFESTS } from '../../manifests';
 import { normalizeThemeId } from '../../../registry/theme';
 import SearchDropdown from './SearchDropdown.js';
@@ -261,6 +262,20 @@ const IconButton = styled(Link)`
      * from the bottom tab bar, so hide the redundant top-bar icon. */
     @media (max-width: 600px) {
         display: none;
+    }
+`;
+
+/* Red variant of `IconButton` used by the admin-only Reports flag.
+ * Only mounts when there are pending reports, so the loud `voteDown`
+ * red doubles as a "you have moderator work" affordance. Hover keeps
+ * the same red but with a tinted bg so it doesn't fade into the
+ * neutral hover used by Inbox / Create. */
+const AlertIconButton = styled(IconButton)`
+    color: ${({ theme }) => theme.colors.voteDown};
+
+    &:hover {
+        color: ${({ theme }) => theme.colors.voteDown};
+        background: ${({ theme }) => theme.colors.voteDownBg};
     }
 `;
 
@@ -995,6 +1010,54 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
         return () => window.removeEventListener('inboxCount', onInbox);
     }, [isLoggedIn]);
 
+    // Reports count for the admin-only top-bar icon. Survives navigation
+    // via localStorage. Updated by:
+    //   1. A poll on mount (so the icon appears without visiting /reports).
+    //   2. The `reportsUpdated` event dispatched from `useReports` whenever
+    //      the admin acts on a report inside ReportsView.
+    //   3. A 60s background poll while the admin is logged in.
+    const [reportsCount, setReportsCount] = useState(() => {
+        try {
+            const stored = localStorage.getItem('reports_count');
+            return stored ? Math.max(0, parseInt(stored, 10) || 0) : 0;
+        } catch (_) { return 0; }
+    });
+
+    useEffect(() => {
+        if (!isLoggedIn || !isAdmin || !publicKey) {
+            setReportsCount(0);
+            try { localStorage.removeItem('reports_count'); } catch (_) { /* noop */ }
+            return undefined;
+        }
+        let cancelled = false;
+        const persist = (n) => {
+            const safe = Math.max(0, Number(n) || 0);
+            setReportsCount(safe);
+            try { localStorage.setItem('reports_count', String(safe)); } catch (_) { /* noop */ }
+        };
+        const fetchCount = async () => {
+            try {
+                const res = await Api.get('get_reports', { address: publicKey, limit: 200 });
+                if (cancelled) return;
+                const list = res && Array.isArray(res.reports) ? res.reports : [];
+                persist(list.length);
+            } catch (_) { /* noop */ }
+        };
+        const onReports = (e) => {
+            const detail = e && e.detail;
+            const count = detail && typeof detail.count === 'number' ? detail.count : null;
+            if (count !== null) persist(count);
+        };
+        fetchCount();
+        const id = setInterval(fetchCount, 60000);
+        window.addEventListener('reportsUpdated', onReports);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+            window.removeEventListener('reportsUpdated', onReports);
+        };
+    }, [isLoggedIn, isAdmin, publicKey]);
+
     const [menuOpen, setMenuOpen] = useState(false);
     const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
     const menuRef = useRef(null);
@@ -1009,6 +1072,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
 
     // Search dropdown: drives recent searches, trending topics, and
     // debounced live results while the user is typing.
+    const [searchFocused, setSearchFocused] = useState(false);
     const {
         rawQuery: query,
         setQuery,
@@ -1020,15 +1084,20 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
         hasLiveResults,
         trendingTopics,
         isLoadingTrending,
+        loadTrending,
         recentSearches,
         addRecentSearch,
         removeRecentSearch,
         clearRecentSearches,
-    } = useSearchDropdown();
+    } = useSearchDropdown({ trendingEnabled: searchFocused });
 
-    const [searchFocused, setSearchFocused] = useState(false);
     const searchWrapRef = useRef(null);
     const searchInputRef = useRef(null);
+
+    const focusSearch = useCallback(() => {
+        setSearchFocused(true);
+        loadTrending();
+    }, [loadTrending]);
 
     // Close the dropdown whenever the route changes.
     useEffect(() => {
@@ -1108,9 +1177,9 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                                 type="search"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                onFocus={() => setSearchFocused(true)}
-                                onMouseDown={() => setSearchFocused(true)}
-                                onClick={() => setSearchFocused(true)}
+                                onFocus={focusSearch}
+                                onMouseDown={focusSearch}
+                                onClick={focusSearch}
                                 onKeyDown={handleSearchKeyDown}
                                 placeholder="Search Mirage"
                                 aria-label="Search"
@@ -1195,12 +1264,12 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                             </IconButton>
                         )}
 
-                        {isLoggedIn && isAdmin && (
-                            <IconButton
+                        {isLoggedIn && isAdmin && reportsCount > 0 && (
+                            <AlertIconButton
                                 to="/reports"
                                 $active={isReports}
-                                aria-label="Reports"
-                                title="Reports"
+                                aria-label={`Reports, ${reportsCount} pending`}
+                                title={`${reportsCount} pending report${reportsCount === 1 ? '' : 's'}`}
                             >
                                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                                     {isReports
@@ -1208,7 +1277,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                                         : <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 21V4h9l.4 2H20v8h-7l-.4-2H7v9z" />
                                     }
                                 </svg>
-                            </IconButton>
+                            </AlertIconButton>
                         )}
 
                         {isLoggedIn ? (

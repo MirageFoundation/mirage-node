@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Api from '../utils/api';
 import Storage from '../utils/Storage';
+import { readBootstrapStashAfterBootstrap } from '../utils/bootstrapStash';
 
 const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
 const OPTIMISTIC_CLAIM_TTL_MS = 45000;
@@ -64,6 +65,11 @@ export function useRewards() {
         console.log(`[useRewards] Optimistic claim balance cleared: ${reason}`);
     }, []);
 
+    // First-mount stash consumed flag — only the very first fetchAll() reads
+    // from /api/bootstrap's snapshot. Refreshes (claim, manual reload) always
+    // hit /api/rewards/summary.
+    const bootstrapStashConsumedRef = useRef(false);
+
     // ---- single fetch ----
     const fetchAll = useCallback(async (isRefresh = false) => {
         if (!userAddress) {
@@ -75,7 +81,14 @@ export function useRewards() {
             if (!isRefresh) setLoading(true);
             setError(null);
 
-            const res = await Api.get('/rewards/summary', { owner: userAddress });
+            let res = null;
+            if (!isRefresh && !bootstrapStashConsumedRef.current) {
+                bootstrapStashConsumedRef.current = true;
+                res = await readBootstrapStashAfterBootstrap('bootstrap_rewards_summary', userAddress);
+            }
+            if (!res) {
+                res = await Api.get('/rewards/summary', { owner: userAddress });
+            }
 
             // --- disabled ---
             if (res.disabled) {

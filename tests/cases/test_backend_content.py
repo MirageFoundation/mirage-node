@@ -1376,3 +1376,122 @@ def test_image_impressions(backend: str) -> None:
         _pass("image_impressions.increment_twice")
     else:
         _fail("image_impressions.increment_twice", f"after={after} after2={after2}")
+
+
+def test_recent_content(backend: str) -> None:
+    """get_recent_content returns a chronological mix of posts and comments."""
+    wallet = WALLETS["free"]
+    addr = str(wallet.address())
+
+    parent_txh = _do_post(backend, wallet, f"recent{_rand_str(6)}", f"Recent {_rand_str(6)}", "Recent body")
+    if not parent_txh:
+        _fail("recent_content.create_post")
+        return
+    if not _wait_indexed(backend, addr, parent_txh):
+        _fail("recent_content.parent_indexed")
+        return
+    _pass("recent_content.parent_indexed", tx=parent_txh)
+
+    comment_txh = _do_post(backend, wallet, "", "", "Recent comment body", target=parent_txh)
+    if not comment_txh:
+        _fail("recent_content.create_comment")
+        return
+    if not _wait_comment_indexed(backend, parent_txh, comment_txh):
+        _fail("recent_content.comment_indexed")
+        return
+    _pass("recent_content.comment_indexed", tx=comment_txh)
+
+    code, data = _get(f"{backend}/api/get_recent_content", {"limit": 200})
+    if code != 200 or not isinstance(data, dict):
+        _fail("recent_content.basic_fetch", f"code={code}")
+        return
+
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        _fail("recent_content.items_present", f"items={items!r}")
+        return
+
+    expected_top_keys = {"items", "limit", "next_before", "has_more"}
+    missing = expected_top_keys - set(data.keys())
+    if missing:
+        _fail("recent_content.shape", f"missing keys: {sorted(missing)}")
+    else:
+        _pass("recent_content.shape")
+
+    expected_item_keys = {
+        "post_id",
+        "author",
+        "username",
+        "timestamp",
+        "topic",
+        "root_topic",
+        "root_post_id",
+        "target",
+        "title",
+        "content",
+        "tag",
+        "edited_at",
+        "is_comment",
+    }
+    sample = items[0]
+    item_missing = expected_item_keys - set(sample.keys())
+    if item_missing:
+        _fail("recent_content.item_shape", f"missing fields: {sorted(item_missing)}")
+    else:
+        _pass("recent_content.item_shape")
+
+    timestamps = [int(it.get("timestamp", 0)) for it in items]
+    if timestamps == sorted(timestamps, reverse=True):
+        _pass("recent_content.chronological_desc")
+    else:
+        _fail("recent_content.chronological_desc")
+
+    parent_item = next((it for it in items if str(it.get("post_id", "")).lower() == parent_txh), None)
+    comment_item = next((it for it in items if str(it.get("post_id", "")).lower() == comment_txh), None)
+
+    if parent_item and parent_item.get("is_comment") is False and not parent_item.get("target"):
+        _pass("recent_content.parent_post_present")
+    else:
+        _fail("recent_content.parent_post_present", f"parent_item={parent_item}")
+
+    if (
+        comment_item
+        and comment_item.get("is_comment") is True
+        and (comment_item.get("target") or "").lower() == parent_txh
+    ):
+        _pass("recent_content.comment_present")
+    else:
+        _fail("recent_content.comment_present", f"comment_item={comment_item}")
+
+    code_clamp, data_clamp = _get(f"{backend}/api/get_recent_content", {"limit": 9999})
+    if code_clamp == 200 and int((data_clamp or {}).get("limit", 0)) == 500:
+        _pass("recent_content.limit_clamped")
+    else:
+        _fail("recent_content.limit_clamped", f"code={code_clamp} limit={(data_clamp or {}).get('limit')}")
+
+    code_small, data_small = _get(f"{backend}/api/get_recent_content", {"limit": 1})
+    small_items = (data_small or {}).get("items") or []
+    if (
+        code_small == 200
+        and len(small_items) == 1
+        and (data_small or {}).get("has_more") is True
+        and (data_small or {}).get("next_before") is not None
+    ):
+        _pass("recent_content.has_more_with_cursor")
+        cursor = int(data_small["next_before"])
+        code_next, data_next = _get(f"{backend}/api/get_recent_content", {"limit": 50, "before": cursor})
+        next_items = (data_next or {}).get("items") or []
+        seen_ids = {str(small_items[0].get("post_id", "")).lower()}
+        if (
+            code_next == 200
+            and all(int(it.get("timestamp", 0)) < cursor for it in next_items)
+            and not any(str(it.get("post_id", "")).lower() in seen_ids for it in next_items)
+        ):
+            _pass("recent_content.before_cursor_advances")
+        else:
+            _fail("recent_content.before_cursor_advances", f"code={code_next} count={len(next_items)}")
+    else:
+        _fail(
+            "recent_content.has_more_with_cursor",
+            f"code={code_small} items={len(small_items)} has_more={(data_small or {}).get('has_more')}",
+        )

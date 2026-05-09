@@ -6,6 +6,7 @@ import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
 import Api from './utils/api';
 import * as tx from './utils/tx';
+import { seedFromBootstrap as seedProfileFromBootstrap } from './utils/ProfileCache';
 import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
@@ -291,8 +292,10 @@ class App extends Component {
         // the app has loaded successfully.
         try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch (_) { }
 
-        // On hard refresh (or any full page reload), invalidate cached config timestamps
-        // so views re-fetch chain/node config from the backend.
+        // On hard refresh, invalidate the chain_config timestamp only — chain config
+        // is genuinely volatile (params, difficulty). nodeConfig is deployment-static
+        // and matches the backend's 24h cache; we keep it across reloads. It's still
+        // cleared in setCredentials() on login/logout in case the active validator differs.
         try {
             const navEntries = performance.getEntriesByType('navigation');
             const isReload = navEntries.length > 0
@@ -300,7 +303,6 @@ class App extends Component {
                 : performance.navigation?.type === 1;
             if (isReload) {
                 Storage.remove('chain_config_cached_at');
-                Storage.remove('node_config_cached_at');
             }
         } catch (_) { }
 
@@ -421,38 +423,17 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch node config if missing, not cached, or stale (> 1h).
-        try {
-            const nowMs = Date.now();
-            const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
-            const nodeConfigCached = Storage.load('nodeConfig', null);
-            const hasNodeConfig = !!(nodeConfigCached && typeof nodeConfigCached === 'object');
-            const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 3600_000 || !hasNodeConfig;
-            if (nodeStale) {
-                // Retry up to 4 attempts (0s, 1s, 3s, 7s) so that a transient
-                // failure on first load (e.g. node still catching up → 503)
-                // doesn't leave the home cards / profile menu / create-account
-                // view stuck waiting until the user manually refreshes.
-                this._bootstrapNodeConfig();
-            }
-        } catch (_) { }
+        // Single combined bootstrap fetch: replaces the cold-load fan-out of
+        // get_node_config + get_user_status + get_user_followed + get_user_blocked +
+        // get_invite_codes + /rewards/summary (one round-trip instead of six).
+        // Per-section nulls fall through to the existing per-endpoint fetches.
+        try { this._bootstrapApp(); } catch (_) { }
 
-        // Fetch chain config in parallel with node config and get_posts so it
-        // doesn't serialize behind the feed request (it used to be fetched
-        // lazily from CardView after mount, trailing the home waterfall).
-        // Retry up to 3 attempts with 1s, then 3s backoff; bail early if
-        // another path populates the cache between attempts.
+        // Fetch chain config in parallel with bootstrap and get_posts so it
+        // doesn't serialize behind the feed request. Retry up to 3 attempts
+        // with 1s, then 3s backoff; bail early if another path populates
+        // the cache between attempts.
         try { this._bootstrapChainConfig(); } catch (_) { }
-
-        // Refresh user balance on every page load for logged-in users
-        try {
-            const pk = this.state.publicKey || Storage.load('publicKey', '');
-            if (pk) {
-                Api.get('get_user_status', { address: pk, _cb: Date.now() })
-                    .then((data) => { if (data) try { tx.cacheUserStatus(data); } catch (_) { } })
-                    .catch(() => { });
-            }
-        } catch (_) { }
 
         // Add the "beforeunload" event listener
         window.addEventListener('beforeunload', this.handleBeforeUnload);
@@ -496,6 +477,12 @@ class App extends Component {
             if (this._nodeConfigRetryTimer) {
                 clearTimeout(this._nodeConfigRetryTimer);
                 this._nodeConfigRetryTimer = null;
+            }
+        } catch (_) { }
+        try {
+            if (this._bootstrapAppRetryTimer) {
+                clearTimeout(this._bootstrapAppRetryTimer);
+                this._bootstrapAppRetryTimer = null;
             }
         } catch (_) { }
     }
@@ -568,6 +555,127 @@ class App extends Component {
         }
     }
 
+    _bootstrapApp(attempt = 0) {
+        // Combined first-paint fetch via /api/bootstrap. Distributes results into
+        // the existing caches so consumer hooks see the data on their first effect.
+        // For logged-out users only node_config comes back; user_* sections are null.
+        // On failure, the per-endpoint hooks (useMain blocked-topics fetcher, useQuests
+        // fetchAll, etc.) keep their existing fetch logic and pick up the slack.
+        const delays = [0, 1000, 3000, 7000];
+        if (attempt >= delays.length) {
+            // Out of retries: fire the same nodeConfigUpdated event the
+            // standalone _bootstrapNodeConfig path would, so listeners stop
+            // showing "Loading..." indefinitely.
+            try { window.dispatchEvent(new Event('nodeConfigUpdated')); } catch (_) { }
+            return;
+        }
+
+        const run = () => {
+            const pk = this.state.publicKey || Storage.load('publicKey', '');
+
+            // If we already have a fresh nodeConfig in localStorage AND there's no
+            // logged-in user, there's nothing for bootstrap to do — skip the request
+            // entirely. (24h staleness matches the backend's server-side cache.)
+            const nowMs = Date.now();
+            const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
+            const nodeConfigCached = Storage.load('nodeConfig', null);
+            const hasFreshNodeConfig = !!(nodeConfigCached && typeof nodeConfigCached === 'object')
+                && nodeCachedAt && (nowMs - nodeCachedAt) <= 86_400_000;
+            if (!pk && hasFreshNodeConfig) {
+                console.debug('[App] bootstrap.skipped (anonymous + fresh node_config)');
+                return;
+            }
+
+            console.debug('[App] bootstrap.fetch attempt', attempt + 1, 'logged_in:', !!pk);
+            const requestPk = pk || '';
+            const request = Api.get('bootstrap', pk ? { address: pk } : undefined)
+                .then((resp) => {
+                    if (!resp || typeof resp !== 'object') {
+                        this._bootstrapApp(attempt + 1);
+                        return;
+                    }
+
+                    if (resp.node_config && typeof resp.node_config === 'object') {
+                        try { tx.cacheNodeConfig(resp.node_config); } catch (_) { }
+                    } else if (!hasFreshNodeConfig) {
+                        // node_config came back null: fall through to the legacy
+                        // retrying fetcher so home cards eventually populate.
+                        try { this._bootstrapNodeConfig(); } catch (_) { }
+                    }
+
+                    if (pk) {
+                        if (resp.user_status) {
+                            try { tx.cacheUserStatus(resp.user_status); } catch (_) { }
+                            // Surface backend-resolved username if missing from local state.
+                            try {
+                                const u = resp.user_status.username;
+                                if (typeof u === 'string' && u && u !== this.state.username) {
+                                    this.setState({ username: u });
+                                }
+                            } catch (_) { }
+                            // Prime local recent votes for highlight continuity.
+                            try {
+                                const rv = resp.user_status.recent_votes;
+                                if (Array.isArray(rv) && rv.length > 0) {
+                                    const votes = {};
+                                    for (const v of rv) {
+                                        if (!v || !v.target) continue;
+                                        votes[String(v.target).toLowerCase()] = Number(v.direction || 0);
+                                    }
+                                    try {
+                                        const keys = Object.keys(votes);
+                                        const pruned = {};
+                                        const keep = keys.slice(-100);
+                                        for (const k of keep) pruned[k] = votes[k];
+                                        Storage.save('votes', pruned);
+                                    } catch (_) {
+                                        Storage.save('votes', votes);
+                                    }
+                                    this.applyVotesToExistingPosts();
+                                }
+                            } catch (_) { }
+                        }
+                        if (resp.user_followed) {
+                            try { seedProfileFromBootstrap(pk, resp.user_followed); } catch (_) { }
+                        }
+                        const stashAt = Date.now();
+                        if (resp.user_blocked) {
+                            try { Storage.save('bootstrap_user_blocked', { data: resp.user_blocked, at: stashAt, pk }); } catch (_) { }
+                        }
+                        if (resp.invite_codes) {
+                            try { Storage.save('bootstrap_invite_codes', { data: resp.invite_codes, at: stashAt, pk }); } catch (_) { }
+                        }
+                        if (resp.rewards_summary) {
+                            try { Storage.save('bootstrap_rewards_summary', { data: resp.rewards_summary, at: stashAt, pk }); } catch (_) { }
+                        }
+                    }
+
+                    try { window.dispatchEvent(new Event('bootstrapHydrated')); } catch (_) { }
+                })
+                .catch(() => {
+                    this._bootstrapApp(attempt + 1);
+                })
+                .finally(() => {
+                    try {
+                        if (window.__MIRAGE_BOOTSTRAP_PROMISE__ === request) {
+                            window.__MIRAGE_BOOTSTRAP_PROMISE__ = null;
+                            window.__MIRAGE_BOOTSTRAP_PK__ = '';
+                        }
+                    } catch (_) { }
+                });
+            try {
+                window.__MIRAGE_BOOTSTRAP_PROMISE__ = request;
+                window.__MIRAGE_BOOTSTRAP_PK__ = requestPk;
+            } catch (_) { }
+        };
+
+        if (attempt === 0) {
+            run();
+        } else {
+            this._bootstrapAppRetryTimer = setTimeout(run, delays[attempt]);
+        }
+    }
+
     updateTheme() {
         const newTheme = this.calculateTheme(this.state.themeMode);
         if (newTheme !== this.state.theme) {
@@ -609,61 +717,18 @@ class App extends Component {
         Storage.remove('user_balance');
         Storage.remove('profile_followed_cache');
         Storage.remove('profile_no_cache_until');
+        Storage.remove('bootstrap_user_blocked');
+        Storage.remove('bootstrap_invite_codes');
+        Storage.remove('bootstrap_rewards_summary');
 
-        // Fetch latest status on login
+        // Fetch latest status on login: chain config in parallel + bootstrap
+        // for everything user-specific. Previously this issued separate
+        // get_user_status / get_node_config / etc. requests; bootstrap collapses
+        // them all into one round-trip and also seeds recent_votes / username.
         try {
             if (publicKey) {
-                // We just cleared the cached chain/node config above to drop
-                // stale per-wallet data, so re-prime both immediately.
-                // Without this, after sign-in/sign-up the home view renders
-                // with empty nodeConfig (no invite-only banner, no quest hero
-                // card, no Referrals menu item) until the next full reload.
                 try { this._bootstrapChainConfig(); } catch (_) { }
-                try { this._bootstrapNodeConfig(); } catch (_) { }
-
-                // Fetch user-specific data (cache-bust to ensure fresh balance)
-                Api.get('get_user_status', { address: publicKey, _cb: Date.now() })
-                    .then((userStatus) => {
-                        if (!userStatus) {
-                            console.warn('[App] No user status returned from API');
-                            return;
-                        }
-
-                        // Cache user data
-                        try { tx.cacheUserStatus(userStatus); } catch (_) { }
-
-                        // Update username in state if returned from backend
-                        if (typeof userStatus.username === 'string' && userStatus.username) {
-                            this.setState({ username: userStatus.username });
-                        }
-
-                        // Prime recent votes for local highlight (only on login)
-                        try {
-                            if (Array.isArray(userStatus.recent_votes)) {
-                                const votes = {};
-                                for (const v of userStatus.recent_votes) {
-                                    if (!v || !v.target) continue;
-                                    votes[String(v.target).toLowerCase()] = Number(v.direction || 0);
-                                }
-                                // Keep only a small cache; API provides user_vote for fetched items.
-                                // This is just to preserve quick highlight across reloads before indexing catches up.
-                                try {
-                                    const keys = Object.keys(votes);
-                                    const pruned = {};
-                                    const keep = keys.slice(-100);
-                                    for (const k of keep) pruned[k] = votes[k];
-                                    Storage.save('votes', pruned);
-                                } catch (_) {
-                                    Storage.save('votes', votes);
-                                }
-                                // Update existing posts in state with vote directions
-                                this.applyVotesToExistingPosts();
-                            }
-                        } catch (_) { }
-                    })
-                    .catch((err) => {
-                        console.error('[App] User status fetch failed:', err);
-                    });
+                try { this._bootstrapApp(); } catch (_) { }
             }
         } catch (e) {
             console.error('[App] setCredentials error:', e);
