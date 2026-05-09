@@ -135,8 +135,20 @@ const COMMENT_BASE_LEFT_PX = 12;
 const COMMENT_BASE_LEFT_PX_MOBILE = 8;
 const COMMENT_INDENT_PX = 26;
 const COMMENT_INDENT_PX_MOBILE = 22;
-const COMMENT_AVATAR_SIZE_PX = 24;
-const COMMENT_AVATAR_SIZE_PX_MOBILE = 22;
+/* DiceBear identicons are a 5×5 cell grid. For pixel-crisp rendering
+ * (no fractional-cell anti-aliasing) the *inner* render size — i.e.
+ * chip size minus the 2× padding halo — has to be a multiple of 5.
+ * `CommentAvatar` overrides the inherited ratio-based padding with
+ * absolute values via `!important`: 4px on desktop (23-4-4 = 15px
+ * inner) and 3px on mobile (21-3-3 = 15px inner). Both land at 15px
+ * inner → 3px cells. The 15px identicon square is comfortably
+ * inscribed inside the 23-diameter desktop circle (corners at 10.6
+ * < radius 11.5), so the round border-radius doesn't clip its
+ * corners. Don't drift these without also updating CommentAvatar's
+ * hardcoded padding rules so `(size - 2*padding)` stays divisible
+ * by 5. */
+const COMMENT_AVATAR_SIZE_PX = 23;
+const COMMENT_AVATAR_SIZE_PX_MOBILE = 21;
 const COMMENT_RAIL_WIDTH_PX = 1;
 const COMMENT_CURVE_RADIUS_PX = 10;
 const COMMENT_CURVE_RADIUS_PX_MOBILE = 9;
@@ -427,6 +439,20 @@ const CommentAvatar = styled(UserAvatar)`
     pointer-events: none;
     position: relative;
     z-index: 2;
+    /* Override the inherited ratio-based padding from \`UserAvatar\`.
+     * \`!important\` is necessary because the Wrapper's runtime-
+     * computed \`padding: ...px\` interpolation gets emitted into a
+     * stylesheet rule whose source-order varies with first-render
+     * timing — without \`!important\` we sometimes lose the cascade
+     * race and the chip renders with the original 20% halo (the
+     * identicon then hugs the chip border). We hardcode absolute
+     * halos: 4px on desktop (23-4-4 = 15px inner), 3px on mobile
+     * (21-3-3 = 15px inner). Both yield 15px / 5 = 3px cells —
+     * pixel-perfect identicon rendering. The 15px identicon square
+     * is also comfortably inscribed inside the 23-diameter desktop
+     * circle (corners at 10.6 < radius 11.5), so \`border-radius:
+     * 50%\` doesn't clip the identicon's corner cells either. */
+    padding: 4px !important;
 
     /* In light theme the shared UserAvatar wrapper is transparent, so
      * the comment thread spine (drawn behind the avatar) shows through
@@ -444,6 +470,7 @@ const CommentAvatar = styled(UserAvatar)`
         margin-right: ${Math.max(0, COMMENT_CONTENT_GAP_PX_MOBILE - 6)}px;
         width: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
         height: ${COMMENT_AVATAR_SIZE_PX_MOBILE}px;
+        padding: 3px !important;
     }
 `;
 /**
@@ -3596,6 +3623,11 @@ function ViewPostView({
                                                             const seed = (post.user_id ? String(post.user_id) : '')
                                                                 || (post.username && String(post.username).trim())
                                                                 || 'anon';
+                                                            // The visible halo is hardcoded inside
+                                                            // CommentAvatar (2px desktop, 1px
+                                                            // mobile) so we get pixel-perfect 4px
+                                                            // cells on both breakpoints — see the
+                                                            // size-constants comment above.
                                                             return <CommentAvatar
                                                                 seed={seed}
                                                                 size={COMMENT_AVATAR_SIZE_PX}

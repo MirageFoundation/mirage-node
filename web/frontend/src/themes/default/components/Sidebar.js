@@ -212,23 +212,6 @@ const EmptyRow = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const EmptyPrompt = styled.div`
-    padding: 0.35rem 0.6rem 0.5rem;
-    font-size: 0.65rem;
-    line-height: 1.5;
-    color: ${({ theme }) => theme.colors.subtleText};
-
-    a {
-        color: ${({ theme }) => theme.colors.link};
-        font-weight: 500;
-        text-decoration: none;
-    }
-
-    a:hover {
-        text-decoration: underline;
-    }
-`;
-
 const ToggleMore = styled.button`
     margin: 0.25rem 0 0 0.3rem;
     padding: 0.2rem 0.5rem;
@@ -385,7 +368,7 @@ function Sidebar({ state }) {
             try {
                 const mapping = await resolveUsernames(people, { timeoutMs: 8000 });
                 if (alive) setUsernamesMap(mapping);
-            } catch (_) {}
+            } catch (_) { }
         })();
         return () => { alive = false; };
     }, [people]);

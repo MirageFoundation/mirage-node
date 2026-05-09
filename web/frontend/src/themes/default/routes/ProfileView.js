@@ -1305,7 +1305,7 @@ async function __requestParentChainOnce(commentId) {
         } catch (err) {
             lastErr = err;
             const status = err && (err.status || err.code);
-            const is429 = status === 429 || /429|rate/i.test(String(err && err.message || ''));
+            const is429 = status === 429 || /429|rate/i.test(String((err && err.message) || ''));
             if (!is429) throw err;
             const delay = (300 * Math.pow(2, attempt)) + Math.floor(Math.random() * 200);
             await new Promise(r => setTimeout(r, delay));
@@ -1674,7 +1674,6 @@ function ProfileViewAuthenticated({
         donatePending,
         donateStatus,
         profileTitle,
-        canHaveBiography,
         BIO_MAX,
         handleBioSave,
         formatDonateAmount,
