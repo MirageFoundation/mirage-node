@@ -1501,8 +1501,8 @@ function ViewPostView({
         }
         if (confirmReportPost === post.post_id) {
             return <BlockConfirmMessage>
-                <span>🚨 Report this post? Provide a short reason.</span>
-                <ReportInput type="text" value={reportReason} onChange={e => setReportReason(e.target.value)} placeholder="Short reason (max 140 chars)" maxLength={140} />
+                <span>🚨 Report illegal content only (CSAM, credible threats, doxxing, etc). Wrong topic, untagged adult content, low quality, or anything you just don't like will be ignored. To filter those out, follow a moderation agent. Agents are how moderation works on Mirage for everyone.</span>
+                <ReportInput type="text" value={reportReason} onChange={e => setReportReason(e.target.value)} placeholder="Describe the illegality (e.g. CSAM, credible threat, doxxing)" maxLength={200} />
                 <ConfirmButtons style={{
                     width: 'auto'
                 }}>

@@ -795,7 +795,7 @@ export function useViewPost({
     };
     const confirmReportAction = async () => {
         const postId = confirmReportPost;
-        const reason = (reportReason || "").trim().slice(0, 140);
+        const reason = (reportReason || "").trim().slice(0, 200);
         setConfirmReportPost(null);
         setIsReporting(true);
         if (!reason) {

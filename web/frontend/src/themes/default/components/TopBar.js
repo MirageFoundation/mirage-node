@@ -966,7 +966,10 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     const path = location.pathname;
 
     const isInbox = path === '/inbox';
+    const isReports = path === '/reports';
     const isLoggedIn = !!(state && state.publicKey);
+    const userLevel = Number(Storage.load('user_level', '0')) || 0;
+    const isAdmin = userLevel >= 100;
 
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
@@ -1189,6 +1192,22 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                                     }
                                 </svg>
                                 {inboxCount > 0 && <InboxBadge aria-hidden="true">{formatBadgeCount(inboxCount)}</InboxBadge>}
+                            </IconButton>
+                        )}
+
+                        {isLoggedIn && isAdmin && (
+                            <IconButton
+                                to="/reports"
+                                $active={isReports}
+                                aria-label="Reports"
+                                title="Reports"
+                            >
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    {isReports
+                                        ? <path fill="currentColor" d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z" />
+                                        : <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 21V4h9l.4 2H20v8h-7l-.4-2H7v9z" />
+                                    }
+                                </svg>
                             </IconButton>
                         )}
 

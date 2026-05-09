@@ -105,6 +105,13 @@ function requirePowFactor(value) {
     return num;
 }
 
+function formatHashRate(rate) {
+    if (!Number.isFinite(rate) || rate <= 0) return null;
+    if (rate >= 1_000_000) return `${(rate / 1_000_000).toFixed(2)}M H/s`;
+    if (rate >= 1_000) return `${(rate / 1_000).toFixed(1)}k H/s`;
+    return `${Math.round(rate)} H/s`;
+}
+
 function requireTxDifficulty(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
@@ -128,6 +135,11 @@ class TransactionHandler {
 
             this.totalTransactions = 0;
             this.processedTransactions = 0;
+
+            // PoW totals across the current queue (used for the end-of-queue
+            // average hash-rate notification).  Reset in processTransactions().
+            this.totalPowIterations = 0;
+            this.totalPowSeconds = 0;
 
             this.setWarnOnLeave = null;
             this.updatePost = null;
@@ -2209,6 +2221,8 @@ class TransactionHandler {
         this.isProcessing = true;
         this.startTime = Date.now();
         this._statusStartTime = Date.now();
+        this.totalPowIterations = 0;
+        this.totalPowSeconds = 0;
 
         let hadFailure = false;
         let hadQuestAction = false; // Track if any quest-relevant actions were processed
@@ -2569,17 +2583,20 @@ class TransactionHandler {
 
         if (!hadFailure) {
             // Show a single end-of-queue notification. For multi-tx queues, report
-            // the average elapsed time per transaction rather than firing a toast
+            // the average PoW hash rate across the queue rather than firing a toast
             // after every individual tx.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const processed = Math.max(1, this.processedTransactions || 1);
             const totalElapsed = (Date.now() - this.startTime) / 1000;
+            const totalPowSec = this.totalPowSeconds || 0;
+            const totalPowIter = this.totalPowIterations || 0;
+            const avgRate = totalPowSec > 0.05 ? formatHashRate(totalPowIter / totalPowSec) : null;
             if (this.totalTransactions > 1) {
                 if (userLevel >= 1) {
                     updateNotification("All transactions submitted");
                 } else {
-                    const avg = (totalElapsed / processed).toFixed(1);
-                    updateNotification(`All transactions submitted (avg ${avg}s)`);
+                    updateNotification(avgRate
+                        ? `All transactions submitted (avg ${avgRate})`
+                        : "All transactions submitted");
                 }
             } else {
                 if (userLevel >= 1) {
@@ -2592,6 +2609,12 @@ class TransactionHandler {
             if (hadQuestAction) {
                 window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { batch: true } }));
             }
+        } else {
+            // Replace the pinned "Processing tx N/M" toast so it doesn't sit
+            // there forever when the queue aborts mid-flight.  Callers may
+            // also surface their own per-action error UI; this is a safety
+            // net for the toast.
+            updateNotification("Transaction failed", 5.0, true);
         }
 
         this.totalTransactions = 0;
@@ -5167,7 +5190,7 @@ class TransactionHandler {
                     transaction.difficulty = 0;
                     transaction.pow = 0;
                 }
-                updateNotification("Submitting transaction");
+                updateNotification("Submitting transaction", this.transactions.length > 0 ? 0 : 0.5);
                 (async () => {
                     this._setStatus("submitting");
                     try {
@@ -5695,11 +5718,15 @@ class TransactionHandler {
 
             const intervalId = setInterval(() => {
                 taken += 0.1;
+                // While more txs are queued, pin the toast (timeout=0) so it doesn't
+                // slide out between this tx finishing and the next one's PoW interval
+                // taking over — the next tx updates the same toast in place.
+                const tmo = this.transactions.length > 0 ? 0 : 0.5;
                 if (this.totalTransactions === 0)
-                    updateNotification(`Processing transaction (${taken.toFixed(1)}s)`);
+                    updateNotification(`Processing transaction (${taken.toFixed(1)}s)`, tmo);
                 else
-                    updateNotification(`Processing tx ${this.processedTransactions}/${this.totalTransactions} (${taken.toFixed(1)}s)`);
-            }, 100); // Update every second
+                    updateNotification(`Processing tx ${this.processedTransactions}/${this.totalTransactions} (${taken.toFixed(1)}s)`, tmo);
+            }, 100); // Update every 100ms
 
             // 60-second timeout for PoW
             const powTimeoutId = setTimeout(() => {
@@ -5756,6 +5783,8 @@ class TransactionHandler {
                 const iterations = ((rawProof - start) >>> 0) + 1;
                 const hashesPerSec = taken > 0.05 ? (iterations / taken).toFixed(1) : null;
                 console.log(`[PoW] completed: ${taken.toFixed(2)}s, difficulty=${difficulty}, iterations=${iterations}, speed=${hashesPerSec || 'instant'} H/s`);
+                this.totalPowIterations += iterations;
+                this.totalPowSeconds += taken;
                 if (rawProof !== proof) {
                     try {
                         console.warn('[PoW] proof overflow normalized', { rawProof, proof, start });

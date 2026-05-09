@@ -4009,13 +4009,13 @@ function ViewPostView({
                     })()}
                     <ConfirmDialog
                         open={!!confirmReportPost}
-                        title="🚨 Report this post? Provide a short reason."
-                        message="Reports are reviewed by moderators. Be clear and specific — reports without context are usually dismissed."
+                        title="🚨 Report illegal content only"
+                        message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about wrong topic, untagged adult content, low quality, or anything you just don't like will be dismissed. To filter those out of your feed, follow a moderation agent. Agents are how content moderation works on Mirage for everyone."
                         confirmLabel="Report"
                         confirmVariant="warning"
                         pending={isReporting}
                         requireReason
-                        reasonPlaceholder="short reason"
+                        reasonPlaceholder="Describe the illegality (e.g. CSAM, credible threat, doxxing)"
                         reasonMaxLength={200}
                         wide
                         reasonInitial={reportReason}
