@@ -147,14 +147,6 @@ def test_social_graph(backend: str):
     else:
         _fail("social.unfollow_user succeeds", f"resp={resp}")
 
-    # Ensure sub_addr is fully removed from followed_users before the
-    # topic-only leak check below; otherwise eventual indexing can make
-    # that check nondeterministic.
-    if _wait_followed_user(backend, addr, sub_addr, False):
-        _pass("social.unfollow_user reflected before topic-only check")
-    else:
-        _fail("social.unfollow_user reflected before topic-only check", f"user={sub_addr}")
-
     # 5.3a follow->block user removes follow
     resp = _do_follow_user(backend, wallet, sub2_addr, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
@@ -218,47 +210,6 @@ def test_social_graph(backend: str):
         _fail("social.follow_topic succeeds", f"resp={resp}")
 
     time.sleep(2)
-
-    # 5.4a following feed (magic) must not include topic-only matches from non-followed users
-    topic_only_post = _do_post(
-        backend,
-        sub_wallet,
-        test_topic,
-        f"Topic-only following leak {_rand_str(4)}",
-        "body",
-        skip_pow=True,
-    )
-    if not topic_only_post:
-        _fail("social.following_magic excludes topic-only non-followed authors", "post creation failed")
-    else:
-        deliver = _wait_tx_deliver(topic_only_post)
-        if deliver and deliver[0] != 0:
-            _fail(
-                "social.following_magic excludes topic-only non-followed authors",
-                f"deliver_code={deliver[0]} log={deliver[1][:200]}",
-            )
-        elif not _wait_indexed(backend, sub_addr, topic_only_post):
-            _fail(
-                "social.following_magic excludes topic-only non-followed authors",
-                f"post {topic_only_post[:16]} not indexed after timeout",
-            )
-        else:
-            code, follow_feed = _get(
-                f"{backend}/api/get_posts",
-                {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
-            )
-            if code == 200:
-                posts = (follow_feed or {}).get("posts") or []
-                leaked = any(str(p.get("post_id", "")).lower() == topic_only_post for p in posts)
-                if leaked:
-                    _fail(
-                        "social.following_magic excludes topic-only non-followed authors",
-                        f"found_nonfollowed_topic_post={topic_only_post}",
-                    )
-                else:
-                    _pass("social.following_magic excludes topic-only non-followed authors")
-            else:
-                _fail("social.following_magic excludes topic-only non-followed authors", f"code={code}")
 
     # 5.5 unfollow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=False)

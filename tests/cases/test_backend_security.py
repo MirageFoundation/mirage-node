@@ -786,6 +786,7 @@ def test_validation(backend: str):
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
     sub_wallet = WALLETS["sub1"]
+    sub_addr = str(sub_wallet.address())
 
     # Check if registration is enabled on this node
     _code, _ncfg = _get(f"{backend}/api/get_node_config")

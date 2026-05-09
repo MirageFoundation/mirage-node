@@ -818,6 +818,10 @@ const NsfwHeroButton = styled.button`
         border-color 0.15s ease, color 0.15s ease;
     border: 1px solid transparent;
     line-height: 1.2;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     &:focus-visible {
         outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
@@ -1415,6 +1419,9 @@ const MainView = ({
         dismissAndroidBanner,
         dismissIPhoneBanner,
         showNsfwHero,
+        showModerationReminder,
+        dismissModerationReminder,
+        snoozeModerationReminder,
         isLoggedIn,
         inviteCodesEnabled,
         questsEnabled,
@@ -1764,6 +1771,29 @@ const MainView = ({
                                 {/* Quest hero card - shown below invite codes on home/following */}
                                 {inviteCodesEnabled && questsEnabled && <HomeSectionSpacer />}
                                 {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
+                                {isLoggedIn && urlTopic === 'home' && showModerationReminder && (inviteCodesEnabled || questsEnabled) && <HomeSectionSpacer />}
+                                {isLoggedIn && urlTopic === 'home' && showModerationReminder && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Moderation reminder">
+                                    <NsfwHeroHeader>
+                                        <NsfwHeroIconTile aria-hidden="true">
+                                            <NsfwHeroEmoji>🛡️</NsfwHeroEmoji>
+                                        </NsfwHeroIconTile>
+                                        <NsfwHeroTitle>Mirage moderation is opt-in</NsfwHeroTitle>
+                                    </NsfwHeroHeader>
+                                    <NsfwHeroDescription>
+                                        Mirage does not hide legal content by default just because it is messy, spammy, offensive, or low quality. If your feed feels too unruly, enable moderation agents: <strong>SafeSpaceBot</strong> helps hide harassment, hostility, and upsetting content; <strong>AntiSpamBot</strong> helps hide spam, scams, repost floods, and low-effort automated posts. You can enable either one, or both.
+                                    </NsfwHeroDescription>
+                                    <NsfwHeroButtons>
+                                        <NsfwHeroButton as={Link} to="/agents" $variant="yes" onClick={dismissModerationReminder}>
+                                            Choose agents
+                                        </NsfwHeroButton>
+                                        <NsfwHeroButton $variant="no" onClick={dismissModerationReminder}>
+                                            I understand
+                                        </NsfwHeroButton>
+                                        <NsfwHeroButton $variant="no" onClick={snoozeModerationReminder}>
+                                            Remind me later
+                                        </NsfwHeroButton>
+                                    </NsfwHeroButtons>
+                                </NsfwWelcomeHero>}
                             </FeedHeroColumn>}
 
                             {/* Android app banner - shown once for Android users until dismissed */}

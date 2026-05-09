@@ -10,6 +10,10 @@ import { readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
+const MODERATION_REMINDER_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+// Show the moderation reminder only after the user has been logged in on the
+// home feed for at least this long. Avoids piling onto first-visit onboarding.
+const MODERATION_REMINDER_MIN_AGE_MS = 10 * 60 * 1000;
 
 // Session storage key helpers for feed state preservation (keyed by topic)
 export const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
@@ -480,6 +484,8 @@ export function useMain({
         setIphoneBannerDismissedAt(now);
     };
 
+    const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
+
     // NSFW welcome hero: show once for logged-in users until they choose yes/no
     const [showNsfwHero, setShowNsfwHero] = useState(() => {
         try {
@@ -491,7 +497,86 @@ export function useMain({
 
     // handleNsfwChoice is defined after getPosts (see below)
 
-    const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
+    const [showModerationReminder, setShowModerationReminder] = useState(false);
+    useEffect(() => {
+        if (!isLoggedIn || urlTopic !== 'home') {
+            setShowModerationReminder(false);
+            return undefined;
+        }
+
+        const suffix = String(viewerAddress).toLowerCase();
+        const dismissedKey = `moderation_reminder_understood_v1_${suffix}`;
+        const snoozedUntilKey = `moderation_reminder_snoozed_until_v1_${suffix}`;
+        const firstSeenKey = `moderation_reminder_first_seen_at_v1_${suffix}`;
+
+        const dismissed = Storage.load(dismissedKey, false) === true;
+        const snoozedUntilRaw = Number(Storage.load(snoozedUntilKey, 0));
+        const now = Date.now();
+        const snoozed = Number.isFinite(snoozedUntilRaw) && snoozedUntilRaw > now;
+
+        let firstSeenAt = Number(Storage.load(firstSeenKey, 0));
+        if (!Number.isFinite(firstSeenAt) || firstSeenAt <= 0 || firstSeenAt > now) {
+            firstSeenAt = now;
+            try {
+                Storage.save(firstSeenKey, firstSeenAt);
+            } catch (_) { }
+        }
+
+        const ageMs = now - firstSeenAt;
+        const eligible = !dismissed && !snoozed;
+        const shouldShow = eligible && ageMs >= MODERATION_REMINDER_MIN_AGE_MS;
+        setShowModerationReminder(shouldShow);
+
+        try {
+            console.debug('[MainView] moderation reminder eligibility', {
+                firstSeenAt,
+                ageMs,
+                dismissed,
+                snoozed,
+                shouldShow
+            });
+        } catch (_) { }
+
+        if (eligible && !shouldShow) {
+            const remainingMs = MODERATION_REMINDER_MIN_AGE_MS - ageMs;
+            const handle = setTimeout(() => {
+                setShowModerationReminder(true);
+                try {
+                    console.debug('[MainView] moderation reminder timer fired', {
+                        firstSeenAt,
+                        remainingMs
+                    });
+                } catch (_) { }
+            }, Math.max(0, remainingMs));
+            return () => clearTimeout(handle);
+        }
+        return undefined;
+    }, [isLoggedIn, urlTopic, viewerAddress]);
+
+    const dismissModerationReminder = useCallback(() => {
+        if (!viewerAddress || viewerAddress === 'guest') return;
+        const suffix = String(viewerAddress).toLowerCase();
+        try {
+            Storage.save(`moderation_reminder_understood_v1_${suffix}`, true);
+            Storage.remove(`moderation_reminder_snoozed_until_v1_${suffix}`);
+            console.debug('[MainView] moderation reminder dismissed');
+        } catch (_) { }
+        setShowModerationReminder(false);
+    }, [viewerAddress]);
+
+    const snoozeModerationReminder = useCallback(() => {
+        if (!viewerAddress || viewerAddress === 'guest') return;
+        const suffix = String(viewerAddress).toLowerCase();
+        const snoozedUntil = Date.now() + MODERATION_REMINDER_SNOOZE_MS;
+        try {
+            Storage.save(`moderation_reminder_snoozed_until_v1_${suffix}`, snoozedUntil);
+            console.debug('[MainView] moderation reminder snoozed', {
+                snoozedUntil
+            });
+        } catch (_) { }
+        setShowModerationReminder(false);
+    }, [viewerAddress]);
+
     const [nodeConfigTick, setNodeConfigTick] = useState(0);
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
@@ -1651,6 +1736,9 @@ export function useMain({
         dismissAndroidBanner,
         dismissIPhoneBanner,
         showNsfwHero,
+        showModerationReminder,
+        dismissModerationReminder,
+        snoozeModerationReminder,
         isLoggedIn,
         inviteCodesEnabled,
         questsEnabled,
