@@ -21,6 +21,7 @@ import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
+import { useShowOriginal, isShowingOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
@@ -32,6 +33,7 @@ import {
     HiNoSymbol,
     HiOutlineLink,
     HiOutlineClipboardDocument,
+    HiOutlineDocumentText,
     HiOutlinePencilSquare,
     HiOutlineTrash,
     HiOutlineUserPlus,
@@ -2092,6 +2094,11 @@ function ViewPostView({
         updatePost
     });
 
+    // Subscribe to "Show original" toggle changes for any post in this view.
+    // Per-post checks below use `isShowingOriginal(post.post_id)`; this hook
+    // call is only here to trigger a re-render when any toggle flips.
+    useShowOriginal();
+
     /**
      * Sub-plan 06.11 D1 — surface admin suspend/unsuspend success messages
      * via the global default `Toast` instead of the legacy inline hex banner.
@@ -2761,17 +2768,26 @@ function ViewPostView({
                             }
                         } catch (_) { /* noop */ }
                     };
+                    const showingOriginalForPost = isShowingOriginal(post.post_id);
+                    const hasAgentOriginalForPost = !!(post.original_title || post.original_content);
                     const handleCopyText = () => {
                         setOpenMenuId(null);
                         try {
                             const parts = [];
-                            if (post.title && String(post.title).trim()) parts.push(String(post.title).trim());
-                            if (post.content && String(post.content).trim()) parts.push(String(post.content).trim());
+                            const useOrig = showingOriginalForPost;
+                            const titleStr = useOrig && typeof post.original_title === 'string' ? post.original_title : post.title;
+                            const contentStr = useOrig && typeof post.original_content === 'string' ? post.original_content : post.content;
+                            if (titleStr && String(titleStr).trim()) parts.push(String(titleStr).trim());
+                            if (contentStr && String(contentStr).trim()) parts.push(String(contentStr).trim());
                             const text = parts.join('\n\n');
                             if (text && typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
                                 navigator.clipboard.writeText(text);
                             }
                         } catch (_) { /* noop */ }
+                    };
+                    const handleToggleOriginal = () => {
+                        setOpenMenuId(null);
+                        toggleShowOriginal(post.post_id);
                     };
                     return <>
                         <MenuItem onClick={handleCopyLink}>
@@ -2782,6 +2798,12 @@ function ViewPostView({
                             <HiOutlineClipboardDocument />
                             <span>Copy text</span>
                         </MenuItem>
+                        {hasAgentOriginalForPost && (
+                            <MenuItem onClick={handleToggleOriginal}>
+                                <HiOutlineDocumentText />
+                                <span>{showingOriginalForPost ? 'Show modified' : 'Show original'}</span>
+                            </MenuItem>
+                        )}
                         {isOwnPost && <>
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -3707,7 +3729,14 @@ function ViewPostView({
                                                 {/* Title for root post */}
                                                 {isRoot && <>
                                                     <RootTitleRow>
-                                                        {post && post.title ? post.title : mergedRoot && mergedRoot.title ? mergedRoot.title : root && root.title ? root.title : ''}
+                                                        {(() => {
+                                                            const showOrig = isShowingOriginal(post && post.post_id);
+                                                            if (showOrig && post && post.original_title) return post.original_title;
+                                                            if (post && post.title) return post.title;
+                                                            if (mergedRoot && mergedRoot.title) return mergedRoot.title;
+                                                            if (root && root.title) return root.title;
+                                                            return '';
+                                                        })()}
                                                     </RootTitleRow>
                                                     <TitleDivider />
                                                 </>}
@@ -3715,7 +3744,15 @@ function ViewPostView({
                                                 {/* Content — for the focused post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
                                                 {(() => {
                                                     const isFocusedPost = post.post_id === root?.post_id;
-                                                    const displayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
+                                                    const baseDisplayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
+                                                    const showOrig = isShowingOriginal(post && post.post_id);
+                                                    const displayPost = showOrig
+                                                        ? {
+                                                            ...baseDisplayPost,
+                                                            title: baseDisplayPost && baseDisplayPost.original_title != null ? baseDisplayPost.original_title : (baseDisplayPost && baseDisplayPost.title),
+                                                            content: baseDisplayPost && baseDisplayPost.original_content != null ? baseDisplayPost.original_content : (baseDisplayPost && baseDisplayPost.content),
+                                                        }
+                                                        : baseDisplayPost;
                                                     const displayContent = displayPost.content || '';
                                                     const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
                                                     const displayMediaMeta = Array.isArray(displayPost.media_meta) ? displayPost.media_meta : [];

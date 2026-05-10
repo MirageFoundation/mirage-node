@@ -15,6 +15,7 @@ import {
     HiOutlineFlag,
     HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
+    HiOutlineDocumentText,
 } from "react-icons/hi2";
 
 import { getThemeFamily } from "../../../registry/theme";
@@ -33,6 +34,7 @@ import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import ContentTagBadge from "./ContentTagBadge";
 import usePostGifts from "../../../logic/usePostGifts";
+import { useShowOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
 import { useAdminQuestActions } from "./AdminQuestActions";
@@ -723,7 +725,19 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     })();
     const followingTopic = topicFollowOverride !== null ? topicFollowOverride : computedFollowingTopic;
 
-    const { mediaUrl, body } = useMemo(() => resolveDisplayContent(safePost), [safePost]);
+    const showingOriginal = useShowOriginal(postId);
+    const hasAgentOriginal = !!(safePost.original_title || safePost.original_content);
+    const displayTitle = (showingOriginal && safePost.original_title != null)
+        ? safePost.original_title
+        : safePost.title;
+    const displayRawContent = (showingOriginal && safePost.original_content != null)
+        ? safePost.original_content
+        : safePost.content;
+
+    const { mediaUrl, body } = useMemo(
+        () => resolveDisplayContent({ ...safePost, content: displayRawContent }),
+        [safePost, displayRawContent],
+    );
     const hasMedia = !!mediaUrl;
 
     const hasTag = !!(safePost.tag && String(safePost.tag).trim());
@@ -877,8 +891,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleCopyText = useCallback(() => {
         closeAllMenus();
         const parts = [];
-        if (post && typeof post.title === 'string' && post.title.trim()) parts.push(post.title.trim());
-        if (post && typeof post.content === 'string' && post.content.trim()) parts.push(post.content.trim());
+        const titleStr = (showingOriginal && post && typeof post.original_title === 'string') ? post.original_title : (post && post.title);
+        const contentStr = (showingOriginal && post && typeof post.original_content === 'string') ? post.original_content : (post && post.content);
+        if (typeof titleStr === 'string' && titleStr.trim()) parts.push(titleStr.trim());
+        if (typeof contentStr === 'string' && contentStr.trim()) parts.push(contentStr.trim());
         const text = parts.join('\n\n');
         if (!text) return;
         try {
@@ -888,7 +904,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 setTimeout(() => setTextCopied(false), 2500);
             }
         } catch (_) { /* noop */ }
-    }, [closeAllMenus, post]);
+    }, [closeAllMenus, post, showingOriginal]);
+
+    const handleToggleOriginal = useCallback(() => {
+        closeAllMenus();
+        toggleShowOriginal(postId);
+    }, [closeAllMenus, postId]);
 
     const handleFollowUser = useCallback(async () => {
         closeAllMenus();
@@ -1330,6 +1351,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     <HiOutlineClipboardDocument />
                                     <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
                                 </MenuItemBtn>
+                                {hasAgentOriginal && (
+                                    <MenuItemBtn type="button" onClick={handleToggleOriginal}>
+                                        <HiOutlineDocumentText />
+                                        <span>{showingOriginal ? 'Show modified' : 'Show original'}</span>
+                                    </MenuItemBtn>
+                                )}
                                 {isOwnPost && (
                                     <>
                                         <MenuItemBtn type="button" onClick={handleEdit}>
@@ -1383,7 +1410,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 </HeaderActions>
             </HeaderRow>
 
-            <TitleLink to={linkTarget} onClick={stop}>{post.title}</TitleLink>
+            <TitleLink to={linkTarget} onClick={stop}>{displayTitle}</TitleLink>
 
             {hasMedia && (
                 <MediaWrap

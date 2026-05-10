@@ -18,6 +18,7 @@ import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/
 import Storage from "../../utils/Storage";
 import { formatTimeStamp } from "../../logic/useViewPost";
 import { AWARD_TYPES } from "../../logic/usePostGifts";
+import { useShowOriginal } from "../../logic/useShowOriginal";
 
 /**
  * ListFeedView (default) — mobile-app inspired feed list.
@@ -1095,7 +1096,17 @@ function CompactRow({ post, state, updatePost }) {
         } catch (_) { /* noop */ }
     }, [postId]);
 
-    const { mediaUrl, body } = useMemo(() => resolveCompactContent(post || {}), [post]);
+    const showingOriginal = useShowOriginal(post && post.post_id);
+    const displayPost = useMemo(() => {
+        if (!post) return post;
+        if (!showingOriginal) return post;
+        const next = { ...post };
+        if (post.original_title != null) next.title = post.original_title;
+        if (post.original_content != null) next.content = post.original_content;
+        return next;
+    }, [post, showingOriginal]);
+
+    const { mediaUrl, body } = useMemo(() => resolveCompactContent(displayPost || {}), [displayPost]);
     const thumbUrl = useMemo(() => getCompactThumb(post || {}), [post]);
     const canExpand = Boolean(mediaUrl || (typeof body === 'string' && body.trim()));
 
@@ -1324,7 +1335,7 @@ function CompactRow({ post, state, updatePost }) {
             </CompactTopRow>
 
             <CompactTitle to={linkTarget} onClick={stop}>
-                {post.title}
+                {displayPost.title}
             </CompactTitle>
 
             <CompactFooter onClick={stop}>

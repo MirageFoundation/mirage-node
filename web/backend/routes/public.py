@@ -834,6 +834,13 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
                 continue
             for field in ("topic", "title", "content", "tag", "media"):
                 if field not in applied and edit.get(field) is not None:
+                    # Stash the original value so the frontend can offer a
+                    # "Show original" toggle. We only need title/content for
+                    # that UI today, but the field could be expanded later.
+                    if field in ("title", "content"):
+                        orig_key = "original_" + field
+                        if orig_key not in post:
+                            post[orig_key] = post.get(field)
                     post[field] = edit[field]
                     applied[field] = agent_addr
             if edit.get("appendix"):

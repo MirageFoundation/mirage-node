@@ -12,6 +12,7 @@ import {
     HiOutlineFlag,
     HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
+    HiOutlineDocumentText,
     HiOutlinePencilSquare,
     HiOutlineTrash,
 } from "react-icons/hi2";
@@ -23,6 +24,7 @@ import Storage from "../../../utils/Storage";
 import ConfirmDialog from "./ConfirmDialog";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import usePostGifts from "../../../logic/usePostGifts";
+import { useShowOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { updateNotification } from "../../../utils/notifications";
 import { useAdminQuestActions } from "./AdminQuestActions";
 
@@ -253,6 +255,8 @@ export function MoreMenuChip({
 
     const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
     const linkTarget = postId ? `/p/${postId}` : '#';
+    const showingOriginal = useShowOriginal(postId);
+    const hasAgentOriginal = !!(post && (post.original_title || post.original_content));
 
     const computedFollowingUser = (() => {
         if (!isLoggedIn || !authorAddress) return false;
@@ -313,8 +317,11 @@ export function MoreMenuChip({
     const handleCopyText = useCallback(e => {
         stop(e); setOpen(false);
         const parts = [];
-        if (post && typeof post.title === 'string' && post.title.trim()) parts.push(post.title.trim());
-        if (post && typeof post.content === 'string' && post.content.trim()) parts.push(post.content.trim());
+        const useOrig = showingOriginal;
+        const titleStr = (useOrig && post && typeof post.original_title === 'string') ? post.original_title : (post && post.title);
+        const contentStr = (useOrig && post && typeof post.original_content === 'string') ? post.original_content : (post && post.content);
+        if (typeof titleStr === 'string' && titleStr.trim()) parts.push(titleStr.trim());
+        if (typeof contentStr === 'string' && contentStr.trim()) parts.push(contentStr.trim());
         const text = parts.join('\n\n');
         if (!text) return;
         try {
@@ -324,7 +331,12 @@ export function MoreMenuChip({
                 setTimeout(() => setTextCopied(false), 2000);
             }
         } catch (_) { /* noop */ }
-    }, [post]);
+    }, [post, showingOriginal]);
+
+    const handleToggleOriginal = useCallback(e => {
+        stop(e); setOpen(false);
+        toggleShowOriginal(postId);
+    }, [postId]);
 
     const handleEdit = useCallback(e => {
         stop(e); setOpen(false);
@@ -459,6 +471,12 @@ export function MoreMenuChip({
                             <HiOutlineClipboardDocument />
                             <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
                         </MenuItemBtn>
+                        {hasAgentOriginal && (
+                            <MenuItemBtn type="button" onClick={handleToggleOriginal}>
+                                <HiOutlineDocumentText />
+                                <span>{showingOriginal ? 'Show modified' : 'Show original'}</span>
+                            </MenuItemBtn>
+                        )}
                         {isLoggedIn && isOwnPost && (
                             <>
                                 <MenuItemBtn type="button" onClick={handleEdit}>
