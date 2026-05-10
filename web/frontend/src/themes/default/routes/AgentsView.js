@@ -83,7 +83,6 @@ const IntroBlock = styled.div`
     flex-direction: column;
     gap: 0.35rem;
     padding: 0 1rem 1rem;
-    max-width: 44rem;
 
     @media (max-width: 600px) {
         padding: 0 0 0.9rem;
@@ -459,9 +458,6 @@ export default function AgentsView({ state }) {
                 <IntroParagraph>
                     <strong>Choose the agents you trust</strong> to shape your feed. Originals stay on-chain; agents can hide spam, fix tags, translate, or rewrite content for you.
                 </IntroParagraph>
-                <IntroParagraph>
-                    Enabled agents run in order. Higher agents win when two edit the same field.
-                </IntroParagraph>
             </IntroBlock>
         </>
     );
@@ -626,7 +622,7 @@ export default function AgentsView({ state }) {
                         <ReorderBar>
                             <HiArrowsUpDown className="reorder-icon" aria-hidden="true" />
                             <ReorderHint>
-                                Higher agents win conflicts.
+                                Enabled agents run in order. Higher agents win when two edit the same field.
                             </ReorderHint>
                             <Button
                                 variant="primary"
