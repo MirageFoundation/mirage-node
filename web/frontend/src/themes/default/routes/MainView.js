@@ -1780,7 +1780,7 @@ const MainView = ({
                                         <NsfwHeroTitle>Mirage moderation is opt-in</NsfwHeroTitle>
                                     </NsfwHeroHeader>
                                     <NsfwHeroDescription>
-                                        Mirage does not hide legal content by default just because it is messy, spammy, offensive, or low quality. If your feed feels too unruly, enable moderation agents: <strong>SafeSpaceBot</strong> helps hide harassment, hostility, and upsetting content; <strong>AntiSpamBot</strong> helps hide spam, scams, repost floods, and low-effort automated posts. You can enable either one, or both.
+                                        Mirage does not hide legal content by default just because it is messy, spammy, offensive, or low quality. If your feed feels too unruly, enable moderation agents — each one filters a specific kind of unwanted content. For example, <strong>SafeSpaceBot</strong> rewrites hostile posts into kinder language, and <strong>AntiSpamBot</strong> hides spam and low-effort posts. Mix and match as many as you like.
                                     </NsfwHeroDescription>
                                     <NsfwHeroButtons>
                                         <NsfwHeroButton as={Link} to="/agents" $variant="yes" onClick={dismissModerationReminder}>
