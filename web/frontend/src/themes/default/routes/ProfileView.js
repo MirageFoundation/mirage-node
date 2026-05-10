@@ -290,7 +290,7 @@ const ProfileFieldRow = styled.div`
     display: grid;
     grid-template-columns: 110px minmax(0, 1fr);
     gap: 1.5rem;
-    align-items: center;
+    align-items: start;
     padding: 0.55rem 1rem;
     box-sizing: border-box;
     width: 100%;

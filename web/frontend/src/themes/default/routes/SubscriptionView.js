@@ -9,6 +9,7 @@ import {
 import { formatMirageCompact } from "../../../utils/formatters";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { tooltipStyles } from "../components/Tooltip.js";
+import ConfirmDialog from "../components/ConfirmDialog.js";
 import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from "../../../logic/useSubscription";
 
 /**
@@ -795,8 +796,11 @@ export default function SubscriptionView({ state }) {
         formatPeriodLabel,
         handleCancelAutoRenew,
         buildTierDetails,
-        handleUpgrade,
         canAfford,
+        pendingTier,
+        requestUpgrade,
+        confirmUpgrade,
+        cancelUpgrade,
     } = useSubscription({ state });
 
     if (isLoading) {
@@ -851,11 +855,18 @@ export default function SubscriptionView({ state }) {
                 );
             }
 
+            // Show processing on the tier the user just confirmed. The
+            // queue-status string from formatSubscribeStatus only appears
+            // once the tx hits the pending queue (after key derivation,
+            // etc.), which can take a couple of seconds — so fall back to
+            // "Processing..." while isUpgrading is true to give immediate
+            // feedback and prevent double-clicks.
+            const isTargetTier = pendingTier && pendingTier.level === tier.level;
             const pendingLabel = formatSubscribeStatus(address);
-            if (pendingLabel) {
+            if (pendingLabel || (isUpgrading && isTargetTier)) {
                 return (
                     <PlanCTA type="button" $intent="disabled" disabled>
-                        {pendingLabel}
+                        {pendingLabel || 'Processing...'}
                     </PlanCTA>
                 );
             }
@@ -876,7 +887,7 @@ export default function SubscriptionView({ state }) {
                         type="button"
                         $intent="downgrade"
                         disabled={ctaDisabled}
-                        onClick={() => handleUpgrade(tier)}
+                        onClick={() => requestUpgrade(tier)}
                     >
                         <HiArrowDownLeft />
                         Downgrade
@@ -889,7 +900,7 @@ export default function SubscriptionView({ state }) {
                     type="button"
                     $intent="upgrade"
                     disabled={ctaDisabled}
-                    onClick={() => handleUpgrade(tier)}
+                    onClick={() => requestUpgrade(tier)}
                 >
                     <HiArrowUpRight />
                     Upgrade
@@ -1119,6 +1130,47 @@ export default function SubscriptionView({ state }) {
                 Subscriptions are billed every {periodLabel} in MIRAGE tokens.
                 Tokens are burned on payment. If renewal fails due to insufficient balance, you will be downgraded to Free.
             </InfoText>
+
+            {pendingTier && (() => {
+                const isDowngradeToFree = pendingTier.level === 0;
+                const isUpgradeAction = pendingTier.level > userLevel;
+                const priceLabel = pendingTier.periodFeeUmirage > 0
+                    ? `${formatMirageCompact(pendingTier.periodFeeUmirage)} MIRAGE`
+                    : null;
+                let title;
+                let dialogMessage;
+                let confirmLabel;
+                let confirmVariant;
+                if (isDowngradeToFree) {
+                    title = 'Cancel subscription';
+                    dialogMessage = `Auto-renewal will be turned off. Your ${getTierName(userLevel)} plan stays active until it expires, then you'll be downgraded to Free. You won't be charged again.`;
+                    confirmLabel = 'Cancel subscription';
+                    confirmVariant = 'danger';
+                } else if (isUpgradeAction) {
+                    title = `Upgrade to ${pendingTier.name}`;
+                    dialogMessage = `You'll be charged ${priceLabel} now, and another ${priceLabel} every ${periodLabel} on auto-renewal. You can cancel anytime.`;
+                    confirmLabel = `Upgrade to ${pendingTier.name}`;
+                    confirmVariant = 'primary';
+                } else {
+                    title = `Switch to ${pendingTier.name}`;
+                    dialogMessage = `This replaces your current ${getTierName(userLevel)} plan immediately. You'll be charged ${priceLabel} now, and another ${priceLabel} every ${periodLabel} on auto-renewal.`;
+                    confirmLabel = `Switch to ${pendingTier.name}`;
+                    confirmVariant = 'warning';
+                }
+                return (
+                    <ConfirmDialog
+                        open
+                        title={title}
+                        message={dialogMessage}
+                        confirmLabel={confirmLabel}
+                        confirmVariant={confirmVariant}
+                        cancelLabel="Cancel"
+                        pending={isUpgrading}
+                        onConfirm={confirmUpgrade}
+                        onCancel={cancelUpgrade}
+                    />
+                );
+            })()}
         </SubscriptionPageShell>
     );
 }

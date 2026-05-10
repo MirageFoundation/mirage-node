@@ -97,6 +97,7 @@ export function useSubscription({
     const [subscriptionPeriodMinutes, setSubscriptionPeriodMinutes] = useState(0);
     const [tierConfig, setTierConfig] = useState([]);
     const [expandedTierLevel, setExpandedTierLevel] = useState(null);
+    const [pendingTier, setPendingTier] = useState(null);
     const {
         isPending: isSubscribePending,
         formatStatus: formatSubscribeStatus
@@ -495,6 +496,30 @@ export function useSubscription({
         }
         return deduped;
     };
+    // Open the confirmation dialog for a tier change. The actual tx is
+    // not submitted until the user confirms via `confirmUpgrade`. This
+    // gives the user immediate visual feedback (dialog appears instantly)
+    // and a chance to back out before any chain interaction.
+    const requestUpgrade = tier => {
+        if (txInFlightRef.current) return;
+        if (!tier || tier.level === userLevel) return;
+        if (tier.level > 0 && !canAfford(tier)) {
+            setError(`Insufficient balance. You need ${formatMirageCompact(tier.periodFeeUmirage)} MIRAGE.`);
+            return;
+        }
+        setError('');
+        setPendingTier(tier);
+    };
+    const cancelUpgrade = () => {
+        if (isUpgrading) return;
+        setPendingTier(null);
+    };
+    const confirmUpgrade = async () => {
+        const tier = pendingTier;
+        if (!tier) return;
+        await handleUpgrade(tier);
+        setPendingTier(null);
+    };
     const handleUpgrade = async tier => {
         if (txInFlightRef.current) return;
         if (tier.level === userLevel) return;
@@ -564,6 +589,10 @@ export function useSubscription({
         handleCancelAutoRenew,
         canAfford,
         buildTierDetails,
-        handleUpgrade
+        handleUpgrade,
+        pendingTier,
+        requestUpgrade,
+        confirmUpgrade,
+        cancelUpgrade
     };
 }
