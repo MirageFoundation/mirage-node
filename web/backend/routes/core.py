@@ -3532,8 +3532,15 @@ _TAG_ALIASES = {"porn": "adult"}
 
 
 def _normalize_tag(tag: str) -> str:
-    """Return canonical tag name, applying aliases."""
-    t = (tag or "").strip().lower()
+    """Return canonical tag name, applying aliases.
+
+    Matches Go's `normalizeTag` in `blockchain/x/core/module/module.go`:
+    only trim + alias, no case folding. Non-canonical casing must be
+    rejected as "invalid tag" rather than silently coerced — otherwise
+    the user's signature (computed over the original casing) won't match
+    the canonical bytes the backend reconstructs.
+    """
+    t = (tag or "").strip()
     return _TAG_ALIASES.get(t, t)
 
 
