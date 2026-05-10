@@ -559,7 +559,27 @@ else
     run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
   else
     echo "==> Pulling image on remote (container still running): $DEPLOY_IMAGE"
-    ssh -t $SSH_OPTS "$REMOTE" "docker pull '$DEPLOY_IMAGE'"
+    pull_image() {
+      ssh -t $SSH_OPTS "$REMOTE" "docker pull '$DEPLOY_IMAGE'"
+    }
+
+    if ! pull_image; then
+      echo "==> Initial pull failed; retrying in case registry manifest is still propagating..."
+      PULL_READY=0
+      for attempt in {1..12}; do
+        sleep 5
+        echo "    Pull retry ${attempt}/12..."
+        if pull_image; then
+          PULL_READY=1
+          break
+        fi
+      done
+      if [ "$PULL_READY" -ne 1 ]; then
+        echo "ERROR: Failed to pull image after retries: $DEPLOY_IMAGE" >&2
+        close_ssh_socket
+        exit 1
+      fi
+    fi
   fi
 fi
 
