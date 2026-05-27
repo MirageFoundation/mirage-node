@@ -190,13 +190,6 @@ func (t *ImmutableTree) Get(key []byte) ([]byte, error) {
 		}
 
 		if fastNode == nil {
-			// If the tree is of the latest version and fast node is not in the tree
-			// then the regular node is not in the tree either because fast node
-			// represents live state.
-			if t.version == t.ndb.latestVersion {
-				return nil, nil
-			}
-
 			_, result, err := t.root.get(t, key)
 			return result, err
 		}
@@ -206,9 +199,9 @@ func (t *ImmutableTree) Get(key []byte) ([]byte, error) {
 		}
 	}
 
-	// otherwise skipFastStorageUpgrade is true or
-	// the cached node was updated later than the current tree. In this case,
-	// we need to use the regular stategy for reading from the current tree to avoid staleness.
+	// otherwise skipFastStorageUpgrade is true or the cached node was updated
+	// later than the current tree. In this case, read from the canonical tree to
+	// avoid stale fast-node data.
 	_, result, err := t.root.get(t, key)
 	return result, err
 }
@@ -244,17 +237,23 @@ func (t *ImmutableTree) Iterate(fn func(key []byte, value []byte) bool) (bool, e
 }
 
 // Iterator returns an iterator over the immutable tree.
+//
+// Mirage patch: this used to return NewFastIterator when fast-cache was
+// enabled, the same advisory-as-authoritative trap that broke ImmutableTree.Get
+// and produced both the mirage.talk app-hash divergence and the post-state-sync
+// BondDenom panic. A FastIterator only walks the secondary fast-node index;
+// if that index is incomplete (state import, partial fast-storage upgrade,
+// pruning races) entire keys silently disappear from range scans, producing
+// non-deterministic reads and consensus divergence.
+//
+// Canonical IAVL traversal is the only correct source for consensus reads, so
+// Iterator now always returns NewIterator. The fast-node index is no longer
+// part of the consensus read path. FastIterator remains in the package for
+// the fast-storage maintenance flow in MutableTree.enableFastStorageAndCommit
+// (enumerating live fast-nodes for upgrade), which is not consensus-critical.
+//
+// See docs/troubleshooting/state-sync-bonddenom-panic.md.
 func (t *ImmutableTree) Iterator(start, end []byte, ascending bool) (dbm.Iterator, error) {
-	if !t.skipFastStorageUpgrade {
-		isFastCacheEnabled, err := t.IsFastCacheEnabled()
-		if err != nil {
-			return nil, err
-		}
-
-		if isFastCacheEnabled {
-			return NewFastIterator(start, end, ascending, t.ndb), nil
-		}
-	}
 	return NewIterator(start, end, ascending, t), nil
 }
 
