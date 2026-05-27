@@ -1,12 +1,26 @@
 #!/usr/bin/env python3
 """
-divergence_watchdog.py — long-running supervisor that detects when miraged is
-forked / app-hash-diverged from the rest of the network and triggers a
-recovery script to bring it back automatically.
+divergence_watchdog.py — long-running observability daemon. Detects when
+miraged is forked / app-hash-diverged from the rest of the network and, if
+explicitly authorized, invokes a recovery script.
 
-Default recovery command: scripts/recover.sh peer-pull (chain-data tar pulled
-directly from a healthy peer). State-sync remains available as an opt-in
-alternative - set:
+DEFAULT BEHAVIOUR (post-2026-05-27 incident): ALERT-ONLY. The watchdog will
+log a high-visibility WARNING when it sees divergence symptoms, but it will
+NEVER invoke the recovery script unless the operator has explicitly set:
+
+    WATCHDOG_AUTORECOVER=true
+
+Rationale: prior to 2026-05-27 the watchdog ran on every validator with
+default-on auto-recovery and could autonomously decide to wipe local chain
+DBs. A benign upgrade halt then caused 3 of 4 validators to wipe themselves
+within minutes of each other. We never want a single observability daemon
+to be able to brick the validator set again. Auto-recovery is now opt-in
+per host, and even on the host that opts in, recovery requires that all the
+existing safety guards (cool-down, peer agreement, ≥2 healthy peers) pass.
+
+Default recovery command (when authorized): scripts/recover.sh peer-pull
+(chain-data tar pulled directly from a healthy peer). State-sync remains
+available as an opt-in alternative - set:
    RECOVERY_MODE=state-sync
 to switch back. The default was flipped after the May 25 2026 incident where
 a cosmos-sdk v0.53 state-sync bug left staking.bond_denom empty, causing
@@ -21,6 +35,16 @@ Detection signals (any one triggers recovery):
      or
        "CONSENSUS FAILURE!!!"              (panicking / catastrophic)
      in the last DETECTION_WINDOW seconds.
+
+     EXCEPTION: a "CONSENSUS FAILURE!!!" line whose `err=...` payload is the
+     cosmos-sdk upgrade halt (matches UPGRADE_HALT_RE) is NOT a divergence —
+     it is an operator-driven binary-swap event. The chain has reached an
+     on-chain Plan height for which the running binary lacks a registered
+     handler. The fix is to swap to a binary with that handler, not to wipe
+     the chain DBs. Pre-2026-05-27 the watchdog matched this pattern as a
+     divergence, which destroyed three of four validators' chain data when
+     the v1.26.0 upgrade went live before the binaries were rolled.
+
   2) /status reports the same latest_block_height for STALL_BLOCKS consecutive
      polls AND >=2 healthy peers report a strictly higher block (we're stuck).
   3) /status is unreachable for DEAD_THRESHOLD consecutive polls, the miraged
@@ -70,10 +94,24 @@ COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "21600"))  # 6h
 PEER_AHEAD_THRESHOLD = int(os.environ.get("PEER_AHEAD_THRESHOLD", "20"))
 DEAD_THRESHOLD = int(os.environ.get("DEAD_THRESHOLD", "3"))
 
+# Master gate on destructive recovery. Defaults to FALSE: watchdog is purely
+# observational. Operator must opt in per-host. See module docstring for
+# rationale (2026-05-27 mass-wipe incident).
+WATCHDOG_AUTORECOVER = os.environ.get("WATCHDOG_AUTORECOVER", "").lower() in {"1", "true", "yes"}
+
 DIVERGENCE_PATTERNS = (
     "wrong Block.Header.AppHash",
     "CONSENSUS FAILURE!!!",
 )
+
+# A "CONSENSUS FAILURE!!!" line that is actually the cosmos-sdk upgrade halt
+# looks like:
+#   ERR CONSENSUS FAILURE!!! err="failed to apply block; error UPGRADE \"v1.26.0\" NEEDED at height: 4895581: " module=consensus
+# (the upgrade module returns the error verbatim from
+# x/upgrade.Keeper.PreBlocker when it has no handler registered for plan.Name).
+# This is operator-fixable (swap binaries), NEVER recoverable by wiping the
+# chain DBs. Treat it as non-divergence.
+UPGRADE_HALT_RE = re.compile(r'UPGRADE\s+\\"[^"\\]+\\"\s+NEEDED\s+at\s+height:')
 
 
 # ── Logging ─────────────────────────────────────────────────────────────
@@ -172,6 +210,12 @@ def log_window_has_pattern(text: str, patterns: tuple[str, ...], window_secs: in
         # Quick filter
         if not any(p in line for p in patterns):
             continue
+        # Suppress upgrade-halt false positives: a CONSENSUS FAILURE line whose
+        # err payload is "UPGRADE \"...\" NEEDED at height:" is the cosmos-sdk
+        # upgrade module refusing to apply a block because plan.Name has no
+        # registered handler. That is a binary-swap event, not divergence.
+        if UPGRADE_HALT_RE.search(line):
+            continue
         m = TS_RE.search(line)
         if not m:
             # No parseable timestamp — assume recent (conservative match)
@@ -250,8 +294,12 @@ def run(dry_run: bool) -> int:
         f"divergence_watchdog starting "
         f"(poll={POLL_SECONDS}s, window={DETECTION_WINDOW}s, "
         f"stall={STALL_BLOCKS}, cooldown={COOLDOWN_SECONDS}s, "
-        f"dead_threshold={DEAD_THRESHOLD}, dry_run={dry_run})"
+        f"dead_threshold={DEAD_THRESHOLD}, dry_run={dry_run}, "
+        f"autorecover={WATCHDOG_AUTORECOVER})"
     )
+    if not WATCHDOG_AUTORECOVER:
+        log("MODE: alert-only. Triggers will be logged loudly; recover.sh will NOT be invoked.")
+        log("To permit auto-recovery set WATCHDOG_AUTORECOVER=true (per-host, in node.env).")
 
     height_history: deque[int] = deque(maxlen=STALL_BLOCKS + 1)
     consecutive_unreachable = 0
@@ -344,6 +392,27 @@ def run(dry_run: bool) -> int:
                 continue
             if force_recover and cooldown_active():
                 log("process-dead recovery bypassing cool-down via --force")
+
+            if not WATCHDOG_AUTORECOVER:
+                # Hard gate. This is the post-2026-05-27 "horrible thing must
+                # never happen again" guard. We log loudly so the line shows
+                # up in any monitoring grep, then go back to polling.
+                log("============================================================")
+                log("ALERT: divergence symptom detected; watchdog is in alert-only mode.")
+                log(f"  trigger: {triggered_by}")
+                log("  WATCHDOG_AUTORECOVER is not true; refusing to invoke recover.sh.")
+                log("  Operator action required. To investigate:")
+                log("    tmux attach -t mirage  # then check 'node' and 'watchdog' windows")
+                log(f"    bash {RECOVERY_SCRIPT} {RECOVERY_MODE} --dry-run")
+                log("  To recover after manual review, run from the host:")
+                log(f"    docker exec -it mirage bash {RECOVERY_SCRIPT} {RECOVERY_MODE}")
+                log("============================================================")
+                # Still touch the cool-down marker so we don't spam every poll.
+                LOCK.parent.mkdir(parents=True, exist_ok=True)
+                LOCK.touch()
+                height_history.clear()
+                time.sleep(POLL_SECONDS * 5)
+                continue
 
             if dry_run:
                 log("DRY RUN — would invoke recovery script. Not acting.")

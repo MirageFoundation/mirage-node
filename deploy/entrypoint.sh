@@ -583,17 +583,19 @@ fi
 tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
 
-# Divergence watchdog — detects app-hash divergence and auto-state-syncs.
-# Set AUTO_DIVERGENCE_RECOVERY=false to disable, or DIVERGENCE_DRY_RUN=true to
-# detect-only (log triggers without invoking the recovery script).
-if [ "${AUTO_DIVERGENCE_RECOVERY:-true}" = "true" ]; then
-  echo "==> Starting divergence watchdog (DRY_RUN=${DIVERGENCE_DRY_RUN:-false})"
+# Divergence watchdog — observability daemon. Default OFF on every host;
+# enable only on mirage.talk. Even when enabled, runs in alert-only mode
+# unless WATCHDOG_AUTORECOVER=true is also set. See node.env for full policy.
+if [ "${AUTO_DIVERGENCE_RECOVERY:-false}" = "true" ]; then
+  WD_AUTOREC="${WATCHDOG_AUTORECOVER:-false}"
+  WD_DRY="${DIVERGENCE_DRY_RUN:-false}"
+  echo "==> Starting divergence watchdog (autorecover=${WD_AUTOREC}, dry_run=${WD_DRY})"
   tmux new-window -t "$SESSION" -n watchdog -c "$ROOT_DIR"
-  WATCHDOG_CMD="DRY_RUN=${DIVERGENCE_DRY_RUN:-false} PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/divergence_watchdog.py"
+  WATCHDOG_CMD="WATCHDOG_AUTORECOVER=${WD_AUTOREC} DRY_RUN=${WD_DRY} PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/divergence_watchdog.py"
   tmux send-keys -t "$SESSION:watchdog" \
     "$WATCHDOG_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/divergence_watchdog-%Y-%m-%d.log\")" C-m
 else
-  echo "==> Divergence watchdog disabled (set AUTO_DIVERGENCE_RECOVERY=true to enable)"
+  echo "==> Divergence watchdog disabled (default; set AUTO_DIVERGENCE_RECOVERY=true on mirage.talk only)"
 fi
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"

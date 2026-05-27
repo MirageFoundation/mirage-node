@@ -601,17 +601,31 @@ cmd_peer_pull() {
   RECOVERY_KEY="${RECOVERY_KEY:-/root/.mirage/.ssh/recovery_id}"
   PEER_SSH_USER="${PEER_SSH_USER:-root}"
   PEER_SSH_PORT="${PEER_SSH_PORT:-22}"
+  # PEER_PULL_MIN_HEALTHY=1 enables single-survivor recovery (e.g. the
+  # 2026-05-27 incident: an upgrade halt + a buggy watchdog wiped 3 of 4
+  # validators, leaving only one node with chain data). Default stays at 2 so
+  # the watchdog never silently trusts a single peer; the operator must opt in
+  # by setting the env var explicitly.
+  PEER_PULL_MIN_HEALTHY="${PEER_PULL_MIN_HEALTHY:-2}"
   require_positive_int PEER_PULL_SECONDS
   require_positive_int PEER_SSH_PORT
+  require_positive_int PEER_PULL_MIN_HEALTHY
 
   log "discovering healthy peers from persistent_peers..."
   peer_discover_local_node_id
   peer_discover_persistent_specs
   peer_discover_healthy
-  [ "${#HEALTHY_RPC[@]}" -ge 2 ] \
-    || die "need >=2 healthy peers, found ${#HEALTHY_RPC[@]}. Aborting (avoid blind recovery)."
+  [ "${#HEALTHY_RPC[@]}" -ge "$PEER_PULL_MIN_HEALTHY" ] \
+    || die "need >=${PEER_PULL_MIN_HEALTHY} healthy peers, found ${#HEALTHY_RPC[@]}. Aborting (avoid blind recovery)."
   peer_pick_min_height
-  peer_validate_app_hash
+  if [ "${#HEALTHY_RPC[@]}" -ge 2 ]; then
+    peer_validate_app_hash
+  else
+    log "  WARNING: only 1 healthy peer (${HEALTHY_IP[0]}); skipping cross-validation."
+    log "  WARNING: trusting this peer's chain state without app_hash agreement check."
+    log "  WARNING: this is single-survivor recovery; the operator is responsible for"
+    log "  WARNING: confirming the source peer is the canonical chain (PEER_PULL_MIN_HEALTHY=${PEER_PULL_MIN_HEALTHY})."
+  fi
 
   # Pick highest healthy peer as the source. If one healthy peer is ahead of
   # the rest, pulling from it reduces catch-up time after extraction. The
