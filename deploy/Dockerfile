@@ -158,29 +158,14 @@ COPY --from=builder /opt/mirage/tests /opt/mirage/tests
 
 # Note: backend settings.yaml is already included in web/backend copy above
 
-# Copy deployment files (new entrypoint and init)
-COPY --from=builder /opt/mirage/deploy/entrypoint.sh /opt/mirage/deploy/entrypoint.sh
-COPY --from=builder /opt/mirage/deploy/init.sh /opt/mirage/deploy/init.sh
-COPY --from=builder /opt/mirage/deploy/run_miraged_supervised.sh /opt/mirage/deploy/run_miraged_supervised.sh
-COPY --from=builder /opt/mirage/deploy/templates /opt/mirage/deploy/templates
-
-# Deploy migrations and env sync (run automatically on startup)
-COPY --from=builder /opt/mirage/deploy/__init__.py /opt/mirage/deploy/__init__.py
-COPY --from=builder /opt/mirage/deploy/migrations /opt/mirage/deploy/migrations
-
-# Template renderer
-COPY --from=builder /opt/mirage/deploy/render_template.py /opt/mirage/deploy/render_template.py
-
-# Copy deployment script for consensus key derivation
-COPY --from=builder /opt/mirage/deploy/derive_consensus_key.py /opt/mirage/deploy/derive_consensus_key.py
-
-# Domain/TLS helper scripts
-COPY --from=builder /opt/mirage/deploy/setup_letsencrypt.py /opt/mirage/deploy/setup_letsencrypt.py
-COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/deploy/enable_validator_mode.sh
-
-# Setup scripts
-COPY --from=builder /opt/mirage/deploy/setup_orchestrator.py /opt/mirage/deploy/setup_orchestrator.py
-COPY --from=builder /opt/mirage/deploy/setup_rewards_pool.py /opt/mirage/deploy/setup_rewards_pool.py
+# Copy the entire deploy/ tree from the builder. We previously cherry-picked
+# individual files, which silently dropped any deploy/ file added later
+# (run_miraged_supervised.sh on May 27, create_validator.sh, etc.) — those
+# would land on disk but never make it into the image, and entrypoint.sh
+# would crash on a missing path. Bulk-copying deploy/ removes the trap; the
+# few workstation-only scripts (deploy.sh, harden_server.sh, etc.) are
+# inert in the running container and worth the noise.
+COPY --from=builder /opt/mirage/deploy /opt/mirage/deploy
 
 # Set working directory
 WORKDIR /opt/mirage
