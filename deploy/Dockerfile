@@ -161,6 +161,7 @@ COPY --from=builder /opt/mirage/tests /opt/mirage/tests
 # Copy deployment files (new entrypoint and init)
 COPY --from=builder /opt/mirage/deploy/entrypoint.sh /opt/mirage/deploy/entrypoint.sh
 COPY --from=builder /opt/mirage/deploy/init.sh /opt/mirage/deploy/init.sh
+COPY --from=builder /opt/mirage/deploy/run_miraged_supervised.sh /opt/mirage/deploy/run_miraged_supervised.sh
 COPY --from=builder /opt/mirage/deploy/templates /opt/mirage/deploy/templates
 
 # Deploy migrations and env sync (run automatically on startup)
