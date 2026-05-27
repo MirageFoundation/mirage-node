@@ -509,14 +509,14 @@ fi
 tmux new-window -t "$SESSION" -n node -c "$ROOT_DIR"
 # Node home is always ~/.mirage/node (hardcoded)
 # SKIP_UPGRADES: comma-separated list of upgrade names to skip (for dev/UAT when upgrades weren't triggered via governance)
-NODE_START_CMD="$BIN start --home \"$NODE_HOME\""
+NODE_START_CMD="BIN=\"$BIN\" NODE_HOME=\"$NODE_HOME\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_miraged_supervised.sh\""
 if [ -n "${SKIP_UPGRADES:-}" ]; then
   for upgrade in $(echo "$SKIP_UPGRADES" | tr ',' ' '); do
     NODE_START_CMD="$NODE_START_CMD --unsafe-skip-upgrades $upgrade"
   done
   echo "==> Skipping upgrades: $SKIP_UPGRADES"
 fi
-tmux send-keys -t "$SESSION:node" "$NODE_START_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\")" C-m
+tmux send-keys -t "$SESSION:node" "$NODE_START_CMD" C-m
 
 # Wait for node RPC to be ready before starting dependent services
 echo "==> Waiting for node RPC to become available..."

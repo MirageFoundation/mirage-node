@@ -32,6 +32,9 @@ USE_REMOTE_RPC="${USE_REMOTE_RPC:-true}"
 say() { printf "%s\n" "$*"; }
 die() { printf "ERROR: %s\n" "$*" >&2; exit 1; }
 
+UNJAIL_POLL_SECONDS="${UNJAIL_POLL_SECONDS:-60}"
+[[ "$UNJAIL_POLL_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "UNJAIL_POLL_SECONDS must be a positive integer"
+
 require_bin() {
   command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"
 }
@@ -492,18 +495,11 @@ else
 fi
 
 # Poll jailed flag directly (no tx index dependency).
-# UNJAIL_POLL_SECONDS controls the budget. 60s = 10 blocks at 6s each — enough
-# for normal mempool→block propagation. Every TX_CHECK_INTERVAL seconds we also
-# query the tx by hash so we can short-circuit on an explicit handler rejection
-# (e.g. tombstoned, signing-info missing) instead of waiting out the full budget.
-UNJAIL_POLL_SECONDS="${UNJAIL_POLL_SECONDS:-60}"
-TX_CHECK_INTERVAL="${UNJAIL_TX_CHECK_INTERVAL:-10}"
-
-if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
+# UNJAIL_POLL_SECONDS controls the budget. 60s = 10 blocks at 6s each, enough
+# for normal mempool-to-block propagation on this chain.
+if { [ "$CODE" = "0" ] || [ "$CODE" = "19" ]; } && [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
   say "Transaction submitted: $TXHASH"
-  if [ "$CODE" = "19" ] || [ "$CODE" = "0" ]; then
-    say "Transaction accepted into mempool. Waiting for block inclusion (up to ${UNJAIL_POLL_SECONDS}s)..."
-  fi
+  say "Transaction accepted into mempool. Waiting for block inclusion (up to ${UNJAIL_POLL_SECONDS}s)..."
   POLL_OUTCOME="pending"
   for i in $(seq 1 "$UNJAIL_POLL_SECONDS"); do
     sleep 1
@@ -512,18 +508,6 @@ if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
       POLL_OUTCOME="success"
       break
     fi
-    if [ $((i % TX_CHECK_INTERVAL)) -eq 0 ]; then
-      TX_QUERY="$($BIN q tx "$TXHASH" --node "$RPC" -o json 2>/dev/null || true)"
-      if [ -n "$TX_QUERY" ] && echo "$TX_QUERY" | jq -e '.height' >/dev/null 2>&1; then
-        TX_CODE="$(echo "$TX_QUERY" | jq -r '.code // 0' 2>/dev/null || echo "0")"
-        if [ "$TX_CODE" != "0" ] && [ -n "$TX_CODE" ]; then
-          POLL_OUTCOME="tx_failed"
-          CODE="$TX_CODE"
-          RAW="$(echo "$TX_QUERY" | jq -r '.raw_log // empty' 2>/dev/null || echo "")"
-          break
-        fi
-      fi
-    fi
   done
   case "$POLL_OUTCOME" in
     success)
@@ -531,15 +515,12 @@ if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
       RAW=""
       say "Validator jail flag cleared; treating as success."
       ;;
-    tx_failed)
-      say "Transaction landed in a block but the unjail handler rejected it (code=$CODE)."
-      ;;
     pending)
       say ""
       say "Transaction $TXHASH was accepted into the mempool but jail flag has not cleared after ${UNJAIL_POLL_SECONDS}s."
-      say "This usually means block inclusion is still pending. Verify manually:"
+      say "Possible causes: block inclusion is still pending, the mempool dropped the tx, or this RPC has not observed the post-unjail state yet."
+      say "Verify manually after a few more blocks:"
       say "  $BIN q staking validator $VALOPER --node $RPC -o json | jq .validator.jailed"
-      say "  $BIN q tx $TXHASH --node $RPC -o json"
       say ""
       say "Exiting 0 (tx was accepted; on-chain confirmation may still be propagating)."
       exit 0
@@ -548,7 +529,7 @@ if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
 fi
 
 # If still sequence mismatch, try one more time with refreshed sequence
-if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; echo "$RESP" | grep -qi "account sequence mismatch"; }; then
+if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch" || echo "$RESP" | grep -qi "account sequence mismatch"; }; then
   say "Sequence mismatch detected. Refreshing account state and retrying..."
   sleep 2
   # Try to extract expected sequence from error message first
@@ -611,8 +592,8 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
       RAW="$(echo "$RESP" | grep -i "error\|fatal" | head -1 || echo "$RESP")"
     fi
   fi
-  # Same poll/short-circuit logic as the initial broadcast (see comments above).
-  if [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
+  # Same validator-state polling logic as the initial broadcast.
+  if { [ "$CODE" = "0" ] || [ "$CODE" = "19" ]; } && [ -n "$TXHASH" ] && [ "$TXHASH" != "null" ] && [ "$TXHASH" != "" ]; then
     say "Retry transaction submitted: $TXHASH"
     say "Polling validator state (up to ${UNJAIL_POLL_SECONDS}s)..."
     POLL_OUTCOME="pending"
@@ -623,18 +604,6 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
         POLL_OUTCOME="success"
         break
       fi
-      if [ $((i % TX_CHECK_INTERVAL)) -eq 0 ]; then
-        TX_QUERY="$($BIN q tx "$TXHASH" --node "$RPC" -o json 2>/dev/null || true)"
-        if [ -n "$TX_QUERY" ] && echo "$TX_QUERY" | jq -e '.height' >/dev/null 2>&1; then
-          TX_CODE="$(echo "$TX_QUERY" | jq -r '.code // 0' 2>/dev/null || echo "0")"
-          if [ "$TX_CODE" != "0" ] && [ -n "$TX_CODE" ]; then
-            POLL_OUTCOME="tx_failed"
-            CODE="$TX_CODE"
-            RAW="$(echo "$TX_QUERY" | jq -r '.raw_log // empty' 2>/dev/null || echo "")"
-            break
-          fi
-        fi
-      fi
     done
     case "$POLL_OUTCOME" in
       success)
@@ -642,15 +611,12 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
         RAW=""
         say "Validator jail flag cleared; treating as success."
         ;;
-      tx_failed)
-        say "Retry transaction landed in a block but the unjail handler rejected it (code=$CODE)."
-        ;;
       pending)
         say ""
         say "Retry transaction $TXHASH was accepted into the mempool but jail flag has not cleared after ${UNJAIL_POLL_SECONDS}s."
-        say "Verify manually:"
+        say "Possible causes: block inclusion is still pending, the mempool dropped the tx, or this RPC has not observed the post-unjail state yet."
+        say "Verify manually after a few more blocks:"
         say "  $BIN q staking validator $VALOPER --node $RPC -o json | jq .validator.jailed"
-        say "  $BIN q tx $TXHASH --node $RPC -o json"
         say ""
         say "Exiting 0 (tx was accepted; on-chain confirmation may still be propagating)."
         exit 0

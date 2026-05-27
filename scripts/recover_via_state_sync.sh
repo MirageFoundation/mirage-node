@@ -31,7 +31,8 @@
 #
 # Env overrides:
 #   NODE_HOME, ENV_FILE, LOCK, BIN, TMUX_SESSION, COOLDOWN_SECONDS,
-#   SNAPSHOT_INTERVAL, STATESYNC_WAIT_SECONDS, RECOVERY_LOG
+#   SNAPSHOT_INTERVAL, STATESYNC_WAIT_SECONDS, RECOVERY_VERIFY_SECONDS,
+#   RECOVERY_LOG
 
 set -euo pipefail
 
@@ -46,6 +47,7 @@ LOGS_DIR="${LOGS_DIR:-/root/.mirage/logs}"
 RECOVERY_LOG="${RECOVERY_LOG:-$LOGS_DIR/deploy/divergence_recovery-$(date -u +%Y-%m-%d).log}"
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
 STATESYNC_WAIT_SECONDS="${STATESYNC_WAIT_SECONDS:-300}"  # max 5 min for snapshot to apply
+RECOVERY_VERIFY_SECONDS="${RECOVERY_VERIFY_SECONDS:-60}"
 
 mkdir -p "$(dirname "$RECOVERY_LOG")"
 
@@ -57,6 +59,9 @@ die() {
   log "ERROR: $*"
   exit 1
 }
+
+[[ "$STATESYNC_WAIT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "STATESYNC_WAIT_SECONDS must be a positive integer"
+[[ "$RECOVERY_VERIFY_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "RECOVERY_VERIFY_SECONDS must be a positive integer"
 
 # ── Args ─────────────────────────────────────────────────────────────────
 AUTO=0
@@ -92,6 +97,7 @@ fi
 # shellcheck disable=SC1090
 SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL:-$(grep -E '^SNAPSHOT_INTERVAL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 | head -1)}"
 SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL:-14400}"
+[[ "$SNAPSHOT_INTERVAL" =~ ^[1-9][0-9]*$ ]] || die "SNAPSHOT_INTERVAL must be a positive integer"
 log "snapshot interval: $SNAPSHOT_INTERVAL blocks"
 
 # ── Discover healthy peers ───────────────────────────────────────────────
@@ -219,13 +225,25 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
   tmux send-keys -t "$TMUX_SESSION:node" C-c 2>/dev/null || true
 fi
 for i in $(seq 1 30); do
-  pgrep -f "miraged start" >/dev/null 2>&1 || break
+  if ! pgrep -f "miraged start" >/dev/null 2>&1 && ! pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
+    break
+  fi
   sleep 1
 done
-if pgrep -f "miraged start" >/dev/null 2>&1; then
-  log "miraged didn't exit gracefully, sending SIGKILL"
+if pgrep -f "miraged start" >/dev/null 2>&1 || pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
+  log "miraged supervisor didn't exit gracefully, sending SIGTERM"
+  pkill -TERM -f "run_miraged_supervised.sh" 2>/dev/null || true
+  pkill -TERM -f "miraged start" 2>/dev/null || true
+  sleep 5
+fi
+if pgrep -f "miraged start" >/dev/null 2>&1 || pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
+  log "miraged supervisor still running, sending SIGKILL"
+  pkill -KILL -f "run_miraged_supervised.sh" 2>/dev/null || true
   pkill -KILL -f "miraged start" 2>/dev/null || true
   sleep 2
+fi
+if pgrep -f "miraged start" >/dev/null 2>&1 || pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
+  die "miraged or its supervisor is still running after SIGKILL"
 fi
 log "miraged stopped"
 
@@ -280,7 +298,12 @@ log "re-rendering $NODE_HOME/config/config.toml from template ..."
 
 # ── Restart miraged in the existing tmux node window ─────────────────────
 log "restarting miraged in tmux $TMUX_SESSION:node ..."
-NODE_START_CMD="$BIN start --home \"$NODE_HOME\" 2>&1 | tee >(cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\")"
+NODE_START_CMD="BIN=\"$BIN\" NODE_HOME=\"$NODE_HOME\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_miraged_supervised.sh\""
+TODAYS_LOG="$LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
+SNAPSHOT_SEARCH_START=1
+if [ -f "$TODAYS_LOG" ]; then
+  SNAPSHOT_SEARCH_START=$(( $(wc -l < "$TODAYS_LOG") + 1 ))
+fi
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
   tmux send-keys -t "$TMUX_SESSION:node" "$NODE_START_CMD" C-m
 else
@@ -289,12 +312,13 @@ fi
 
 # ── Wait for snapshot to be applied ──────────────────────────────────────
 log "waiting up to ${STATESYNC_WAIT_SECONDS}s for snapshot to be restored..."
-TODAYS_LOG="$LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
 SNAPSHOT_OK=0
+SNAPSHOT_LOG_LINE=1
 DEADLINE=$(( $(date +%s) + STATESYNC_WAIT_SECONDS ))
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  if [ -f "$TODAYS_LOG" ] && grep -q "Snapshot restored" "$TODAYS_LOG" 2>/dev/null; then
+  if [ -f "$TODAYS_LOG" ] && tail -n +"$SNAPSHOT_SEARCH_START" "$TODAYS_LOG" | grep -q "Snapshot restored" 2>/dev/null; then
     SNAPSHOT_OK=1
+    SNAPSHOT_LOG_LINE=$(wc -l < "$TODAYS_LOG")
     break
   fi
   sleep 5
@@ -324,9 +348,32 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
   fi
 fi
 
+# ── Verify miraged survived snapshot restore before writing cool-down ─────
+RECOVERY_VERIFIED=0
+if [ "$SNAPSHOT_OK" = "1" ]; then
+  log "verifying miraged health for ${RECOVERY_VERIFY_SECONDS}s after snapshot restore..."
+  VERIFY_DEADLINE=$(( $(date +%s) + RECOVERY_VERIFY_SECONDS ))
+  while [ "$(date +%s)" -lt "$VERIFY_DEADLINE" ]; do
+    if [ -f "$TODAYS_LOG" ] && tail -n +"$SNAPSHOT_LOG_LINE" "$TODAYS_LOG" | grep -q "panic:" 2>/dev/null; then
+      log "ERROR: panic detected in miraged log after snapshot restore"
+      break
+    fi
+
+    cur_h=$(curl -fsS --max-time 3 http://127.0.0.1:26657/status 2>/dev/null \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])' 2>/dev/null \
+      || echo 0)
+
+    if [[ "$cur_h" =~ ^[0-9]+$ ]] && [ "$cur_h" -gt "$TRUST_HEIGHT" ]; then
+      RECOVERY_VERIFIED=1
+      log "verified: miraged height $cur_h is past trust height $TRUST_HEIGHT"
+      break
+    fi
+
+    sleep 5
+  done
+fi
+
 # ── Mark cool-down ───────────────────────────────────────────────────────
-date -u +%Y-%m-%dT%H:%M:%SZ > "$LOCK"
-log "recovery initiated. Cool-down lock written: $LOCK"
 log "monitor: tmux attach -t $TMUX_SESSION  (window 'node')"
 log "logs:    $LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
 log "this script's log: $RECOVERY_LOG"
@@ -334,8 +381,15 @@ log "this script's log: $RECOVERY_LOG"
 # ── After-state hint: reminder to unjail ─────────────────────────────────
 log "NOTE: after blocksync catches up, run: docker exec mirage bash $ROOT_DIR/scripts/unjail_validator.sh"
 
-if [ "$SNAPSHOT_OK" = "1" ]; then
+if [ "$RECOVERY_VERIFIED" = "1" ]; then
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$LOCK"
+  log "recovery verified. Cool-down lock written: $LOCK"
   exit 0
-else
+fi
+
+if [ "$SNAPSHOT_OK" != "1" ]; then
   exit 4
 fi
+
+log "ERROR: recovery was not verified; cool-down lock was not written"
+exit 5

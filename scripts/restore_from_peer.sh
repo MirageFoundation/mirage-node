@@ -60,6 +60,16 @@ if [ -z "$SOURCE" ] || [ -z "$TARGET" ]; then
   exit 1
 fi
 
+SSH_DEST_RE='^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+$'
+if ! [[ "$SOURCE" =~ $SSH_DEST_RE ]]; then
+  echo "ERROR: --source must be user@host with only letters, digits, dots, underscores, or dashes" >&2
+  exit 1
+fi
+if ! [[ "$TARGET" =~ $SSH_DEST_RE ]]; then
+  echo "ERROR: --target must be user@host with only letters, digits, dots, underscores, or dashes" >&2
+  exit 1
+fi
+
 # Server-to-server transfer (step 6) needs SSH agent forwarding so the source
 # can scp directly to the target without routing data through this workstation.
 # Verify the agent has at least one key loaded BEFORE we start tearing things
@@ -76,6 +86,16 @@ if ! ssh-add -l >/dev/null 2>&1; then
   exit 1
 fi
 
+SOURCE_STOPPED=0
+cleanup_source() {
+  if [ "$SOURCE_STOPPED" -eq 1 ]; then
+    echo ""
+    echo "==> Cleanup: restarting source node after interrupted restore"
+    ssh "$SOURCE" 'docker restart mirage' || true
+  fi
+}
+trap cleanup_source EXIT
+
 echo "==> Restore blockchain data"
 echo "    Source: $SOURCE"
 echo "    Target: $TARGET"
@@ -91,6 +111,7 @@ fi
 
 # Database directories to sync (relative to ~/.mirage/node/data/)
 DB_DIRS="application.db blockstore.db cs.wal evidence.db snapshots state.db tx_index.db"
+REQUIRED_DB_DIRS="application.db blockstore.db cs.wal evidence.db snapshots state.db"
 
 echo ""
 echo "==> Step 1: Stop target node"
@@ -103,16 +124,21 @@ ssh "$TARGET" 'cp ~/.mirage/node/data/priv_validator_state.json /tmp/priv_valida
 echo ""
 echo "==> Step 3: Stop source node briefly for consistent snapshot"
 ssh "$SOURCE" 'docker exec mirage pkill -TERM miraged 2>/dev/null || true; sleep 3'
+SOURCE_STOPPED=1
 
 echo ""
 echo "==> Step 4: Create snapshot on source (databases only, excluding validator state)"
 # --ignore-failed-read tolerates DB_DIRS entries that don't exist on this peer
 # (e.g. tx_index.db is absent when CometBFT is configured with indexer="null").
 ssh "$SOURCE" "cd ~/.mirage/node/data && tar --ignore-failed-read --exclude='priv_validator_state.json' -czf /tmp/blockchain_data.tar.gz $DB_DIRS"
+SOURCE_SHA="$(ssh "$SOURCE" "sha256sum /tmp/blockchain_data.tar.gz | awk '{print \$1}'")"
+[ -n "$SOURCE_SHA" ] || { echo "ERROR: source snapshot checksum is empty" >&2; exit 1; }
+echo "    Source sha256: $SOURCE_SHA"
 
 echo ""
 echo "==> Step 5: Restart source node"
 ssh "$SOURCE" 'docker restart mirage'
+SOURCE_STOPPED=0
 
 echo ""
 echo "==> Step 6: Transfer snapshot directly from source to target (server-to-server)"
@@ -120,6 +146,15 @@ echo "==> Step 6: Transfer snapshot directly from source to target (server-to-se
 # loaded in the operator's local agent. This bypasses the workstation entirely
 # and saves ~5 min on a typical chain-DB transfer vs streaming through stdin.
 ssh -A "$SOURCE" "scp -o StrictHostKeyChecking=accept-new /tmp/blockchain_data.tar.gz $TARGET:/tmp/blockchain_data.tar.gz"
+TARGET_SHA="$(ssh "$TARGET" "sha256sum /tmp/blockchain_data.tar.gz | awk '{print \$1}'")"
+[ -n "$TARGET_SHA" ] || { echo "ERROR: target snapshot checksum is empty" >&2; exit 1; }
+echo "    Target sha256: $TARGET_SHA"
+if [ "$SOURCE_SHA" != "$TARGET_SHA" ]; then
+  echo "ERROR: snapshot checksum mismatch after transfer" >&2
+  echo "       source: $SOURCE_SHA" >&2
+  echo "       target: $TARGET_SHA" >&2
+  exit 1
+fi
 
 echo ""
 echo "==> Step 7: Clear target's old data (preserving priv_validator_state.json backup)"
@@ -128,6 +163,7 @@ ssh "$TARGET" "cd ~/.mirage/node/data && rm -rf $DB_DIRS"
 echo ""
 echo "==> Step 8: Extract snapshot on target"
 ssh "$TARGET" 'cd ~/.mirage/node/data && tar -xzf /tmp/blockchain_data.tar.gz'
+ssh "$TARGET" "cd ~/.mirage/node/data && for d in $REQUIRED_DB_DIRS; do [ -e \"\$d\" ] || { echo \"ERROR: extracted snapshot missing \$d\" >&2; exit 1; }; done"
 
 echo ""
 echo "==> Step 9: Restore target's priv_validator_state.json"

@@ -15,6 +15,8 @@ Detection signals (any one triggers recovery):
      in the last DETECTION_WINDOW seconds.
   2) /status reports the same latest_block_height for STALL_BLOCKS consecutive
      polls AND >=2 healthy peers report a strictly higher block (we're stuck).
+  3) /status is unreachable for DEAD_THRESHOLD consecutive polls, the miraged
+     process is gone, and >=2 healthy peers are reachable (we crashed).
 
 Safety guards before recovering:
   - Cool-down marker (~/.mirage/.divergence_recovery_lock) — refuse to recover
@@ -57,6 +59,7 @@ DETECTION_WINDOW = int(os.environ.get("DETECTION_WINDOW", "300"))  # 5 min log l
 STALL_BLOCKS = int(os.environ.get("STALL_BLOCKS", "10"))  # ~10 polls = 10 min
 COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "21600"))  # 6h
 PEER_AHEAD_THRESHOLD = int(os.environ.get("PEER_AHEAD_THRESHOLD", "20"))
+DEAD_THRESHOLD = int(os.environ.get("DEAD_THRESHOLD", "3"))
 
 DIVERGENCE_PATTERNS = (
     "wrong Block.Header.AppHash",
@@ -87,6 +90,16 @@ def get_status(rpc: str, timeout: float = 5.0):
         OSError,
     ) as e:
         return None
+
+
+def miraged_running() -> bool:
+    rv = subprocess.run(
+        ["pgrep", "-f", "miraged start"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return rv.returncode == 0
 
 
 def latest_log_file() -> Path | None:
@@ -228,10 +241,11 @@ def run(dry_run: bool) -> int:
         f"divergence_watchdog starting "
         f"(poll={POLL_SECONDS}s, window={DETECTION_WINDOW}s, "
         f"stall={STALL_BLOCKS}, cooldown={COOLDOWN_SECONDS}s, "
-        f"dry_run={dry_run})"
+        f"dead_threshold={DEAD_THRESHOLD}, dry_run={dry_run})"
     )
 
     height_history: deque[int] = deque(maxlen=STALL_BLOCKS + 1)
+    consecutive_unreachable = 0
 
     while True:
         try:
@@ -246,47 +260,68 @@ def run(dry_run: bool) -> int:
                 left = COOLDOWN_SECONDS - age
                 log(f"cool-down active ({age}s into {COOLDOWN_SECONDS}s, {left}s remaining), monitoring only")
 
+            triggered_by = None
+            force_recover = False
+
             local = get_status(LOCAL_RPC)
             if not local:
-                log("local /status unreachable; skipping this cycle")
-                time.sleep(POLL_SECONDS)
-                continue
+                consecutive_unreachable += 1
+                log(f"local /status unreachable ({consecutive_unreachable}/{DEAD_THRESHOLD})")
+                if consecutive_unreachable < DEAD_THRESHOLD:
+                    time.sleep(POLL_SECONDS)
+                    continue
+                if miraged_running():
+                    log("miraged process still running; treating unreachable /status as transient")
+                    time.sleep(POLL_SECONDS)
+                    continue
+                healthy, peer_max = healthy_peers_height()
+                if healthy < 2:
+                    log(f"miraged process is dead, but only {healthy} healthy peer(s) reachable; refusing recovery")
+                    time.sleep(POLL_SECONDS)
+                    continue
+                triggered_by = (
+                    f"process-dead: local /status unreachable for {consecutive_unreachable} polls, "
+                    f"miraged process absent, {healthy} peers healthy at max height {peer_max}"
+                )
+                force_recover = True
+            else:
+                consecutive_unreachable = 0
 
-            try:
-                local_h = int(local["sync_info"]["latest_block_height"])
-                catching_up = bool(local["sync_info"]["catching_up"])
-            except (KeyError, ValueError):
-                log("local /status missing sync_info, skipping")
-                time.sleep(POLL_SECONDS)
-                continue
+            if local:
+                try:
+                    local_h = int(local["sync_info"]["latest_block_height"])
+                    catching_up = bool(local["sync_info"]["catching_up"])
+                except (KeyError, ValueError):
+                    log("local /status missing sync_info, skipping")
+                    time.sleep(POLL_SECONDS)
+                    continue
 
-            if catching_up:
-                log(f"local catching_up=true at height={local_h}; not a divergence")
-                height_history.clear()
-                time.sleep(POLL_SECONDS)
-                continue
+                if catching_up:
+                    log(f"local catching_up=true at height={local_h}; not a divergence")
+                    height_history.clear()
+                    time.sleep(POLL_SECONDS)
+                    continue
 
-            height_history.append(local_h)
-            log(f"local height={local_h} catching_up=False (history={list(height_history)})")
+                height_history.append(local_h)
+                log(f"local height={local_h} catching_up=False (history={list(height_history)})")
 
-            # Signal 1: log pattern
-            triggered_by = None
-            log_path = latest_log_file()
-            if log_path:
-                tail = tail_recent(log_path)
-                hit = log_window_has_pattern(tail, DIVERGENCE_PATTERNS, DETECTION_WINDOW)
-                if hit:
-                    triggered_by = f"log pattern: {hit!r} in {log_path.name}"
+                # Signal 1: log pattern
+                log_path = latest_log_file()
+                if log_path:
+                    tail = tail_recent(log_path)
+                    hit = log_window_has_pattern(tail, DIVERGENCE_PATTERNS, DETECTION_WINDOW)
+                    if hit:
+                        triggered_by = f"log pattern: {hit!r} in {log_path.name}"
 
-            # Signal 2: stall vs peers
-            if not triggered_by and len(height_history) == height_history.maxlen:
-                if len(set(height_history)) == 1:
-                    healthy, peer_max = healthy_peers_height()
-                    if healthy >= 2 and peer_max > local_h + PEER_AHEAD_THRESHOLD:
-                        triggered_by = (
-                            f"stall: local stuck at {local_h} for {STALL_BLOCKS} polls "
-                            f"while {healthy} peers at {peer_max}"
-                        )
+                # Signal 2: stall vs peers
+                if not triggered_by and len(height_history) == height_history.maxlen:
+                    if len(set(height_history)) == 1:
+                        healthy, peer_max = healthy_peers_height()
+                        if healthy >= 2 and peer_max > local_h + PEER_AHEAD_THRESHOLD:
+                            triggered_by = (
+                                f"stall: local stuck at {local_h} for {STALL_BLOCKS} polls "
+                                f"while {healthy} peers at {peer_max}"
+                            )
 
             if not triggered_by:
                 time.sleep(POLL_SECONDS)
@@ -294,20 +329,25 @@ def run(dry_run: bool) -> int:
 
             log(f"DIVERGENCE DETECTED — {triggered_by}")
 
-            if cooldown_active():
+            if cooldown_active() and not force_recover:
                 log("cool-down still active; refusing to act this cycle")
                 time.sleep(POLL_SECONDS)
                 continue
+            if force_recover and cooldown_active():
+                log("process-dead recovery bypassing cool-down via --force")
 
             if dry_run:
                 log("DRY RUN — would invoke recovery script. Not acting.")
                 time.sleep(POLL_SECONDS)
                 continue
 
-            log(f"invoking {RECOVERY_SCRIPT} --auto")
+            recovery_args = ["bash", str(RECOVERY_SCRIPT), "--auto"]
+            if force_recover:
+                recovery_args.append("--force")
+            log(f"invoking {' '.join(recovery_args)}")
             try:
                 rv = subprocess.run(
-                    ["bash", str(RECOVERY_SCRIPT), "--auto"],
+                    recovery_args,
                     check=False,
                 )
                 log(f"recovery script exit code: {rv.returncode}")
