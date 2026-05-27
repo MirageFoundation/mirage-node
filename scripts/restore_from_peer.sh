@@ -60,6 +60,22 @@ if [ -z "$SOURCE" ] || [ -z "$TARGET" ]; then
   exit 1
 fi
 
+# Server-to-server transfer (step 6) needs SSH agent forwarding so the source
+# can scp directly to the target without routing data through this workstation.
+# Verify the agent has at least one key loaded BEFORE we start tearing things
+# down; otherwise we'd stop both nodes and only discover the auth gap mid-flight.
+if ! command -v ssh-add >/dev/null 2>&1; then
+  echo "ERROR: ssh-add not found; cannot verify SSH agent state" >&2
+  exit 1
+fi
+if ! ssh-add -l >/dev/null 2>&1; then
+  echo "ERROR: SSH agent has no keys loaded (or is not running)." >&2
+  echo "       This script needs agent forwarding (ssh -A) so $SOURCE can" >&2
+  echo "       scp directly to $TARGET. Load the appropriate key with:" >&2
+  echo "         ssh-add ~/.ssh/<your_key>" >&2
+  exit 1
+fi
+
 echo "==> Restore blockchain data"
 echo "    Source: $SOURCE"
 echo "    Target: $TARGET"
@@ -90,16 +106,20 @@ ssh "$SOURCE" 'docker exec mirage pkill -TERM miraged 2>/dev/null || true; sleep
 
 echo ""
 echo "==> Step 4: Create snapshot on source (databases only, excluding validator state)"
-ssh "$SOURCE" "cd ~/.mirage/node/data && tar --exclude='priv_validator_state.json' -czf /tmp/blockchain_data.tar.gz $DB_DIRS 2>/dev/null || tar -czf /tmp/blockchain_data.tar.gz $DB_DIRS"
+# --ignore-failed-read tolerates DB_DIRS entries that don't exist on this peer
+# (e.g. tx_index.db is absent when CometBFT is configured with indexer="null").
+ssh "$SOURCE" "cd ~/.mirage/node/data && tar --ignore-failed-read --exclude='priv_validator_state.json' -czf /tmp/blockchain_data.tar.gz $DB_DIRS"
 
 echo ""
 echo "==> Step 5: Restart source node"
 ssh "$SOURCE" 'docker restart mirage'
 
 echo ""
-echo "==> Step 6: Transfer snapshot to target"
-# Use source as intermediary to avoid local disk usage
-ssh "$SOURCE" "cat /tmp/blockchain_data.tar.gz" | ssh "$TARGET" "cat > /tmp/blockchain_data.tar.gz"
+echo "==> Step 6: Transfer snapshot directly from source to target (server-to-server)"
+# Uses SSH agent forwarding so source can authenticate to target with the key
+# loaded in the operator's local agent. This bypasses the workstation entirely
+# and saves ~5 min on a typical chain-DB transfer vs streaming through stdin.
+ssh -A "$SOURCE" "scp -o StrictHostKeyChecking=accept-new /tmp/blockchain_data.tar.gz $TARGET:/tmp/blockchain_data.tar.gz"
 
 echo ""
 echo "==> Step 7: Clear target's old data (preserving priv_validator_state.json backup)"
