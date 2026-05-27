@@ -18,30 +18,50 @@
 #
 # Flags:
 #   --weekly-hour=NN       Hour (0-23) for the weekly Mirage container restart
-#                          timer. Default 04. Stagger across the fleet so no
-#                          two validators ever restart in the same window.
+#                          timer (Sun ${WEEKLY_HOUR}:00 UTC). Default 04.
+#                          Stagger across the fleet so no two validators
+#                          ever restart in the same window.
+#   --upgrade-day=N        Day of week (1=Mon .. 7=Sun) for the weekly full
+#                          OS upgrade + reboot. REQUIRED to enroll the host
+#                          in the per-host weekly upgrade policy. Stagger
+#                          across the fleet so only one validator reboots
+#                          per day. If omitted, daily security-only auto
+#                          upgrades still happen (no reboot) and the host
+#                          must be upgraded manually.
+#   --upgrade-hour=NN      Hour (0-23) for the weekly OS upgrade. Default 04.
 #   --no-migrate-docker    Skip the docker.io -> docker-ce migration.
 #   --no-restart-docker    Skip the post-apply docker restart, even if
 #                          daemon.json changed. Log-size limits will not
 #                          take effect until docker is restarted manually.
 #   --no-reboot            Skip the final reboot, even if a kernel update is
 #                          pending. /var/run/reboot-required will remain,
-#                          and the next unattended-upgrades window (03:30)
-#                          will reboot on its own.
+#                          and the next weekly upgrade window will pick it
+#                          up (after pre-flight checks).
 #   --dry-run              Print what would be done and exit.
 #   -h, --help             This message.
+#
+# Upgrade policy after hardening:
+#   - Daily: unattended-upgrades applies security patches (no reboot).
+#   - Weekly: mirage-weekly-upgrade.timer runs full-upgrade + reboot-if-needed
+#     on --upgrade-day at --upgrade-hour, but ONLY after a pre-flight check
+#     confirms the validator is healthy (container running, RPC responsive,
+#     not catching up, recent block). Pre-flight failure aborts the run and
+#     surfaces in `journalctl -u mirage-weekly-upgrade`.
 #
 # Typical rollout across a 4-validator cluster (one host at a time, wait
 # for each to come back and confirm it is signing before moving on; no
 # long soak required — hardening does not touch validator identity):
-#   harden_server.sh --weekly-hour=04   # on val4
-#   harden_server.sh --weekly-hour=05   # on val3
-#   harden_server.sh --weekly-hour=06   # on val2
-#   harden_server.sh --weekly-hour=07   # on val1
+#   harden_server.sh --weekly-hour=04 --upgrade-day=1   # Mon — val4 (canary)
+#   harden_server.sh --weekly-hour=05 --upgrade-day=2   # Tue — val3
+#   harden_server.sh --weekly-hour=06 --upgrade-day=3   # Wed — UAT (mirage.vote)
+#   harden_server.sh --weekly-hour=07 --upgrade-day=4   # Thu — val1 / PROD (mirage.talk)
+# Fri-Sun deliberately left empty so weekend issues don't trigger reboots.
 
 set -euo pipefail
 
 WEEKLY_HOUR="04"
+UPGRADE_DAY=""
+UPGRADE_HOUR="04"
 MIGRATE_DOCKER=1
 RESTART_DOCKER=1
 REBOOT_IF_NEEDED=1
@@ -50,6 +70,8 @@ DRY_RUN=0
 for arg in "$@"; do
     case "$arg" in
         --weekly-hour=*)      WEEKLY_HOUR="${arg#*=}" ;;
+        --upgrade-day=*)      UPGRADE_DAY="${arg#*=}" ;;
+        --upgrade-hour=*)     UPGRADE_HOUR="${arg#*=}" ;;
         --no-migrate-docker)  MIGRATE_DOCKER=0 ;;
         --no-restart-docker)  RESTART_DOCKER=0 ;;
         --no-reboot)          REBOOT_IF_NEEDED=0 ;;
@@ -71,6 +93,22 @@ if [[ ! "$WEEKLY_HOUR" =~ ^[0-9]{1,2}$ ]] || (( 10#$WEEKLY_HOUR > 23 )); then
     exit 2
 fi
 WEEKLY_HOUR=$(printf '%02d' "$((10#$WEEKLY_HOUR))")
+
+if [[ ! "$UPGRADE_HOUR" =~ ^[0-9]{1,2}$ ]] || (( 10#$UPGRADE_HOUR > 23 )); then
+    echo "--upgrade-hour must be 0-23 (got: $UPGRADE_HOUR)" >&2
+    exit 2
+fi
+UPGRADE_HOUR=$(printf '%02d' "$((10#$UPGRADE_HOUR))")
+
+UPGRADE_DAY_NAME=""
+if [[ -n "$UPGRADE_DAY" ]]; then
+    if [[ ! "$UPGRADE_DAY" =~ ^[1-7]$ ]]; then
+        echo "--upgrade-day must be 1-7 (1=Mon .. 7=Sun); got: $UPGRADE_DAY" >&2
+        exit 2
+    fi
+    UPGRADE_DAY_NAMES=(Mon Tue Wed Thu Fri Sat Sun)
+    UPGRADE_DAY_NAME="${UPGRADE_DAY_NAMES[$((UPGRADE_DAY-1))]}"
+fi
 
 if [[ $EUID -ne 0 ]]; then
     echo "must be run as root" >&2
@@ -234,20 +272,22 @@ run 'systemctl enable --now fail2ban >/dev/null 2>&1 || systemctl enable --now f
 run 'systemctl restart fail2ban'
 
 # -----------------------------------------------------------------------------
-# Step 7 — unattended security upgrades
+# Step 7 — unattended security upgrades (daily, NO reboot)
+#
+# Security patches apply daily via unattended-upgrades. Reboots are NOT done
+# here — they happen in the per-host weekly slot configured in Step 11.5
+# (mirage-weekly-upgrade.timer) so the fleet never reboots in lockstep.
 # -----------------------------------------------------------------------------
-say "unattended-upgrades"
+say "unattended-upgrades (daily security-only, no reboot)"
 write_file /etc/apt/apt.conf.d/20auto-upgrades 'APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 '
-# Enable the 03:30 auto-reboot lines in 50unattended-upgrades. Only touches
-# the two lines we care about; leaves the rest of the file alone.
+# Force Automatic-Reboot to "false". Uncomment the line first if it's still
+# the shipped commented default so our value sticks.
 if (( ! DRY_RUN )); then
-    sed -i 's|^//\s*\(Unattended-Upgrade::Automatic-Reboot\s\+"\)|\1|'      /etc/apt/apt.conf.d/50unattended-upgrades
-    sed -i 's|^//\s*\(Unattended-Upgrade::Automatic-Reboot-Time\s\+"\)|\1|' /etc/apt/apt.conf.d/50unattended-upgrades
-    sed -i 's|^Unattended-Upgrade::Automatic-Reboot\s\+"false";|Unattended-Upgrade::Automatic-Reboot "true";|' /etc/apt/apt.conf.d/50unattended-upgrades
-    sed -i 's|^Unattended-Upgrade::Automatic-Reboot-Time\s\+"[0-9:]\+";|Unattended-Upgrade::Automatic-Reboot-Time "03:30";|' /etc/apt/apt.conf.d/50unattended-upgrades
+    sed -i 's|^//\s*\(Unattended-Upgrade::Automatic-Reboot\s\+"\)|\1|' /etc/apt/apt.conf.d/50unattended-upgrades
+    sed -i 's|^Unattended-Upgrade::Automatic-Reboot\s\+"[a-z]\+";|Unattended-Upgrade::Automatic-Reboot "false";|' /etc/apt/apt.conf.d/50unattended-upgrades
 fi
 run 'systemctl enable --now unattended-upgrades >/dev/null 2>&1 || systemctl enable --now unattended-upgrades'
 
@@ -361,6 +401,109 @@ run 'systemctl daemon-reload'
 run 'systemctl enable --now mirage-weekly-restart.timer >/dev/null'
 
 # -----------------------------------------------------------------------------
+# Step 11.5 — Weekly full OS upgrade + reboot (per-host day, with pre-flight)
+#
+# Drops the daily kernel-auto-reboot model (which would fire fleet-wide at the
+# same time when Ubuntu ships a kernel) in favor of a per-host weekly slot.
+# Each validator picks one day of the week via --upgrade-day so only one host
+# is down for an upgrade-reboot per 24h window.
+#
+# The script aborts cleanly if the validator is not currently healthy. That
+# failure surfaces in `journalctl -u mirage-weekly-upgrade` so the operator
+# can investigate and re-run manually after fixing the underlying issue.
+# -----------------------------------------------------------------------------
+if [[ -n "$UPGRADE_DAY_NAME" ]]; then
+    say "Weekly OS upgrade (${UPGRADE_DAY_NAME} ${UPGRADE_HOUR}:00 UTC ±30m)"
+
+    write_file /usr/local/sbin/mirage-weekly-upgrade.sh '#!/usr/bin/env bash
+# Weekly OS upgrade for a Mirage validator host. Written by harden_server.sh.
+# Aborts unless the validator is healthy. Reboots only if apt says so.
+
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+log() { echo "[$(date -u +%FT%TZ)] $*"; }
+
+# --- Pre-flight ---
+if ! docker inspect mirage --format "{{.State.Status}}" 2>/dev/null | grep -qx running; then
+    log "ABORT: mirage container is not running"
+    exit 1
+fi
+
+if ! status=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status 2>/dev/null); then
+    log "ABORT: CometBFT RPC (127.0.0.1:26657) not responding"
+    exit 1
+fi
+
+catching_up=$(echo "$status" | jq -r ".result.sync_info.catching_up")
+if [[ "$catching_up" != "false" ]]; then
+    log "ABORT: node is catching up (catching_up=$catching_up)"
+    exit 1
+fi
+
+latest=$(echo "$status" | jq -r ".result.sync_info.latest_block_time")
+if ! latest_epoch=$(date -d "$latest" +%s 2>/dev/null); then
+    log "ABORT: could not parse latest_block_time ($latest)"
+    exit 1
+fi
+age=$(( $(date -u +%s) - latest_epoch ))
+if (( age < 0 || age > 60 )); then
+    log "ABORT: latest block is ${age}s old (expected 0-60s)"
+    exit 1
+fi
+
+log "Pre-flight OK (latest block ${age}s ago). Starting full-upgrade."
+
+# --- Upgrade ---
+APT_OPTS=(-qq -y \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold")
+
+apt-get -qq update
+apt-get "${APT_OPTS[@]}" full-upgrade
+apt-get "${APT_OPTS[@]}" autoremove --purge
+
+# --- Reboot if needed ---
+if [[ -f /var/run/reboot-required ]]; then
+    reason=$(cat /var/run/reboot-required 2>/dev/null || true)
+    log "Reboot required: $reason — rebooting now"
+    systemctl reboot
+else
+    log "Upgrade complete. No reboot needed."
+fi
+'
+    if (( ! DRY_RUN )); then
+        chmod 0755 /usr/local/sbin/mirage-weekly-upgrade.sh
+    fi
+
+    write_file /etc/systemd/system/mirage-weekly-upgrade.service '[Unit]
+Description=Weekly full OS upgrade for Mirage validator (with pre-flight)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mirage-weekly-upgrade.sh
+'
+    write_file /etc/systemd/system/mirage-weekly-upgrade.timer "[Unit]
+Description=Weekly full OS upgrade (${UPGRADE_DAY_NAME} ${UPGRADE_HOUR}:00 UTC ±30m)
+
+[Timer]
+OnCalendar=${UPGRADE_DAY_NAME} ${UPGRADE_HOUR}:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"
+    run 'systemctl daemon-reload'
+    run 'systemctl enable --now mirage-weekly-upgrade.timer >/dev/null'
+else
+    note "skipping weekly OS upgrade timer (no --upgrade-day specified)"
+    note "you must upgrade this host manually or re-run with --upgrade-day=N (1=Mon..7=Sun)"
+fi
+
+# -----------------------------------------------------------------------------
 # Step 12 — docker restart (only when something that requires it changed and
 # the user didn't opt out)
 # -----------------------------------------------------------------------------
@@ -393,7 +536,8 @@ echo "--- services ---";                  for svc in ssh fail2ban unattended-upg
                                           done
 echo "--- sysctl ---";                    sysctl vm.swappiness net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.ip_local_port_range fs.inotify.max_user_watches | sed 's/^/    /'
 echo "--- docker ---";                    docker --version; docker compose version 2>&1 | head -1 || true
-echo "--- weekly timer ---";              systemctl list-timers mirage-weekly-restart.timer --no-pager 2>/dev/null | sed -n '1,3p'
+echo "--- weekly timers ---";             systemctl list-timers 'mirage-weekly-*.timer' --no-pager 2>/dev/null | sed -n '1,5p'
+echo "--- auto-reboot ---";               grep -E '^[^/]*Unattended-Upgrade::Automatic-Reboot\s' /etc/apt/apt.conf.d/50unattended-upgrades 2>/dev/null | sed 's/^/    /'
 echo "--- container ---";                 docker inspect mirage --format '    {{.State.Status}} image={{.Config.Image}} restart={{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || echo "    (no mirage container)"
 
 # -----------------------------------------------------------------------------
