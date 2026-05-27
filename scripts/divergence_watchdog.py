@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """
 divergence_watchdog.py — long-running supervisor that detects when miraged is
-forked / app-hash-diverged from the rest of the network and triggers
-recover_via_state_sync.sh to bring it back automatically.
+forked / app-hash-diverged from the rest of the network and triggers a
+recovery script to bring it back automatically.
+
+Default recovery command: scripts/recover.sh peer-pull (chain-data tar pulled
+directly from a healthy peer). State-sync remains available as an opt-in
+alternative - set:
+   RECOVERY_MODE=state-sync
+to switch back. The default was flipped after the May 25 2026 incident where
+a cosmos-sdk v0.53 state-sync bug left staking.bond_denom empty, causing
+mint.BeginBlocker to panic on the next block.
 
 Designed to run inside the mirage container, in its own tmux window, started
 by deploy/entrypoint.sh.
@@ -23,7 +31,7 @@ Safety guards before recovering:
     again within COOLDOWN_SECONDS (default 6h).
   - Disable marker (~/.mirage/.recovery_disabled) — opt out completely.
   - >=2 healthy peers reachable AND agreeing on the same recent app_hash
-    (delegated to recover_via_state_sync.sh which double-checks).
+    (delegated to recover.sh which double-checks).
   - DRY_RUN env var (or --dry-run flag) — only log the trigger, do not act.
   - Refuses to act if /status shows catching_up=true (state-sync already in
     progress — let it finish).
@@ -51,7 +59,8 @@ NODE_HOME = Path(os.environ.get("NODE_HOME", "/root/.mirage/node"))
 LOGS_DIR = Path(os.environ.get("LOGS_DIR", "/root/.mirage/logs"))
 LOCK = Path(os.environ.get("LOCK", "/root/.mirage/.divergence_recovery_lock"))
 DISABLE_MARKER = Path(os.environ.get("DISABLE_MARKER", "/root/.mirage/.recovery_disabled"))
-RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover_via_state_sync.sh"))
+RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover.sh"))
+RECOVERY_MODE = os.environ.get("RECOVERY_MODE", "peer-pull")
 LOCAL_RPC = os.environ.get("LOCAL_RPC", "http://127.0.0.1:26657")
 
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
@@ -341,7 +350,7 @@ def run(dry_run: bool) -> int:
                 time.sleep(POLL_SECONDS)
                 continue
 
-            recovery_args = ["bash", str(RECOVERY_SCRIPT), "--auto"]
+            recovery_args = ["bash", str(RECOVERY_SCRIPT), RECOVERY_MODE, "--auto"]
             if force_recover:
                 recovery_args.append("--force")
             log(f"invoking {' '.join(recovery_args)}")

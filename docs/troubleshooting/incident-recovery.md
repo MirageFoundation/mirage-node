@@ -71,26 +71,27 @@ After the node catches up:
 
 **Do not** use `miraged rollback` as a first move. It only rewinds one block and cannot repair an IAVL cache corruption; restore-from-peer is always the safe play.
 
-### 2.1 Auto-recovery via state-sync (watchdog)
+### 2.1 Auto-recovery via peer-pull (watchdog)
 
-**Scripts**: [`scripts/divergence_watchdog.py`](../../scripts/divergence_watchdog.py), [`scripts/recover_via_state_sync.sh`](../../scripts/recover_via_state_sync.sh).
+**Scripts**: [`scripts/divergence_watchdog.py`](../../scripts/divergence_watchdog.py), [`scripts/recover.sh`](../../scripts/recover.sh).
 
-Each container ships with a `watchdog` tmux window that polls miraged every 60s and triggers an in-place state-sync recovery when it detects either:
+Each container ships with a `watchdog` tmux window that polls miraged every 60s and triggers an in-place recovery when it detects either:
 
 1. The miraged log contains `"wrong Block.Header.AppHash"` or `"CONSENSUS FAILURE!!!"` within the last 5 minutes, **or**
 2. The local `latest_block_height` has not advanced for ~10 polls (~10 min) **and** ≥2 healthy peers report a height ≥20 blocks ahead.
 
-When triggered, [`recover_via_state_sync.sh --auto`](../../scripts/recover_via_state_sync.sh) runs inside the container and:
+Default mode is [`recover.sh peer-pull --auto`](../../scripts/recover.sh). It runs inside the container and:
 
 1. Verifies cool-down (≥6 h since last recovery) and that the opt-out marker `~/.mirage/.recovery_disabled` does not exist.
 2. Selects ≥2 healthy peers from `persistent_peers` and confirms they agree on `app_hash` for a recent height (refuses to act on a split-brain peer set).
-3. Pauses the `indexer`, `backend`, and `status` tmux windows so the CometBFT light client gets full CPU during snapshot verification (this matters on droplets with high steal time).
+3. Pauses the `indexer`, `backend`, and `status` tmux windows.
 4. Stops `miraged`, **backs up `priv_validator_state.json`** (so the height-watermark is preserved — no double-sign risk), wipes only the chain DBs (`application.db`, `blockstore.db`, `cs.wal`, `evidence.db`, `snapshots`, `state.db`, `tx_index.db`).
-5. Pins `STATESYNC_TRUST_HEIGHT` to **snapshot height + 1** (computed from `SNAPSHOT_INTERVAL`) — this avoids the light-client bisection ladder that is the root cause of `context deadline exceeded` on slow VMs.
-6. Re-renders `config.toml` from the template, restarts `miraged`, and waits up to 5 minutes for `Snapshot restored`.
-7. Resets `STATESYNC_ENABLE=false` (so a future container restart doesn't re-trigger sync), resumes the paused services, writes a cool-down marker (`~/.mirage/.divergence_recovery_lock`).
+5. SSHes to the highest healthy peer using the dedicated recovery key. The peer's `authorized_keys` forces `recover.sh serve`, which pauses the peer's `miraged`, streams a gzipped tar of chain DBs, and resumes the peer on exit.
+6. Extracts that tar locally, restores the local `priv_validator_state.json`, restarts `miraged` through the supervisor, resumes services, and verifies block progress before writing the cool-down marker (`~/.mirage/.divergence_recovery_lock`).
 
-The script does **not** auto-unjail and does **not** restore PostgreSQL or any backend data — only chain state. Honors the `mirage.talk` hard rule (no cross-node restore).
+The script does **not** auto-unjail and does **not** restore PostgreSQL or any backend data — only chain state. Honors the `mirage.talk` hard rule (no PostgreSQL clobber).
+
+`recover.sh state-sync` still exists as an explicit fallback, but it is no longer the watchdog default until the cosmos-sdk v0.53 BondDenom state-sync bug is fixed in Phase 4.
 
 **Disable / dry-run / opt-out**:
 
@@ -107,7 +108,7 @@ docker exec mirage rm   /root/.mirage/.recovery_disabled   # re-enable
 
 # Override the cool-down (only do this if you know what you're doing)
 docker exec mirage rm /root/.mirage/.divergence_recovery_lock
-docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto --force
+docker exec mirage bash /opt/mirage/scripts/recover.sh peer-pull --auto --force
 ```
 
 **Logs**:
@@ -119,8 +120,11 @@ docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto --f
 **Manual invocation** (e.g. when triaging):
 
 ```bash
-docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --dry-run   # plan only
-docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto      # do it
+docker exec mirage bash /opt/mirage/scripts/recover.sh peer-pull --dry-run   # plan only
+docker exec mirage bash /opt/mirage/scripts/recover.sh peer-pull --auto      # do it
+
+# Legacy state-sync fallback (not the default until the BondDenom bug is fixed)
+docker exec mirage bash /opt/mirage/scripts/recover.sh state-sync --dry-run
 ```
 
 **Limitations**:
@@ -133,23 +137,24 @@ docker exec mirage bash /opt/mirage/scripts/recover_via_state_sync.sh --auto    
 
 After the determinism-hardening release, several previously-silent fallbacks in
 the consensus path now halt the chain immediately rather than diverge silently.
-**This is by design.** A clean halt is detected by §2.1 and recovered via state-
-sync from healthy peers; silent divergence — the original `mirage.talk` failure
-mode — would have jailed the validator instead.
+**This is by design.** A clean halt is detected by §2.1 and recovered from
+healthy peers (peer-pull by default; state-sync only as an explicit fallback
+once the v0.53 BondDenom panic is fixed in Phase 4); silent divergence — the
+original `mirage.talk` failure mode — would have jailed the validator instead.
 
 **Triggers** (search `miraged` logs for any of these strings):
 
 | Tag | Where | Cause | Operator action |
 | --- | --- | --- | --- |
-| `CONSENSUS_FATAL:PARAMS_STORE_GET` | `core.GetParams` (BeginBlock / EndBlock / handler) | Raw KVStore.Get failed for the `params` key (disk / wrapper I/O error). | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:PARAMS_EMPTY` | `core.GetParams` | `params` key missing post-genesis. Indicates state truncation or genesis-ordering corruption. | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:PARAMS_UNMARSHAL` | `core.GetParams` | Stored params bytes failed to decode. | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:PARAMS_VALIDATE` | `core.GetParams` | Stored params decoded but failed `Validate()` (e.g. governance proposal that bypassed validation). | Halt is correct; investigate the proposal that wrote them, then upgrade-migrate or state-sync. |
-| `CONSENSUS_FATAL:PROFILE_GET` | `deductRelayGasFee`, `processSubscriptions`, ante `getUserLevel` / `checkReserveOrDowngrade` | Raw KVStore.Get failed for a `profiles/<addr>` key. | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:PROFILE_DECODE` | same | A stored ProfileCore JSON blob failed to unmarshal. | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:PROFILE_MISSING` | `deductRelayGasFee`, `processSubscriptions` | A paid-tier user (or an active subscription index entry) has no profile. State inconsistency. | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:RECENT_HASHES_GET` | `RecordRecentBlockHash` (BeginBlock) | Raw KVStore.Get failed for the on-chain recent-block-hashes window. | Watchdog recovers via state-sync. |
-| `CONSENSUS_FATAL:RECENT_HASHES_DECODE` | `GetRecentBlockHashes` (ante) | The on-chain window bytes failed to decode. | Watchdog recovers via state-sync. |
+| `CONSENSUS_FATAL:PARAMS_STORE_GET` | `core.GetParams` (BeginBlock / EndBlock / handler) | Raw KVStore.Get failed for the `params` key (disk / wrapper I/O error). | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:PARAMS_EMPTY` | `core.GetParams` | `params` key missing post-genesis. Indicates state truncation or genesis-ordering corruption. | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:PARAMS_UNMARSHAL` | `core.GetParams` | Stored params bytes failed to decode. | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:PARAMS_VALIDATE` | `core.GetParams` | Stored params decoded but failed `Validate()` (e.g. governance proposal that bypassed validation). | Halt is correct; investigate the proposal that wrote them, then upgrade-migrate or peer-pull. |
+| `CONSENSUS_FATAL:PROFILE_GET` | `deductRelayGasFee`, `processSubscriptions`, ante `getUserLevel` / `checkReserveOrDowngrade` | Raw KVStore.Get failed for a `profiles/<addr>` key. | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:PROFILE_DECODE` | same | A stored ProfileCore JSON blob failed to unmarshal. | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:PROFILE_MISSING` | `deductRelayGasFee`, `processSubscriptions` | A paid-tier user (or an active subscription index entry) has no profile. State inconsistency. | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:RECENT_HASHES_GET` | `RecordRecentBlockHash` (BeginBlock) | Raw KVStore.Get failed for the on-chain recent-block-hashes window. | Watchdog recovers via §2.1 (peer-pull). |
+| `CONSENSUS_FATAL:RECENT_HASHES_DECODE` | `GetRecentBlockHashes` (ante) | The on-chain window bytes failed to decode. | Watchdog recovers via §2.1 (peer-pull). |
 
 **What changed for the PoW ante (state-derived recent-hash window)**:
 
