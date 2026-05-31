@@ -4833,6 +4833,25 @@ def core_register_push_token():
                     (user_addr.lower(), token, platform, now_ts, now_ts),
                 )
 
+                # First push token for this account on this node: defer the
+                # lively-topic push by ~24h. Each node tracks trending state in
+                # its own backend DB, so without this a user who switches nodes
+                # could receive a second lively push the same day from the
+                # newly-connected node. The conditional upsert only seeds users
+                # with no prior lively-push timestamp, so it never resets the
+                # clock for someone already in the rotation.
+                if not existing:
+                    cur.execute(
+                        """
+                        INSERT INTO user_inbox_state (owner, trending_last_sent_at)
+                        VALUES (%s, %s)
+                        ON CONFLICT (owner) DO UPDATE
+                        SET trending_last_sent_at = EXCLUDED.trending_last_sent_at
+                        WHERE COALESCE(user_inbox_state.trending_last_sent_at, 0) <= 0
+                        """,
+                        (user_addr.lower(), now_ts),
+                    )
+
         is_new = not existing
         log_event(rid, "register_push_token.ok", user=user_addr, platform=platform, token=token[:30], new=is_new)
         return jsonify({"ok": True})
