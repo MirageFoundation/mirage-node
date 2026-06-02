@@ -57,7 +57,16 @@ def create_app(init_runtime: bool = True) -> Flask:
     # Global safety net: catch any unhandled exception and return a generic error
     @app.errorhandler(Exception)
     def _handle_unhandled(e):
+        from werkzeug.exceptions import HTTPException
         from error_utils import safe_error
+
+        # HTTPExceptions carry a real status (e.g. 404 for an unknown route, often an
+        # outdated client hitting a removed endpoint). Surface that status instead of
+        # masking it as a 500. error_code is set so the after_request hook skips it.
+        if isinstance(e, HTTPException):
+            code = e.code or 500
+            logger().info(f"[http_error] status={code} method={request.method} path={request.path} name={e.name}")
+            return jsonify({"error": e.name.lower(), "error_code": "http_error", "status": code}), code
 
         return safe_error(e, context="unhandled")
 
