@@ -390,7 +390,7 @@ const DonationAmount = styled.div`
 `;
 
 const QuoteBlock = styled.blockquote`
-    margin: 0.25rem 0 0 1.65rem;
+    margin: 0.25rem 0 0;
     padding: 0.25rem 0.55rem;
     border-left: 1px solid ${({ theme }) => theme.colors.border};
     color: ${({ theme }) => theme.colors.subtleText};
@@ -399,10 +399,6 @@ const QuoteBlock = styled.blockquote`
     line-height: 1.5;
     word-break: break-word;
     overflow-wrap: break-word;
-
-    @media (max-width: 600px) {
-        margin-left: 1.55rem;
-    }
 `;
 
 /* ----- State blocks (empty / loading / error) ----- */
@@ -685,16 +681,14 @@ export default function InboxView({ state }) {
                     let bodyNode = null;
                     if (isAward) {
                         bodyNode = (
-                            <>
+                            <ReplyContent>
                                 {reply.parent_content && (
-                                    <ReplyContent>
-                                        <ParentPreview>{renderInboxBody(reply.parent_content)}</ParentPreview>
-                                    </ReplyContent>
+                                    <ParentPreview>{renderInboxBody(reply.parent_content)}</ParentPreview>
                                 )}
                                 {reply.reply_content && (
                                     <QuoteBlock>{renderInboxBody(truncateWords(reply.reply_content, 50))}</QuoteBlock>
                                 )}
-                            </>
+                            </ReplyContent>
                         );
                     } else if (isDonation) {
                         bodyNode = (
