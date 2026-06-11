@@ -1752,8 +1752,7 @@ const MainView = ({
                                     </InviteHeaderButton>
                                     {!inviteBannerCollapsed && <InviteContent>
                                         <InviteSubtitleBody>
-                                            Mirage is now invite-only — because great conversations require great users!
-                                            {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
+                                            {availableCodeCount > 0 ? "We've given you some invite codes to share with friends. Use them wisely." : "You're out of invite codes for now. We might drop some more soon — stay tuned!"}
                                         </InviteSubtitleBody>
                                         <InviteBannerButton
                                             type="button"
@@ -1913,7 +1912,6 @@ const MainView = ({
                                 role="region"
                                 aria-label="Welcome to Mirage"
                                 title={urlTopic === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
-                                notice="Currently in Private Beta, Invite Only."
                                 description={urlTopic === 'following'
                                     ? 'Sign in to unlock your following feed and keep up with the users and topics you care about.'
                                     : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
@@ -1926,7 +1924,6 @@ const MainView = ({
                                     { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
                                     { label: 'Learn More', href: 'https://mirage.foundation', external: true },
                                 ]}
-                                inviteText="Have an invite code? Join the community today."
                                 primaryLabel="Create account"
                                 secondaryLabel="Sign in"
                             />}

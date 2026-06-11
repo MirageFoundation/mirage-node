@@ -68,20 +68,6 @@ const InviteOnlyHeroTitle = styled.h1`
         font-size: 1.1rem;
     }
 `;
-const InviteOnlyHeroSubtitle = styled.div`
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #667eea;
-    margin-top: -0.25rem;
-
-    @media (max-width: 1000px) {
-        font-size: 0.8rem;
-    }
-
-    @media (max-width: 768px) {
-        font-size: 0.7rem;
-    }
-`;
 const InviteOnlyHeroDescription = styled.p`
     font-size: 0.85rem;
     color: ${({
@@ -1481,8 +1467,7 @@ const MainView = ({
                         {!inviteBannerCollapsed && <InviteBannerContentWrapper>
                             <InviteBannerTextContent>
                                 <HomeFeedInfoDescription>
-                                    Mirage is now invite-only — because great conversations require great users!
-                                    {' '}{availableCodeCount > 0 ? "But don't fret, we've given you some invite codes for your friends. Use them wisely." : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
+                                    {availableCodeCount > 0 ? "We've given you some invite codes to share with friends. Use them wisely." : "You're out of invite codes for now. We might drop some more soon — stay tuned!"}
                                 </HomeFeedInfoDescription>
                             </InviteBannerTextContent>
                             <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
@@ -1630,7 +1615,6 @@ const MainView = ({
                             verticalAlign: 'super',
                             opacity: 0.8
                         }}>BETA</sup></InviteOnlyHeroTitle>
-                        <InviteOnlyHeroSubtitle>Currently in Private Beta — Invite Only</InviteOnlyHeroSubtitle>
                         <InviteOnlyHeroDescription>
                             Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
                         </InviteOnlyHeroDescription>
@@ -1659,9 +1643,6 @@ const MainView = ({
                                 <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
                             </WelcomeStatItem>
                         </WelcomeStatsGrid>}
-                        <InviteOnlyHeroDescription>
-                            Have an invite code? Join the community today.
-                        </InviteOnlyHeroDescription>
                         <InviteOnlyHeroButtons>
                             <Button to="/signup" size="md">
                                 Create Account

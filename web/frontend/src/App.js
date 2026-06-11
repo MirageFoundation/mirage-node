@@ -521,7 +521,7 @@ class App extends Component {
 
     _bootstrapNodeConfig(attempt = 0) {
         // Mirrors `_bootstrapChainConfig`: retry get_node_config on transient
-        // failures so home cards (invite-only banner, quest hero), the profile
+        // failures so home cards (invite codes banner, quest hero), the profile
         // menu's Referrals item, and CreateAccountView don't render in their
         // "missing" state until the user manually refreshes.
         const delays = [0, 1000, 3000, 7000];

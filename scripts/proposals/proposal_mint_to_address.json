@@ -3,14 +3,14 @@
         {
             "@type": "/mirage.core.v1.MsgMintTokens",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "target": "mirage1venw2fdw8wx8mux4gglqjctwwttvw6f2y04qhw",
-            "amount": "20000000000000",
-            "reason": "Mint 20M MIRAGE"
+            "target": "mirage19r4jmk3fs0a397thjk4g4wf9qv9yhg7zecyrz6",
+            "amount": "10000000000000",
+            "reason": "Mint 10M MIRAGE"
         }
     ],
     "metadata": "",
-    "deposit": "auto",
-    "title": "Mint 20M MIRAGE",
-    "summary": "Mint 20,000,000 MIRAGE to mirage1venw2fdw8wx8mux4gglqjctwwttvw6f2y04qhw.",
+    "deposit": "1000000000000umirage",
+    "title": "Mint MIRAGE",
+    "summary": "Mint MIRAGE",
     "expedited": true
 }
