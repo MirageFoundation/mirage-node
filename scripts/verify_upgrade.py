@@ -242,9 +242,14 @@ def check_binary_version() -> None:
     """Cross-check that the frontend version.txt (shipped with this
     release) reports the upgrade target. Cheap proxy for 'we shipped the
     correct binary'."""
+    # Built artifact (what the deploy actually ships) is checked first;
+    # source-tree `public/` is the fallback for pre-build local runs.
     candidates = [
+        Path("/opt/mirage/web/frontend/build/version.txt"),
         Path("/opt/mirage/web/frontend/public/version.txt"),
+        Path.cwd() / "web" / "frontend" / "build" / "version.txt",
         Path.cwd() / "web" / "frontend" / "public" / "version.txt",
+        Path(__file__).parent.parent / "web" / "frontend" / "build" / "version.txt",
         Path(__file__).parent.parent / "web" / "frontend" / "public" / "version.txt",
     ]
     for p in candidates:

@@ -860,14 +860,14 @@ if [ "$LOCAL_MODE" -eq 0 ]; then
 fi
 
 # Health check: best-effort only. Log status but never block the deploy.
-# Poll for up to ~90s so a normal deploy (services need ~60-90s to come up)
-# reports real status instead of a premature "all unreachable" snapshot.
-# Still never hard-fails: during a coordinated upgrade the chain halts until
-# 2/3+ validators restart, so blocking here would break sequential deploys.
-echo "==> Running post-deploy health check (non-blocking, up to ~90s)..."
+# Poll for up to ~15s — long enough for a normal deploy to flip healthy, short
+# enough that an upgrade-halt rollout doesn't add minutes per node (chain stays
+# halted until 2/3+ validators restart, so the first nodes will always look
+# unhealthy here and we don't want to wait for them).
+echo "==> Running post-deploy health check (non-blocking, up to ~15s)..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
   HEALTH_JSON=""
-  for _ in $(seq 1 18); do
+  for _ in $(seq 1 3); do
     HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
     if echo "$HEALTH_JSON" | python3 -c "import sys, json
 try:
@@ -889,14 +889,14 @@ try:
         print(f'    {symbol} {name}: {status} - {msg}')
     if not d.get('healthy'):
         print()
-        print('    Note: still unhealthy after ~90s — may be an upgrade halt (resumes once 2/3+ validators restart)')
+        print('    Note: still unhealthy after ~15s — may be an upgrade halt (resumes once 2/3+ validators restart)')
 except Exception:
     print('    (health check not available yet)')
 "
 else
   run_ssh '
     HEALTH_JSON=""
-    for _ in $(seq 1 18); do
+    for _ in $(seq 1 3); do
       HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
       if echo "$HEALTH_JSON" | python3 -c "import sys, json
 try:
@@ -918,7 +918,7 @@ try:
         print(f\"    {symbol} {name}: {status} - {msg}\")
     if not d.get(\"healthy\"):
         print()
-        print(\"    Note: still unhealthy after ~90s — may be an upgrade halt (resumes once 2/3+ validators restart)\")
+        print(\"    Note: still unhealthy after ~15s — may be an upgrade halt (resumes once 2/3+ validators restart)\")
 except Exception:
     print(\"    (health check not available yet)\")
 "
