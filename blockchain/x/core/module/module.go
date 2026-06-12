@@ -737,6 +737,20 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		return err
 	}
 
+	// Supply invariant guard: after every balance-affecting operation this
+	// block (BeginBlock fee burn + mint, all txs, subscription processing),
+	// recorded supply MUST equal the sum of all balances. A violation is
+	// impossible under correct serial execution and means this node read stale
+	// state mid-block — the IAVL fast-node stale-read class that caused the
+	// 2026-06-12 app-hash divergence at height 5280036. Halt this node with the
+	// discrepancy named rather than committing a divergent app hash; the
+	// auto-recovery watchdog will state-sync from healthy peers.
+	if err := am.k.AssertSupplyInvariant(sdkCtx); err != nil {
+		sdkCtx.Logger().Error("CONSENSUS_FATAL:SUPPLY_INVARIANT EndBlock; halting chain (auto-recovery will state-sync)",
+			"height", sdkCtx.BlockHeight(), "err", err)
+		return err
+	}
+
 	currentDifficulty := am.k.GetCurrentDifficulty(sdkCtx)
 
 	// Sliding-window message count over last PowMessageWindow blocks

@@ -651,30 +651,20 @@ func (tree *MutableTree) Rollback() {
 // GetVersioned gets the value at the specified key and version. The returned value must not be
 // modified, since it may point to data stored within IAVL.
 //
-// Mirage patch: this used to short-circuit with `return nil, nil` when the
-// fast-node index returned no entry for the latest version. That is the same
-// advisory-as-authoritative trap that broke ImmutableTree.Get and produced
-// both the mirage.talk app-hash divergence and the post-state-sync BondDenom
-// panic. We now treat fast-node misses as a hint and always fall through to a
-// canonical IAVL read via GetImmutable(...).Get(...). Fast-node hits at or
-// before the requested version are still served from the index for speed.
+// Mirage patch: the fast-node index is NOT consulted on the read path. This
+// used to short-circuit with `return nil, nil` on a fast-node miss and serve
+// fast-node hits as authoritative — the advisory-as-authoritative trap that
+// broke ImmutableTree.Get and produced both the mirage.talk app-hash
+// divergences (2026-05-25 h4854225, 2026-06-12 h5280036) and the post-state-sync
+// BondDenom panic. Under concurrent query load the fast index can return a
+// value stale relative to the canonical tree while the version check still
+// passes. Reads now always go through canonical IAVL traversal via
+// GetImmutable(version).Get(key).
 //
-// See docs/troubleshooting/state-sync-bonddenom-panic.md.
+// See docs/troubleshooting/divergence-recovery.md and
+// docs/troubleshooting/state-sync-bonddenom-panic.md.
 func (tree *MutableTree) GetVersioned(key []byte, version int64) ([]byte, error) {
 	if tree.VersionExists(version) {
-		if !tree.skipFastStorageUpgrade {
-			isFastCacheEnabled, err := tree.IsFastCacheEnabled()
-			if err != nil {
-				return nil, err
-			}
-
-			if isFastCacheEnabled {
-				fastNode, _ := tree.ndb.GetFastNode(key)
-				if fastNode != nil && fastNode.GetVersionLastUpdatedAt() <= version {
-					return fastNode.GetValue(), nil
-				}
-			}
-		}
 		t, err := tree.GetImmutable(version)
 		if err != nil {
 			return nil, nil

@@ -1,37 +1,34 @@
 #!/usr/bin/env python3
 """
-Post-upgrade verification for v1.26.0.
+Post-upgrade verification for v1.27.0.
 
-Only v1.26.0-specific checks are included. Generic prior-upgrade checks
-(including the v1.25.0 CONSENSUS_FATAL fail-fast paths) have been removed
-per the /upgrade workflow: keep only checks needed to validate THIS upgrade.
+Only v1.27.0-specific checks are included. Generic prior-upgrade checks
+have been removed per the /upgrade workflow: keep only checks needed to
+validate THIS upgrade.
 
-What v1.26.0 actually changes
+What v1.27.0 actually changes
 -----------------------------
-The upgrade activates a fix in blockchain/patches/iavl. The deployed IAVL
-read paths used to return nil/incomplete results when the secondary
-fast-node index missed a key at the latest version, instead of falling
-back to the canonical IAVL tree. v1.26.0 makes every read path
-canonical-fallback. The handler itself is a no-op for on-chain state — no
-new params, no new store keys, no module migrations. Coordination is
-required because pre- and post-v1.26.0 binaries can compute different app
-hashes from the same canonical state on a fast-node miss.
+The upgrade coordinates three divergence-hardening changes:
+1) canonical IAVL reads are authoritative (fast-node no longer drives
+   consensus reads),
+2) EndBlock enforces supply == sum(balances) and halts on mismatch,
+3) deploy/runtime forces iavl-disable-fastnode=true.
+
+No store migrations, params, or new keys are introduced, but the behavior
+change is consensus-critical and must activate at one height.
 
 Checks
 ------
   1. Required environment variables are set (DB URLs)
   2. Database connectivity (backend + indexer RO)
   3. Upgrade handler ran:
-       - node logs contain "Starting upgrade to v1.26.0"
-       - node logs contain "Upgrade to v1.26.0 complete"
+       - node logs contain "Starting upgrade to v1.27.0"
+       - node logs contain "Upgrade to v1.27.0 complete"
        - node logs contain the post-migration params validation line
-  4. Chain liveness post-upgrade (indexer freshness): the chain is
-     producing fresh blocks, which is the external proof that BeginBlock
-     is succeeding under the new IAVL read contract. Crucially this also
-     proves we did NOT regress the v1.25.0 BondDenom panic vector — the
-     incident that motivated this release manifested as a
-     mint.BeginBlocker panic on the very first block after recovery.
-  5. Frontend version cross-check (version.txt == v1.26.0).
+  4. Runtime config hardening is active:
+       - app.toml contains iavl-disable-fastnode = true
+  5. Chain liveness post-upgrade (indexer freshness)
+  6. Frontend version cross-check (version.txt == v1.27.0).
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -40,6 +37,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -56,7 +54,7 @@ except ImportError:
 
 
 # Constants tied to THIS upgrade. If they change, this file must change.
-UPGRADE_NAME = "v1.26.0"
+UPGRADE_NAME = "v1.27.0"
 
 
 passed = 0
@@ -144,7 +142,7 @@ def resolve_node_log_dir() -> Path:
     raise RuntimeError(f"node log dir not found; tried: {tried}")
 
 
-# ─── v1.26.0 checks ──────────────────────────────────────────────────
+# ─── v1.27.0 checks ──────────────────────────────────────────────────
 
 
 def check_upgrade_handler_ran() -> None:
@@ -183,12 +181,32 @@ def check_upgrade_handler_ran() -> None:
         )
 
 
+def check_fastnode_disabled() -> None:
+    candidates = [
+        Path("/root/.mirage/node/config/app.toml"),
+        Path.home() / ".mirage" / "node" / "config" / "app.toml",
+        Path.cwd() / "main" / "config" / "app.toml",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        content = path.read_text(errors="ignore")
+        m = re.search(r"(?m)^\s*iavl-disable-fastnode\s*=\s*(true|false)\s*$", content)
+        if not m:
+            fail(f"app.toml missing iavl-disable-fastnode ({path})")
+            return
+        if m.group(1) != "true":
+            fail(f"app.toml has iavl-disable-fastnode={m.group(1)} (expected true) ({path})")
+            return
+        ok(f"app.toml enforces iavl-disable-fastnode=true ({path})")
+        return
+    fail("app.toml not found in known locations; cannot verify iavl-disable-fastnode")
+
+
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
-    """Post-upgrade liveness proof. The v1.26.0 incident manifested as a
-    mint.BondDenom panic on the very first block after state-sync recovery,
-    so a chain that is still producing blocks on the new binary is direct
-    evidence that the IAVL read-path fix is correct in the post-upgrade
-    state shape. A halted chain would freeze the indexer."""
+    """Post-upgrade liveness proof for v1.27.0 divergence hardening.
+    If the chain is producing fresh blocks after activation, the canonical-read
+    and supply-invariant paths are executing without fatal mismatch."""
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
         row = cur.fetchone()
@@ -210,13 +228,13 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
         return
     age_sec = time.time() - block_ts
     if age_sec < 120:
-        ok(f"latest block is {age_sec:.0f}s old — chain is live, " f"BondDenom panic vector is NOT regressed")
+        ok(f"latest block is {age_sec:.0f}s old — chain is live")
     elif age_sec < 600:
         warn(f"latest block is {age_sec:.0f}s old (slightly stale)")
     else:
         fail(
             f"latest block is {age_sec:.0f}s old — chain may have halted "
-            f"(check node logs for panic: invalid denom or CONSENSUS_FATAL)"
+            f"(check node logs for CONSENSUS_FATAL or panic)"
         )
 
 
@@ -282,10 +300,13 @@ def main() -> None:
     section(f"3. Upgrade Handler ({UPGRADE_NAME})")
     check_upgrade_handler_ran()
 
-    section("4. Chain Liveness (BondDenom panic vector NOT regressed)")
+    section("4. Runtime Config Hardening")
+    check_fastnode_disabled()
+
+    section("5. Chain Liveness")
     check_indexer_freshness(indexer_conn)
 
-    section("5. Binary Version Cross-Check")
+    section("6. Binary Version Cross-Check")
     check_binary_version()
 
     if backend_conn:

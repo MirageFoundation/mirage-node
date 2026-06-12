@@ -2104,6 +2104,50 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.27.0: divergence hardening follow-up (state-machine breaking) ──
+	//
+	// No store migrations, no new params, no new keys. This upgrade coordinates
+	// consensus-critical behavior changes that MUST activate atomically:
+	//   1) IAVL read path hardening completion: point reads no longer treat
+	//      fast-node hits as authoritative; canonical IAVL is always the source.
+	//   2) EndBlock supply invariant guard: halt on supply != sum(balances)
+	//      instead of silently committing a divergent app hash.
+	//   3) Deploy-side runtime hardening: iavl-disable-fastnode=true.
+	//
+	// This is the same class as v1.26.0: local read-contract changes can produce
+	// different app hashes if mixed binaries run side-by-side.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.27.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.27.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.27.0: RunMigrations failed",
+					"from_vm", fmt.Sprintf("%v", fromVM),
+					"err", err,
+				)
+				return nil, fmt.Errorf("v1.27.0: RunMigrations failed (fromVM=%v): %w", fromVM, err)
+			}
+
+			// Defensive sanity check: if params cannot load/validate here, every
+			// following BeginBlock would halt with CONSENSUS_FATAL.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.27.0: post-migration params failed validation: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.27.0: params validated post-migration",
+				"block_hash_window", params.BlockHashWindow,
+				"min_difficulty", params.MinDifficulty,
+				"pow_message_window", params.PowMessageWindow,
+			)
+
+			sdkCtx.Logger().Info("Upgrade to v1.27.0 complete - IAVL canonical-read enforcement + supply invariant guard activated")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

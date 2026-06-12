@@ -180,28 +180,16 @@ func (t *ImmutableTree) Get(key []byte) ([]byte, error) {
 		return nil, nil
 	}
 
-	if !t.skipFastStorageUpgrade {
-		// attempt to get a FastNode directly from db/cache.
-		// if call fails, fall back to the original IAVL logic in place.
-		fastNode, err := t.ndb.GetFastNode(key)
-		if err != nil {
-			_, result, err := t.root.get(t, key)
-			return result, err
-		}
-
-		if fastNode == nil {
-			_, result, err := t.root.get(t, key)
-			return result, err
-		}
-
-		if fastNode.GetVersionLastUpdatedAt() <= t.version {
-			return fastNode.GetValue(), nil
-		}
-	}
-
-	// otherwise skipFastStorageUpgrade is true or the cached node was updated
-	// later than the current tree. In this case, read from the canonical tree to
-	// avoid stale fast-node data.
+	// Mirage patch: the fast-node index is NOT consulted on the read path.
+	// Serving a fast-node hit as authoritative is the advisory-as-authoritative
+	// trap that produced the mirage.talk app-hash divergences (2026-05-25
+	// h4854225, 2026-06-12 h5280036): under concurrent query load the fast index
+	// can return a value one commit stale relative to the canonical tree while
+	// the version check (GetVersionLastUpdatedAt() <= t.version) still passes.
+	// The 2026-05-27 patch fixed fast-node *misses* and the iterators but
+	// deliberately kept serving fast-node *hits* here; that remaining path caused
+	// the 2026-06-12 recurrence. Canonical IAVL traversal of t.root is the only
+	// authoritative source for reads. See docs/troubleshooting/divergence-recovery.md.
 	_, result, err := t.root.get(t, key)
 	return result, err
 }

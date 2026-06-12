@@ -12,10 +12,12 @@ import (
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	"github.com/gogo/protobuf/proto"
 
@@ -148,6 +150,21 @@ func (it *sortedMockIterator) Value() []byte {
 func (it *sortedMockIterator) Close() error { return nil }
 func (it *sortedMockIterator) Error() error { return nil }
 
+// mockBank is a minimal bankkeeper.Keeper used only so EndBlock's supply
+// invariant guard (AssertSupplyInvariant) can run in unit tests. An empty bank
+// trivially satisfies supply == sum(balances) (0 == 0). Only IterateAllBalances
+// and GetSupply are exercised by the guard; the embedded nil interface means any
+// other bank call panics, surfacing an unmocked path rather than hiding it.
+type mockBank struct {
+	bankkeeper.Keeper
+}
+
+func (mockBank) IterateAllBalances(context.Context, func(sdk.AccAddress, sdk.Coin) bool) {}
+
+func (mockBank) GetSupply(_ context.Context, denom string) sdk.Coin {
+	return sdk.NewCoin(denom, sdkmath.ZeroInt())
+}
+
 // mockKeeper wraps keeper.Keeper to override IsValidatorBonded for testing
 type mockKeeper struct {
 	keeper.Keeper
@@ -160,8 +177,9 @@ func newMockKeeper() *mockKeeper {
 	interfaceRegistry := codectypes.NewInterfaceRegistry()
 	cdc := codec.NewProtoCodec(interfaceRegistry)
 
-	// Create a real keeper with nil/empty keepers (we'll override what we need)
-	k := keeper.NewKeeper(storeService, cdc, nil, nil, nil, slashingkeeper.Keeper{})
+	// Create a real keeper with a minimal mock bank and nil/empty keepers
+	// (we'll override what we need).
+	k := keeper.NewKeeper(storeService, cdc, mockBank{}, nil, nil, slashingkeeper.Keeper{})
 
 	mk := &mockKeeper{
 		Keeper:          k,

@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.26.0 (IAVL fast-node read-path correctness — coordinated activation of patches/iavl fix)",
-    "summary": "Coordinated activation of a state-machine-breaking fix to blockchain/patches/iavl. The deployed IAVL patch treated a fast-node index miss at the latest version as proof of key absence — instead of falling back to the canonical IAVL tree. That is the root cause of the post-state-sync `mint.BondDenom == \"\"` panic that took down mirage.talk on 2026-05-25 after watchdog recovery, and is the evidence-consistent cause of the original block 4,854,225 app-hash divergence on the same node (the same IAVL read contract was on the deliver path; not formally reproduced because we lack per-node IAVL state captures from that moment). After v1.26.0, every IAVL read path — ImmutableTree.Get, MutableTree.GetVersioned, ImmutableTree.Iterator, ImmutableTree.Iterate, MutableTree.Iterator, MutableTree.Iterate — falls through to canonical IAVL on a fast-node miss. Fast-node hits are still served from the index for performance. The handler is a no-op for on-chain state (no new params, no new store keys, no module migrations) — coordination is required because pre- and post-v1.26.0 nodes will compute different app hashes from the same canonical state if one of them hits a fast-node miss. After this upgrade is live across the validator set, state-sync recovery is safe again on this chain.",
+    "title": "Upgrade to v1.27.0 (Divergence hardening: canonical IAVL reads + supply invariant guard)",
+    "summary": "Coordinated activation of consensus-critical divergence hardening. This release completes the IAVL read-path safety work by removing remaining advisory fast-node reads from consensus paths: point reads now use canonical IAVL as authoritative source even when the fast index has a hit. It also adds a supply invariant guard at EndBlock that halts a corrupted node when recorded supply does not match sum(balances), instead of silently committing a divergent app hash. This directly addresses the recurring single-node divergence class observed on mirage.talk, including the 2026-06-12 incident where supply was undercounted by 164,124,000 due to a stale read. No on-chain state migration is required (no new params, no new store keys, no module migrations), but this is state-machine-breaking behavior and therefore must activate at one coordinated upgrade height across validators.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.26.0",
+                "name": "v1.27.0",
                 "height": "T+50",
                 "info": ""
             }
