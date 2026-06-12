@@ -91,4 +91,6 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.23.0"), "v1.23.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.24.0"), "v1.24.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.25.0"), "v1.25.0 upgrade handler should be registered")
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.26.0"), "v1.26.0 upgrade handler should be registered")
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.27.0"), "v1.27.0 upgrade handler should be registered")
 }

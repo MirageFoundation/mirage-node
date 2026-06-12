@@ -1197,6 +1197,40 @@ func (k Keeper) moduleAddress() sdk.AccAddress {
 
 func (k Keeper) mintDenom() string { return types.MintDenom }
 
+// AssertSupplyInvariant verifies the bank module's fundamental accounting
+// identity for the mint denom: recorded supply MUST equal the sum of every
+// account balance. This is impossible to violate under correct serial
+// execution — every coin minted or burned updates supply and a balance in the
+// same call — so any mismatch means this node read stale state mid-block. That
+// is exactly the IAVL fast-node stale-read that double-burned a prior block's
+// fees and caused the 2026-06-12 app-hash divergence at height 5280036
+// (supply was low by 164,124,000 while balances were unchanged).
+//
+// Returning an error from the EndBlock caller halts only the corrupted node,
+// with the precise discrepancy logged, instead of silently committing a
+// divergent app hash that surfaces later as a cryptic consensus failure. The
+// auto-recovery watchdog then state-syncs the node from healthy peers.
+//
+// See docs/troubleshooting/divergence-recovery.md.
+func (k Keeper) AssertSupplyInvariant(ctx sdk.Context) error {
+	denom := k.mintDenom()
+	sum := sdkmath.ZeroInt()
+	k.bank.IterateAllBalances(ctx, func(_ sdk.AccAddress, coin sdk.Coin) bool {
+		if coin.Denom == denom {
+			sum = sum.Add(coin.Amount)
+		}
+		return false
+	})
+	supply := k.bank.GetSupply(ctx, denom).Amount
+	if !supply.Equal(sum) {
+		return fmt.Errorf(
+			"supply invariant violated for %s: recorded supply %s != sum of balances %s (diff %s)",
+			denom, supply.String(), sum.String(), supply.Sub(sum).String(),
+		)
+	}
+	return nil
+}
+
 // BurnAllFromModule burns all balance of the core module account for the mint denom
 func (k Keeper) BurnAllFromModule(ctx sdk.Context) error {
 	addr := k.moduleAddress()

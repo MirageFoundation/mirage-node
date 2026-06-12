@@ -180,35 +180,16 @@ func (t *ImmutableTree) Get(key []byte) ([]byte, error) {
 		return nil, nil
 	}
 
-	if !t.skipFastStorageUpgrade {
-		// attempt to get a FastNode directly from db/cache.
-		// if call fails, fall back to the original IAVL logic in place.
-		fastNode, err := t.ndb.GetFastNode(key)
-		if err != nil {
-			_, result, err := t.root.get(t, key)
-			return result, err
-		}
-
-		if fastNode == nil {
-			// If the tree is of the latest version and fast node is not in the tree
-			// then the regular node is not in the tree either because fast node
-			// represents live state.
-			if t.version == t.ndb.latestVersion {
-				return nil, nil
-			}
-
-			_, result, err := t.root.get(t, key)
-			return result, err
-		}
-
-		if fastNode.GetVersionLastUpdatedAt() <= t.version {
-			return fastNode.GetValue(), nil
-		}
-	}
-
-	// otherwise skipFastStorageUpgrade is true or
-	// the cached node was updated later than the current tree. In this case,
-	// we need to use the regular stategy for reading from the current tree to avoid staleness.
+	// Mirage patch: the fast-node index is NOT consulted on the read path.
+	// Serving a fast-node hit as authoritative is the advisory-as-authoritative
+	// trap that produced the mirage.talk app-hash divergences (2026-05-25
+	// h4854225, 2026-06-12 h5280036): under concurrent query load the fast index
+	// can return a value one commit stale relative to the canonical tree while
+	// the version check (GetVersionLastUpdatedAt() <= t.version) still passes.
+	// The 2026-05-27 patch fixed fast-node *misses* and the iterators but
+	// deliberately kept serving fast-node *hits* here; that remaining path caused
+	// the 2026-06-12 recurrence. Canonical IAVL traversal of t.root is the only
+	// authoritative source for reads. See docs/troubleshooting/divergence-recovery.md.
 	_, result, err := t.root.get(t, key)
 	return result, err
 }
@@ -244,17 +225,23 @@ func (t *ImmutableTree) Iterate(fn func(key []byte, value []byte) bool) (bool, e
 }
 
 // Iterator returns an iterator over the immutable tree.
+//
+// Mirage patch: this used to return NewFastIterator when fast-cache was
+// enabled, the same advisory-as-authoritative trap that broke ImmutableTree.Get
+// and produced both the mirage.talk app-hash divergence and the post-state-sync
+// BondDenom panic. A FastIterator only walks the secondary fast-node index;
+// if that index is incomplete (state import, partial fast-storage upgrade,
+// pruning races) entire keys silently disappear from range scans, producing
+// non-deterministic reads and consensus divergence.
+//
+// Canonical IAVL traversal is the only correct source for consensus reads, so
+// Iterator now always returns NewIterator. The fast-node index is no longer
+// part of the consensus read path. FastIterator remains in the package for
+// the fast-storage maintenance flow in MutableTree.enableFastStorageAndCommit
+// (enumerating live fast-nodes for upgrade), which is not consensus-critical.
+//
+// See docs/troubleshooting/state-sync-bonddenom-panic.md.
 func (t *ImmutableTree) Iterator(start, end []byte, ascending bool) (dbm.Iterator, error) {
-	if !t.skipFastStorageUpgrade {
-		isFastCacheEnabled, err := t.IsFastCacheEnabled()
-		if err != nil {
-			return nil, err
-		}
-
-		if isFastCacheEnabled {
-			return NewFastIterator(start, end, ascending, t.ndb), nil
-		}
-	}
 	return NewIterator(start, end, ascending, t), nil
 }
 

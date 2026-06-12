@@ -883,13 +883,11 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                 aria-label="Create a post on Mirage"
                                 title="Sign in to post on Mirage"
                                 description="Create an account or sign in to publish posts, join topics, and participate on-chain."
-                                notice="Currently in Private Beta, Invite Only."
                                 stats={getCachedWelcomeStats()}
                                 links={[
                                     { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
                                     { label: 'Learn More', href: 'https://mirage.foundation', external: true },
                                 ]}
-                                inviteText="Have an invite code? Join the community today."
                                 primaryLabel="Create account"
                                 secondaryLabel="Sign in"
                             />

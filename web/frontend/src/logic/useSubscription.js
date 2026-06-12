@@ -68,9 +68,9 @@ export const buildTierConfig = chainTiers => {
         if (meta.level === 0) {
             features = ['PoW for transactions', maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`, followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`, maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents', 'Basic posting'];
         } else if (meta.level === 1) {
-            features = ['Instant posting', "Remove 'Anon-' prefix", maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`, followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`, maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents', 'Profile biography, avatar & banner', voteWeight > 1 ? `${voteWeight}x vote weight` : 'Higher vote weight'];
+            features = ['Instant posting', "Remove 'Anon-' prefix", maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`, followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`, maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents', 'Profile biography, avatar & banner', voteWeight > 1 && `${voteWeight}x vote weight`];
         } else {
-            features = ['Everything in Subscriber, plus:', 'Listed as a selectable agent on the Agents page', 'Moderate manually or automate with a bot via the API', 'Edit, translate, tag, or hide posts — your followers see your version'];
+            features = ['Everything in Subscriber, plus:', 'Listed as a selectable agent on the Agents page', 'Moderate manually or automate with a bot via the API', 'Edit, translate, tag, or hide posts — your followers see your version', voteWeight > 1 && `${voteWeight}x vote weight`];
         }
         return {
             level: meta.level,
@@ -451,10 +451,8 @@ export function useSubscription({
         } else {
             details.push('Cannot edit posts after publishing.');
         }
-        if (typeof raw.vote_weight === 'number' && raw.vote_weight > 0) {
+        if (typeof raw.vote_weight === 'number' && raw.vote_weight > 1) {
             details.push(`Vote weight: ${raw.vote_weight.toFixed(2)}x.`);
-        } else {
-            details.push('Standard vote weight.');
         }
         if (raw.can_be_agent) {
             details.push('Eligible to be agent.');

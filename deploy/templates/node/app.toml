@@ -29,6 +29,15 @@ min-retain-blocks = ${RETENTION_BLOCKS}
 # Application database backend (goleveldb or pebbledb)
 app-db-backend = "${APP_DB_BACKEND:-goleveldb}"
 
+# IAVL fast-node index is DISABLED on the consensus read path. Serving a
+# fast-node hit as authoritative is the advisory-as-authoritative trap that
+# produced the mirage.talk app-hash divergences (2026-05-25 h4854225,
+# 2026-06-12 h5280036): under concurrent query load the fast index can return a
+# value one commit stale relative to the canonical IAVL tree. Disabling it
+# forces every read through the canonical tree, which always re-executes
+# deterministically. See docs/troubleshooting/divergence-recovery.md.
+iavl-disable-fastnode = true
+
 [api]
 enable = true
 enabled-unsafe-cors = true

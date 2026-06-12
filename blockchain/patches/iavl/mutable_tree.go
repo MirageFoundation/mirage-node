@@ -201,48 +201,39 @@ func (tree *MutableTree) Import(version int64) (*Importer, error) {
 }
 
 // Iterate iterates over all keys of the tree. The keys and values must not be modified,
-// since they may point to data stored within IAVL. Returns true if stopped by callnack, false otherwise
+// since they may point to data stored within IAVL. Returns true if stopped by callback, false otherwise.
+//
+// Mirage patch: always delegates to the canonical ImmutableTree iterator. See
+// MutableTree.Iterator for the rationale. tree.set keeps tree.ImmutableTree.root
+// in sync with every unsaved write, so canonical traversal already reflects
+// uncommitted state without consulting the fast-node index.
 func (tree *MutableTree) Iterate(fn func(key []byte, value []byte) bool) (stopped bool, err error) {
 	if tree.root == nil {
 		return false, nil
 	}
-
-	if tree.skipFastStorageUpgrade {
-		return tree.ImmutableTree.Iterate(fn)
-	}
-
-	isFastCacheEnabled, err := tree.IsFastCacheEnabled()
-	if err != nil {
-		return false, err
-	}
-	if !isFastCacheEnabled {
-		return tree.ImmutableTree.Iterate(fn)
-	}
-
-	itr := NewUnsavedFastIterator(nil, nil, true, tree.ndb, tree.unsavedFastNodeAdditions, tree.unsavedFastNodeRemovals)
-	defer itr.Close()
-	for ; itr.Valid(); itr.Next() {
-		if fn(itr.Key(), itr.Value()) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return tree.ImmutableTree.Iterate(fn)
 }
 
 // Iterator returns an iterator over the mutable tree.
 // CONTRACT: no updates are made to the tree while an iterator is active.
+// A concurrent Set/Remove can re-root tree.ImmutableTree while the iterator is
+// walking old node pointers; callers must keep the same no-mutation discipline
+// the original fast iterator required.
+//
+// Mirage patch: this used to return NewUnsavedFastIterator when fast-cache was
+// enabled, which is FastIterator (advisory fast-node index) merged with
+// per-process unsaved additions/removals. That made consensus iteration
+// dependent on fast-node completeness — exactly the failure mode that produced
+// the mirage.talk app-hash divergence and the post-state-sync BondDenom panic.
+//
+// Iterator now always delegates to ImmutableTree.Iterator, which performs a
+// canonical IAVL traversal of tree.root. tree.set keeps tree.ImmutableTree.root
+// in sync with every unsaved write (both branches of MutableTree.set), so the
+// canonical tree already reflects uncommitted state and is authoritative for
+// consensus reads. The fast-node index is no longer on the consensus read path.
+//
+// See docs/troubleshooting/state-sync-bonddenom-panic.md.
 func (tree *MutableTree) Iterator(start, end []byte, ascending bool) (dbm.Iterator, error) {
-	if !tree.skipFastStorageUpgrade {
-		isFastCacheEnabled, err := tree.IsFastCacheEnabled()
-		if err != nil {
-			return nil, err
-		}
-
-		if isFastCacheEnabled {
-			return NewUnsavedFastIterator(start, end, ascending, tree.ndb, tree.unsavedFastNodeAdditions, tree.unsavedFastNodeRemovals), nil
-		}
-	}
-
 	return tree.ImmutableTree.Iterator(start, end, ascending)
 }
 
@@ -659,25 +650,21 @@ func (tree *MutableTree) Rollback() {
 
 // GetVersioned gets the value at the specified key and version. The returned value must not be
 // modified, since it may point to data stored within IAVL.
+//
+// Mirage patch: the fast-node index is NOT consulted on the read path. This
+// used to short-circuit with `return nil, nil` on a fast-node miss and serve
+// fast-node hits as authoritative — the advisory-as-authoritative trap that
+// broke ImmutableTree.Get and produced both the mirage.talk app-hash
+// divergences (2026-05-25 h4854225, 2026-06-12 h5280036) and the post-state-sync
+// BondDenom panic. Under concurrent query load the fast index can return a
+// value stale relative to the canonical tree while the version check still
+// passes. Reads now always go through canonical IAVL traversal via
+// GetImmutable(version).Get(key).
+//
+// See docs/troubleshooting/divergence-recovery.md and
+// docs/troubleshooting/state-sync-bonddenom-panic.md.
 func (tree *MutableTree) GetVersioned(key []byte, version int64) ([]byte, error) {
 	if tree.VersionExists(version) {
-		if !tree.skipFastStorageUpgrade {
-			isFastCacheEnabled, err := tree.IsFastCacheEnabled()
-			if err != nil {
-				return nil, err
-			}
-
-			if isFastCacheEnabled {
-				fastNode, _ := tree.ndb.GetFastNode(key)
-				if fastNode == nil && version == tree.ndb.latestVersion {
-					return nil, nil
-				}
-
-				if fastNode != nil && fastNode.GetVersionLastUpdatedAt() <= version {
-					return fastNode.GetValue(), nil
-				}
-			}
-		}
 		t, err := tree.GetImmutable(version)
 		if err != nil {
 			return nil, nil

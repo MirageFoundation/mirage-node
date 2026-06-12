@@ -39,9 +39,15 @@ The UX is a toggle: go to the agents page, see a list with descriptions, flip th
 
 ## On-chain Messages
 
-### MsgSetAgents
+### MsgEnableAgent / MsgDisableAgent / MsgSetAgents
 
-Users manage their enabled agents via `MsgSetAgents`, which atomically replaces the full ordered list in a single transaction. The chain stores agents as an ordered JSON array at `plist_agents/{owner}`. This single-message design means enabling, disabling, and reordering all happen in one tx -- no multi-step disable-all/re-enable-all dance required.
+Users manage their enabled-agents list with three messages. The chain stores the list as an ordered JSON array at `plist_agents/{owner}`.
+
+- **`MsgEnableAgent`** (`POST /api/core/enable_agent`) — append a single agent. No-op if already enabled.
+- **`MsgDisableAgent`** (`POST /api/core/disable_agent`) — remove a single agent. No-op if not enabled.
+- **`MsgSetAgents`** (`POST /api/core/set_agents`) — atomically replace the entire ordered list. Used to reorder agents (priority) or apply a batched draft.
+
+The frontend toggles individual agents via `MsgEnableAgent` / `MsgDisableAgent` so two near-simultaneous toggle clicks don't clobber each other (each tx mutates the canonical list, instead of racing to overwrite a stale snapshot). `MsgSetAgents` is reserved for the explicit "Apply order" / batched-reorder action.
 
 ### MsgAnnotate
 
@@ -70,21 +76,24 @@ In practice, most agents will specialize (one does tags, one does translations, 
 
 ## Example Agents
 
-- **AntiSpamBot**: hides spam and low effort posts
-- **TranslateToEnglish**: translates non English titles and bodies
+- **SafeSpaceBot**: rewrites hostile posts into kinder language (deployed default-agent example)
+- **AntiSpamBot**: hides spam and low effort posts (deployed default-agent example)
+- **TranslateToEnglish**: translates non-English titles and bodies
 - **WrongTopicBot**: moves misplaced posts to the correct topic
 - **ContentTagger**: flags adult/violent content with proper tags
-- **CharlieKirkBot**: adds Charlie Kirk's opinion to political posts
-- **FactCheckBot**: appends fact check notes to claims
+- **FactCheckBot**: appends fact-check notes to claims
 
 ## Discovery
 
-Agents are listed on a dedicated page, similar to the topics page. Each entry shows:
+Agents are listed on a dedicated page (linked from the sidebar nav). Each entry shows:
 
-- Agent username
+- Agent username and avatar
 - Biography / description of what the agent does
-- Number of users who have enabled it
-- Enable/disable toggle
+- Last-active timestamp (most recent annotation, block, or edit)
+- Per-agent enable/disable toggle
+- Drag-to-reorder when multiple agents are enabled (priority)
+
+Posts that an enabled agent has overlaid are marked with an `agent_edited` indicator in the post header. A per-post toggle (the "show original" control) lets the viewer flip back to the unmodified post on the fly without disabling the agent.
 
 ## Why This Works
 

@@ -2038,6 +2038,116 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.26.0: IAVL fast-node read-path correctness ──
+	//
+	// No on-chain state change. No new params. No new store keys. No module
+	// migrations. The handler is intentionally a no-op for state — it exists
+	// solely to coordinate rollout of a state-machine-breaking change to the
+	// LOCAL IAVL read contract.
+	//
+	// Fix: blockchain/patches/iavl no longer treats a fast-node index miss at
+	// the latest version as proof of key absence. ImmutableTree.Get,
+	// MutableTree.GetVersioned, and every iterator path now fall through to
+	// canonical IAVL on a fast-node miss. Affected every IAVL read site —
+	// previously, post-state-sync nodes silently observed `nil` for keys that
+	// were demonstrably present in the canonical, app-hash-verified state.
+	// This was the root cause of:
+	//
+	//   - The post-state-sync `mint.BondDenom == ""` panic that took down
+	//     mirage.talk on 2026-05-25 after watchdog recovery (proven, reproduced
+	//     deterministically in patches/iavl/fastnode_import_test.go).
+	//   - The original block 4,854,225 app-hash divergence on mirage.talk
+	//     (evidence-consistent — same IAVL read contract was on the deliver
+	//     path; not formally reproduced because we lack per-node IAVL state
+	//     captures from the moment of divergence).
+	//
+	// Why this is state-machine breaking even with no migration: pre-v1.26.0
+	// nodes can observe `nil` from a read path where v1.26.0 nodes observe
+	// the canonical value. Two binaries running side-by-side against the same
+	// canonical state will compute different app hashes the moment one of
+	// them hits a fast-node miss. Coordinated activation at the upgrade
+	// height is mandatory.
+	//
+	// Operator runbook: docs/troubleshooting/state-sync-bonddenom-panic.md.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.26.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.26.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.26.0: RunMigrations failed",
+					"from_vm", fmt.Sprintf("%v", fromVM),
+					"err", err,
+				)
+				return nil, fmt.Errorf("v1.26.0: RunMigrations failed (fromVM=%v): %w", fromVM, err)
+			}
+
+			// Defensive sanity check, mirroring v1.25.0: if GetParams cannot
+			// load params here the chain is already broken and every following
+			// BeginBlock will halt with CONSENSUS_FATAL. Surface it during the
+			// upgrade so operators can roll back the binary before it locks
+			// the chain.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.26.0: post-migration params failed validation: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.26.0: params validated post-migration",
+				"block_hash_window", params.BlockHashWindow,
+				"min_difficulty", params.MinDifficulty,
+				"pow_message_window", params.PowMessageWindow,
+			)
+
+			sdkCtx.Logger().Info("Upgrade to v1.26.0 complete - IAVL fast-node read paths now fall through to canonical IAVL on miss; state-sync recovery is safe again on this chain")
+			return toVM, nil
+		},
+	)
+
+	// ── v1.27.0: divergence hardening follow-up (state-machine breaking) ──
+	//
+	// No store migrations, no new params, no new keys. This upgrade coordinates
+	// consensus-critical behavior changes that MUST activate atomically:
+	//   1) IAVL read path hardening completion: point reads no longer treat
+	//      fast-node hits as authoritative; canonical IAVL is always the source.
+	//   2) EndBlock supply invariant guard: halt on supply != sum(balances)
+	//      instead of silently committing a divergent app hash.
+	//   3) Deploy-side runtime hardening: iavl-disable-fastnode=true.
+	//
+	// This is the same class as v1.26.0: local read-contract changes can produce
+	// different app hashes if mixed binaries run side-by-side.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.27.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.27.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.27.0: RunMigrations failed",
+					"from_vm", fmt.Sprintf("%v", fromVM),
+					"err", err,
+				)
+				return nil, fmt.Errorf("v1.27.0: RunMigrations failed (fromVM=%v): %w", fromVM, err)
+			}
+
+			// Defensive sanity check: if params cannot load/validate here, every
+			// following BeginBlock would halt with CONSENSUS_FATAL.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.27.0: post-migration params failed validation: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.27.0: params validated post-migration",
+				"block_hash_window", params.BlockHashWindow,
+				"min_difficulty", params.MinDifficulty,
+				"pow_message_window", params.PowMessageWindow,
+			)
+
+			sdkCtx.Logger().Info("Upgrade to v1.27.0 complete - IAVL canonical-read enforcement + supply invariant guard activated")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

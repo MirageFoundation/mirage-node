@@ -720,8 +720,7 @@ export default function SearchResultsView({ state }) {
                 }
             } catch (err) {
                 alert(
-                    `Error ${wasFollowing ? "unfollowing" : "following"} topic: ${
-                        err?.message || err
+                    `Error ${wasFollowing ? "unfollowing" : "following"} topic: ${err?.message || err
                     }`
                 );
             }
@@ -754,8 +753,7 @@ export default function SearchResultsView({ state }) {
                 }
             } catch (err) {
                 alert(
-                    `Error ${wasFollowing ? "unfollowing" : "following"} user: ${
-                        err?.message || err
+                    `Error ${wasFollowing ? "unfollowing" : "following"} user: ${err?.message || err
                     }`
                 );
             }
@@ -975,7 +973,6 @@ export default function SearchResultsView({ state }) {
                                 aria-label="Search on Mirage"
                                 title={query ? "Sign in to search Mirage" : "Search Mirage"}
                                 description="Create an account or sign in to search topics, users, and posts."
-                                notice="Currently in Private Beta, Invite Only."
                                 stats={getCachedWelcomeStats()}
                                 links={[
                                     {
@@ -989,7 +986,6 @@ export default function SearchResultsView({ state }) {
                                         external: true,
                                     },
                                 ]}
-                                inviteText="Have an invite code? Join the community today."
                                 primaryLabel="Create account"
                                 secondaryLabel="Sign in"
                             />

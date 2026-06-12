@@ -43,14 +43,31 @@ bench:
 	@echo Running unit tests with benchmarking...
 	@go test -mod=readonly -v -timeout 30m -bench=. ./...
 
-test: govet govulncheck test-unit
+test: govet govulncheck test-unit test-iavl
 
-# Fast test for CI/deploy - no race detector, shorter timeout
-test-fast:
-	@echo "--> Running tests..."
+# Fast test for CI/deploy - no race detector, shorter timeout.
+# test-iavl is included so the patches/iavl regression suite (consensus
+# read-path correctness when fast-node index is incomplete) runs in every
+# CI/deploy gate alongside ./... — patches/iavl is a separate go module
+# (replace directive in go.mod) and is NOT picked up by ./...
+test-fast: test-fast-app test-iavl
+	@echo "--> All fast tests passed (./... + patches/iavl)"
+
+test-fast-app:
+	@echo "--> Running blockchain tests (./...)"
 	@go test -mod=readonly -timeout 5m ./...
 
-.PHONY: test test-unit test-race test-cover test-fast bench
+# patches/iavl is a forked IAVL with mirage-specific consensus-correctness
+# fixes (see docs/troubleshooting/state-sync-bonddenom-panic.md). It lives in
+# its own go module so upstream cosmos/iavl tooling treats it as a drop-in.
+# Running it as part of test-fast guarantees that any future change to the
+# patch is gated by the regression suite that catches the BondDenom /
+# app-hash divergence shape.
+test-iavl:
+	@echo "--> Running patched IAVL tests (patches/iavl)"
+	@cd patches/iavl && go test -mod=readonly -timeout 5m .
+
+.PHONY: test test-unit test-race test-cover test-fast test-fast-app test-iavl bench
 
 #################
 ###  Install  ###

@@ -1016,16 +1016,17 @@ def send_push_for_trending(
     title_preview: str,
     tx_hash: str,
 ) -> bool:
-    """Fire push for a trending post to a recipient."""
+    """Fire push for a trending post to a recipient.
+
+    Trending pushes are capped by the listener's once-per-day policy and bypass
+    inbox throttle windows so they don't interfere with inbox summary behavior.
+    """
     if not PUSH_NOTIFICATIONS_ENABLED:
         logger.debug("[Push] Disabled, skipping trending push for %s", recipient_owner[:16])
         return False
     tokens = _get_tokens_for_owner(recipient_owner)
     if not tokens:
         logger.debug("[Push] No tokens for trending recipient=%s", recipient_owner[:16])
-        return False
-    if not _try_throttle_send(recipient_owner):
-        logger.debug("[Push] Throttled, skipping trending recipient=%s", recipient_owner[:16])
         return False
     logger.info(
         "[Push] Firing trending push: recipient=%s tx=%s",

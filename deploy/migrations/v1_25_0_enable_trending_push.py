@@ -42,9 +42,8 @@ def run(config_dir, logger):
             cur.execute(
                 """
                 UPDATE user_inbox_state
-                SET trending_level = 0, trending_last_sent_at = 0
-                WHERE COALESCE(trending_level, 0) <> 0
-                   OR COALESCE(trending_last_sent_at, 0) <> 0
+                SET trending_last_sent_at = 0
+                WHERE COALESCE(trending_last_sent_at, 0) <> 0
                 """
             )
             reset_count = cur.rowcount

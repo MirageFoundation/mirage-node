@@ -1,12 +1,26 @@
 #!/usr/bin/env python3
 """
-divergence_watchdog.py — long-running supervisor that detects when miraged is
-forked / app-hash-diverged from the rest of the network and triggers a
-recovery script to bring it back automatically.
+divergence_watchdog.py — long-running observability daemon. Detects when
+miraged is forked / app-hash-diverged from the rest of the network and, if
+explicitly authorized, invokes a recovery script.
 
-Default recovery command: scripts/recover.sh peer-pull (chain-data tar pulled
-directly from a healthy peer). State-sync remains available as an opt-in
-alternative - set:
+DEFAULT BEHAVIOUR (post-2026-05-27 incident): ALERT-ONLY. The watchdog will
+log a high-visibility WARNING when it sees divergence symptoms, but it will
+NEVER invoke the recovery script unless the operator has explicitly set:
+
+    WATCHDOG_AUTORECOVER=true
+
+Rationale: prior to 2026-05-27 the watchdog ran on every validator with
+default-on auto-recovery and could autonomously decide to wipe local chain
+DBs. A benign upgrade halt then caused 3 of 4 validators to wipe themselves
+within minutes of each other. We never want a single observability daemon
+to be able to brick the validator set again. Auto-recovery is now opt-in
+per host, and even on the host that opts in, recovery requires that all the
+existing safety guards (cool-down, peer agreement, ≥2 healthy peers) pass.
+
+Default recovery command (when authorized): scripts/recover.sh peer-pull
+(chain-data tar pulled directly from a healthy peer). State-sync remains
+available as an opt-in alternative - set:
    RECOVERY_MODE=state-sync
 to switch back. The default was flipped after the May 25 2026 incident where
 a cosmos-sdk v0.53 state-sync bug left staking.bond_denom empty, causing
@@ -21,6 +35,16 @@ Detection signals (any one triggers recovery):
      or
        "CONSENSUS FAILURE!!!"              (panicking / catastrophic)
      in the last DETECTION_WINDOW seconds.
+
+     EXCEPTION: a "CONSENSUS FAILURE!!!" line whose `err=...` payload is the
+     cosmos-sdk upgrade halt (matches UPGRADE_HALT_RE) is NOT a divergence —
+     it is an operator-driven binary-swap event. The chain has reached an
+     on-chain Plan height for which the running binary lacks a registered
+     handler. The fix is to swap to a binary with that handler, not to wipe
+     the chain DBs. Pre-2026-05-27 the watchdog matched this pattern as a
+     divergence, which destroyed three of four validators' chain data when
+     the v1.26.0 upgrade went live before the binaries were rolled.
+
   2) /status reports the same latest_block_height for STALL_BLOCKS consecutive
      polls AND >=2 healthy peers report a strictly higher block (we're stuck).
   3) /status is unreachable for DEAD_THRESHOLD consecutive polls, the miraged
@@ -28,7 +52,12 @@ Detection signals (any one triggers recovery):
 
 Safety guards before recovering:
   - Cool-down marker (~/.mirage/.divergence_recovery_lock) — refuse to recover
-    again within COOLDOWN_SECONDS (default 6h).
+    again within COOLDOWN_SECONDS (default 6h). This marker is written ONLY by
+    recover.sh after a VERIFIED recovery. The watchdog itself never writes it:
+    on 2026-06-12 the alert-only path touched this marker for alert dedup,
+    which pre-blocked the operator's real recovery for 6h during a divergence.
+    Alert dedup now uses a separate marker (~/.mirage/.divergence_alert_lock)
+    that recover.sh ignores entirely.
   - Disable marker (~/.mirage/.recovery_disabled) — opt out completely.
   - >=2 healthy peers reachable AND agreeing on the same recent app_hash
     (delegated to recover.sh which double-checks).
@@ -58,9 +87,19 @@ from pathlib import Path
 NODE_HOME = Path(os.environ.get("NODE_HOME", "/root/.mirage/node"))
 LOGS_DIR = Path(os.environ.get("LOGS_DIR", "/root/.mirage/logs"))
 LOCK = Path(os.environ.get("LOCK", "/root/.mirage/.divergence_recovery_lock"))
+# Alert-spam dedup marker for alert-only mode. MUST be distinct from LOCK:
+# LOCK is the recovery cool-down that recover.sh checks before acting, and
+# polluting it from the alert path locks operators out of recovery (2026-06-12).
+ALERT_LOCK = Path(os.environ.get("ALERT_LOCK", "/root/.mirage/.divergence_alert_lock"))
+ALERT_REPEAT_SECONDS = int(os.environ.get("ALERT_REPEAT_SECONDS", "1800"))  # re-alert every 30 min
 DISABLE_MARKER = Path(os.environ.get("DISABLE_MARKER", "/root/.mirage/.recovery_disabled"))
 RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover.sh"))
 RECOVERY_MODE = os.environ.get("RECOVERY_MODE", "peer-pull")
+# Private key used by recover.sh peer-pull to SSH into source peers. Installed
+# by `recover.sh provision`. Checked at startup when autorecover is enabled so
+# a missing key surfaces at deploy time, not mid-incident (2026-06-12: prod had
+# autorecover docs but no key, so peer-pull could never have worked there).
+RECOVERY_KEY = Path(os.environ.get("RECOVERY_KEY", "/root/.mirage/.ssh/recovery_id"))
 LOCAL_RPC = os.environ.get("LOCAL_RPC", "http://127.0.0.1:26657")
 
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
@@ -70,10 +109,24 @@ COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "21600"))  # 6h
 PEER_AHEAD_THRESHOLD = int(os.environ.get("PEER_AHEAD_THRESHOLD", "20"))
 DEAD_THRESHOLD = int(os.environ.get("DEAD_THRESHOLD", "3"))
 
+# Master gate on destructive recovery. Defaults to FALSE: watchdog is purely
+# observational. Operator must opt in per-host. See module docstring for
+# rationale (2026-05-27 mass-wipe incident).
+WATCHDOG_AUTORECOVER = os.environ.get("WATCHDOG_AUTORECOVER", "").lower() in {"1", "true", "yes"}
+
 DIVERGENCE_PATTERNS = (
     "wrong Block.Header.AppHash",
     "CONSENSUS FAILURE!!!",
 )
+
+# A "CONSENSUS FAILURE!!!" line that is actually the cosmos-sdk upgrade halt
+# looks like:
+#   ERR CONSENSUS FAILURE!!! err="failed to apply block; error UPGRADE \"v1.26.0\" NEEDED at height: 4895581: " module=consensus
+# (the upgrade module returns the error verbatim from
+# x/upgrade.Keeper.PreBlocker when it has no handler registered for plan.Name).
+# This is operator-fixable (swap binaries), NEVER recoverable by wiping the
+# chain DBs. Treat it as non-divergence.
+UPGRADE_HALT_RE = re.compile(r'UPGRADE\s+\\"[^"\\]+\\"\s+NEEDED\s+at\s+height:')
 
 
 # ── Logging ─────────────────────────────────────────────────────────────
@@ -172,6 +225,12 @@ def log_window_has_pattern(text: str, patterns: tuple[str, ...], window_secs: in
         # Quick filter
         if not any(p in line for p in patterns):
             continue
+        # Suppress upgrade-halt false positives: a CONSENSUS FAILURE line whose
+        # err payload is "UPGRADE \"...\" NEEDED at height:" is the cosmos-sdk
+        # upgrade module refusing to apply a block because plan.Name has no
+        # registered handler. That is a binary-swap event, not divergence.
+        if UPGRADE_HALT_RE.search(line):
+            continue
         m = TS_RE.search(line)
         if not m:
             # No parseable timestamp — assume recent (conservative match)
@@ -250,8 +309,24 @@ def run(dry_run: bool) -> int:
         f"divergence_watchdog starting "
         f"(poll={POLL_SECONDS}s, window={DETECTION_WINDOW}s, "
         f"stall={STALL_BLOCKS}, cooldown={COOLDOWN_SECONDS}s, "
-        f"dead_threshold={DEAD_THRESHOLD}, dry_run={dry_run})"
+        f"dead_threshold={DEAD_THRESHOLD}, dry_run={dry_run}, "
+        f"autorecover={WATCHDOG_AUTORECOVER})"
     )
+    if not WATCHDOG_AUTORECOVER:
+        log("MODE: alert-only. Triggers will be logged loudly; recover.sh will NOT be invoked.")
+        log("To permit auto-recovery set WATCHDOG_AUTORECOVER=true (per-host, in node.env).")
+    elif RECOVERY_MODE == "peer-pull" and not RECOVERY_KEY.is_file():
+        # Fail hard at startup: an autorecover watchdog without its recovery
+        # key would only ever discover the problem mid-incident, when recover.sh
+        # dies with "recovery key missing". Surface the misconfiguration now.
+        log("============================================================")
+        log("FATAL: WATCHDOG_AUTORECOVER=true with RECOVERY_MODE=peer-pull,")
+        log(f"  but the recovery key is missing: {RECOVERY_KEY}")
+        log("  Auto-recovery CANNOT work on this host. Either:")
+        log("    - provision it:  ./scripts/recover.sh provision --cluster=... --peer=... --container-host=...")
+        log("    - or set RECOVERY_MODE=state-sync / WATCHDOG_AUTORECOVER=false")
+        log("============================================================")
+        return 2
 
     height_history: deque[int] = deque(maxlen=STALL_BLOCKS + 1)
     consecutive_unreachable = 0
@@ -345,6 +420,38 @@ def run(dry_run: bool) -> int:
             if force_recover and cooldown_active():
                 log("process-dead recovery bypassing cool-down via --force")
 
+            if not WATCHDOG_AUTORECOVER:
+                # Hard gate. This is the post-2026-05-27 "horrible thing must
+                # never happen again" guard. We log loudly so the line shows
+                # up in any monitoring grep, then go back to polling.
+                #
+                # Alert dedup uses ALERT_LOCK, NEVER the recovery cool-down
+                # LOCK. Touching LOCK here is what locked the operator out of
+                # recovery for 6h during the 2026-06-12 divergence. Height
+                # history is intentionally NOT cleared so the trigger stays
+                # armed and a (suppressed) line appears every poll.
+                alert_age = time.time() - ALERT_LOCK.stat().st_mtime if ALERT_LOCK.exists() else None
+                if alert_age is not None and alert_age < ALERT_REPEAT_SECONDS:
+                    remaining = int(ALERT_REPEAT_SECONDS - alert_age)
+                    log(f"ALERT (suppressed, re-alert in {remaining}s): {triggered_by}")
+                    time.sleep(POLL_SECONDS)
+                    continue
+                log("============================================================")
+                log("ALERT: divergence symptom detected; watchdog is in alert-only mode.")
+                log(f"  trigger: {triggered_by}")
+                log("  WATCHDOG_AUTORECOVER is not true; refusing to invoke recover.sh.")
+                log("  Operator action required. To investigate:")
+                log("    tmux attach -t mirage  # then check 'node' and 'watchdog' windows")
+                log(f"    bash {RECOVERY_SCRIPT} {RECOVERY_MODE} --dry-run")
+                log("  To recover after manual review, run from the host:")
+                log(f"    docker exec -it mirage bash {RECOVERY_SCRIPT} {RECOVERY_MODE}")
+                log("  Full runbook: docs/troubleshooting/divergence-recovery.md")
+                log("============================================================")
+                ALERT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+                ALERT_LOCK.touch()
+                time.sleep(POLL_SECONDS)
+                continue
+
             if dry_run:
                 log("DRY RUN — would invoke recovery script. Not acting.")
                 time.sleep(POLL_SECONDS)
@@ -359,9 +466,20 @@ def run(dry_run: bool) -> int:
                     recovery_args,
                     check=False,
                 )
-                log(f"recovery script exit code: {rv.returncode}")
+                if rv.returncode == 0:
+                    log(f"recovery script exit code: {rv.returncode}")
+                else:
+                    # A non-zero exit means the node is still diverged and
+                    # nothing was recovered. Be as loud as the alert-only path:
+                    # this line is what monitoring greps for.
+                    log("============================================================")
+                    log(f"ALERT: recovery script FAILED (exit code {rv.returncode}); node still diverged.")
+                    log(f"  trigger was: {triggered_by}")
+                    log(f"  see: {LOGS_DIR}/deploy/divergence_recovery-{datetime.now(timezone.utc):%Y-%m-%d}.log")
+                    log("  Manual runbook: docs/troubleshooting/divergence-recovery.md")
+                    log("============================================================")
             except (subprocess.SubprocessError, OSError) as e:
-                log(f"ERROR invoking recovery script: {e!r}")
+                log(f"ALERT: ERROR invoking recovery script: {e!r}")
 
             # After triggering recovery, reset history and wait an extra cycle
             # before resuming detection (give miraged time to come back up).

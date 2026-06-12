@@ -860,12 +860,24 @@ if [ "$LOCAL_MODE" -eq 0 ]; then
 fi
 
 # Health check: best-effort only. Log status but never block the deploy.
-# During software upgrades the chain halts until 2/3+ validators restart,
-# so hard-failing here would prevent sequential multi-server deploys.
-echo "==> Running post-deploy health check (non-blocking)..."
+# Poll for up to ~15s — long enough for a normal deploy to flip healthy, short
+# enough that an upgrade-halt rollout doesn't add minutes per node (chain stays
+# halted until 2/3+ validators restart, so the first nodes will always look
+# unhealthy here and we don't want to wait for them).
+echo "==> Running post-deploy health check (non-blocking, up to ~15s)..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
-  sleep 5
-  HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+  HEALTH_JSON=""
+  for _ in $(seq 1 3); do
+    HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+    if echo "$HEALTH_JSON" | python3 -c "import sys, json
+try:
+    sys.exit(0 if json.load(sys.stdin).get('healthy') else 1)
+except Exception:
+    sys.exit(1)" 2>/dev/null; then
+      break
+    fi
+    sleep 5
+  done
   echo "$HEALTH_JSON" | python3 -c "
 import sys, json
 try:
@@ -877,14 +889,24 @@ try:
         print(f'    {symbol} {name}: {status} - {msg}')
     if not d.get('healthy'):
         print()
-        print('    Note: some services unhealthy — expected during upgrade halts')
+        print('    Note: still unhealthy after ~15s — may be an upgrade halt (resumes once 2/3+ validators restart)')
 except Exception:
     print('    (health check not available yet)')
 "
 else
   run_ssh '
-    sleep 5
-    HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+    HEALTH_JSON=""
+    for _ in $(seq 1 3); do
+      HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+      if echo "$HEALTH_JSON" | python3 -c "import sys, json
+try:
+    sys.exit(0 if json.load(sys.stdin).get(\"healthy\") else 1)
+except Exception:
+    sys.exit(1)" 2>/dev/null; then
+        break
+      fi
+      sleep 5
+    done
     echo "$HEALTH_JSON" | python3 -c "
 import sys, json
 try:
@@ -896,7 +918,7 @@ try:
         print(f\"    {symbol} {name}: {status} - {msg}\")
     if not d.get(\"healthy\"):
         print()
-        print(\"    Note: some services unhealthy — expected during upgrade halts\")
+        print(\"    Note: still unhealthy after ~15s — may be an upgrade halt (resumes once 2/3+ validators restart)\")
 except Exception:
     print(\"    (health check not available yet)\")
 "

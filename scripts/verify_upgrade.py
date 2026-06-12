@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
 """
-Post-upgrade verification for v1.25.0.
+Post-upgrade verification for v1.27.0.
 
-Only v1.25.0-specific checks are included. Generic prior-upgrade checks
-have been removed per the /upgrade workflow: keep only checks needed
-to validate THIS upgrade.
+Only v1.27.0-specific checks are included. Generic prior-upgrade checks
+have been removed per the /upgrade workflow: keep only checks needed to
+validate THIS upgrade.
 
-Checks:
+What v1.27.0 actually changes
+-----------------------------
+The upgrade coordinates three divergence-hardening changes:
+1) canonical IAVL reads are authoritative (fast-node no longer drives
+   consensus reads),
+2) EndBlock enforces supply == sum(balances) and halts on mismatch,
+3) deploy/runtime forces iavl-disable-fastnode=true.
+
+No store migrations, params, or new keys are introduced, but the behavior
+change is consensus-critical and must activate at one height.
+
+Checks
+------
   1. Required environment variables are set (DB URLs)
   2. Database connectivity (backend + indexer RO)
   3. Upgrade handler ran:
-       - node logs contain "Starting upgrade to v1.25.0"
-       - node logs contain "Upgrade to v1.25.0 complete"
+       - node logs contain "Starting upgrade to v1.27.0"
+       - node logs contain "Upgrade to v1.27.0 complete"
        - node logs contain the post-migration params validation line
-  4. Fail-fast contract is dormant (regression check):
-       - no "panic:" + "CONSENSUS_FATAL:" co-occurrence in node logs
-         after the upgrade height. CONSENSUS_FATAL is the new tag for
-         deliberate halts on consensus-critical decode failures; in
-         healthy steady state it MUST NOT fire.
-  5. Chain liveness post-upgrade (indexer freshness): the chain is
-     producing fresh blocks, which is the external proof that
-     BeginBlock is successfully writing the new on-chain
-     recent_block_hashes window every block.
-  6. Frontend version cross-check (version.txt == v1.25.0).
+  4. Runtime config hardening is active:
+       - app.toml contains iavl-disable-fastnode = true
+  5. Chain liveness post-upgrade (indexer freshness)
+  6. Frontend version cross-check (version.txt == v1.27.0).
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -31,6 +37,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -47,29 +54,7 @@ except ImportError:
 
 
 # Constants tied to THIS upgrade. If they change, this file must change.
-UPGRADE_NAME = "v1.25.0"
-
-# Tag prefix used by every fail-fast site introduced in v1.25.0
-# (core.GetParams, deductRelayGasFee, processSubscriptions, PoW ante).
-# In a healthy node this string MUST NOT appear after the upgrade height
-# unless an operator deliberately corrupted state for testing.
-CONSENSUS_FATAL_TAG = "CONSENSUS_FATAL:"
-
-# Specific tags expected to never fire in steady state. We list them so
-# that if a new tag is added in a future release without updating this
-# checklist, we still catch it via the prefix scan above.
-KNOWN_FATAL_TAGS = (
-    "CONSENSUS_FATAL:PARAMS_STORE_GET",
-    "CONSENSUS_FATAL:PARAMS_EMPTY",
-    "CONSENSUS_FATAL:PARAMS_UNMARSHAL",
-    "CONSENSUS_FATAL:PARAMS_VALIDATE",
-    "CONSENSUS_FATAL:PROFILE_GET",
-    "CONSENSUS_FATAL:PROFILE_MISSING",
-    "CONSENSUS_FATAL:PROFILE_DECODE",
-    "CONSENSUS_FATAL:RECENT_HASHES_GET",
-    "CONSENSUS_FATAL:RECENT_HASHES_DECODE",
-    "CONSENSUS_FATAL:RECENT_HASHES_WRITE",
-)
+UPGRADE_NAME = "v1.27.0"
 
 
 passed = 0
@@ -157,7 +142,7 @@ def resolve_node_log_dir() -> Path:
     raise RuntimeError(f"node log dir not found; tried: {tried}")
 
 
-# ─── v1.25.0 checks ──────────────────────────────────────────────────
+# ─── v1.27.0 checks ──────────────────────────────────────────────────
 
 
 def check_upgrade_handler_ran() -> None:
@@ -188,7 +173,7 @@ def check_upgrade_handler_ran() -> None:
         fail(f"{done_marker!r} not found — upgrade handler may not have run cleanly")
 
     if params_marker in content:
-        ok(f"{params_marker!r} present in node log (fail-fast GetParams sanity check passed)")
+        ok(f"{params_marker!r} present in node log (post-migration params validation passed)")
     else:
         warn(
             f"{params_marker!r} not found — handler may have run but the post-migration "
@@ -196,53 +181,32 @@ def check_upgrade_handler_ran() -> None:
         )
 
 
-def check_no_consensus_fatal() -> None:
-    """The whole point of v1.25.0 is that CONSENSUS_FATAL paths exist as
-    a safety mechanism. In normal operation they MUST NOT fire — if they
-    do, either we have a real bug or a real corruption event that needs
-    investigation. Either way, the deploy is not green."""
-    try:
-        log_dir = resolve_node_log_dir()
-    except Exception as exc:
-        fail(str(exc))
+def check_fastnode_disabled() -> None:
+    candidates = [
+        Path("/root/.mirage/node/config/app.toml"),
+        Path.home() / ".mirage" / "node" / "config" / "app.toml",
+        Path.cwd() / "main" / "config" / "app.toml",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        content = path.read_text(errors="ignore")
+        m = re.search(r"(?m)^\s*iavl-disable-fastnode\s*=\s*(true|false)\s*$", content)
+        if not m:
+            fail(f"app.toml missing iavl-disable-fastnode ({path})")
+            return
+        if m.group(1) != "true":
+            fail(f"app.toml has iavl-disable-fastnode={m.group(1)} (expected true) ({path})")
+            return
+        ok(f"app.toml enforces iavl-disable-fastnode=true ({path})")
         return
-    try:
-        log_path = find_latest_log(log_dir)
-    except Exception as exc:
-        fail(str(exc))
-        return
-
-    content = log_path.read_text(errors="ignore")
-    lines = content.splitlines()
-
-    fatal_hits: list[tuple[int, str]] = []
-    for i, line in enumerate(lines):
-        if CONSENSUS_FATAL_TAG in line:
-            fatal_hits.append((i + 1, line.strip()[:200]))
-
-    if fatal_hits:
-        fail(
-            f"{CONSENSUS_FATAL_TAG} appeared {len(fatal_hits)} time(s) in latest node log — "
-            f"one of the new fail-fast paths fired"
-        )
-        for lineno, snippet in fatal_hits[:5]:
-            info(f"line {lineno}: {snippet}")
-        if len(fatal_hits) > 5:
-            info(f"... and {len(fatal_hits) - 5} more")
-        return
-
-    ok(f"no {CONSENSUS_FATAL_TAG} occurrences in latest node log")
-    info(
-        f"watched tags ({len(KNOWN_FATAL_TAGS)}): "
-        f"{', '.join(t.split(':', 1)[1] for t in KNOWN_FATAL_TAGS)}"
-    )
+    fail("app.toml not found in known locations; cannot verify iavl-disable-fastnode")
 
 
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
-    """Post-upgrade liveness proof. Also serves as the implicit check
-    that BeginBlock's RecordRecentBlockHash write is not failing — a
-    failure there would propagate as a non-nil error from BeginBlock,
-    halt the chain, and freeze the indexer."""
+    """Post-upgrade liveness proof for v1.27.0 divergence hardening.
+    If the chain is producing fresh blocks after activation, the canonical-read
+    and supply-invariant paths are executing without fatal mismatch."""
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
         row = cur.fetchone()
@@ -264,20 +228,28 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
         return
     age_sec = time.time() - block_ts
     if age_sec < 120:
-        ok(f"latest block is {age_sec:.0f}s old — chain is live, BeginBlock writes succeeding")
+        ok(f"latest block is {age_sec:.0f}s old — chain is live")
     elif age_sec < 600:
         warn(f"latest block is {age_sec:.0f}s old (slightly stale)")
     else:
-        fail(f"latest block is {age_sec:.0f}s old — chain may have halted (check for CONSENSUS_FATAL)")
+        fail(
+            f"latest block is {age_sec:.0f}s old — chain may have halted "
+            f"(check node logs for CONSENSUS_FATAL or panic)"
+        )
 
 
 def check_binary_version() -> None:
     """Cross-check that the frontend version.txt (shipped with this
     release) reports the upgrade target. Cheap proxy for 'we shipped the
     correct binary'."""
+    # Built artifact (what the deploy actually ships) is checked first;
+    # source-tree `public/` is the fallback for pre-build local runs.
     candidates = [
+        Path("/opt/mirage/web/frontend/build/version.txt"),
         Path("/opt/mirage/web/frontend/public/version.txt"),
+        Path.cwd() / "web" / "frontend" / "build" / "version.txt",
         Path.cwd() / "web" / "frontend" / "public" / "version.txt",
+        Path(__file__).parent.parent / "web" / "frontend" / "build" / "version.txt",
         Path(__file__).parent.parent / "web" / "frontend" / "public" / "version.txt",
     ]
     for p in candidates:
@@ -333,10 +305,10 @@ def main() -> None:
     section(f"3. Upgrade Handler ({UPGRADE_NAME})")
     check_upgrade_handler_ran()
 
-    section(f"4. CONSENSUS_FATAL Dormant (no fail-fast paths fired)")
-    check_no_consensus_fatal()
+    section("4. Runtime Config Hardening")
+    check_fastnode_disabled()
 
-    section("5. Chain Liveness (block production post-upgrade)")
+    section("5. Chain Liveness")
     check_indexer_freshness(indexer_conn)
 
     section("6. Binary Version Cross-Check")

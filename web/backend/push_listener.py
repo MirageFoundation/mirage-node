@@ -8,7 +8,12 @@ import time
 
 from db import connect_backend_db, connect_db
 from logging_utils import logger
-from settings import TRENDING_PUSH_ENABLED, require_bool_env
+from settings import (
+    IGNORE_AGENT_BLOCKED_POSTS,
+    IGNORE_AGENT_BLOCKED_USERS,
+    TRENDING_PUSH_ENABLED,
+    require_bool_env,
+)
 from shared.inbox import donation_event_key, record_inbox_event, trending_event_key
 from shared.push import (
     send_push_for_award,
@@ -32,22 +37,13 @@ PUSH_EVENT_SEEN_CLEANUP_BATCH = 5000
 _last_seen_cleanup_ts = 0.0
 _listener_lock_fp = None
 
-TRENDING_POLL_INTERVAL_SECONDS = 60
+TRENDING_POLL_INTERVAL_SECONDS = 30 * 60
 TRENDING_UNIQUE_COMMENTERS_THRESHOLD = 10
 TRENDING_POST_MAX_AGE_SECONDS = 24 * 3600
-TRENDING_TIME_MATCH_TOLERANCE_MINUTES = 60
-TRENDING_LEVEL_WAITS = [
-    8 * 3600,
-    3 * 86400,
-    7 * 86400,
-    14 * 86400,
-    21 * 86400,
-    42 * 86400,
-    63 * 86400,
-    126 * 86400,
-    252 * 86400,
-]
-TRENDING_STOPPED_LEVEL = len(TRENDING_LEVEL_WAITS)
+# Every push-enabled user gets at most one lively-topic push per day.
+TRENDING_DAILY_INTERVAL_SECONDS = 24 * 3600
+# How many top lively posts to consider when picking one each user can actually see.
+TRENDING_CANDIDATE_LIMIT = 25
 _last_trending_poll_ts = 0.0
 
 
@@ -626,9 +622,12 @@ def _poll_inbox_events() -> int:
     return processed
 
 
-def _poll_trending() -> int:
-    """Detect trending posts and push-notify inactive users at last-active time."""
-    now_ts = int(time.time())
+def _fetch_lively_candidates(now_ts: int) -> list[dict]:
+    """Return the top lively root posts (most unique commenters, recency-decayed).
+
+    These are the global candidates; per-user visibility is applied later so each
+    user gets a lively topic they can actually see.
+    """
     cutoff_ts = now_ts - TRENDING_POST_MAX_AGE_SECONDS
     threshold = TRENDING_UNIQUE_COMMENTERS_THRESHOLD
 
@@ -636,8 +635,7 @@ def _poll_trending() -> int:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT p.txhash, p.owner, COALESCE(p.title, ''),
-                   p.created_at,
+            SELECT p.txhash, p.owner, COALESCE(p.title, ''), COALESCE(p.topic, ''),
                    COUNT(DISTINCT LOWER(c.owner)) AS unique_commenters
             FROM posts p
             JOIN posts c
@@ -649,181 +647,243 @@ def _poll_trending() -> int:
               AND p.created_at > %s
               AND p.comment_count >= %s
               AND COALESCE(p.target, '') = ''
-            GROUP BY p.txhash, p.owner, p.title, p.created_at
+            GROUP BY p.txhash, p.owner, p.title, p.topic, p.created_at
             HAVING COUNT(DISTINCT LOWER(c.owner)) >= %s
             ORDER BY (COUNT(DISTINCT LOWER(c.owner)) / (1 + ((%s - p.created_at) / 3600.0))) DESC
-            LIMIT 1
+            LIMIT %s
             """,
-            (cutoff_ts, threshold, threshold, now_ts),
+            (cutoff_ts, threshold, threshold, now_ts, TRENDING_CANDIDATE_LIMIT),
         )
-        row = cur.fetchone()
+        rows = cur.fetchall()
 
-    if not row:
-        return 0
+    candidates: list[dict] = []
+    for txhash, owner, title, topic, _unique_commenters in rows:
+        txhash_lc = str(txhash or "").strip().lower()
+        author_lc = str(owner or "").strip().lower()
+        if not txhash_lc or not author_lc:
+            continue
+        candidates.append(
+            {
+                "txhash": txhash_lc,
+                "author": author_lc,
+                "title": str(title or "").strip(),
+                "topic": str(topic or "").strip().lower(),
+            }
+        )
+    logger().debug("push.listener.trending.candidates count=%d", len(candidates))
+    return candidates
 
-    txhash, author, title, _created_at, _unique_commenters = row
-    txhash_lc = str(txhash or "").strip().lower()
-    author_lc = str(author or "").strip().lower()
-    if not txhash_lc or not author_lc:
-        return 0
 
-    processed = 0
-    minute_of_day_now = (now_ts // 60) % 1440
-    min_inactive = TRENDING_LEVEL_WAITS[0]
-    tolerance = TRENDING_TIME_MATCH_TOLERANCE_MINUTES
-    title_str = str(title or "").strip()
-    from routes.public import _invalidate_inbox_cache
-
-    with connect_backend_db() as bconn:
-        with bconn.cursor() as bcur:
-            bcur.execute(
+def _select_due_users(now_ts: int, limit: int) -> list[str]:
+    """Push-token holders who haven't received a lively-topic push in the last day."""
+    cutoff = now_ts - TRENDING_DAILY_INTERVAL_SECONDS
+    slot_key = str(now_ts // TRENDING_POLL_INTERVAL_SECONDS)
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
                 """
-                SELECT u.owner,
-                       u.last_seen_at,
-                       COALESCE(s.trending_level, 0) AS trending_level,
-                       COALESCE(s.trending_last_sent_at, 0) AS trending_last_sent_at
-                FROM user_last_seen u
-                LEFT JOIN user_inbox_state s ON s.owner = u.owner
-                LEFT JOIN user_seen_posts sp
-                  ON sp.owner = u.owner AND sp.post_id = %s
-                WHERE u.owner != %s
-                  AND sp.owner IS NULL
-                  AND u.last_seen_at <= %s
-                  AND EXISTS (
-                      SELECT 1 FROM push_tokens pt WHERE LOWER(pt.owner) = LOWER(u.owner)
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM inbox_events ie
-                      WHERE LOWER(ie.recipient) = LOWER(u.owner)
-                        AND ie.event_type = 'trending'
-                        AND LOWER(ie.tx_hash) = LOWER(%s)
-                  )
-                  AND (
-                      ABS(((u.last_seen_at / 60) %% 1440) - %s) <= %s
-                      OR ABS(((u.last_seen_at / 60) %% 1440) - %s) >= 1440 - %s
-                  )
-                ORDER BY u.last_seen_at ASC
+                SELECT LOWER(pt.owner) AS owner,
+                       COALESCE(s.trending_last_sent_at, 0) AS last_sent
+                FROM push_tokens pt
+                LEFT JOIN user_inbox_state s ON s.owner = LOWER(pt.owner)
+                GROUP BY LOWER(pt.owner), COALESCE(s.trending_last_sent_at, 0)
+                HAVING COALESCE(s.trending_last_sent_at, 0) <= %s
+                ORDER BY md5(LOWER(pt.owner) || %s) ASC, last_sent ASC
                 LIMIT %s
                 """,
-                (
-                    txhash_lc,
-                    author_lc,
-                    now_ts - min_inactive,
-                    txhash_lc,
-                    minute_of_day_now,
-                    tolerance,
-                    minute_of_day_now,
-                    tolerance,
-                    PUSH_LISTENER_BATCH_SIZE,
-                ),
+                (cutoff, slot_key, limit),
             )
-            rows = bcur.fetchall()
+            return [str(r[0] or "").strip().lower() for r in cur.fetchall() if r[0]]
 
-            blocked_recipients: set[str] = set()
-            owners = [str(row[0] or "").strip().lower() for row in rows if row[0]]
-            if owners:
-                with connect_db(timeout=3.0, busy_timeout_ms=5000) as iconn:
-                    with iconn.cursor() as icur:
-                        placeholders = ",".join(["%s"] * len(owners))
-                        icur.execute(
-                            f"""
-                            SELECT LOWER(owner) FROM blocked_users
-                            WHERE LOWER(target) = %s
-                              AND LOWER(owner) IN ({placeholders})
-                            """,
-                            [author_lc] + owners,
-                        )
-                        blocked_recipients = {row[0] for row in icur.fetchall()}
-            if blocked_recipients:
-                logger().debug(
-                    "push.listener.trending.blocked author=%s count=%d",
-                    author_lc[:16],
-                    len(blocked_recipients),
-                )
 
-            for owner, last_seen, level, last_sent in rows:
-                owner_lc = str(owner or "").strip().lower()
-                if not owner_lc or owner_lc == "guest":
-                    continue
-                if owner_lc in blocked_recipients:
-                    logger().debug(
-                        "push.listener.trending.skip_blocked owner=%s author=%s",
-                        owner_lc[:16],
-                        author_lc[:16],
-                    )
-                    continue
-                try:
-                    last_seen_ts = int(last_seen or 0)
-                    level = int(level or 0)
-                    last_sent = int(last_sent or 0)
+def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -> dict | None:
+    """Pick the top lively candidate this user can see and doesn't dislike.
 
-                    came_back = last_sent > 0 and last_seen_ts > last_sent
-                    effective_level = 0 if came_back else level
-                    if effective_level >= TRENDING_STOPPED_LEVEL:
-                        continue
-                    required_wait = TRENDING_LEVEL_WAITS[effective_level]
-                    if now_ts - last_seen_ts < required_wait:
-                        continue
-                    if last_sent > 0 and now_ts - last_sent < required_wait:
-                        continue
+    Filters (mirrors feed visibility): not the user's own post, not blocked by the
+    user or an enabled agent (post / author / topic), and neither the author nor the
+    topic disliked (negative author/topic preference), not already seen, and not
+    already pushed as trending.
+    """
+    from routes.public import _split_blocked_topics, _topic_is_blocked
 
-                    if came_back or last_sent == 0:
-                        new_level = 0
-                    else:
-                        new_level = min(level + 1, TRENDING_STOPPED_LEVEL)
+    cand_txs = [c["txhash"] for c in candidates]
+    cand_authors = list({c["author"] for c in candidates})
+    cand_topics = list({c["topic"] for c in candidates if c["topic"]})
 
-                    sent = send_push_for_trending(owner_lc, title_str, txhash_lc)
-                    if not sent:
-                        continue
+    icur.execute("SELECT LOWER(agent) FROM enabled_agents WHERE LOWER(owner) = %s", (owner_lc,))
+    agents = [str(r[0] or "").strip().lower() for r in icur.fetchall() if r[0]]
 
-                    with bconn.transaction():
-                        bcur.execute(
-                            """INSERT INTO user_inbox_state (owner) VALUES (%s)
-                               ON CONFLICT (owner) DO NOTHING""",
-                            (owner_lc,),
-                        )
-                        bcur.execute(
-                            "UPDATE user_inbox_state SET trending_level = %s, trending_last_sent_at = %s WHERE owner = %s",
-                            (new_level, now_ts, owner_lc),
-                        )
-                        bcur.execute(
-                            """
-                            INSERT INTO inbox_events (event_key, recipient, actor, event_type, created_at, amount, tx_hash)
-                            VALUES (%s, %s, %s, 'trending', %s, NULL, %s)
-                            ON CONFLICT (event_key) DO NOTHING
-                            """,
-                            (
-                                trending_event_key(owner_lc, txhash_lc),
-                                owner_lc,
-                                author_lc,
-                                now_ts,
-                                txhash_lc,
-                            ),
-                        )
+    post_owners = [owner_lc] + (agents if not IGNORE_AGENT_BLOCKED_POSTS else [])
+    user_owners = [owner_lc] + (agents if not IGNORE_AGENT_BLOCKED_USERS else [])
+    topic_owners = [owner_lc] + agents
 
-                    _invalidate_inbox_cache(owner_lc)
-                    processed += 1
-                    logger().info(
-                        "push.listener.trending.sent owner=%s tx=%s author=%s "
-                        "level=%d->%d came_back=%s last_seen_ago=%ds last_sent_ago=%ds title=%r",
-                        owner_lc[:16],
-                        txhash_lc[:16],
-                        author_lc[:16],
-                        level,
-                        new_level,
-                        came_back,
-                        now_ts - last_seen_ts,
-                        (now_ts - last_sent) if last_sent > 0 else -1,
-                        title_str[:60],
-                    )
-                except Exception:
-                    logger().exception(
-                        "push.listener.trending.error owner=%s tx=%s",
-                        owner_lc[:16],
-                        txhash_lc[:16],
-                    )
+    icur.execute(
+        "SELECT DISTINCT LOWER(target) FROM blocked_posts " "WHERE LOWER(owner) = ANY(%s) AND LOWER(target) = ANY(%s)",
+        (post_owners, cand_txs),
+    )
+    blocked_posts = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
 
-    logger().debug("push.listener.trending processed=%d tx=%s", processed, txhash_lc[:16])
+    blocked_authors: set[str] = set()
+    if cand_authors:
+        icur.execute(
+            "SELECT DISTINCT LOWER(target) FROM blocked_users "
+            "WHERE LOWER(owner) = ANY(%s) AND LOWER(target) = ANY(%s)",
+            (user_owners, cand_authors),
+        )
+        blocked_authors = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
+
+    icur.execute(
+        "SELECT DISTINCT LOWER(target) FROM blocked_topics WHERE LOWER(owner) = ANY(%s)",
+        (topic_owners,),
+    )
+    raw_blocked_topics = [str(r[0] or "").strip().lower() for r in icur.fetchall()]
+    blocked_topic_set: set[str] = set()
+    invalid_pattern_count = 0
+    for topic in raw_blocked_topics:
+        if not topic:
+            continue
+        if topic.replace("*", "") == "":
+            invalid_pattern_count += 1
+            continue
+        blocked_topic_set.add(topic)
+    if invalid_pattern_count > 0:
+        logger().warning(
+            "push.listener.trending.invalid_blocked_topics owner=%s count=%d",
+            owner_lc[:16],
+            invalid_pattern_count,
+        )
+    blocked_exact, blocked_patterns = _split_blocked_topics(blocked_topic_set)
+
+    disliked_topics: set[str] = set()
+    if cand_topics:
+        icur.execute(
+            "SELECT LOWER(target) FROM preferences "
+            "WHERE LOWER(owner) = %s AND pref_type = 'topic' AND weight < 0 AND LOWER(target) = ANY(%s)",
+            (owner_lc, cand_topics),
+        )
+        disliked_topics = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
+
+    icur.execute(
+        "SELECT LOWER(target) FROM preferences "
+        "WHERE LOWER(owner) = %s AND pref_type = 'author' AND weight < 0 AND LOWER(target) = ANY(%s)",
+        (owner_lc, cand_authors),
+    )
+    disliked_authors = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
+
+    bcur.execute(
+        "SELECT post_id FROM user_seen_posts WHERE owner = %s AND post_id = ANY(%s)",
+        (owner_lc, cand_txs),
+    )
+    seen = {str(r[0] or "").strip().lower() for r in bcur.fetchall()}
+
+    bcur.execute(
+        "SELECT LOWER(tx_hash) FROM inbox_events "
+        "WHERE LOWER(recipient) = %s AND event_type = 'trending' AND LOWER(tx_hash) = ANY(%s)",
+        (owner_lc, cand_txs),
+    )
+    already_pushed = {str(r[0] or "").strip().lower() for r in bcur.fetchall() if r[0]}
+
+    for cand in candidates:
+        tx = cand["txhash"]
+        if cand["author"] == owner_lc:
+            continue
+        if tx in blocked_posts or tx in seen or tx in already_pushed:
+            continue
+        if cand["author"] in blocked_authors or cand["author"] in disliked_authors:
+            continue
+        topic = cand["topic"]
+        if topic and _topic_is_blocked(topic, blocked_exact, blocked_patterns):
+            continue
+        if topic and topic in disliked_topics:
+            continue
+        return cand
+    return None
+
+
+def _poll_trending() -> int:
+    """Send each push-enabled user at most one lively-topic push per day.
+
+    Every token holder is eligible once per 24h. We pick the highest-ranked lively
+    post the user can actually see (not blocked by them or an enabled agent, topic
+    not blocked, author/topic not disliked, not already seen or pushed).
+    Users with no visible candidate remain eligible for future polls.
+    """
+    now_ts = int(time.time())
+    due_users = _select_due_users(now_ts, PUSH_LISTENER_BATCH_SIZE)
+    if not due_users:
+        return 0
+
+    candidates = _fetch_lively_candidates(now_ts)
+    if not candidates:
+        return 0
+
+    from routes.public import _invalidate_inbox_cache
+
+    processed = 0
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as iconn:
+        with iconn.cursor() as icur:
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    for owner_lc in due_users:
+                        if not owner_lc or owner_lc == "guest":
+                            continue
+                        try:
+                            chosen = _pick_visible_candidate(owner_lc, candidates, icur, bcur)
+                            if chosen is None:
+                                logger().debug("push.listener.trending.no_visible owner=%s", owner_lc[:16])
+                                continue
+
+                            txhash_lc = chosen["txhash"]
+                            author_lc = chosen["author"]
+                            title_str = chosen["title"]
+
+                            sent = send_push_for_trending(owner_lc, title_str, txhash_lc)
+                            if not sent:
+                                logger().debug(
+                                    "push.listener.trending.delivery_failed owner=%s tx=%s",
+                                    owner_lc[:16],
+                                    txhash_lc[:16],
+                                )
+                                continue
+
+                            with bconn.transaction():
+                                bcur.execute(
+                                    "INSERT INTO user_inbox_state (owner) VALUES (%s) ON CONFLICT (owner) DO NOTHING",
+                                    (owner_lc,),
+                                )
+                                bcur.execute(
+                                    "UPDATE user_inbox_state SET trending_last_sent_at = %s WHERE owner = %s",
+                                    (now_ts, owner_lc),
+                                )
+                                bcur.execute(
+                                    """
+                                    INSERT INTO inbox_events (event_key, recipient, actor, event_type, created_at, amount, tx_hash)
+                                    VALUES (%s, %s, %s, 'trending', %s, NULL, %s)
+                                    ON CONFLICT (event_key) DO NOTHING
+                                    """,
+                                    (
+                                        trending_event_key(owner_lc, txhash_lc),
+                                        owner_lc,
+                                        author_lc,
+                                        now_ts,
+                                        txhash_lc,
+                                    ),
+                                )
+
+                            _invalidate_inbox_cache(owner_lc)
+                            processed += 1
+                            logger().info(
+                                "push.listener.trending.sent owner=%s tx=%s author=%s topic=%r title=%r",
+                                owner_lc[:16],
+                                txhash_lc[:16],
+                                author_lc[:16],
+                                chosen["topic"][:40],
+                                title_str[:60],
+                            )
+                        except Exception:
+                            logger().exception("push.listener.trending.error owner=%s", owner_lc[:16])
+
+    logger().debug("push.listener.trending processed=%d due=%d", processed, len(due_users))
     return processed
 
 
