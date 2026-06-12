@@ -323,8 +323,26 @@ def get_inbox(page: int = 1, limit: int = 25) -> dict:
 
 
 def mark_inbox_viewed() -> None:
-    """Mark all inbox items as read (resets unread count)."""
-    r = requests.post(f"{NODE}/api/mark_inbox_viewed", json={"address": ADDRESS}, timeout=10)
+    """Mark all inbox items as read (resets unread count).
+
+    Uses an ad-hoc signed payload (no canonical bytes / no PoW). The backend
+    derives the address from the pubkey; the signed string is exactly:
+        f"mark_inbox_viewed:{address}:{timestamp}:{nonce}"
+    Note: timestamp here is in SECONDS, unlike on-chain envelope timestamps
+    which are in milliseconds.
+    """
+    ts = int(time.time())
+    nonce = generate_nonce()
+    payload = f"mark_inbox_viewed:{ADDRESS.lower()}:{ts}:{nonce}".encode()
+    sig = sign(PRIVKEY, payload)
+    body = {
+        "pubkey": b64(PUBKEY),
+        "signature": b64(sig),
+        "address": ADDRESS,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+    }
+    r = requests.post(f"{NODE}/api/mark_inbox_viewed", json=body, timeout=10)
     r.raise_for_status()
 
 
@@ -576,10 +594,17 @@ def handle_mention(item: dict) -> None:
       - reply_id:        tx_hash of the post/comment that mentioned us
       - reply_owner:     address of the person who mentioned us
       - reply_username:  their username
+      - reply_author_level / reply_author_is_new:  actor metadata
       - reply_content:   text of their post/comment
-      - parent_id:       the parent post (context)
+      - parent_id / parent_owner / parent_content:  the parent post (context)
       - root_post_id:    the root-level post in the thread
-      - type:            "mention", "reply", or "award"
+      - amount:          umirage amount for "donation" / "subscription_gift" types (else None)
+      - type:            one of:
+                           - "mention" / "reply" / "award"            (post-anchored)
+                           - "follow" / "donation" / "subscription_gift" / "trending"
+                             (profile-anchored notifications; no parent post — handled
+                             by the backend's inbox_events table). This loop only acts
+                             on "mention"; the others are silently ignored.
     """
     mentioned_in = item["reply_id"]
     root_post_id = item.get("root_post_id", mentioned_in)
