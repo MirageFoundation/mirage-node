@@ -232,11 +232,17 @@ peer_discover_healthy() {
 }
 
 peer_pick_min_height() {
+  # NOTE: do NOT use `[ ... ] && X=Y` here. Under `set -euo pipefail`, when the
+  # final iteration's test returns false, the for-loop's exit status is the
+  # failing test's status, which propagates out of the function and aborts the
+  # entire script with no `die` message. See the 2026-06-12 mirage.talk
+  # divergence: this exact pattern silently aborted recovery for every
+  # operator-initiated recovery on this validator. Use an explicit `if`/`fi`.
   [ "${#HEALTHY_HEIGHT[@]}" -gt 0 ] || die "peer_pick_min_height: no healthy peers"
   MIN_HEIGHT="${HEALTHY_HEIGHT[0]}"
   local h
   for h in "${HEALTHY_HEIGHT[@]}"; do
-    [ "$h" -lt "$MIN_HEIGHT" ] && MIN_HEIGHT="$h"
+    if [ "$h" -lt "$MIN_HEIGHT" ]; then MIN_HEIGHT="$h"; fi
   done
 }
 

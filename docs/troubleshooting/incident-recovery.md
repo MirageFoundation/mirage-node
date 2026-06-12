@@ -31,7 +31,7 @@ done
 
 | Symptom | Canonical procedure |
 |---|---|
-| Node stuck at height N, peers at N+k, frontend "node catching up" | **Apphash divergence** → §2 |
+| Node stuck at height N, peers at N+k, frontend "node catching up" | **Apphash divergence** → [`divergence-recovery.md`](divergence-recovery.md) (full triage + manual fallback), summary in §2 |
 | Node jailed (`jailed: true` in `staking validator`) | **Unjail** → §3 |
 | Fresh host, no data yet | **Deploy from scratch** → §4 |
 | Host-level issues (swap, ulimit, SSH, docker) | **Baseline / rehardening** → §5 |

@@ -52,7 +52,12 @@ Detection signals (any one triggers recovery):
 
 Safety guards before recovering:
   - Cool-down marker (~/.mirage/.divergence_recovery_lock) — refuse to recover
-    again within COOLDOWN_SECONDS (default 6h).
+    again within COOLDOWN_SECONDS (default 6h). This marker is written ONLY by
+    recover.sh after a VERIFIED recovery. The watchdog itself never writes it:
+    on 2026-06-12 the alert-only path touched this marker for alert dedup,
+    which pre-blocked the operator's real recovery for 6h during a divergence.
+    Alert dedup now uses a separate marker (~/.mirage/.divergence_alert_lock)
+    that recover.sh ignores entirely.
   - Disable marker (~/.mirage/.recovery_disabled) — opt out completely.
   - >=2 healthy peers reachable AND agreeing on the same recent app_hash
     (delegated to recover.sh which double-checks).
@@ -82,9 +87,19 @@ from pathlib import Path
 NODE_HOME = Path(os.environ.get("NODE_HOME", "/root/.mirage/node"))
 LOGS_DIR = Path(os.environ.get("LOGS_DIR", "/root/.mirage/logs"))
 LOCK = Path(os.environ.get("LOCK", "/root/.mirage/.divergence_recovery_lock"))
+# Alert-spam dedup marker for alert-only mode. MUST be distinct from LOCK:
+# LOCK is the recovery cool-down that recover.sh checks before acting, and
+# polluting it from the alert path locks operators out of recovery (2026-06-12).
+ALERT_LOCK = Path(os.environ.get("ALERT_LOCK", "/root/.mirage/.divergence_alert_lock"))
+ALERT_REPEAT_SECONDS = int(os.environ.get("ALERT_REPEAT_SECONDS", "1800"))  # re-alert every 30 min
 DISABLE_MARKER = Path(os.environ.get("DISABLE_MARKER", "/root/.mirage/.recovery_disabled"))
 RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover.sh"))
 RECOVERY_MODE = os.environ.get("RECOVERY_MODE", "peer-pull")
+# Private key used by recover.sh peer-pull to SSH into source peers. Installed
+# by `recover.sh provision`. Checked at startup when autorecover is enabled so
+# a missing key surfaces at deploy time, not mid-incident (2026-06-12: prod had
+# autorecover docs but no key, so peer-pull could never have worked there).
+RECOVERY_KEY = Path(os.environ.get("RECOVERY_KEY", "/root/.mirage/.ssh/recovery_id"))
 LOCAL_RPC = os.environ.get("LOCAL_RPC", "http://127.0.0.1:26657")
 
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
@@ -300,6 +315,18 @@ def run(dry_run: bool) -> int:
     if not WATCHDOG_AUTORECOVER:
         log("MODE: alert-only. Triggers will be logged loudly; recover.sh will NOT be invoked.")
         log("To permit auto-recovery set WATCHDOG_AUTORECOVER=true (per-host, in node.env).")
+    elif RECOVERY_MODE == "peer-pull" and not RECOVERY_KEY.is_file():
+        # Fail hard at startup: an autorecover watchdog without its recovery
+        # key would only ever discover the problem mid-incident, when recover.sh
+        # dies with "recovery key missing". Surface the misconfiguration now.
+        log("============================================================")
+        log("FATAL: WATCHDOG_AUTORECOVER=true with RECOVERY_MODE=peer-pull,")
+        log(f"  but the recovery key is missing: {RECOVERY_KEY}")
+        log("  Auto-recovery CANNOT work on this host. Either:")
+        log("    - provision it:  ./scripts/recover.sh provision --cluster=... --peer=... --container-host=...")
+        log("    - or set RECOVERY_MODE=state-sync / WATCHDOG_AUTORECOVER=false")
+        log("============================================================")
+        return 2
 
     height_history: deque[int] = deque(maxlen=STALL_BLOCKS + 1)
     consecutive_unreachable = 0
@@ -397,6 +424,18 @@ def run(dry_run: bool) -> int:
                 # Hard gate. This is the post-2026-05-27 "horrible thing must
                 # never happen again" guard. We log loudly so the line shows
                 # up in any monitoring grep, then go back to polling.
+                #
+                # Alert dedup uses ALERT_LOCK, NEVER the recovery cool-down
+                # LOCK. Touching LOCK here is what locked the operator out of
+                # recovery for 6h during the 2026-06-12 divergence. Height
+                # history is intentionally NOT cleared so the trigger stays
+                # armed and a (suppressed) line appears every poll.
+                alert_age = time.time() - ALERT_LOCK.stat().st_mtime if ALERT_LOCK.exists() else None
+                if alert_age is not None and alert_age < ALERT_REPEAT_SECONDS:
+                    remaining = int(ALERT_REPEAT_SECONDS - alert_age)
+                    log(f"ALERT (suppressed, re-alert in {remaining}s): {triggered_by}")
+                    time.sleep(POLL_SECONDS)
+                    continue
                 log("============================================================")
                 log("ALERT: divergence symptom detected; watchdog is in alert-only mode.")
                 log(f"  trigger: {triggered_by}")
@@ -406,12 +445,11 @@ def run(dry_run: bool) -> int:
                 log(f"    bash {RECOVERY_SCRIPT} {RECOVERY_MODE} --dry-run")
                 log("  To recover after manual review, run from the host:")
                 log(f"    docker exec -it mirage bash {RECOVERY_SCRIPT} {RECOVERY_MODE}")
+                log("  Full runbook: docs/troubleshooting/divergence-recovery.md")
                 log("============================================================")
-                # Still touch the cool-down marker so we don't spam every poll.
-                LOCK.parent.mkdir(parents=True, exist_ok=True)
-                LOCK.touch()
-                height_history.clear()
-                time.sleep(POLL_SECONDS * 5)
+                ALERT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+                ALERT_LOCK.touch()
+                time.sleep(POLL_SECONDS)
                 continue
 
             if dry_run:
@@ -428,9 +466,20 @@ def run(dry_run: bool) -> int:
                     recovery_args,
                     check=False,
                 )
-                log(f"recovery script exit code: {rv.returncode}")
+                if rv.returncode == 0:
+                    log(f"recovery script exit code: {rv.returncode}")
+                else:
+                    # A non-zero exit means the node is still diverged and
+                    # nothing was recovered. Be as loud as the alert-only path:
+                    # this line is what monitoring greps for.
+                    log("============================================================")
+                    log(f"ALERT: recovery script FAILED (exit code {rv.returncode}); node still diverged.")
+                    log(f"  trigger was: {triggered_by}")
+                    log(f"  see: {LOGS_DIR}/deploy/divergence_recovery-{datetime.now(timezone.utc):%Y-%m-%d}.log")
+                    log("  Manual runbook: docs/troubleshooting/divergence-recovery.md")
+                    log("============================================================")
             except (subprocess.SubprocessError, OSError) as e:
-                log(f"ERROR invoking recovery script: {e!r}")
+                log(f"ALERT: ERROR invoking recovery script: {e!r}")
 
             # After triggering recovery, reset history and wait an extra cycle
             # before resuming detection (give miraged time to come back up).
