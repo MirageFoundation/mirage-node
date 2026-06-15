@@ -112,6 +112,7 @@ from shared.canon import (
     canon_base_post as _canon_base_post,
     canon_base_vote as _canon_base_vote,
     canon_base_annotate as _canon_base_annotate,
+    canon_base_edit as _canon_base_edit,
     canon_base_block_post as _canon_base_block_post,
     canon_base_unblock_post as _canon_base_unblock_post,
     canon_base_delete as _canon_base_delete,
@@ -932,4 +933,40 @@ def annotate(
         },
         skip_pow,
         canon_kwargs={"media": media, "appendix": appendix},
+    )
+
+
+def edit(
+    backend: str,
+    wallet: LocalWallet,
+    override: str,
+    target: str = "",
+    topic: str = "",
+    title: str = "",
+    content: str = "",
+    tag: str = "",
+    media: list[str] | None = None,
+    skip_pow: Optional[bool] = None,
+) -> dict:
+    """Edit a post or comment the signer owns. ``override`` is the txhash being
+    edited; ``target`` is the parent hash (set for comments, empty for root posts)."""
+    if media is None:
+        media = []
+    return _submit_envelope(
+        backend,
+        wallet,
+        "/api/core/edit",
+        _canon_base_edit,
+        (target, topic, title, content, tag, override),
+        {
+            "target": target,
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "tag": tag,
+            "override": override,
+            "media": media,
+        },
+        skip_pow,
+        canon_kwargs={"media": media},
     )

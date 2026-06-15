@@ -2,9 +2,36 @@
 
 Runbook for the incident class where the site looks dead (API returns
 `503 node_catching_up`, frontend loads but shows no data, writes fail) because
-the local node diverged from the rest of the cluster. Written after the
-2026-06-12 incident (height 5280037). General entry point for all validator
-sickness: [`incident-recovery.md`](incident-recovery.md).
+the local node fell out of step with the rest of the cluster. Written after the
+2026-06-12 divergence (height 5280037) and the 2026-06-14 stuck-consensus stall
+(height 5329009). General entry point for all validator sickness:
+[`incident-recovery.md`](incident-recovery.md).
+
+## TWO failure classes, TWO cures
+
+The watchdog and `recover.sh` now distinguish two very different problems. Get
+this distinction right before acting — it decides whether you wipe the DB:
+
+| Symptom | Class | Cure | Destructive? |
+|---|---|---|---|
+| Height frozen, `catching_up=false`, **app_hash at the stuck height MATCHES peers** | **Stuck consensus / runtime hang** (2026-06-14) | `recover.sh restart` | No — just restarts the process |
+| `wrong Block.Header.AppHash` in log, OR stall whose **app_hash DISAGREES** with peers | **State divergence** (2026-06-12) | `recover.sh peer-pull` | Yes — wipes & re-pulls chain DBs |
+| Process dead | **Crash** | `recover.sh restart`, then peer-pull if it can't recover | restart first |
+
+The watchdog's automatic escalation ladder:
+
+```
+log-pattern divergence   -> peer-pull            (gated by WATCHDOG_AUTORECOVER)
+stall + app_hash MATCH   -> restart              (ungated; non-destructive)
+stall + app_hash MISS    -> peer-pull            (gated)
+process-dead             -> restart, then peer-pull if restart fails to recover
+3 restarts within 2h     -> peer-pull            (recurrence escalation)
+```
+
+The restart path is ungated and runs on **every** validator (the watchdog is
+`AUTO_DIVERGENCE_RECOVERY=true` everywhere now). Destructive peer-pull stays
+gated by `WATCHDOG_AUTORECOVER=true`, which should be set on exactly one host
+(mirage.talk).
 
 ---
 
@@ -40,7 +67,7 @@ Three outcomes:
 
 | Pattern | Meaning | Action |
 |---|---|---|
-| One node's height frozen, others advancing | **Divergence** (this runbook) | → §2 |
+| One node's height frozen, others advancing | **Divergence OR stuck consensus** (this runbook) | → §1c to classify, then §2A/§2B |
 | All four frozen at the same height | **Chain halt** (upgrade halt? 2+ nodes down?) | → `incident-recovery.md` §0; check miraged logs for `UPGRADE "..." NEEDED` |
 | All four advancing, API still 503 | **Indexer-only problem** | → §4 (indexer restart) |
 
@@ -49,39 +76,90 @@ Three outcomes:
 > the same in all three cases. Always run the 4-node triage loop — do not
 > diagnose from the API error alone.
 
-### 1c. Confirm it is a divergence, not a crash
+### 1c. Stuck consensus vs state divergence vs crash
 
 ```bash
 ssh root@<sick-host> 'docker exec mirage curl -s http://127.0.0.1:26657/status' \
   | jq '.result.sync_info | {latest_block_height, latest_block_time, catching_up}'
 ```
 
-- Process up, height frozen, `catching_up: false` → diverged (it thinks it is
-  fine; it is on its own fork). The miraged log will show the moment it forked —
-  look for `wrong Block.Header.AppHash` near the stall time:
+- Process up, height frozen, `catching_up: false`. Now decide WHICH class by
+  comparing the app_hash AT the stuck height against a healthy peer:
+
+```bash
+SICK=159.203.114.27; PEER=146.190.108.140
+H=$(curl -sfm5 http://$SICK:26657/status | jq -r .result.sync_info.latest_block_height)
+for ip in $SICK $PEER; do
+  curl -sfm5 "http://$ip:26657/block?height=$H" \
+    | jq -r "\"$ip app=\(.result.block.header.app_hash)\""
+done
+```
+
+  - **app_hash MATCHES the peer** → this is a **stuck consensus / runtime hang**
+    (the 2026-06-14 case: frozen at h=5329009 step=3 prevote, app_hash identical
+    to peers). Local state is correct. Cure is a **restart** (§2A), not a wipe.
+  - **app_hash DIFFERS**, or the log shows `wrong Block.Header.AppHash` →
+    **state divergence**, go to peer-pull (§2B):
 
 ```bash
 ssh root@<sick-host> 'docker exec mirage grep -a "wrong Block.Header.AppHash" \
   /root/.mirage/logs/node/miraged-$(date -u +%F).log | head -5'
 ```
 
-- Process dead → crash, not divergence; check the supervisor and the end of the
-  miraged log instead.
+- Process dead → crash; the watchdog/`recover.sh restart` handles it even if
+  peers are unreachable, because restart is non-destructive. It escalates to
+  peer-pull only if the restart can't bring the chain forward, and peer-pull's
+  own peer-health checks still have to pass.
 
 ### 1d. Check what the watchdog saw
+
+Two logs. The tmux-pane capture (human view):
 
 ```bash
 ssh root@<sick-host> 'docker exec mirage tail -40 \
   /root/.mirage/logs/deploy/divergence_watchdog-$(date -u +%F).log'
 ```
 
-You should see `DIVERGENCE DETECTED — stall: ...` lines. If the watchdog was in
-alert-only mode (`WATCHDOG_AUTORECOVER` not `true`), nothing has been recovered
-yet and you proceed manually (§2).
+And the **dense forensic log** (durable, 90-day retention, one or more tagged
+lines per poll — this is the "what happened at 3am four months ago" source):
+
+```bash
+ssh root@<sick-host> "docker exec mirage sh -c '
+  F=/root/.mirage/logs/watchdog/watchdog-\$(date -u +%F).log
+  echo \"== last poll ==\";    grep \"\\[POLL\\]\"     \"\$F\" | tail -3
+  echo \"== events ==\";       grep -E \"\\[(TRIGGER|PRECHECK|DISPATCH|INVOKE|POSTCHECK|ESCALATE|ALERT|CRASH)\\]\" \"\$F\" | tail -30'"
+```
+
+Key fields to read: `[POLL] last_advance_age_s=` (how long stuck), `[PRECHECK]
+match=true|false` (the app_hash decision), `[DISPATCH] action=restart|peer-pull`
+(what it chose and why). If the watchdog already restarted and recovered, you may
+be done — verify with §5. If `WATCHDOG_AUTORECOVER` is not `true` and the class
+is divergence, peer-pull was not run; proceed manually (§2B).
 
 ---
 
-## 2. RECOVERY — automated path (try this first)
+## 2A. RECOVERY — stuck consensus / runtime hang (NON-destructive)
+
+When §1c showed the app_hash MATCHES peers, the chain DB is fine; the process is
+just wedged. This is what the watchdog now does automatically on every host. To
+do it by hand:
+
+```bash
+ssh root@<sick-host> 'docker exec mirage bash /opt/mirage/scripts/recover.sh restart --dry-run'
+# Then:
+ssh root@<sick-host> 'docker exec mirage bash /opt/mirage/scripts/recover.sh restart --auto'
+```
+
+This stops and relaunches miraged via the supervisor, touches NOTHING else (no
+DB wipe, no `priv_validator_state.json` change, no service pause), and verifies
+the chain advances past the pre-stop height. Exit 5 means it restarted but the
+chain did not move — that reclassifies the incident as divergence; go to §2B.
+Then verify with §5. The indexer keeps running (no wipe), so §4 is usually NOT
+needed for a restart-only recovery — but check the gap in §5 anyway.
+
+---
+
+## 2B. RECOVERY — state divergence, automated path (try this first)
 
 All commands run on the sick host. Total time ≈ 15 min for ~2 GB of chain data.
 
@@ -244,6 +322,39 @@ the divergence height.
    a function whose last statement can return non-zero.
 3. **Missing recovery key.** `peer-pull --auto` needs
    `/root/.mirage/.ssh/recovery_id`, installed by `recover.sh provision`. The
-   dry-run prints a note if it is missing — read the dry-run output. Manual
-   fallback: §3.
+   watchdog now keeps restart-only recovery alive if this key is missing, but
+   it logs `[ALERT] kind=destructive-autorecover-disabled` and will not run
+   destructive peer-pull until the key exists. The dry-run also prints a note if
+   it is missing — read the dry-run output. Manual fallback: §3.
 4. **Indexer live-tail.** See §4. The catch-up gap does not close on its own.
+5. **Wiping a healthy DB (2026-06-14).** A stuck consensus reactor looks just
+   like a divergence at the API level (frozen height, 503), but the chain DB is
+   correct — the app_hash at the stuck height matches peers. Reaching for
+   `peer-pull` here needlessly wipes ~2 GB and risks the validator's signing
+   watermark. Always run the §1c app_hash comparison first; if it matches, use
+   `recover.sh restart` (§2A). The watchdog now makes this call automatically
+   via its `[PRECHECK] match=` gate.
+
+---
+
+## 7. Post-deploy smoke check (new restart path)
+
+After rolling out the two-tier watchdog, confirm the new entry point and
+supervisor handoff work on each validator without actually restarting anything:
+
+```bash
+for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+  echo "== $ip =="
+  ssh root@$ip 'docker exec mirage bash /opt/mirage/scripts/recover.sh restart --dry-run'
+done
+```
+
+Expect each to print the pre-stop height and the "DRY RUN — would: stop
+miraged ... NO DB wipe ..." block, then exit 0. Also confirm the watchdog is
+running and logging on every host:
+
+```bash
+for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+  ssh root@$ip 'docker exec mirage sh -c "tail -1 /root/.mirage/logs/watchdog/watchdog-$(date -u +%F).log"'
+done
+```
