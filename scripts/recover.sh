@@ -764,6 +764,110 @@ cmd_peer_pull() {
   exit 0
 }
 
+# ── Mode: restart ───────────────────────────────────────────────────────
+# In-container; NON-DESTRUCTIVE. This is the first-line recovery for a stuck
+# consensus reactor (the 2026-06-14 mirage.talk incident: miraged frozen at
+# height 5329009 step=3/prevote for 30 min while peers advanced, local app_hash
+# matched peers exactly — local STATE was correct, the process was just hung).
+#
+# It does the cheapest thing that fixes a runtime hang and nothing more:
+#   - stop miraged + supervisor (SIGTERM -> SIGKILL escalation, shared helper)
+#   - relaunch via the supervisor
+#   - verify the chain advanced past the pre-stop height
+#
+# Explicitly does NOT (this is what separates it from peer-pull):
+#   - wipe chain DBs
+#   - touch priv_validator_state.json
+#   - pause indexer/backend (no DB wipe means they can stay connected)
+#   - read or write the 6h destructive cool-down LOCK
+#
+# Cool-down is its own short marker (RESTART_LOCK, default 15 min) so a flapping
+# node restarts at most every ~15 min and the watchdog's recurrence counter can
+# escalate to peer-pull if restarts are not actually fixing anything.
+#
+# Exit codes: 0 verified forward progress, 5 restarted but chain did not advance
+# past the pre-stop height within the verify window (watchdog escalates), 1
+# validation error.
+cmd_restart() {
+  # Parse flags. --auto is required to actually stop/restart; --dry-run previews;
+  # --force bypasses the short RESTART_LOCK cool-down. Mirror peer-pull semantics
+  # so operator muscle memory carries over.
+  AUTO=0; DRY_RUN=0; FORCE=0
+  for a in "$@"; do
+    case "$a" in
+      --auto)    AUTO=1 ;;
+      --dry-run) DRY_RUN=1 ;;
+      --force)   FORCE=1 ;;
+      -h|--help) usage_in_container; exit 0 ;;
+      *)         die "unknown arg: $a" ;;
+    esac
+  done
+  if [ "$AUTO" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+    die "refusing to run without --auto. Use --dry-run to preview."
+  fi
+
+  NODE_HOME="${NODE_HOME:-/root/.mirage/node}"
+  DISABLE_MARKER="${DISABLE_MARKER:-/root/.mirage/.recovery_disabled}"
+  BIN="${BIN:-/opt/mirage/blockchain/bin/miraged}"
+  TMUX_SESSION="${TMUX_SESSION:-mirage}"
+  LOGS_DIR="${LOGS_DIR:-/root/.mirage/logs}"
+  ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
+  # Restart verifies faster than peer-pull: no blocksync of a fresh DB, the node
+  # should resume from its existing data within ~60s.
+  RECOVERY_VERIFY_SECONDS="${RECOVERY_VERIFY_SECONDS_RESTART:-${RECOVERY_VERIFY_SECONDS:-60}}"
+  RESTART_LOCK="${RESTART_LOCK:-/root/.mirage/.restart_recovery_lock}"
+  RESTART_COOLDOWN_SECONDS="${RESTART_COOLDOWN_SECONDS:-900}"
+  LOG_FILE="${RECOVERY_LOG:-$LOGS_DIR/deploy/divergence_recovery-$(date -u +%Y-%m-%d).log}"
+  mkdir -p "$(dirname "$LOG_FILE")"
+  require_positive_int RECOVERY_VERIFY_SECONDS
+  require_positive_int RESTART_COOLDOWN_SECONDS
+
+  if [ -e "$DISABLE_MARKER" ]; then
+    die "recovery disabled by marker $DISABLE_MARKER (delete to re-enable)"
+  fi
+  # Short cool-down: never consults the 6h destructive LOCK. Separate marker so
+  # a recent restart does not block a real peer-pull and vice versa.
+  if [ "$FORCE" -ne 1 ] && [ -e "$RESTART_LOCK" ]; then
+    local lock_age=$(( $(date +%s) - $(stat -c %Y "$RESTART_LOCK" 2>/dev/null || echo 0) ))
+    if [ "$lock_age" -lt "$RESTART_COOLDOWN_SECONDS" ]; then
+      die "restart cool-down active: last restart ${lock_age}s ago (< ${RESTART_COOLDOWN_SECONDS}s). Use --force to override."
+    fi
+  fi
+
+  # Pre-stop height is the verification baseline: success means we advanced PAST
+  # the height we were stuck at. Defaults to 0 if /status is already down, in
+  # which case any post-restart block counts as progress.
+  TRUST_HEIGHT="$(curl -fsS --max-time 3 http://127.0.0.1:26657/status 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])' 2>/dev/null \
+    || echo 0)"
+  [[ "$TRUST_HEIGHT" =~ ^[0-9]+$ ]] || TRUST_HEIGHT=0
+  log "restart mode: non-destructive supervisor restart (pre-stop height=$TRUST_HEIGHT)"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY RUN — would: stop miraged + supervisor, relaunch via supervisor,"
+    log "DRY RUN — verify height advances past $TRUST_HEIGHT within ${RECOVERY_VERIFY_SECONDS}s,"
+    log "DRY RUN — write short cool-down lock $RESTART_LOCK on success."
+    log "DRY RUN — NO DB wipe, NO priv_validator_state.json change, NO service pause."
+    exit 0
+  fi
+
+  prepare_supervisor_log_marker
+  stop_miraged_supervised
+  restart_miraged_via_supervisor
+  verify_recovery_health
+  log "monitor: tmux attach -t $TMUX_SESSION  (window 'node')"
+  log "logs:    $LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
+  log "this run's log: $LOG_FILE"
+  if [ "$RECOVERY_VERIFIED" = "1" ]; then
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$RESTART_LOCK"
+    log "restart verified: chain advanced past $TRUST_HEIGHT. Short cool-down lock written: $RESTART_LOCK"
+    exit 0
+  fi
+  log "ERROR: restart did not advance the chain past $TRUST_HEIGHT in ${RECOVERY_VERIFY_SECONDS}s"
+  log "  (watchdog will escalate to peer-pull if WATCHDOG_AUTORECOVER=true; otherwise this is alert-only)"
+  exit 5
+}
+
 # ── Mode: state-sync ────────────────────────────────────────────────────
 # In-container; legacy CometBFT state-sync. Kept until Phase 4 fixes the
 # v0.53 BondDenom panic. See docs/troubleshooting/incident-recovery.md.
@@ -1211,9 +1315,17 @@ Incident quick start:
   docker exec mirage bash /opt/mirage/scripts/recover.sh peer-pull --auto --force
 
 Modes:
+  restart    [--auto|--dry-run|--force]
+      In-container; NON-DESTRUCTIVE. Stops and relaunches miraged via the
+      supervisor to clear a stuck consensus reactor (2026-06-14 incident).
+      No DB wipe, no priv_validator change. First-line watchdog recovery for
+      a stall whose local app_hash matches peers. Exit 5 = chain did not
+      advance past the pre-stop height (watchdog escalates to peer-pull).
+
   peer-pull  [--auto|--dry-run|--force]
       In-container; ssh-pulls a chain-data tar from a healthy peer.
-      Default path used by scripts/divergence_watchdog.py.
+      Destructive recovery used by scripts/divergence_watchdog.py for true
+      state divergence.
 
   state-sync [--auto|--dry-run|--force]
       In-container; legacy CometBFT state-sync recovery. Kept as fallback;
@@ -1245,7 +1357,12 @@ EOF
 
 usage_in_container() {
   cat >&2 <<EOF
-Usage: recover.sh <peer-pull|state-sync> [--auto|--dry-run|--force]
+Usage: recover.sh <restart|peer-pull|state-sync> [--auto|--dry-run|--force]
+
+Env overrides (restart):
+  RESTART_LOCK                  default: /root/.mirage/.restart_recovery_lock
+  RESTART_COOLDOWN_SECONDS      default: 900
+  RECOVERY_VERIFY_SECONDS_RESTART default: 60
 
 Env overrides (peer-pull):
   RECOVERY_KEY        default: /root/.mirage/.ssh/recovery_id
@@ -1253,7 +1370,7 @@ Env overrides (peer-pull):
   PEER_SSH_PORT       default: 22
   PEER_PULL_SECONDS   default: 1800
 
-Env overrides (both):
+Env overrides (all in-container modes):
   NODE_HOME, ENV_FILE, LOCK, BIN, TMUX_SESSION, ROOT_DIR, LOGS_DIR,
   COOLDOWN_SECONDS, RECOVERY_VERIFY_SECONDS, RECOVERY_LOG
 
@@ -1288,6 +1405,7 @@ EOF
 
 main() {
   case "${1:-}" in
+    restart)    shift; cmd_restart    "$@" ;;
     peer-pull)  shift; cmd_peer_pull  "$@" ;;
     state-sync) shift; cmd_state_sync "$@" ;;
     serve)      shift; cmd_serve      "$@" ;;

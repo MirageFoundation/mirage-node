@@ -583,9 +583,13 @@ fi
 tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
 
-# Divergence watchdog — observability daemon. Default OFF on every host;
-# enable only on mirage.talk. Even when enabled, runs in alert-only mode
-# unless WATCHDOG_AUTORECOVER=true is also set. See node.env for full policy.
+# Divergence watchdog — recovery daemon. AUTO_DIVERGENCE_RECOVERY=true is now the
+# default on every host: the watchdog's first-line action is a NON-DESTRUCTIVE
+# restart (recover.sh restart), so running it everywhere is safe and lets a
+# stuck/crashed node self-heal. DESTRUCTIVE peer-pull stays gated by
+# WATCHDOG_AUTORECOVER (mirage.talk only). The watchdog writes a dense daily
+# forensic log to $LOGS_DIR/watchdog/ in addition to the tmux pane. See node.env
+# for the full two-tier policy.
 if [ "${AUTO_DIVERGENCE_RECOVERY:-false}" = "true" ]; then
   WD_AUTOREC="${WATCHDOG_AUTORECOVER:-false}"
   WD_DRY="${DIVERGENCE_DRY_RUN:-false}"
@@ -595,7 +599,7 @@ if [ "${AUTO_DIVERGENCE_RECOVERY:-false}" = "true" ]; then
   tmux send-keys -t "$SESSION:watchdog" \
     "$WATCHDOG_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/divergence_watchdog-%Y-%m-%d.log\")" C-m
 else
-  echo "==> Divergence watchdog disabled (default; set AUTO_DIVERGENCE_RECOVERY=true on mirage.talk only)"
+  echo "==> Divergence watchdog disabled (AUTO_DIVERGENCE_RECOVERY=false on this host)"
 fi
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"

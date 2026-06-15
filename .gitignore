@@ -96,6 +96,8 @@ scripts/*
 !scripts/remote_hot_swap.py
 !scripts/recover.sh
 !scripts/divergence_watchdog.py
+!scripts/tests/
+!scripts/tests/**
 
 cursor.md
 .cursor/
