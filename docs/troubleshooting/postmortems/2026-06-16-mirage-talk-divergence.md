@@ -72,28 +72,70 @@ confirmed flowing again by 20:08 UTC.
 
 ## 4. Root cause
 
-### 4.1 Trigger (the divergence itself) — most likely host memory pressure → IAVL cache corruption
+### 4.1 Trigger (the divergence itself) — node-local read-consistency fault under prod's concurrency (NOT memory pressure)
 
 prod diverged alone (all 3 peers had **0** AppHash errors that day), so this is
-**not** a chain-wide non-determinism bug. It matches the failure class already
-documented in [`incident-recovery.md` §2](../incident-recovery.md): host-level
-memory pressure on an underprovisioned validator causing a silent in-memory IAVL
-read to return a stale value during block execution, which yields a different
-app_hash for one height on that one node. The committed on-disk state is correct;
-`miraged rollback` cannot fix it; restore-from-peer can.
+**not** a chain-wide non-determinism bug. One node computed a different app_hash
+for the same block, executing block 5378001 → `C6ABD68C…` while the network
+computed `21C470FF…` (prod was the outlier and was peer-pulled onto the canonical
+chain). The committed on-disk state is correct; `miraged rollback` cannot fix it;
+restore-from-peer can.
 
-Supporting evidence:
-- prod-only divergence (peers clean).
-- prod is the **single most memory-constrained and most loaded** box in the fleet
-  — it runs miraged **and** the indexer, backend (gunicorn), PostgreSQL, and Caddy
-  together on **3.8 GiB RAM** (observed 168 MiB free, 2 GiB swap).
-- This is **recurring** on prod specifically: divergence/stall recoveries on
-  2026-05-25, 2026-06-12, 2026-06-14 (stall), and 2026-06-16. The cadence is
-  tightening (every ~2 days recently).
+**The original "host memory pressure → IAVL cache corruption" hypothesis is
+REFUTED by post-incident evidence (2026-06-16):**
 
-> This trigger is strongly indicated but not definitively proven for this specific
-> event (no OOM-kill or EDAC/MCE line was captured in `dmesg` at the time). It
-> remains the leading hypothesis and the basis for the prevention action items.
+- **All 4 hosts are provisioned identically** — `3915 MB` RAM, `2047 MB` swap,
+  `vm.swappiness=10`. prod is **not** under-provisioned relative to peers.
+- **All 4 run only the `mirage` container** at near-identical memory: ~705–741 MiB
+  (~18 %), with ~2.6 GiB `MemAvailable` and swap virtually untouched
+  (`SwapFree ≈ 2000/2047`) on every host. prod was **not** memory-starved.
+- **Zero OOM-kills fleet-wide** since 2026-05-24 (`journalctl -k | grep oom` = 0 on
+  all four). No process was killed.
+- **No hardware memory errors.** The only `EDAC` line is the benign boot banner
+  `EDAC MC: Ver: 3.0.0` (present identically on all hosts); no MCE/correctable/
+  uncorrectable errors.
+- **prod's miraged ran ~18 h continuously** (00:01 → 18:21) before diverging, so
+  this was **not** a cold-cache-after-restart event.
+- **The only real differential is load**: prod load-average `1.6–2.0` vs peers
+  `0.3–0.8` — i.e. **production user/query traffic concurrency**, not RAM.
+
+**What it actually is — the documented read-consistency class, minus the fast-node
+vector.** The repo's own IAVL patch
+([`blockchain/patches/iavl/immutable_tree.go`](../../../blockchain/patches/iavl/immutable_tree.go))
+records the mechanism for the prior prod divergences (2026-05-25 h4854225,
+2026-06-12 h5280036): *under concurrent query load the fast-node index can return
+a value one commit stale relative to the canonical tree while the version check
+still passes.* That specific vector is now **disabled** — prod runs with
+`iavl-disable-fastnode = true` (verified live; `MutableTree.Get`'s fast-node block
+is gated off and `ImmutableTree.Get` never consults it). So 2026-06-16 is a
+**residual instance of the same class** (a node-local read returning a value
+inconsistent with committed state under prod's higher concurrency), reached
+through a *different* surface than fast-node. The leading candidate surfaces:
+
+1. **Error-swallowing store fallbacks** in the consensus path that turn an
+   intermittent `store.Get` error into a *silently different* state transition
+   rather than a fail-fast halt — e.g. `Keeper.HasEnvelopeNonce` returns `false`
+   on a `Get` error (→ could accept a replay one peer rejects), and the PoW
+   difficulty getters (`GetCurrentDifficulty`, `GetPoWMessageCount`, …) return
+   their default on a `Get` error (→ wrong PoW accept/reject threshold). None of
+   these log on the error branch — **consistent with 2026-06-16 leaving no
+   app-level marker** (`record_fail=0 renewal_fail=0 supply=0 fatal=0`, vs the
+   2026-06-12/06-14 events which *did* log supply-invariant violations).
+2. **Residual store/cache read staleness** below the app (PebbleDB block cache /
+   IAVL node cache) exercised by prod's concurrent RPC+gRPC query load that the
+   peers simply don't see.
+
+> Confidence: HIGH that it is **not** memory/OOM/hardware (hard evidence above).
+> HIGH that it is a node-local, load-correlated, *silent* read-consistency fault
+> of the same family as the documented IAVL divergences. The exact remaining
+> surface (error-swallowing fallback vs sub-IAVL cache) is **not yet pinned to a
+> line** for this specific height — that requires replaying 5378001 against a
+> peer's state (see Action Items 9–11). The prior `data.preheal-*` backup from
+> recovery is the artifact to replay against.
+
+Recurrence history (prod-only): 2026-05-25, 2026-06-12, 2026-06-14 (stall),
+2026-06-16 — cadence tightening as prod traffic grows, which fits a
+**concurrency-driven** (not memory-driven) trigger.
 
 ### 4.2 Why automatic recovery did nothing (the part we *can* fix today)
 
@@ -139,8 +181,9 @@ Three independent defects meant the watchdog/`recover.sh` recovery path had
 
 ## 6. Fixes (this incident)
 
-All three tooling defects are fixed in the repo. The trigger (memory pressure) is
-**not** fixed — see Action Items.
+All three tooling defects are fixed in the repo. The trigger (a node-local
+read-consistency fault under prod concurrency — see §4.1, **not** memory pressure)
+is **not** fixed — see Action Items.
 
 ### 6.1 `deploy/Dockerfile` — install `openssh-client`
 Added `openssh-client` to the runtime package list so the in-container
@@ -186,14 +229,17 @@ the discriminator. Unit tests added in
 
 | # | Action | Type | Status |
 |---|---|---|---|
-| 1 | Add `openssh-client` to runtime image | Fix | Done (repo); deploy pending |
-| 2 | Fix `recover.sh serve` SIGCONT (globals) | Fix | Done (repo + live on peers); image deploy pending |
-| 3 | Watchdog detects divergence while `catching_up=true` | Fix | Done (repo); deploy pending |
-| 4 | Rebuild image + redeploy fleet so 1–3 are permanent/live | Deploy | **Open** |
-| 5 | **Address the trigger: relieve prod memory pressure** — move the validator off the app host, or materially increase RAM, or both. prod runs node+indexer+backend+postgres+caddy on 3.8 GiB. | Prevention | **Open (highest value)** |
+| 1 | Add `openssh-client` to runtime image | Fix | **Done** (released v1.27.3, deployed fleet-wide) |
+| 2 | Fix `recover.sh serve` SIGCONT (globals) | Fix | **Done** (released v1.27.3, deployed fleet-wide) |
+| 3 | Watchdog detects divergence while `catching_up=true` | Fix | **Done** (released v1.27.3, deployed fleet-wide) |
+| 4 | Rebuild image + redeploy fleet so 1–3 are permanent/live | Deploy | **Done** — v1.27.3 (`d7b9642`) rolled peers-first then prod; all 4 verified `ssh`/recover/watchdog + auto-recovery armed |
+| 5 | ~~Relieve prod memory pressure~~ **REVISED (see §4.1): the trigger is NOT memory.** Reduce prod's concurrent read load on the *validator*: serve RPC/gRPC queries (indexer/backend/simulate) from a **separate non-validating full node**, so the validating process isn't racing user query traffic. | Prevention | **Open (highest value)** |
 | 6 | Add an external alert (independent of the watchdog) for "any node `catching_up=true` and height frozen > N min" so a future silent failure pages a human | Detection | **Open** |
 | 7 | Periodically smoke-test auto-recovery end-to-end in prod (`peer-pull --dry-run` is not enough — the `ssh`/serve path must be exercised) | Process | **Open** |
-| 8 | Consider on-chain/IAVL determinism hardening + fail-fast (some already shipped per `incident-recovery.md` §2.2) to convert silent divergence into a clean, auto-recoverable halt | Hardening | **Open** |
+| 8 | **Fail-fast the silent fallbacks**: make consensus-path `store.Get` error branches `panic`/halt instead of returning a default (`HasEnvelopeNonce`→`false`, `GetCurrentDifficulty`/`GetPoWMessageCount`→default). A deterministic halt is recoverable by the (now-fixed) watchdog; a silent wrong value is not. | Hardening | **Open (high value)** |
+| 9 | **Defense-in-depth**: drop the fast-node read block from `MutableTree.Get` entirely (mirror the `ImmutableTree.Get` patch) so no read path can ever consult the advisory index, regardless of the `iavl-disable-fastnode` toggle. | Hardening | **Open** |
+| 10 | **Pin the exact surface**: replay block 5378001 on the `data.preheal-*` backup vs a peer's state to identify which key/module read diverged. | Investigation | **Open** |
+| 11 | Add an in-process app-hash self-check / periodic state-vs-peer reconciliation so a single-node divergence is caught at the producing node, not only at the next block's header check. | Detection | **Open** |
 
 ---
 
