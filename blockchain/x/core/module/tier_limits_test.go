@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"

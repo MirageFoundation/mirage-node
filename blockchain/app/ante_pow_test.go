@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"testing"
 
-	cosmoslog "cosmossdk.io/log"
+	cosmoslog "cosmossdk.io/log/v2"
 	sdkmath "cosmossdk.io/math"
 	"github.com/stretchr/testify/require"
 

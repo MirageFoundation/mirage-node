@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,10 +13,9 @@ import (
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/depinject"
-	"cosmossdk.io/log"
-	storetypes "cosmossdk.io/store/types"
-	circuitkeeper "cosmossdk.io/x/circuit/keeper"
-	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
+	"cosmossdk.io/log/v2"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
 
 	"mirage/docs"
 	corekeeper "mirage/x/core/keeper"
@@ -99,7 +97,6 @@ type App struct {
 	UpgradeKeeper         *upgradekeeper.Keeper
 	AuthzKeeper           authzkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
-	CircuitBreakerKeeper  circuitkeeper.Keeper
 	ParamsKeeper          paramskeeper.Keeper
 	CoreKeeper            corekeeper.Keeper
 
@@ -236,7 +233,6 @@ func AppConfig() depinject.Config {
 func New(
 	logger log.Logger,
 	db dbm.DB,
-	traceStore io.Writer,
 	loadLatest bool,
 	appOpts servertypes.AppOptions,
 	baseAppOptions ...func(*baseapp.BaseApp),
@@ -274,7 +270,6 @@ func New(
 		&app.UpgradeKeeper,
 		&app.AuthzKeeper,
 		&app.ConsensusParamsKeeper,
-		&app.CircuitBreakerKeeper,
 		&app.ParamsKeeper,
 		&app.CoreKeeper,
 	); err != nil {
@@ -296,7 +291,7 @@ func New(
 	// baseAppOptions = append(baseAppOptions, baseapp.SetOptimisticExecution())
 
 	// build app
-	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
+	app.App = appBuilder.Build(db, baseAppOptions...)
 
 	// Signature-less ante chain for relay flow
 	if app.App != nil {

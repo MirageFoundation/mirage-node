@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	secp256k1 "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"

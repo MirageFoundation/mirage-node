@@ -38,6 +38,11 @@ app-db-backend = "${APP_DB_BACKEND:-goleveldb}"
 # deterministically. See docs/troubleshooting/divergence-recovery.md.
 iavl-disable-fastnode = true
 
+# inter-block-cache is left at the SDK default (enabled). The Commit<->Query
+# state race that drove the mirage.talk divergences is fixed upstream in SDK
+# v0.54 store/v2 (#24655: atomic lastCommitInfo + state-manager serialization),
+# so the cache no longer needs to be disabled as a mitigation.
+
 [api]
 enable = true
 enabled-unsafe-cors = true

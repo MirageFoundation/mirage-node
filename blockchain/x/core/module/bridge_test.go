@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"cosmossdk.io/core/store"
-	"cosmossdk.io/log"
+	"cosmossdk.io/log/v2"
 	sdkmath "cosmossdk.io/math"
-	storetypes "cosmossdk.io/store/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"

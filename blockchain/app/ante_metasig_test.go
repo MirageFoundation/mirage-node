@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	cosmoslog "cosmossdk.io/log"
+	cosmoslog "cosmossdk.io/log/v2"
 	sdkmath "cosmossdk.io/math"
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"

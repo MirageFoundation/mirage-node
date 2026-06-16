@@ -816,6 +816,14 @@ def transform_to_single_validator(
     apply_local_evidence_params(gen)
 
     app_state = gen.get("app_state") or {}
+
+    # v1.28.0 removes x/group and x/circuit. An export taken from a pre-v1.28.0
+    # binary still carries their app_state sections; the new binary has no such
+    # modules, so drop them here to keep InitGenesis clean.
+    for removed_module in ("group", "circuit"):
+        if app_state.pop(removed_module, None) is not None:
+            status(f"Stripped removed module '{removed_module}' from genesis app_state")
+
     auth = app_state.get("auth") or {}
     staking = app_state.get("staking") or {}
     bank = app_state.get("bank") or {}

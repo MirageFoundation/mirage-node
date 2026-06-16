@@ -67,7 +67,7 @@ func NewMutableTree(db dbm.DB, cacheSize int, skipFastStorageUpgrade bool, lg Lo
 // IsEmpty returns whether or not the tree has any keys. Only trees that are
 // not empty can be saved.
 func (tree *MutableTree) IsEmpty() bool {
-	return tree.ImmutableTree.Size() == 0
+	return tree.Size() == 0
 }
 
 // GetLatestVersion returns the latest version of the tree.
@@ -146,7 +146,7 @@ func (tree *MutableTree) WorkingHash() []byte {
 func (tree *MutableTree) WorkingVersion() int64 {
 	version := tree.version + 1
 	if version == 1 && tree.ndb.opts.InitialVersion > 0 {
-		version = int64(tree.ndb.opts.InitialVersion)
+		version = int64(tree.ndb.opts.InitialVersion) // nolint:gosec // false positive
 	}
 	return version
 }
@@ -170,19 +170,18 @@ func (tree *MutableTree) Set(key, value []byte) (updated bool, err error) {
 
 // Get returns the value of the specified key if it exists, or nil otherwise.
 // The returned value must not be modified, since it may point to data stored within IAVL.
+//
+// Mirage patch: the in-memory unsavedFastNode additions/removals are NOT
+// consulted on the read path. This is the same advisory-as-authoritative trap
+// closed in ImmutableTree.Get, MutableTree.Iterator and GetVersioned: serving an
+// unsaved fast-node value (or treating an unsaved removal as authoritative)
+// bypasses the canonical tree. MutableTree.set keeps tree.ImmutableTree.root in
+// sync with every uncommitted write (both branches of set), so the canonical
+// traversal below already reflects unsaved working-set state and is the single
+// authoritative source for reads. See docs/troubleshooting/divergence-recovery.md.
 func (tree *MutableTree) Get(key []byte) ([]byte, error) {
 	if tree.root == nil {
 		return nil, nil
-	}
-
-	if !tree.skipFastStorageUpgrade {
-		if fastNode, ok := tree.unsavedFastNodeAdditions.Load(ibytes.UnsafeBytesToStr(key)); ok {
-			return fastNode.(*fastnode.Node).GetValue(), nil
-		}
-		// check if node was deleted
-		if _, ok := tree.unsavedFastNodeRemovals.Load(string(key)); ok {
-			return nil, nil
-		}
 	}
 
 	return tree.ImmutableTree.Get(key)
@@ -211,6 +210,7 @@ func (tree *MutableTree) Iterate(fn func(key []byte, value []byte) bool) (stoppe
 	if tree.root == nil {
 		return false, nil
 	}
+
 	return tree.ImmutableTree.Iterate(fn)
 }
 
@@ -242,15 +242,15 @@ func (tree *MutableTree) set(key []byte, value []byte) (updated bool, err error)
 		return updated, fmt.Errorf("attempt to store nil value at key '%s'", key)
 	}
 
-	if tree.ImmutableTree.root == nil {
+	if tree.root == nil {
 		if !tree.skipFastStorageUpgrade {
 			tree.addUnsavedAddition(key, fastnode.NewNode(key, value, tree.version+1))
 		}
-		tree.ImmutableTree.root = NewNode(key, value)
+		tree.root = NewNode(key, value)
 		return updated, nil
 	}
 
-	tree.ImmutableTree.root, updated, err = tree.recursiveSet(tree.ImmutableTree.root, key, value)
+	tree.root, updated, err = tree.recursiveSet(tree.root, key, value)
 	return updated, err
 }
 
@@ -434,7 +434,7 @@ func (tree *MutableTree) LoadVersion(targetVersion int64) (int64, error) {
 		return 0, err
 	}
 
-	if firstVersion > 0 && firstVersion < int64(tree.ndb.opts.InitialVersion) {
+	if firstVersion > 0 && firstVersion < int64(tree.ndb.opts.InitialVersion) { // nolint:gosec // false positive
 		return firstVersion, fmt.Errorf("initial version set to %v, but found earlier version %v",
 			tree.ndb.opts.InitialVersion, firstVersion)
 	}
@@ -444,7 +444,7 @@ func (tree *MutableTree) LoadVersion(targetVersion int64) (int64, error) {
 		return 0, err
 	}
 
-	if firstVersion > 0 && firstVersion < int64(tree.ndb.opts.InitialVersion) {
+	if firstVersion > 0 && firstVersion < int64(tree.ndb.opts.InitialVersion) { // nolint:gosec // false positive
 		return latestVersion, fmt.Errorf("initial version set to %v, but found earlier version %v",
 			tree.ndb.opts.InitialVersion, firstVersion)
 	}
@@ -714,8 +714,8 @@ func (tree *MutableTree) SaveVersion() ([]byte, int64, error) {
 		if (existingRoot == nil && tree.root == nil) || (existingRoot != nil && bytes.Equal(existingRoot.hash, newHash)) { // TODO with WorkingHash
 			tree.version = version
 			tree.root = existingRoot
-			tree.ImmutableTree = tree.ImmutableTree.clone()
-			tree.lastSaved = tree.ImmutableTree.clone()
+			tree.ImmutableTree = tree.clone()
+			tree.lastSaved = tree.clone()
 			return newHash, version, nil
 		}
 
@@ -765,8 +765,8 @@ func (tree *MutableTree) SaveVersion() ([]byte, int64, error) {
 	tree.version = version
 
 	// set new working tree
-	tree.ImmutableTree = tree.ImmutableTree.clone()
-	tree.lastSaved = tree.ImmutableTree.clone()
+	tree.ImmutableTree = tree.clone()
+	tree.lastSaved = tree.clone()
 	if !tree.skipFastStorageUpgrade {
 		tree.unsavedFastNodeAdditions = &sync.Map{}
 		tree.unsavedFastNodeRemovals = &sync.Map{}
@@ -814,7 +814,7 @@ func (tree *MutableTree) addUnsavedAddition(key []byte, node *fastnode.Node) {
 
 func (tree *MutableTree) saveFastNodeAdditions() error {
 	keysToSort := make([]string, 0)
-	tree.unsavedFastNodeAdditions.Range(func(k, v interface{}) bool {
+	tree.unsavedFastNodeAdditions.Range(func(k, _ interface{}) bool {
 		keysToSort = append(keysToSort, k.(string))
 		return true
 	})
@@ -838,7 +838,7 @@ func (tree *MutableTree) addUnsavedRemoval(key []byte) {
 
 func (tree *MutableTree) saveFastNodeRemovals() error {
 	keysToSort := make([]string, 0)
-	tree.unsavedFastNodeRemovals.Range(func(k, v interface{}) bool {
+	tree.unsavedFastNodeRemovals.Range(func(k, _ interface{}) bool {
 		keysToSort = append(keysToSort, k.(string))
 		return true
 	})

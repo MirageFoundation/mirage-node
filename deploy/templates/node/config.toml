@@ -1,3 +1,8 @@
+# CometBFT v0.39 (SDK v0.54 / release v1.28.0). Reviewed for v0.39: every key
+# below is still valid. The v0.39 experimental features are intentionally left at
+# their OFF defaults and not set here: [p2p.libp2p] enabled=false (keep CometBFT
+# p2p) and adaptive_sync=false. App-side BlockSTM parallel execution is likewise
+# left disabled (optimistic execution is also disabled in app.go).
 moniker = "${MONIKER}"
 db_backend = "${COMET_DB_BACKEND:-goleveldb}"
 
