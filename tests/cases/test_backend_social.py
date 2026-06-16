@@ -104,6 +104,8 @@ from tests.backend_helpers import (
     _wait_blocked_topic,
     _wait_blocked_topic_state,
     _wait_comment_indexed,
+    _feed_has_post,
+    _feed_missing_post,
     _rpc_latest_height,
     _wait_next_block,
 )
@@ -446,23 +448,18 @@ def test_social_graph(backend: str):
         and _wait_indexed(backend, sub_addr, match_post)
         and _wait_indexed(backend, sub_addr, nonmatch_post)
     ):
-        code, feed = _get(
-            f"{backend}/api/get_posts",
-            {"limit": 50, "by": "newest", "address": addr},
-        )
-        if code == 200:
-            posts = (feed or {}).get("posts") or []
-            has_blocked = any(str(p.get("post_id", "")).lower() == match_post for p in posts)
-            has_unblocked = any(str(p.get("post_id", "")).lower() == nonmatch_post for p in posts)
-            if not has_blocked and has_unblocked:
-                _pass("social.block_topic wildcard filters get_posts")
-            else:
-                _fail(
-                    "social.block_topic wildcard filters get_posts",
-                    f"blocked_present={has_blocked} unblocked_present={has_unblocked}",
-                )
+        # Poll the feed instead of a single-shot read: the unblocked post must
+        # appear (tolerating indexer/read-replica lag) while the wildcard-blocked
+        # post must stay filtered out.
+        has_unblocked = _feed_has_post(backend, addr, nonmatch_post)
+        blocked_filtered = _feed_missing_post(backend, addr, match_post)
+        if has_unblocked and blocked_filtered:
+            _pass("social.block_topic wildcard filters get_posts")
         else:
-            _fail("social.block_topic wildcard filters get_posts", f"code={code}")
+            _fail(
+                "social.block_topic wildcard filters get_posts",
+                f"blocked_present={not blocked_filtered} unblocked_present={has_unblocked}",
+            )
     else:
         _fail("social.block_topic wildcard filters get_posts", "post not indexed")
 
