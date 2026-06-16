@@ -1249,6 +1249,20 @@ export function useMain({
 
     // Reset page and loading state when topic changes
     // Skip reset on back navigation (we want to restore cached state)
+    //
+    // `isBackNavigation` is intentionally NOT in the dependency array. It is
+    // derived from `navigationType` + the module-level `__hasHadFirstSpaNavigation`
+    // flag, so after a hard refresh (navigationType === 'POP') it flips
+    // false -> true once the first SPA navigation marker is set post-mount, and
+    // back to false when you click the already-active "Home" link (same-path
+    // navigation, which react-router treats as REPLACE). That stray flip used to
+    // re-run this effect and clear the feed (setStableOrder([]) + setIsLoading)
+    // WITHOUT the fetch effect below firing — the fetcher is keyed on
+    // `location.pathname`, which does not change for a same-path click — leaving
+    // the feed wiped and stuck on the loading skeleton with nothing reloaded.
+    // We only want to reset on a real trigger change (topic / viewer / sort /
+    // downvote toggle); `isBackNavigation` is read inside the body purely as a
+    // guard, so a stale closure value is fine here.
     useEffect(() => {
         // On back navigation, don't reset - state was already restored from cache
         if (isBackNavigation || restoreFeedIntentRef.current === true) {
@@ -1261,7 +1275,8 @@ export function useMain({
         setHasMorePosts(false);
         setStableOrder([]); // Clear stale order to prevent flash of old content
         setIsLoading(true); // Show loading immediately when navigating
-    }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts, isBackNavigation]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts]);
 
     // Infinite scroll: observe a sentinel near the bottom (also clickable fallback)
     const bottomSentinelRef = useRef(null);

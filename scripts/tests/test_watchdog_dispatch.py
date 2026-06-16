@@ -168,6 +168,63 @@ def test_restart_exit_0_is_noop():
     assert d.argv == []
 
 
+def test_apphash_line_is_detected_as_divergence():
+    # The real 2026-06-16 mirage.talk divergence line must match. Use a current
+    # CometBFT-style 12h timestamp so the line falls inside the detection window
+    # regardless of when the test runs.
+    from datetime import datetime, timezone
+
+    ts = datetime.now(timezone.utc).strftime("%I:%M%p").lstrip("0")
+    text = (
+        f"{ts} ERR Error in validation "
+        'err="wrong Block.Header.AppHash.  Expected C6ABD68C, got 21C470FF" module=blocksync'
+    )
+    assert wd.log_window_has_pattern(text, wd.DIVERGENCE_PATTERNS, 300) == "wrong Block.Header.AppHash"
+
+
+# ── catching_up divergence detection (2026-06-16 mirage.talk blind spot) ──
+def _catchup(**overrides):
+    kwargs = dict(
+        last_advance_age_s=wd.CATCHUP_STALL_SECONDS,
+        div_hit="wrong Block.Header.AppHash",
+        healthy_peers=3,
+        peer_max_height=5_378_200,
+        local_h=5_378_001,
+    )
+    kwargs.update(overrides)
+    return wd.is_catchup_divergence(**kwargs)
+
+
+def test_catchup_stuck_with_apphash_and_peers_ahead_is_divergence():
+    # Exactly the 2026-06-16 incident: frozen height + AppHash error + peers ahead.
+    assert _catchup() is True
+
+
+def test_catchup_advancing_node_is_not_divergence():
+    # A genuine block-sync advances, so last_advance_age stays small.
+    assert _catchup(last_advance_age_s=5) is False
+
+
+def test_catchup_no_log_pattern_is_not_divergence():
+    # Frozen + peers ahead but no AppHash/consensus-failure line => don't wipe DBs.
+    assert _catchup(div_hit=None) is False
+
+
+def test_catchup_needs_two_healthy_peers():
+    assert _catchup(healthy_peers=1) is False
+
+
+def test_catchup_requires_peers_strictly_ahead():
+    assert _catchup(peer_max_height=5_378_001) is False
+
+
+def test_catchup_divergence_routes_to_peer_pull():
+    # When detected, the loop fires TRIGGER_LOG_PATTERN, which must peer-pull.
+    d = _decide(trigger=wd.TRIGGER_LOG_PATTERN, local_app_hash=None, peer_app_hashes={})
+    assert d.action == "peer-pull"
+    assert d.argv == ["bash", SCRIPT, PULL, "--auto"]
+
+
 def test_upgrade_halt_with_escaped_quotes_is_not_divergence():
     text = 'ERR CONSENSUS FAILURE!!! err="failed; error UPGRADE \\"v1.27.0\\" NEEDED at height: 5: "'
     assert wd.log_window_has_pattern(text, wd.DIVERGENCE_PATTERNS, 300) is None

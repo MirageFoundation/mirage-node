@@ -7,6 +7,11 @@ the local node fell out of step with the rest of the cluster. Written after the
 (height 5329009). General entry point for all validator sickness:
 [`incident-recovery.md`](incident-recovery.md).
 
+> Latest incident: [2026-06-16 mirage.talk divergence + dead auto-recovery](postmortems/2026-06-16-mirage-talk-divergence.md)
+> (height 5378002). That postmortem documents three recovery-tooling failures —
+> missing `ssh` in the container, the `serve` SIGCONT unbound-var bug, and the
+> watchdog ignoring divergence while `catching_up=true` — all now fixed.
+
 ## TWO failure classes, TWO cures
 
 The watchdog and `recover.sh` now distinguish two very different problems. Get
@@ -334,6 +339,16 @@ the divergence height.
    watermark. Always run the §1c app_hash comparison first; if it matches, use
    `recover.sh restart` (§2A). The watchdog now makes this call automatically
    via its `[PRECHECK] match=` gate.
+6. **Auto-recovery silently dead (2026-06-16).** Three defects meant peer-pull had
+   never actually worked on prod: (a) `ssh`/`openssh-client` was missing from the
+   container image, so in-container `peer-pull` died with `exit 127`; (b)
+   `recover.sh serve` used `local paused`/`local container`, which the `EXIT`-trap
+   resume cannot see under `set -u`, so SIGCONT never fired and the **source peer
+   was left frozen**; (c) the watchdog skipped divergence checks whenever
+   `catching_up=true`, but a diverged node reports exactly that. All three are
+   fixed — see the [2026-06-16 postmortem](postmortems/2026-06-16-mirage-talk-divergence.md).
+   If a peer-pull ever leaves a healthy peer stuck (`docker top` shows `Tl`/stopped),
+   resume it immediately: `ssh root@<peer> 'docker exec mirage pkill -CONT -f "miraged start"'`.
 
 ---
 
