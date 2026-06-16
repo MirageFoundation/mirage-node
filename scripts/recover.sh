@@ -1056,7 +1056,11 @@ cmd_serve() {
   command -v tar    >/dev/null 2>&1 || die "tar not found in PATH"
   command -v flock  >/dev/null 2>&1 || die "flock not found in PATH"
 
-  local container="${MIRAGE_CONTAINER:-mirage}"
+  # `container` is global (not local) for the same reason as `paused` below:
+  # resume_serve dereferences "$container" from the EXIT trap, which runs after
+  # cmd_serve has returned. A `local container` would be unbound there under
+  # `set -u`, killing the trap before SIGCONT and re-freezing the source peer.
+  container="${MIRAGE_CONTAINER:-mirage}"
   local host_data_dir="${HOST_DATA_DIR:-$HOME/.mirage/node/data}"
   local lock_file="${PEER_SNAPSHOT_LOCK:-/run/mirage_peer_snapshot.lock}"
 
@@ -1073,11 +1077,18 @@ cmd_serve() {
   exec 9>"$lock_file" || die "could not open lock $lock_file"
   flock -n 9 || die "another serve is already running (lock $lock_file held)"
 
-  local paused=0
+  # `paused` MUST be global, not `local`. resume_serve runs from the EXIT trap,
+  # which fires AFTER cmd_serve has returned (main -> cmd_serve -> return ->
+  # script EOF -> EXIT trap). By then a `local paused` is out of scope, so under
+  # `set -u` the trap dies with "paused: unbound variable" BEFORE sending
+  # SIGCONT. That left the source peer's miraged frozen (SIGSTOP) and made serve
+  # exit non-zero, aborting every peer-pull. Keeping it global preserves the
+  # value into the trap so the resume always runs.
+  paused=0
   resume_serve() {
-    if [ "$paused" -eq 1 ]; then
+    if [ "${paused:-0}" -eq 1 ]; then
       log "resuming miraged (SIGCONT)..."
-      docker exec "$container" pkill -CONT -f "miraged start" 2>/dev/null || true
+      docker exec "${container:-mirage}" pkill -CONT -f "miraged start" 2>/dev/null || true
       paused=0
     fi
   }

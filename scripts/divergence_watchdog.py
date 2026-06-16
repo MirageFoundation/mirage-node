@@ -143,6 +143,11 @@ LOCAL_RPC = os.environ.get("LOCAL_RPC", "http://127.0.0.1:26657")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
 DETECTION_WINDOW = int(os.environ.get("DETECTION_WINDOW", "300"))  # 5 min log lookback
 STALL_BLOCKS = int(os.environ.get("STALL_BLOCKS", "10"))  # ~10 polls = 10 min
+# How long the local height must stay FROZEN while catching_up=True before we
+# even consider it a possible divergence (a genuine block-sync advances, so its
+# height is never frozen this long). Paired with a log-pattern hit + peers ahead
+# to escalate. Default = STALL_BLOCKS polls, matching the not-catching-up stall.
+CATCHUP_STALL_SECONDS = int(os.environ.get("CATCHUP_STALL_SECONDS", str(STALL_BLOCKS * POLL_SECONDS)))
 COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "21600"))  # 6h
 PEER_AHEAD_THRESHOLD = int(os.environ.get("PEER_AHEAD_THRESHOLD", "20"))
 DEAD_THRESHOLD = int(os.environ.get("DEAD_THRESHOLD", "3"))
@@ -556,6 +561,32 @@ def _restart_argv(recovery_script: str, force: bool) -> list[str]:
     if force:
         argv.append("--force")
     return argv
+
+
+def is_catchup_divergence(
+    last_advance_age_s: int,
+    div_hit: str | None,
+    healthy_peers: int,
+    peer_max_height: int,
+    local_h: int,
+    catchup_stall_s: int = CATCHUP_STALL_SECONDS,
+) -> bool:
+    """True when a `catching_up=True` node is actually DIVERGED, not just syncing.
+
+    A genuine block-sync/state-sync advances, so its height is never frozen for
+    catchup_stall_s. Real divergence requires ALL of:
+      - the local height has been FROZEN for >= catchup_stall_s;
+      - an AppHash / consensus-failure line appeared in the detection window
+        (div_hit is the matched pattern, or None);
+      - >= 2 healthy peers are strictly ahead of us (the canonical chain moved on).
+    PURE: no I/O, no clock — trivially unit-testable.
+    """
+    return bool(
+        last_advance_age_s >= catchup_stall_s
+        and div_hit
+        and healthy_peers >= 2
+        and peer_max_height > local_h
+    )
 
 
 def decide_action(
@@ -1020,106 +1051,164 @@ def run(dry_run: bool) -> int:
                 last_advance_age = int(time.time() - last_advance_ts)
 
                 if catching_up:
+                    # A node doing genuine block-sync/state-sync also reports
+                    # catching_up=True — but it ADVANCES. A diverged node (wrong
+                    # AppHash) gets wedged: catching_up stays True, the height is
+                    # FROZEN, and its CometBFT log spews "wrong Block.Header.AppHash"
+                    # while healthy peers move on. The old code unconditionally
+                    # logged "not a divergence" and never acted, so a real
+                    # divergence hiding behind catching_up=True was invisible to
+                    # recovery (2026-06-16 mirage.talk: stuck ~95 min until a
+                    # manual peer-pull). Detect the stuck+diverged case here.
                     height_history.clear()
+                    div_hit = None
+                    healthy = peer_max = 0
+                    stuck = last_advance_age >= CATCHUP_STALL_SECONDS
+                    if stuck:
+                        log_path = latest_log_file()
+                        if log_path:
+                            div_hit = log_window_has_pattern(
+                                tail_recent(log_path), DIVERGENCE_PATTERNS, DETECTION_WINDOW
+                            )
+                        if div_hit:
+                            peers = probe_peers()
+                            for p in peers:
+                                _emit_peer(p)
+                            healthy, peer_max = healthy_summary(peers)
+                    if is_catchup_divergence(last_advance_age, div_hit, healthy, peer_max, local_h):
+                        # Frozen height + AppHash error + healthy peers ahead =
+                        # divergence. Route through the log-pattern trigger, which
+                        # decide_action sends to peer-pull (no restart can fix
+                        # wrong state). Gating still applies in decide_action.
+                        trigger = TRIGGER_LOG_PATTERN
+                        stats["triggers"]["log_pattern"] += 1
+                        emit(
+                            "TRIGGER",
+                            type="log_pattern",
+                            pattern=div_hit,
+                            via="catching_up_stall",
+                            local_h=local_h,
+                            last_advance_age_s=last_advance_age,
+                            peers_healthy=healthy,
+                            peer_max=peer_max,
+                        )
+                        emit(
+                            "GATE",
+                            watchdog_autorecover=WATCHDOG_AUTORECOVER,
+                            destructive_recovery_ready=destructive_recovery_ready,
+                            recovery_key_present=recovery_key_present,
+                            pull_cooldown_s=cooldown_remaining_s(LOCK, COOLDOWN_SECONDS),
+                            restart_cooldown_s=cooldown_remaining_s(RESTART_LOCK, RESTART_COOLDOWN_SECONDS),
+                            disable_marker=DISABLE_MARKER.exists(),
+                            dry_run=dry_run,
+                            alert_lock_age_s=marker_age_s(ALERT_LOCK),
+                            recent_restarts=recent_restart_count(),
+                        )
+                        # Fall through to the shared dispatch below (no continue).
+                    else:
+                        emit(
+                            "POLL",
+                            poll=poll_no,
+                            local_h=local_h,
+                            catching_up=True,
+                            step=step if step is not None else "n/a",
+                            round=rnd if rnd is not None else "n/a",
+                            last_advance_h=last_advance_h,
+                            last_advance_age_s=last_advance_age,
+                            miraged_pid=pid if pid else "none",
+                            mem_rss_mb=rss if rss is not None else "n/a",
+                            disk_used_pct=disk if disk is not None else "n/a",
+                            note=(
+                                "catching_up; stuck but no divergence signal"
+                                if stuck
+                                else "catching_up; not a divergence"
+                            ),
+                        )
+                        time.sleep(POLL_SECONDS)
+                        continue
+                else:
+                    height_history.append(local_h)
+                    stall_n = _trailing_equal(height_history)
                     emit(
                         "POLL",
                         poll=poll_no,
                         local_h=local_h,
-                        catching_up=True,
+                        catching_up=False,
                         step=step if step is not None else "n/a",
                         round=rnd if rnd is not None else "n/a",
                         last_advance_h=last_advance_h,
                         last_advance_age_s=last_advance_age,
+                        stall_count=f"{stall_n}/{STALL_BLOCKS}",
+                        history=list(height_history),
                         miraged_pid=pid if pid else "none",
                         mem_rss_mb=rss if rss is not None else "n/a",
                         disk_used_pct=disk if disk is not None else "n/a",
-                        note="catching_up; not a divergence",
                     )
-                    time.sleep(POLL_SECONDS)
-                    continue
 
-                height_history.append(local_h)
-                stall_n = _trailing_equal(height_history)
-                emit(
-                    "POLL",
-                    poll=poll_no,
-                    local_h=local_h,
-                    catching_up=False,
-                    step=step if step is not None else "n/a",
-                    round=rnd if rnd is not None else "n/a",
-                    last_advance_h=last_advance_h,
-                    last_advance_age_s=last_advance_age,
-                    stall_count=f"{stall_n}/{STALL_BLOCKS}",
-                    history=list(height_history),
-                    miraged_pid=pid if pid else "none",
-                    mem_rss_mb=rss if rss is not None else "n/a",
-                    disk_used_pct=disk if disk is not None else "n/a",
-                )
-
-                peers = probe_peers()
-                for p in peers:
-                    _emit_peer(p)
-                healthy, peer_max = healthy_summary(peers)
-                emit(
-                    "GATE",
-                    watchdog_autorecover=WATCHDOG_AUTORECOVER,
-                    destructive_recovery_ready=destructive_recovery_ready,
-                    recovery_key_present=recovery_key_present,
-                    pull_cooldown_s=cooldown_remaining_s(LOCK, COOLDOWN_SECONDS),
-                    restart_cooldown_s=cooldown_remaining_s(RESTART_LOCK, RESTART_COOLDOWN_SECONDS),
-                    disable_marker=DISABLE_MARKER.exists(),
-                    dry_run=dry_run,
-                    alert_lock_age_s=marker_age_s(ALERT_LOCK),
-                    recent_restarts=recent_restart_count(),
-                )
-
-                # Signal 1: log-pattern divergence.
-                log_path = latest_log_file()
-                if log_path:
-                    tail = tail_recent(log_path)
-                    hit = log_window_has_pattern(tail, DIVERGENCE_PATTERNS, DETECTION_WINDOW)
-                    if hit:
-                        trigger = TRIGGER_LOG_PATTERN
-                        stats["triggers"]["log_pattern"] += 1
-                        emit("TRIGGER", type="log_pattern", pattern=hit, log=log_path.name, local_h=local_h)
-
-                # Signal 2: stall vs peers.
-                if (
-                    trigger is None
-                    and len(height_history) == height_history.maxlen
-                    and len(set(height_history)) == 1
-                    and healthy >= 2
-                    and peer_max > local_h + PEER_AHEAD_THRESHOLD
-                ):
-                    trigger = TRIGGER_STALL
-                    stats["triggers"]["stall"] += 1
+                    peers = probe_peers()
+                    for p in peers:
+                        _emit_peer(p)
+                    healthy, peer_max = healthy_summary(peers)
                     emit(
-                        "TRIGGER",
-                        type="stall",
-                        local_h=local_h,
-                        stall_polls=f"{STALL_BLOCKS}/{STALL_BLOCKS}",
-                        peer_max=peer_max,
-                        peers_healthy=healthy,
-                        lag=peer_max - local_h,
-                        last_advance_age_s=last_advance_age,
+                        "GATE",
+                        watchdog_autorecover=WATCHDOG_AUTORECOVER,
+                        destructive_recovery_ready=destructive_recovery_ready,
+                        recovery_key_present=recovery_key_present,
+                        pull_cooldown_s=cooldown_remaining_s(LOCK, COOLDOWN_SECONDS),
+                        restart_cooldown_s=cooldown_remaining_s(RESTART_LOCK, RESTART_COOLDOWN_SECONDS),
+                        disable_marker=DISABLE_MARKER.exists(),
+                        dry_run=dry_run,
+                        alert_lock_age_s=marker_age_s(ALERT_LOCK),
+                        recent_restarts=recent_restart_count(),
                     )
-                    # PRECHECK: app_hash agreement AT the stuck height decides
-                    # restart (state OK) vs peer-pull (state diverged).
-                    local_app_hash, peer_app_hashes = local_peer_app_hash_at(local_h, peers)
-                    match = bool(
-                        local_app_hash
-                        and peer_app_hashes
-                        and all(h == local_app_hash for h in peer_app_hashes.values())
-                    )
-                    emit(
-                        "PRECHECK",
-                        kind="app_hash_at_local_h",
-                        height=local_h,
-                        local=(local_app_hash[:16] + "..." if local_app_hash else "unknown"),
-                        peer_hashes="{" + ",".join(f"{ip}:{h[:12]}..." for ip, h in peer_app_hashes.items()) + "}",
-                        match=match,
-                        peer_count=len(peer_app_hashes),
-                    )
+
+                    # Signal 1: log-pattern divergence.
+                    log_path = latest_log_file()
+                    if log_path:
+                        tail = tail_recent(log_path)
+                        hit = log_window_has_pattern(tail, DIVERGENCE_PATTERNS, DETECTION_WINDOW)
+                        if hit:
+                            trigger = TRIGGER_LOG_PATTERN
+                            stats["triggers"]["log_pattern"] += 1
+                            emit("TRIGGER", type="log_pattern", pattern=hit, log=log_path.name, local_h=local_h)
+
+                    # Signal 2: stall vs peers.
+                    if (
+                        trigger is None
+                        and len(height_history) == height_history.maxlen
+                        and len(set(height_history)) == 1
+                        and healthy >= 2
+                        and peer_max > local_h + PEER_AHEAD_THRESHOLD
+                    ):
+                        trigger = TRIGGER_STALL
+                        stats["triggers"]["stall"] += 1
+                        emit(
+                            "TRIGGER",
+                            type="stall",
+                            local_h=local_h,
+                            stall_polls=f"{STALL_BLOCKS}/{STALL_BLOCKS}",
+                            peer_max=peer_max,
+                            peers_healthy=healthy,
+                            lag=peer_max - local_h,
+                            last_advance_age_s=last_advance_age,
+                        )
+                        # PRECHECK: app_hash agreement AT the stuck height decides
+                        # restart (state OK) vs peer-pull (state diverged).
+                        local_app_hash, peer_app_hashes = local_peer_app_hash_at(local_h, peers)
+                        match = bool(
+                            local_app_hash
+                            and peer_app_hashes
+                            and all(h == local_app_hash for h in peer_app_hashes.values())
+                        )
+                        emit(
+                            "PRECHECK",
+                            kind="app_hash_at_local_h",
+                            height=local_h,
+                            local=(local_app_hash[:16] + "..." if local_app_hash else "unknown"),
+                            peer_hashes="{" + ",".join(f"{ip}:{h[:12]}..." for ip, h in peer_app_hashes.items()) + "}",
+                            match=match,
+                            peer_count=len(peer_app_hashes),
+                        )
 
             if trigger is None:
                 time.sleep(POLL_SECONDS)
