@@ -3163,6 +3163,12 @@ function ViewPostView({
                                     setReplyAttachedUrl(prev => ({ ...prev, [post.post_id]: pickedUrl }));
                                     setReplyThumbLoading(prev => ({ ...prev, [post.post_id]: true }));
                                 }}
+                                onUploadImage={() => {
+                                    try {
+                                        const api = replyEditorUpload[post.post_id];
+                                        if (api && typeof api.selectFile === 'function') api.selectFile('image');
+                                    } catch (_) { /* noop */ }
+                                }}
                                 disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]}
                             />
                         } onSubmitShortcut={() => {
@@ -3857,7 +3863,7 @@ function ViewPostView({
                                                 </>}
                                             </ColumnFlex>
                                         </CardComponent>
-                                        {isRoot && !!focusedCommentId && <StyledThreadReminder>
+                                        {!!focusedCommentId && String(post.post_id).toLowerCase() === focusedCommentId && <StyledThreadReminder>
                                             You are viewing a single comment's thread.{' '}
                                             {!showContext ? <>
                                                 Click{' '}

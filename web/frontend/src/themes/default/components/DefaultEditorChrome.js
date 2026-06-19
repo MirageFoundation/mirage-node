@@ -1,4 +1,5 @@
 import styled from "styled-components";
+import { LuImage } from "react-icons/lu";
 import StickerPicker from "./StickerPicker.js";
 import GifPicker from "./GifPicker.js";
 
@@ -176,17 +177,32 @@ export const ToolbarDivider = styled.span`
     flex-shrink: 0;
 `;
 
-/* Shared "right side" of the editor toolbar — the divider + sticker +
- * GIF triplet that both the post composer and the comments reply editor
- * render via MarkdownEditor's `toolbarExtra` slot. Single component so
- * the two editors are literally identical at this seam — no place left
- * for the JSX to drift apart. Drag-drop and paste-upload for own images
- * still work through MarkdownEditor's built-in handlers, so we don't
- * need an explicit upload button in either context. */
-export function EditorMediaTools({ onSelect, disabled = false }) {
+/* Shared "right side" of the editor toolbar — the divider + image upload
+ * + sticker + GIF group that both the post composer and the comments
+ * reply editor render via MarkdownEditor's `toolbarExtra` slot. Single
+ * component so the two editors are literally identical at this seam — no
+ * place left for the JSX to drift apart.
+ *
+ * The image button is the first action in the group: it routes to the
+ * editor's hidden file input via `onUploadImage` so users get the same
+ * inline image as ctrl+v paste, but discoverable as a click. Drag-drop
+ * and paste-upload still flow through MarkdownEditor's built-in handlers. */
+export function EditorMediaTools({ onSelect, onUploadImage, disabled = false }) {
     return (
         <>
             <ToolbarDivider />
+            {onUploadImage ? (
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => { if (!disabled) onUploadImage(); }}
+                    disabled={disabled}
+                    aria-label="Upload image"
+                    title="Upload image"
+                >
+                    <LuImage className="md-icon" aria-hidden="true" />
+                </button>
+            ) : null}
             <StickerPicker onSelect={onSelect} disabled={disabled} />
             <GifPicker onSelect={onSelect} disabled={disabled} />
         </>

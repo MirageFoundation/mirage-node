@@ -1837,6 +1837,9 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                     toolbarExtra={
                                                         <EditorMediaTools
                                                             onSelect={handlePickerSelect}
+                                                            onUploadImage={() => {
+                                                                try { editorUpload && editorUpload.selectFile('image'); } catch (_) { /* noop */ }
+                                                            }}
                                                             disabled={isSubmitting || !!pickerMediaUrl}
                                                         />
                                                     }
