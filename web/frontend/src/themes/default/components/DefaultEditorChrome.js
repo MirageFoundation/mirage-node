@@ -1,5 +1,5 @@
 import styled from "styled-components";
-import { LuImage } from "react-icons/lu";
+import { LuImageUp, LuImagePlus } from "react-icons/lu";
 import StickerPicker from "./StickerPicker.js";
 import GifPicker from "./GifPicker.js";
 
@@ -183,11 +183,13 @@ export const ToolbarDivider = styled.span`
  * component so the two editors are literally identical at this seam — no
  * place left for the JSX to drift apart.
  *
- * The image button is the first action in the group: it routes to the
- * editor's hidden file input via `onUploadImage` so users get the same
- * inline image as ctrl+v paste, but discoverable as a click. Drag-drop
- * and paste-upload still flow through MarkdownEditor's built-in handlers. */
-export function EditorMediaTools({ onSelect, onUploadImage, disabled = false }) {
+ * Two image actions lead the group:
+ *   - `onUploadImage` routes to the editor's hidden file input, giving the
+ *     same inline image as ctrl+v paste but discoverable as a click.
+ *   - `onLinkImage` inserts an inline image-by-URL markdown so users can
+ *     drop in a remote image link without uploading a file.
+ * Drag-drop and paste-upload still flow through MarkdownEditor's handlers. */
+export function EditorMediaTools({ onSelect, onUploadImage, onLinkImage, disabled = false }) {
     return (
         <>
             <ToolbarDivider />
@@ -200,7 +202,19 @@ export function EditorMediaTools({ onSelect, onUploadImage, disabled = false }) 
                     aria-label="Upload image"
                     title="Upload image"
                 >
-                    <LuImage className="md-icon" aria-hidden="true" />
+                    <LuImageUp className="md-icon" aria-hidden="true" />
+                </button>
+            ) : null}
+            {onLinkImage ? (
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => { if (!disabled) onLinkImage(); }}
+                    disabled={disabled}
+                    aria-label="Insert image by URL"
+                    title="Insert image by URL"
+                >
+                    <LuImagePlus className="md-icon" aria-hidden="true" />
                 </button>
             ) : null}
             <StickerPicker onSelect={onSelect} disabled={disabled} />

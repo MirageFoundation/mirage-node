@@ -3169,6 +3169,12 @@ function ViewPostView({
                                         if (api && typeof api.selectFile === 'function') api.selectFile('image');
                                     } catch (_) { /* noop */ }
                                 }}
+                                onLinkImage={() => {
+                                    try {
+                                        const api = replyEditorUpload[post.post_id];
+                                        if (api && typeof api.insertImageLink === 'function') api.insertImageLink();
+                                    } catch (_) { /* noop */ }
+                                }}
                                 disabled={isBusy || !!replyIsUploading[post.post_id] || !!replyAttachedUrl[post.post_id]}
                             />
                         } onSubmitShortcut={() => {

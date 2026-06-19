@@ -1840,6 +1840,9 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                             onUploadImage={() => {
                                                                 try { editorUpload && editorUpload.selectFile('image'); } catch (_) { /* noop */ }
                                                             }}
+                                                            onLinkImage={() => {
+                                                                try { editorUpload && editorUpload.insertImageLink(); } catch (_) { /* noop */ }
+                                                            }}
                                                             disabled={isSubmitting || !!pickerMediaUrl}
                                                         />
                                                     }

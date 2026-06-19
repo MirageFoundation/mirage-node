@@ -616,6 +616,11 @@ export default function MarkdownEditor({
     placeholder = "Link or content", // optional: textarea placeholder
 }) {
     const areaRef = useRef(null);
+    // Keep latest onChange in a ref so actions exposed via
+    // registerUploadHandler (registered once on mount) never call a stale
+    // closure when the parent re-renders with a new onChange identity.
+    const onChangeRef = useRef(onChange);
+    useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
     useEffect(() => {
         if (editorRef) {
@@ -997,6 +1002,31 @@ export default function MarkdownEditor({
         });
     };
 
+    // Insert an inline image-by-URL markdown (`![alt](https://)`) at the
+    // caret and select the URL placeholder so the user can paste a link.
+    // Reads from the live textarea value (not the `value` prop) so it stays
+    // correct when invoked via the registerUploadHandler API. Mirrors
+    // insertLink, which is the editor's established insert pattern.
+    const insertImage = useCallback(() => {
+        const ta = areaRef.current;
+        if (!ta) return;
+        const start = ta.selectionStart ?? 0;
+        const end = ta.selectionEnd ?? 0;
+        const text = ta.value || "";
+        const selected = text.slice(start, end);
+        const insert = `![${selected}](https://)`;
+        const next = text.slice(0, start) + insert + text.slice(end);
+        onChangeRef.current(next);
+        const urlStart = start + insert.indexOf("https://");
+        const urlEnd = urlStart + "https://".length;
+        requestAnimationFrame(() => {
+            try {
+                ta.focus();
+                ta.setSelectionRange(urlStart, urlEnd);
+            } catch (_) { }
+        });
+    }, []);
+
     // eslint-disable-next-line no-unused-vars
     const handleUploadClick = (type) => {
         if (uploadPct !== null) return; // Disable upload click during upload
@@ -1250,6 +1280,7 @@ export default function MarkdownEditor({
             },
             uploadFile: (file) => performUploadFile(file),
             cancelUpload: () => cancelUpload(),
+            insertImageLink: () => insertImage(),
         };
         registerUploadHandler(api);
         return () => {
