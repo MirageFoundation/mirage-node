@@ -8,8 +8,8 @@ import (
 	"math"
 	"time"
 
-	storetypes "cosmossdk.io/store/types"
-	upgradetypes "cosmossdk.io/x/upgrade/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
@@ -2148,6 +2148,84 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.28.0: Cosmos SDK v0.54 / CometBFT v0.39 release-family migration ──
+	//
+	// This is the coordinated chain upgrade that moves the binary onto SDK
+	// v0.54 (store/v2 + log/v2). The motivation is upstream PR #24655 ("race
+	// condition in baseapp states"): store/v2 rootmulti now keeps lastCommitInfo
+	// in an atomic.Pointer and serializes Commit vs CreateQueryContext, which is
+	// the canonical fix for the node-local Commit<->Query race behind the
+	// recurring mirage.talk app-hash divergences. The vendored IAVL fork is also
+	// rebased to v1.2.8 (nodeDB sync.RWMutex + deferred fast-node cache).
+	//
+	// State-machine effects handled here:
+	//   1. RunMigrations runs every module's registered migrations. The module
+	//      manager no longer contains x/group or x/circuit, so RunMigrations
+	//      automatically drops them from the returned version map.
+	//   2. The dormant x/group and x/circuit KV stores are physically deleted at
+	//      the upgrade height via StoreUpgrades.Deleted (registered below in the
+	//      store loader). x/group is now Cosmos Enterprise-licensed and x/circuit's
+	//      depinject api proto was removed in v0.54; both were unused scaffolding.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.28.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.28.0 (SDK v0.54 / CometBFT v0.39)...")
+
+			// Drop the removed modules from the incoming version map defensively.
+			// RunMigrations already ignores modules absent from the manager, but
+			// removing them here keeps the from/to maps clean in the logs.
+			delete(fromVM, "group")
+			delete(fromVM, "circuit")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.28.0: RunMigrations failed",
+					"from_vm", fmt.Sprintf("%v", fromVM),
+					"err", err,
+				)
+				return nil, fmt.Errorf("v1.28.0: RunMigrations failed (fromVM=%v): %w", fromVM, err)
+			}
+
+			// Defensive sanity check: if params cannot load/validate here, every
+			// following BeginBlock would halt with CONSENSUS_FATAL.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.28.0: post-migration params failed validation: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.28.0: params validated post-migration",
+				"block_hash_window", params.BlockHashWindow,
+				"min_difficulty", params.MinDifficulty,
+				"pow_message_window", params.PowMessageWindow,
+			)
+
+			sdkCtx.Logger().Info("Upgrade to v1.28.0 complete - on SDK v0.54 store/v2 (#24655 Commit/Query race fix) + IAVL v1.2.8; x/group and x/circuit removed")
+			return toVM, nil
+		},
+	)
+
+	// Register the store loader for v1.28.0's store deletions. This must run
+	// before app.Load() (called later in App.New) so the deleted stores are
+	// dropped while loading the multistore at the upgrade height.
+	app.registerV1_28_0StoreLoader()
+}
+
+// registerV1_28_0StoreLoader wires StoreUpgrades for the v1.28.0 upgrade, which
+// physically deletes the dormant x/group and x/circuit KV stores at the planned
+// upgrade height. It is a no-op on every other height/upgrade.
+func (app *App) registerV1_28_0StoreLoader() {
+	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
+	if err != nil {
+		panic(err)
+	}
+
+	if upgradeInfo.Name == "v1.28.0" && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
+		storeUpgrades := storetypes.StoreUpgrades{
+			Deleted: []string{"group", "circuit"},
+		}
+		app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storeUpgrades))
+	}
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

@@ -684,6 +684,7 @@ cmd_peer_pull() {
   chmod 700 /root/.mirage/.ssh
   log "pulling chain snapshot from $PEER_SSH_USER@$source_ip (timeout ${PEER_PULL_SECONDS}s)..."
   local ssh_opts=(
+    -n
     -i "$RECOVERY_KEY"
     -p "$PEER_SSH_PORT"
     -o BatchMode=yes
@@ -696,7 +697,14 @@ cmd_peer_pull() {
   # The remote side ignores any command we send because authorized_keys forces
   # `recover.sh serve`. We redirect stdout to a local tar file. All remote logs
   # go to stderr, so they do not corrupt the tar stream.
-  if ! timeout "$PEER_PULL_SECONDS" ssh "${ssh_opts[@]}" "$PEER_SSH_USER@$source_ip" >"$tar_path"; then
+  #
+  # ssh -n reads stdin from /dev/null. The watchdog invokes recover.sh from a
+  # tmux pane, so without -n this background ssh would read the controlling TTY,
+  # take SIGTTIN, and stop (state T). A stopped child ignores SIGTERM, so the
+  # plain `timeout` could never reap it and recovery hung indefinitely. -k
+  # escalates to SIGKILL (which a stopped process cannot ignore) if SIGTERM is
+  # not honored within the grace window.
+  if ! timeout -k 30 "$PEER_PULL_SECONDS" ssh "${ssh_opts[@]}" "$PEER_SSH_USER@$source_ip" >"$tar_path"; then
     rm -f "$tar_path"
     die "ssh peer-pull from $source_ip failed or timed out after ${PEER_PULL_SECONDS}s"
   fi

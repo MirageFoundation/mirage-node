@@ -816,7 +816,10 @@ def _invoke(argv: list[str]) -> int | None:
     in recover.sh's own daily log (child_log), cross-referenced here by pid."""
     child_log = f"{LOGS_DIR}/deploy/divergence_recovery-{datetime.now(timezone.utc):%Y-%m-%d}.log"
     try:
-        proc = subprocess.Popen(argv)
+        # stdin from /dev/null: the watchdog runs in a tmux pane, so an inherited
+        # TTY stdin would let recovery's background ssh take SIGTTIN and stop
+        # (state T), which is unkillable by SIGTERM and wedges recovery forever.
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as e:
         emit("CRASH", where="invoke_spawn", argv=json.dumps(argv), err=repr(e))
         return None

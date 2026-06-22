@@ -1959,6 +1959,56 @@ export function useViewPost({
 
                     // Immediately insert optimistic comment and close reply box
                     const viewerAddress = Storage.load("publicKey", "");
+
+                    // Is the replied-to post part of the comment subtree currently on
+                    // screen? In the focused single-comment view the actual root post
+                    // (and any parent-chain context) are rendered ABOVE the focused
+                    // comment, but `root`/`children` only hold the focused comment and
+                    // its descendants. Replying to one of those out-of-view posts (e.g.
+                    // the root post at the top) produces a comment that can never appear
+                    // in this focused view, so we navigate to that post's own thread
+                    // where the new reply is visible instead of silently dropping it.
+                    const findTargetInChildren = nodes => {
+                        if (!Array.isArray(nodes)) return false;
+                        for (const n of nodes) {
+                            if (n && n.post_id === commentId) return true;
+                            if (n && n.children && findTargetInChildren(n.children)) return true;
+                        }
+                        return false;
+                    };
+                    const targetVisibleInTree = (root && root.post_id === commentId) || findTargetInChildren(children);
+                    if (!targetVisibleInTree) {
+                        console.log('[ViewPostView] Reply target is outside the focused view; verifying then navigating to its thread', {
+                            commentId,
+                            txHash
+                        });
+                        // Keep the reply box closed but show verifying status while we
+                        // wait for the comment to be indexed, so the destination thread
+                        // actually contains it when we land there.
+                        try {
+                            updatePost(commentId, {
+                                replyOpen: false
+                            });
+                        } catch (_) { }
+                        setReplySubmitStatus(prev => ({
+                            ...prev,
+                            [commentId]: 'verifying'
+                        }));
+                        try {
+                            await tx.pollTxStatus(txHash);
+                        } catch (_) { }
+                        try {
+                            updatePost(commentId, {
+                                replyBusy: false
+                            });
+                        } catch (_) { }
+                        try {
+                            Storage.setPendingPostHighlight(txHash);
+                        } catch (_) { }
+                        navigate(`/p/${commentId}`);
+                        return;
+                    }
+
                     const optimisticComment = {
                         post_id: txHash,
                         user_id: viewerAddress,

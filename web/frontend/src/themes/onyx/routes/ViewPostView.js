@@ -2713,7 +2713,7 @@ function ViewPostView({
                                     </>}
                                 </ColumnFlex>
                             </CardComponent>
-                            {isRoot && !!focusedCommentId && <StyledThreadReminder>
+                            {!!focusedCommentId && String(post.post_id).toLowerCase() === focusedCommentId && <StyledThreadReminder>
                                 You are viewing a single comment's thread.{' '}
                                 {!showContext ? <>
                                     Click{' '}

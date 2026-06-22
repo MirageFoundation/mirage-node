@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.27.0 (Divergence hardening: canonical IAVL reads + supply invariant guard)",
-    "summary": "Coordinated activation of consensus-critical divergence hardening. This release completes the IAVL read-path safety work by removing remaining advisory fast-node reads from consensus paths: point reads now use canonical IAVL as authoritative source even when the fast index has a hit. It also adds a supply invariant guard at EndBlock that halts a corrupted node when recorded supply does not match sum(balances), instead of silently committing a divergent app hash. This directly addresses the recurring single-node divergence class observed on mirage.talk, including the 2026-06-12 incident where supply was undercounted by 164,124,000 due to a stale read. No on-chain state migration is required (no new params, no new store keys, no module migrations), but this is state-machine-breaking behavior and therefore must activate at one coordinated upgrade height across validators.",
+    "title": "Upgrade to v1.28.0 (Cosmos SDK v0.54 / CometBFT v0.39 - eliminate node-local app-hash divergence)",
+    "summary": "Coordinated release-family migration to Cosmos SDK v0.54 and CometBFT v0.39. The motivation is the upstream fix for the node-local Commit/Query state race (cosmos-sdk #24655): store/v2 rootmulti now keeps lastCommitInfo in an atomic pointer and serializes Commit against query-context creation, which is the canonical fix for the recurring single-node app-hash divergences observed on mirage.talk. The vendored IAVL fork is rebased to v1.2.8 (nodeDB read/write lock plus deferred fast-node cache application) and the fast-node index remains off the consensus read path. The dormant x/group and x/circuit modules are removed (x/group is now Cosmos Enterprise-licensed and x/circuit's wiring proto was dropped in v0.54); their unused KV stores are deleted at the upgrade height via StoreUpgrades. No application state migration is required: store/v2 reuses the same on-disk IAVL v1.2.x format. This is consensus-breaking and must activate at one coordinated height across all validators with every node running the v1.28.0 binary.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.27.0",
+                "name": "v1.28.0",
                 "height": "T+50",
                 "info": ""
             }

@@ -1,4 +1,5 @@
 import styled from "styled-components";
+import { LuImageUp, LuImagePlus } from "react-icons/lu";
 import StickerPicker from "./StickerPicker.js";
 import GifPicker from "./GifPicker.js";
 
@@ -176,17 +177,46 @@ export const ToolbarDivider = styled.span`
     flex-shrink: 0;
 `;
 
-/* Shared "right side" of the editor toolbar — the divider + sticker +
- * GIF triplet that both the post composer and the comments reply editor
- * render via MarkdownEditor's `toolbarExtra` slot. Single component so
- * the two editors are literally identical at this seam — no place left
- * for the JSX to drift apart. Drag-drop and paste-upload for own images
- * still work through MarkdownEditor's built-in handlers, so we don't
- * need an explicit upload button in either context. */
-export function EditorMediaTools({ onSelect, disabled = false }) {
+/* Shared "right side" of the editor toolbar — the divider + image upload
+ * + sticker + GIF group that both the post composer and the comments
+ * reply editor render via MarkdownEditor's `toolbarExtra` slot. Single
+ * component so the two editors are literally identical at this seam — no
+ * place left for the JSX to drift apart.
+ *
+ * Two image actions lead the group:
+ *   - `onUploadImage` routes to the editor's hidden file input, giving the
+ *     same inline image as ctrl+v paste but discoverable as a click.
+ *   - `onLinkImage` inserts an inline image-by-URL markdown so users can
+ *     drop in a remote image link without uploading a file.
+ * Drag-drop and paste-upload still flow through MarkdownEditor's handlers. */
+export function EditorMediaTools({ onSelect, onUploadImage, onLinkImage, disabled = false }) {
     return (
         <>
             <ToolbarDivider />
+            {onUploadImage ? (
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => { if (!disabled) onUploadImage(); }}
+                    disabled={disabled}
+                    aria-label="Upload image"
+                    title="Upload image"
+                >
+                    <LuImageUp className="md-icon" aria-hidden="true" />
+                </button>
+            ) : null}
+            {onLinkImage ? (
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => { if (!disabled) onLinkImage(); }}
+                    disabled={disabled}
+                    aria-label="Insert image by URL"
+                    title="Insert image by URL"
+                >
+                    <LuImagePlus className="md-icon" aria-hidden="true" />
+                </button>
+            ) : null}
             <StickerPicker onSelect={onSelect} disabled={disabled} />
             <GifPicker onSelect={onSelect} disabled={disabled} />
         </>

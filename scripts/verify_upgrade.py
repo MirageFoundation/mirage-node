@@ -1,34 +1,37 @@
 #!/usr/bin/env python3
 """
-Post-upgrade verification for v1.27.0.
+Post-upgrade verification for v1.28.0.
 
-Only v1.27.0-specific checks are included. Generic prior-upgrade checks
+Only v1.28.0-specific checks are included. Generic prior-upgrade checks
 have been removed per the /upgrade workflow: keep only checks needed to
 validate THIS upgrade.
 
-What v1.27.0 actually changes
+What v1.28.0 actually changes
 -----------------------------
-The upgrade coordinates three divergence-hardening changes:
-1) canonical IAVL reads are authoritative (fast-node no longer drives
-   consensus reads),
-2) EndBlock enforces supply == sum(balances) and halts on mismatch,
-3) deploy/runtime forces iavl-disable-fastnode=true.
+This is the Cosmos SDK v0.54 / CometBFT v0.39 release-family migration. It
+adopts the upstream Commit/Query state-race fix (cosmos-sdk #24655: atomic
+lastCommitInfo + serialized Commit vs query-context creation in store/v2
+rootmulti), rebases the vendored IAVL fork to v1.2.8 (nodeDB sync.RWMutex +
+deferred fast-node cache), and removes the dormant x/group and x/circuit
+modules (their KV stores are deleted at the upgrade height via StoreUpgrades).
 
-No store migrations, params, or new keys are introduced, but the behavior
-change is consensus-critical and must activate at one height.
+No application state migration is required: store/v2 reuses the same on-disk
+IAVL v1.2.x format. The change is consensus-breaking and must activate at one
+coordinated height across validators.
 
 Checks
 ------
   1. Required environment variables are set (DB URLs)
   2. Database connectivity (backend + indexer RO)
   3. Upgrade handler ran:
-       - node logs contain "Starting upgrade to v1.27.0"
-       - node logs contain "Upgrade to v1.27.0 complete"
+       - node logs contain "Starting upgrade to v1.28.0"
+       - node logs contain "Upgrade to v1.28.0 complete"
        - node logs contain the post-migration params validation line
-  4. Runtime config hardening is active:
+  4. x/group and x/circuit stores were deleted (node log signature)
+  5. Runtime config hardening is active:
        - app.toml contains iavl-disable-fastnode = true
-  5. Chain liveness post-upgrade (indexer freshness)
-  6. Frontend version cross-check (version.txt == v1.27.0).
+  6. Chain liveness post-upgrade (indexer freshness)
+  7. Frontend version cross-check (version.txt == v1.28.0).
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -54,7 +57,10 @@ except ImportError:
 
 
 # Constants tied to THIS upgrade. If they change, this file must change.
-UPGRADE_NAME = "v1.27.0"
+UPGRADE_NAME = "v1.28.0"
+
+# Modules removed in v1.28.0; their KV stores are deleted at the upgrade height.
+REMOVED_MODULES = ("group", "circuit")
 
 
 passed = 0
@@ -114,6 +120,18 @@ def find_latest_log(log_dir: Path) -> Path:
     return logs[0]
 
 
+def read_all_logs(log_dir: Path) -> str:
+    """Concatenate every *.log in the dir so rotation cannot hide a marker.
+
+    Used by checks that must fail hard (not warn) when a required signature is
+    absent: searching all rotated files makes a false negative due to rotation
+    effectively impossible."""
+    logs = sorted(log_dir.glob("*.log"), key=lambda path: path.stat().st_mtime)
+    if not logs:
+        raise RuntimeError(f"no log files found in {log_dir}")
+    return "\n".join(p.read_text(errors="ignore") for p in logs)
+
+
 def resolve_node_log_dir() -> Path:
     """Resolve node log directory across local + container layouts."""
     explicit = os.environ.get("NODE_LOG_DIR", "").strip()
@@ -142,7 +160,7 @@ def resolve_node_log_dir() -> Path:
     raise RuntimeError(f"node log dir not found; tried: {tried}")
 
 
-# ─── v1.27.0 checks ──────────────────────────────────────────────────
+# ─── v1.28.0 checks ──────────────────────────────────────────────────
 
 
 def check_upgrade_handler_ran() -> None:
@@ -181,6 +199,31 @@ def check_upgrade_handler_ran() -> None:
         )
 
 
+def check_modules_removed() -> None:
+    """Confirm x/group and x/circuit were removed at the upgrade height.
+
+    The v1.28.0 completion log line states the modules were removed. Only the
+    v0.54 binary lacks these modules, so this line proves the binary that ran the
+    handler also registered the StoreUpgrades.Deleted store loader that drops the
+    group/circuit substores. This is a fail-hard check (no silent warn), and it
+    scans every rotated log so rotation cannot mask a real success."""
+    try:
+        log_dir = resolve_node_log_dir()
+        content = read_all_logs(log_dir)
+    except Exception as exc:
+        fail(str(exc))
+        return
+
+    removal_marker = "x/group and x/circuit removed"
+    if removal_marker in content:
+        ok(f"{removal_marker!r} present in node logs (module removal completed)")
+    else:
+        fail(
+            f"{removal_marker!r} not found in any node log — the v1.28.0 module-removal "
+            f"handler did not run on this binary"
+        )
+
+
 def check_fastnode_disabled() -> None:
     candidates = [
         Path("/root/.mirage/node/config/app.toml"),
@@ -204,9 +247,10 @@ def check_fastnode_disabled() -> None:
 
 
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
-    """Post-upgrade liveness proof for v1.27.0 divergence hardening.
-    If the chain is producing fresh blocks after activation, the canonical-read
-    and supply-invariant paths are executing without fatal mismatch."""
+    """Post-upgrade liveness proof for the v1.28.0 SDK v0.54 migration.
+    If the chain is producing fresh blocks after activation, the store/v2
+    Commit/Query path and rebased IAVL read path are executing without a fatal
+    app-hash mismatch."""
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
         row = cur.fetchone()
@@ -305,13 +349,16 @@ def main() -> None:
     section(f"3. Upgrade Handler ({UPGRADE_NAME})")
     check_upgrade_handler_ran()
 
-    section("4. Runtime Config Hardening")
+    section("4. Removed Modules (x/group, x/circuit)")
+    check_modules_removed()
+
+    section("5. Runtime Config Hardening")
     check_fastnode_disabled()
 
-    section("5. Chain Liveness")
+    section("6. Chain Liveness")
     check_indexer_freshness(indexer_conn)
 
-    section("6. Binary Version Cross-Check")
+    section("7. Binary Version Cross-Check")
     check_binary_version()
 
     if backend_conn:

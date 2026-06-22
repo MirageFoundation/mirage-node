@@ -3,9 +3,9 @@ package app
 import (
 	"testing"
 
-	"cosmossdk.io/log"
-	storetypes "cosmossdk.io/store/types"
-	upgradetypes "cosmossdk.io/x/upgrade/types"
+	"cosmossdk.io/log/v2"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	authz "github.com/cosmos/cosmos-sdk/x/authz"
@@ -30,7 +30,7 @@ func TestStoreLoaderWithExistingStore(t *testing.T) {
 	chainID := "mirage-test"
 
 	// 1. Create and load app - this initializes all stores
-	app1 := New(log.NewNopLogger(), db, nil, false, MockAppOptions{}, baseapp.SetChainID(chainID))
+	app1 := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID(chainID))
 	require.NoError(t, app1.Load(true))
 
 	// The app has now initialized stores for all modules including authz.
@@ -39,7 +39,7 @@ func TestStoreLoaderWithExistingStore(t *testing.T) {
 	// 2. Verify that using StoreUpgrades.Added for an existing store causes issues
 	// This simulates what the buggy v1.10.4-restore-sdk upgrade did
 	t.Log("Creating app2 with StoreUpgrades.Added for existing authz store")
-	app2 := New(log.NewNopLogger(), db, nil, false, MockAppOptions{}, baseapp.SetChainID(chainID))
+	app2 := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID(chainID))
 
 	upgradeHeight := int64(10)
 	app2.SetStoreLoader(
@@ -63,7 +63,7 @@ func TestStoreLoaderWithExistingStore(t *testing.T) {
 
 	// 3. Verify that loading WITHOUT StoreUpgrades.Added works fine
 	t.Log("Creating app3 without StoreUpgrades.Added")
-	app3 := New(log.NewNopLogger(), db, nil, false, MockAppOptions{}, baseapp.SetChainID(chainID))
+	app3 := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID(chainID))
 
 	require.NoError(t, app3.Load(true), "Loading app without Added should succeed")
 
@@ -74,7 +74,7 @@ func TestStoreLoaderWithExistingStore(t *testing.T) {
 // TestUpgradeHandlersRegistered verifies that key upgrade handlers are registered
 func TestUpgradeHandlersRegistered(t *testing.T) {
 	db := dbm.NewMemDB()
-	app := New(log.NewNopLogger(), db, nil, false, MockAppOptions{}, baseapp.SetChainID("mirage-test"))
+	app := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID("mirage-test"))
 	require.NoError(t, app.Load(true))
 
 	// Check that upgrade handlers are registered (sampling a few key ones)
@@ -93,4 +93,20 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.25.0"), "v1.25.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.26.0"), "v1.26.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.27.0"), "v1.27.0 upgrade handler should be registered")
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.28.0"), "v1.28.0 upgrade handler should be registered")
+}
+
+// TestRemovedModulesNotWired verifies that the x/group and x/circuit modules,
+// removed in the v1.28.0 SDK v0.54 migration, are no longer wired into the app.
+// Their KV stores are deleted at the upgrade height via StoreUpgrades.Deleted;
+// this guards against an accidental re-introduction of the modules.
+func TestRemovedModulesNotWired(t *testing.T) {
+	db := dbm.NewMemDB()
+	app := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID("mirage-test"))
+	require.NoError(t, app.Load(true))
+
+	for _, name := range []string{"group", "circuit"} {
+		_, ok := app.ModuleManager.Modules[name]
+		require.False(t, ok, "module %q should be removed in v1.28.0 but is still wired", name)
+	}
 }
