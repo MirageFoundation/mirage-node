@@ -40,6 +40,56 @@ gated by `WATCHDOG_AUTORECOVER=true`, which should be set on exactly one host
 
 ---
 
+## 0. 2026-06-22 — supply-invariant divergence (h5522659) + mitigations
+
+A single node diverged at **height 5522659** on a `MsgVote` tx with
+`CONSENSUS_FATAL:SUPPLY_INVARIANT` (recorded supply != sum of balances). This
+was **after** the v1.28.0 upgrade (SDK v0.54 store/v2 + #24655 atomic
+lastCommitInfo / state-manager serialization), so the upstream Commit↔Query
+race fix did **not** cover it. A money-conservation break on one node only is
+the signature of a non-deterministic read during tx execution.
+
+Three changes landed in response (all repo-side, no chain upgrade):
+
+1. **`inter-block-cache = false`** in `deploy/templates/node/app.toml`, applied
+   to already-deployed nodes by migration
+   `deploy/migrations/v1_28_1_disable_inter_block_cache.py` (config-only, picked
+   up on the next miraged restart — rolling, low risk). The inter-block cache is
+   a shared, mutable-across-blocks `CommitKVStore` cache and is the most likely
+   remaining non-deterministic read surface. This was the Plan-A mitigation that
+   was previously skipped.
+
+2. **Always-on pre-wipe forensic snapshot.** `recover.sh` now preserves the
+   diverged chain DBs into `/root/.mirage/.divergence_forensics/<utc>-h<height>/`
+   **before** any wipe, at the single `wipe_chain_dbs` chokepoint (so both
+   peer-pull and state-sync are covered, automated or manual, regardless of
+   `--force`). The watchdog passes `RECOVERY_REASON=watchdog:<trigger>` so the
+   capture's `MANIFEST.txt` is traceable. Retention is bounded by `FORENSIC_KEEP`
+   (default 2). **Never wipe a diverged DB without a snapshot** — it is the only
+   artifact that lets us replay the offending block. See `RULES.md`.
+
+3. **MsgVote → mint/burn audit.** The cache-sensitive reads on the vote path
+   are the balance reads that *clamp* a burn/spend amount:
+   - `deductRelayGasFee` (paid voters) → `BurnFromModuleAmount` /
+     `DeductFeeFromOwner`, which read the module/owner balance via
+     `bank.GetBalance` and clamp the burn to it (`if bal.LT(amt) { amt = bal }`,
+     `keeper.go`). A stale cached balance here changes the burned amount on the
+     affected node only → supply != balances at `AssertSupplyInvariant`
+     (EndBlock).
+   - `MintIfNeeded` (BeginBlock, mint-interval blocks) and `mintAndDistribute`
+     read params + staking state and mint/send/burn; the same cache exposure
+     applies to those store reads.
+
+   `AssertSupplyInvariant` (EndBlock) is the **detector**, not the cause: it
+   iterates all balances vs `GetSupply` and halts the node if they disagree.
+   Disabling the inter-block cache forces every one of these reads through the
+   canonical store, removing the non-determinism. Follow-up: consider whether the
+   burn-clamp fallbacks should fail hard instead of silently clamping (per
+   `RULES.md` "no fallbacks"), so a bad balance read surfaces as a rejected tx
+   identically on all nodes rather than as a per-node supply drift.
+
+---
+
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
 
 Run these from your workstation, in order. Each step splits the problem space

@@ -581,12 +581,7 @@ def is_catchup_divergence(
       - >= 2 healthy peers are strictly ahead of us (the canonical chain moved on).
     PURE: no I/O, no clock — trivially unit-testable.
     """
-    return bool(
-        last_advance_age_s >= catchup_stall_s
-        and div_hit
-        and healthy_peers >= 2
-        and peer_max_height > local_h
-    )
+    return bool(last_advance_age_s >= catchup_stall_s and div_hit and healthy_peers >= 2 and peer_max_height > local_h)
 
 
 def decide_action(
@@ -810,16 +805,22 @@ def _emit_peer(p: dict) -> None:
         emit("PEER", ip=p["ip"], reachable=bool(p.get("reachable")), err=p.get("err", ""), rtt_ms=p.get("rtt_ms"))
 
 
-def _invoke(argv: list[str]) -> int | None:
+def _invoke(argv: list[str], reason: str | None = None) -> int | None:
     """Run a recovery subprocess WITHOUT piping its output, so recover.sh's
     progress streams live to the tmux pane. The full step-by-step trail lives
     in recover.sh's own daily log (child_log), cross-referenced here by pid."""
     child_log = f"{LOGS_DIR}/deploy/divergence_recovery-{datetime.now(timezone.utc):%Y-%m-%d}.log"
+    env = os.environ.copy()
+    if reason:
+        # recover.sh stamps RECOVERY_REASON into the pre-wipe forensic snapshot
+        # manifest, so a captured diverged DB is always traceable back to the
+        # watchdog trigger that decided to wipe it.
+        env["RECOVERY_REASON"] = f"watchdog:{reason}"
     try:
         # stdin from /dev/null: the watchdog runs in a tmux pane, so an inherited
         # TTY stdin would let recovery's background ssh take SIGTTIN and stop
         # (state T), which is unkillable by SIGTERM and wedges recovery forever.
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL)
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         emit("CRASH", where="invoke_spawn", argv=json.dumps(argv), err=repr(e))
         return None
@@ -1251,7 +1252,7 @@ def run(dry_run: bool) -> int:
                 continue
 
             # action is restart or peer-pull: execute.
-            code = _invoke(decision.argv)
+            code = _invoke(decision.argv, reason=decision.reason)
             stats["dispatches"][decision.action] = stats["dispatches"].get(decision.action, 0) + 1
             if decision.action == "restart":
                 recent_restarts.append(time.time())
@@ -1285,7 +1286,7 @@ def run(dry_run: bool) -> int:
                 for tag, kv in esc.emits:
                     emit(tag, **kv)
                 if esc.action == "peer-pull" and not dry_run:
-                    code2 = _invoke(esc.argv)
+                    code2 = _invoke(esc.argv, reason=esc.reason)
                     stats["dispatches"]["peer-pull"] += 1
                     post2 = get_status(LOCAL_RPC)
                     nh2 = None
