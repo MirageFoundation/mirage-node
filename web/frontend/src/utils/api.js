@@ -162,28 +162,40 @@ function withInboxLastViewed(params) {
 
 
 async function readErrorDetail(resp) {
-    if (!resp) return 'request failed';
+    if (!resp) return { detail: 'request failed', code: '' };
     const fallback = (resp.statusText && String(resp.statusText).trim()) || 'request failed';
     try {
         const ct = resp.headers && typeof resp.headers.get === 'function' ? (resp.headers.get('content-type') || '') : '';
         if (ct.includes('application/json') && typeof resp.json === 'function') {
             const payload = await resp.json();
             if (payload && typeof payload === 'object') {
+                // Preserve the backend's structured error_code so callers can map
+                // it to user-facing copy (e.g. node_catching_up) instead of
+                // collapsing every failure into a generic "client error".
+                const code = typeof payload.error_code === 'string' ? payload.error_code.trim() : '';
                 const message = typeof payload.message === 'string' ? payload.message.trim() : '';
-                if (message) return message;
+                if (message) return { detail: message, code };
                 const error = typeof payload.error === 'string' ? payload.error.trim() : '';
-                if (error) return error;
-                return JSON.stringify(payload);
+                if (error) return { detail: error, code };
+                return { detail: JSON.stringify(payload), code };
             }
         }
         if (typeof resp.text === 'function') {
             const text = (await resp.text()) || '';
-            if (text.trim()) return text.trim();
+            if (text.trim()) return { detail: text.trim(), code: '' };
         }
     } catch (_) {
         // Keep fallback message below
     }
-    return fallback;
+    return { detail: fallback, code: '' };
+}
+
+function buildHttpError(resp, detail, code) {
+    const status = resp && typeof resp.status === 'number' ? resp.status : 'ERR';
+    const err = new Error(`HTTP ${status}: ${detail}`);
+    if (code) err.error_code = code;
+    if (typeof status === 'number') err.status = status;
+    return err;
 }
 
 /**
@@ -217,8 +229,8 @@ async function get(path, params, options) {
                 return await resp.text();
             }
         }
-        const detail = await readErrorDetail(resp);
-        throw new Error(`HTTP ${resp && typeof resp.status === 'number' ? resp.status : 'ERR'}: ${detail}`);
+        const { detail, code } = await readErrorDetail(resp);
+        throw buildHttpError(resp, detail, code);
     } finally {
         clearTimeout(id);
     }
@@ -252,8 +264,8 @@ async function post(path, body, options) {
                 return await resp.text();
             }
         }
-        const detail = await readErrorDetail(resp);
-        throw new Error(`HTTP ${resp && typeof resp.status === 'number' ? resp.status : 'ERR'}: ${detail}`);
+        const { detail, code } = await readErrorDetail(resp);
+        throw buildHttpError(resp, detail, code);
     } finally {
         clearTimeout(id);
     }
