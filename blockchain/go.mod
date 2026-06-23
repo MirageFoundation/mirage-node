@@ -3,6 +3,11 @@ module mirage
 go 1.25.9
 
 replace (
+	// fix: upstream cosmossdk.io/store PruneStores prunes only IAVL versions and
+	// never deletes the rootmulti commit-info records (s/<version>), so they grow
+	// unbounded (one per block, fleet-wide). Patch adds bounded commit-info
+	// pruning. Consensus-safe: app hash uses the current commit-info only.
+	cosmossdk.io/store => ./patches/store
 	// force latest sonic version for Go 1.25 support
 	github.com/bytedance/sonic => github.com/bytedance/sonic v1.15.0
 	// fix: IAVL pruning fails on state-synced nodes with "version does not exist"
@@ -80,6 +85,7 @@ require (
 	connectrpc.com/connect v1.18.1 // indirect
 	connectrpc.com/otelconnect v0.7.2 // indirect
 	cosmossdk.io/schema v1.1.0 // indirect
+	cosmossdk.io/store v1.1.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/4meepo/tagalign v1.4.2 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect

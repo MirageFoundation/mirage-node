@@ -226,9 +226,16 @@ copied off-host and scanned with `analyze-db`:
   ~1.84 GB `application.db`, growing every block, fleet-wide (floor v3146400 =
   DB-creation height). The IAVL state itself is only ~85 MB (node pruning works).
   `min-retain-blocks=201600` is not the floor (2.1M ≫ 201600) and
-  `pruneSnapshotHeights` is healthy. Tracked as action item 12 in the 06-16
-  postmortem; fix needs a source-level read of the SDK rootmulti commit-info
-  prune path.
+  `pruneSnapshotHeights` is healthy. **Confirmed root cause:**
+  `cosmossdk.io/store@v1.1.2` `PruneStores()` prunes only IAVL versions and never
+  deletes commit-info (`s/<version>`); `flushCommitInfo` writes one per block, so
+  it grows unbounded fleet-wide. **Fixed (action item 12):** forked the store
+  module (`blockchain/patches/store`, `replace => ./patches/store`, like the iavl
+  patch) and added `pruneCommitInfo` to `PruneStores` — each prune pass deletes
+  `s/<v>` for `v < pruningHeight`, capped at 20000/pass so the historical backlog
+  drains gradually. Consensus-safe (the app hash uses the *current* commit-info).
+  The fix is consensus-neutral, so nodes draining the backlog at different rates
+  is fine. After deploy, expect `application.db` to shrink as the backlog clears.
 
 ---
 
