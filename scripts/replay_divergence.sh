@@ -167,13 +167,37 @@ if [[ -n "$HEALTHY" ]]; then
 fi
 
 echo "------------------------------------------------------------"
-if grep -qE '>>> (PRUNING APPEARS BROKEN|BUG CONFIRMED)' "$DIV_REPORT"; then
-	echo "VERDICT: pruning anomaly PRESENT in the diverged DB — consistent with the"
-	echo "         prune-race hypothesis (§0.1). Next: pin the diverging key, then run"
-	echo "         the behavioral A/B (replay_divergence.sh --procedure)."
+# IMPORTANT (2026-06-22): analyze-db's ">>> PRUNING APPEARS BROKEN" line counts
+# the cosmos-sdk commit-info store (s/<version>) and fires whenever that store
+# holds far more than ~1000 records. We confirmed on real snapshots that a
+# HEALTHY mirage-1 peer carries the SAME bloat (2.39M commit-info records from
+# version floor 3146400) as a DIVERGED node (2.13M, same floor). So that line
+# alone is NOT diagnostic of divergence — it reflects a fleet-wide commit-info
+# pruning bug, present on nodes that never diverged. Only a DIVERGED-vs-HEALTHY
+# DELTA is suggestive, and even then this static scan cannot see the
+# load-triggered IAVL node-level prune race that the §0.1 hypothesis is about
+# (that needs the behavioral A/B under concurrent read load, --procedure).
+div_commit="$(grep -E '^Count:' "$DIV_REPORT" | head -1 | grep -oE '[0-9]+' | head -1 || echo '?')"
+div_floor="$(grep -E '^Version range:' "$DIV_REPORT" | head -1 | grep -oE '[0-9]+' | head -1 || echo '?')"
+echo "commit-info store (s/<version>) — diverged: count=${div_commit} floor=${div_floor}"
+if [[ -n "$HEALTHY" ]]; then
+	heal_commit="$(grep -E '^Count:' "$HEAL_REPORT" | head -1 | grep -oE '[0-9]+' | head -1 || echo '?')"
+	heal_floor="$(grep -E '^Version range:' "$HEAL_REPORT" | head -1 | grep -oE '[0-9]+' | head -1 || echo '?')"
+	echo "commit-info store (s/<version>) — healthy:  count=${heal_commit} floor=${heal_floor}"
+	if [[ "$div_floor" == "$heal_floor" ]]; then
+		echo "VERDICT: diverged and healthy share the SAME commit-info floor (${div_floor})."
+		echo "         The commit-info bloat is FLEET-WIDE, not divergence-specific, and does"
+		echo "         NOT implicate pruning in this divergence. Investigate the read path and"
+		echo "         the load-triggered IAVL node race via the behavioral A/B (--procedure)."
+	else
+		echo "VERDICT: commit-info floors DIFFER (diverged=${div_floor} healthy=${heal_floor})."
+		echo "         A real divergence-specific pruning delta — pin the diverging store/key,"
+		echo "         then run the behavioral A/B (--procedure)."
+	fi
 else
-	echo "VERDICT: no gross pruning anomaly flagged in the diverged DB. The diverging"
-	echo "         key may sit in a read-path (fast-node) surface instead. Inspect the"
-	echo "         per-store ranges above and run the behavioral A/B (--procedure)."
+	echo "VERDICT: inconclusive without a --healthy baseline. The raw commit-info count is"
+	echo "         NOT diagnostic on its own (a healthy peer shows the same bloat). Re-run"
+	echo "         with --healthy <peer-snapshot> to get a meaningful diverged-vs-healthy"
+	echo "         delta, and run the behavioral A/B (--procedure) for the load-triggered race."
 fi
 echo "Reports written to: $OUT_DIR"

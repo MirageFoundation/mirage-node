@@ -192,6 +192,44 @@ conviction.** Honest status of the pruning work, so nobody mistakes it for a cur
   procedure documented in that script's header. **Until that runs, the pruning
   fork is a suspect, not the culprit.**
 
+#### 0.2.1 First real-snapshot scan run — pruning-bloat hypothesis NOT supported (2026-06-22)
+
+The static half of the above finally ran against **real** snapshots (the 06-16
+diverged DB was gone — that recovery kept only `priv_validator_state.json` — but
+the **06-12** incident's full diverged DB was preserved as
+`data.preheal-20260612T164034Z`, h**5280037**, same divergence class). Both the
+diverged DB and a current **healthy** peer (139.59.9.96, never diverged) were
+copied off-host and scanned with `analyze-db`:
+
+| snapshot | commit-info (`s/<version>`) count | version floor |
+|---|---|---|
+| diverged (06-12, h5280037) | 2,133,637 | **3146400** |
+| healthy (139.59.9.96, h5532429) | 2,386,030 | **3146400** |
+
+- **Result:** the "PRUNING APPEARS BROKEN" signal (commit-info store far larger
+  than `keep-recent`) is present on the **healthy** node too, with the **same
+  version floor**. So it is **fleet-wide, not divergence-specific**, and **does
+  not implicate pruning in the divergence.** `replay_divergence.sh` was corrected
+  so its verdict no longer reads a standalone commit-info count as "consistent
+  with the prune-race hypothesis" — it now requires a diverged-vs-healthy floor
+  delta and says so.
+- **What this does and does not mean:** it rules out *commit-info bloat* as the
+  culprit. It does **not** refute the IAVL *node-level* prune race (deleting/
+  serving inconsistent nodes under concurrent reads) — a static count cannot see
+  a transient, load-triggered race. That still needs the behavioral A/B under the
+  prod-only concurrent read load (`replay_divergence.sh --procedure`), which needs
+  a snapshot whose blocks H..H+2 are locally replayable. **Still the honest
+  bottom line: the pruning fork remains a suspect, not the culprit — and the
+  cheap static evidence now leans *against* the bloat theory.**
+- **Side discovery (the real disk-growth driver):** the cosmos-sdk commit-info
+  store (`s/<version>`, ~848 B/height) is **never pruned** — ~1.83 GB of the
+  ~1.84 GB `application.db`, growing every block, fleet-wide (floor v3146400 =
+  DB-creation height). The IAVL state itself is only ~85 MB (node pruning works).
+  `min-retain-blocks=201600` is not the floor (2.1M ≫ 201600) and
+  `pruneSnapshotHeights` is healthy. Tracked as action item 12 in the 06-16
+  postmortem; fix needs a source-level read of the SDK rootmulti commit-info
+  prune path.
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
