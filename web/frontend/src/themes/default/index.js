@@ -53,6 +53,7 @@ import ChangeUsernameView from './routes/ChangeUsernameView';
 import CreateAccountView from './routes/CreateAccountView';
 import CreatePostView from './routes/CreatePostView';
 import DiscoverView from './routes/DiscoverView';
+import FAQView from './routes/FAQView';
 import FollowsView from './routes/FollowsView';
 import InboxView from './routes/InboxView';
 import LoginView from './routes/LoginView';
@@ -123,6 +124,7 @@ const routes = {
     CreateAccountView,
     CreatePostView,
     DiscoverView,
+    FAQView,
     FollowsView,
     InboxView,
     LoginView,

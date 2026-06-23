@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 
 /**
@@ -65,7 +66,7 @@ const FOUNDATION_URL = 'https://mirage.foundation';
 const ROW_ONE = [
     { label: 'About Mirage', href: `${FOUNDATION_URL}/#about` },
     { label: 'Docs', href: `${FOUNDATION_URL}/docs` },
-    { label: 'FAQ', href: `${FOUNDATION_URL}/faq` },
+    { label: 'FAQ', to: '/faq' },
 ];
 const ROW_TWO = [
     { label: 'X.com', href: 'https://x.com/getmirage' },
@@ -76,8 +77,10 @@ export default function FeedRightRail() {
     return (
         <RailRoot aria-label="Mirage links">
             <LinksRow>
-                {ROW_ONE.map(({ label, href }) => (
-                    <RailLink key={label} href={href} target="_blank" rel="noopener noreferrer">{label}</RailLink>
+                {ROW_ONE.map(({ label, href, to }) => (
+                    to
+                        ? <RailLink key={label} as={Link} to={to}>{label}</RailLink>
+                        : <RailLink key={label} href={href} target="_blank" rel="noopener noreferrer">{label}</RailLink>
                 ))}
             </LinksRow>
             <LinksRow>

@@ -1923,6 +1923,7 @@ const MainView = ({
                                 links={[
                                     { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
                                     { label: 'Learn More', href: 'https://mirage.foundation', external: true },
+                                    { label: 'FAQ', href: '/faq' },
                                 ]}
                                 primaryLabel="Create account"
                                 secondaryLabel="Sign in"
@@ -1967,7 +1968,7 @@ const MainView = ({
                         </ModernPostFeed>
                     </MainFeedPanel>
                 </FeedCol>
-                {isLoggedIn && <FeedRightRail />}
+                <FeedRightRail />
             </FeedRailRow>
 
             {/* Invite Code Modal */}

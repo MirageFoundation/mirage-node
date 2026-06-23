@@ -893,6 +893,8 @@ function GuestMenu() {
                             </svg>
                         </ModeIconButton>
                     </ModeTrack>
+                    <MenuDivider />
+                    <MenuItem to="/faq" onClick={() => setOpen(false)}>FAQ</MenuItem>
                 </Dropdown>
             )}
         </UserMenuWrapper>
@@ -964,6 +966,7 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
                 </>
             )}
             <MenuDivider />
+            <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuButton type="button" onClick={handleSignOutClick}>Sign out</MenuButton>
         </>
     );

@@ -14,6 +14,8 @@ import {
     HiOutlineMagnifyingGlass,
     HiUserGroup,
     HiOutlineUserGroup,
+    HiQuestionMarkCircle,
+    HiOutlineQuestionMarkCircle,
     HiChevronDown,
 } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
@@ -242,6 +244,7 @@ const icons = {
     create: { outline: HiOutlinePlusCircle, filled: HiPlusCircle },
     search: { outline: HiOutlineMagnifyingGlass, filled: HiMagnifyingGlass },
     agents: { outline: HiOutlineUserGroup, filled: HiUserGroup },
+    faq: { outline: HiOutlineQuestionMarkCircle, filled: HiQuestionMarkCircle },
 };
 
 function isActivePath(pathname, target) {
@@ -472,6 +475,12 @@ function Sidebar({ state }) {
                     </Section>
                 </>
             )}
+
+            <SectionDivider />
+
+            <Section>
+                <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
+            </Section>
 
         </Aside>
     );
