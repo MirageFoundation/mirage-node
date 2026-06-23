@@ -21,7 +21,7 @@ from pathlib import Path
 
 from deploy.migrations._helpers import backup_file
 
-MIGRATION_KEY = "v1.28.1-disable-inter-block-cache"
+MIGRATION_KEY = "v1.28.2-disable-inter-block-cache"
 DESCRIPTION = "Force inter-block-cache=false in node app.toml (divergence mitigation)"
 
 TARGET_LINE = "inter-block-cache = false"

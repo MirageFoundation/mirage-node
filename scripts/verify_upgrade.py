@@ -1,37 +1,29 @@
 #!/usr/bin/env python3
 """
-Post-upgrade verification for v1.28.0.
+Post-deploy verification for v1.28.2.
 
-Only v1.28.0-specific checks are included. Generic prior-upgrade checks
+Only v1.28.2-specific checks are included. Generic prior-upgrade checks
 have been removed per the /upgrade workflow: keep only checks needed to
-validate THIS upgrade.
+validate THIS release.
 
-What v1.28.0 actually changes
+What v1.28.2 actually changes
 -----------------------------
-This is the Cosmos SDK v0.54 / CometBFT v0.39 release-family migration. It
-adopts the upstream Commit/Query state-race fix (cosmos-sdk #24655: atomic
-lastCommitInfo + serialized Commit vs query-context creation in store/v2
-rootmulti), rebases the vendored IAVL fork to v1.2.8 (nodeDB sync.RWMutex +
-deferred fast-node cache), and removes the dormant x/group and x/circuit
-modules (their KV stores are deleted at the upgrade height via StoreUpgrades).
+This is a rolling PATCH release (no on-chain upgrade handler, no governance
+proposal, no chain halt) — every change is consensus-neutral, halt-on-error,
+disk-GC, or pure ops. The deploy-visible effects this script verifies:
 
-No application state migration is required: store/v2 reuses the same on-disk
-IAVL v1.2.x format. The change is consensus-breaking and must activate at one
-coordinated height across validators.
+  1. inter-block-cache = false in node app.toml (divergence mitigation,
+     applied by deploy/migrations/v1_28_2_disable_inter_block_cache.py).
+  2. iavl-disable-fastnode = true is still enforced (carried divergence knob).
+  3. The chain is live after the rolling restart (indexer freshness).
+  4. The shipped binary/frontend reports the release version.
 
-Checks
-------
-  1. Required environment variables are set (DB URLs)
-  2. Database connectivity (backend + indexer RO)
-  3. Upgrade handler ran:
-       - node logs contain "Starting upgrade to v1.28.0"
-       - node logs contain "Upgrade to v1.28.0 complete"
-       - node logs contain the post-migration params validation line
-  4. x/group and x/circuit stores were deleted (node log signature)
-  5. Runtime config hardening is active:
-       - app.toml contains iavl-disable-fastnode = true
-  6. Chain liveness post-upgrade (indexer freshness)
-  7. Frontend version cross-check (version.txt == v1.28.0).
+Not verified here (no runtime signature):
+  - store/v2 commit-info pruning drains over many prune passes; it is exercised
+    by rootmulti/commit_info_prune_test.go, not observable in a point check.
+  - consensus-path fail-fast reads + IAVL prune-hole guard only fire on an
+    actual storage error; covered by Go tests (never_halt_test.go,
+    nodedb_prune_fail_fast_test.go).
 
 Usage:
   python scripts/verify_upgrade.py                     # inside container
@@ -56,11 +48,8 @@ except ImportError:
     sys.exit(1)
 
 
-# Constants tied to THIS upgrade. If they change, this file must change.
-UPGRADE_NAME = "v1.28.0"
-
-# Modules removed in v1.28.0; their KV stores are deleted at the upgrade height.
-REMOVED_MODULES = ("group", "circuit")
+# Constant tied to THIS release. If it changes, this file must change.
+RELEASE_VERSION = "v1.28.2"
 
 
 passed = 0
@@ -103,154 +92,71 @@ def require_env(key: str) -> str:
     return val
 
 
-def ensure_local_url(name: str, raw: str) -> None:
-    parsed = urlparse(raw)
-    host = (parsed.hostname or "").lower()
-    if host not in {"127.0.0.1", "localhost"}:
-        raise RuntimeError(f"{name} must be local (got host={host})")
+# ─── app.toml discovery ───────────────────────────────────────────────
 
 
-# ─── Log discovery ────────────────────────────────────────────────────
-
-
-def find_latest_log(log_dir: Path) -> Path:
-    logs = sorted(log_dir.glob("*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
-    if not logs:
-        raise RuntimeError(f"no log files found in {log_dir}")
-    return logs[0]
-
-
-def read_all_logs(log_dir: Path) -> str:
-    """Concatenate every *.log in the dir so rotation cannot hide a marker.
-
-    Used by checks that must fail hard (not warn) when a required signature is
-    absent: searching all rotated files makes a false negative due to rotation
-    effectively impossible."""
-    logs = sorted(log_dir.glob("*.log"), key=lambda path: path.stat().st_mtime)
-    if not logs:
-        raise RuntimeError(f"no log files found in {log_dir}")
-    return "\n".join(p.read_text(errors="ignore") for p in logs)
-
-
-def resolve_node_log_dir() -> Path:
-    """Resolve node log directory across local + container layouts."""
-    explicit = os.environ.get("NODE_LOG_DIR", "").strip()
-    if explicit:
-        p = Path(explicit).expanduser()
-        if p.exists():
-            return p
-        raise RuntimeError(f"NODE_LOG_DIR set but path does not exist: {p}")
-
-    node_home_raw = os.environ.get("NODE_HOME", "").strip()
-    node_home = Path(node_home_raw).expanduser() if node_home_raw else Path.home() / ".mirage" / "node"
-
-    candidates = [
-        node_home / "logs" / "node",
-        node_home / "logs",
-        Path.home() / ".mirage" / "node" / "logs" / "node",
-        Path.home() / ".mirage" / "logs" / "node",
-        Path("/root/.mirage/node/logs/node"),
-        Path("/root/.mirage/logs/node"),
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-
-    tried = ", ".join(str(c) for c in candidates)
-    raise RuntimeError(f"node log dir not found; tried: {tried}")
-
-
-# ─── v1.28.0 checks ──────────────────────────────────────────────────
-
-
-def check_upgrade_handler_ran() -> None:
-    try:
-        log_dir = resolve_node_log_dir()
-    except Exception as exc:
-        fail(str(exc))
-        return
-    try:
-        log_path = find_latest_log(log_dir)
-    except Exception as exc:
-        fail(str(exc))
-        return
-
-    content = log_path.read_text(errors="ignore")
-    start_marker = f"Starting upgrade to {UPGRADE_NAME}"
-    done_marker = f"Upgrade to {UPGRADE_NAME} complete"
-    params_marker = f"{UPGRADE_NAME}: params validated post-migration"
-
-    if start_marker in content:
-        ok(f"{start_marker!r} present in node log")
-    else:
-        warn(f"{start_marker!r} not found in latest node log (may be in a rotated older file)")
-
-    if done_marker in content:
-        ok(f"{done_marker!r} present in node log")
-    else:
-        fail(f"{done_marker!r} not found — upgrade handler may not have run cleanly")
-
-    if params_marker in content:
-        ok(f"{params_marker!r} present in node log (post-migration params validation passed)")
-    else:
-        warn(
-            f"{params_marker!r} not found — handler may have run but the post-migration "
-            f"params sanity log line was not emitted (rotated log?)"
-        )
-
-
-def check_modules_removed() -> None:
-    """Confirm x/group and x/circuit were removed at the upgrade height.
-
-    The v1.28.0 completion log line states the modules were removed. Only the
-    v0.54 binary lacks these modules, so this line proves the binary that ran the
-    handler also registered the StoreUpgrades.Deleted store loader that drops the
-    group/circuit substores. This is a fail-hard check (no silent warn), and it
-    scans every rotated log so rotation cannot mask a real success."""
-    try:
-        log_dir = resolve_node_log_dir()
-        content = read_all_logs(log_dir)
-    except Exception as exc:
-        fail(str(exc))
-        return
-
-    removal_marker = "x/group and x/circuit removed"
-    if removal_marker in content:
-        ok(f"{removal_marker!r} present in node logs (module removal completed)")
-    else:
-        fail(
-            f"{removal_marker!r} not found in any node log — the v1.28.0 module-removal "
-            f"handler did not run on this binary"
-        )
-
-
-def check_fastnode_disabled() -> None:
+def find_app_toml() -> Path | None:
     candidates = [
         Path("/root/.mirage/node/config/app.toml"),
         Path.home() / ".mirage" / "node" / "config" / "app.toml",
         Path.cwd() / "main" / "config" / "app.toml",
     ]
     for path in candidates:
-        if not path.exists():
-            continue
-        content = path.read_text(errors="ignore")
-        m = re.search(r"(?m)^\s*iavl-disable-fastnode\s*=\s*(true|false)\s*$", content)
-        if not m:
-            fail(f"app.toml missing iavl-disable-fastnode ({path})")
-            return
-        if m.group(1) != "true":
-            fail(f"app.toml has iavl-disable-fastnode={m.group(1)} (expected true) ({path})")
-            return
-        ok(f"app.toml enforces iavl-disable-fastnode=true ({path})")
+        if path.exists():
+            return path
+    return None
+
+
+def _read_toml_bool(content: str, key: str) -> str | None:
+    m = re.search(rf"(?m)^\s*{re.escape(key)}\s*=\s*(true|false)\s*$", content)
+    return m.group(1) if m else None
+
+
+# ─── v1.28.2 checks ──────────────────────────────────────────────────
+
+
+def check_inter_block_cache_disabled() -> None:
+    """The primary v1.28.2 mitigation: the shared cross-block CommitKVStore
+    cache must be off on disk so the next/already-applied restart runs without
+    it. Fail hard — this is the headline change."""
+    path = find_app_toml()
+    if path is None:
+        fail("app.toml not found in known locations; cannot verify inter-block-cache")
         return
-    fail("app.toml not found in known locations; cannot verify iavl-disable-fastnode")
+    content = path.read_text(errors="ignore")
+    val = _read_toml_bool(content, "inter-block-cache")
+    if val is None:
+        # Absent means the SDK default (enabled) applies — the migration should
+        # have inserted an explicit false. Treat as failure.
+        fail(f"app.toml has no inter-block-cache key (SDK default is ENABLED) ({path})")
+        return
+    if val != "false":
+        fail(f"app.toml has inter-block-cache={val} (expected false) ({path})")
+        return
+    ok(f"app.toml enforces inter-block-cache=false ({path})")
+
+
+def check_fastnode_disabled() -> None:
+    """Carried divergence knob from v1.27/v1.28.0 — must remain enforced."""
+    path = find_app_toml()
+    if path is None:
+        fail("app.toml not found in known locations; cannot verify iavl-disable-fastnode")
+        return
+    content = path.read_text(errors="ignore")
+    val = _read_toml_bool(content, "iavl-disable-fastnode")
+    if val is None:
+        fail(f"app.toml missing iavl-disable-fastnode ({path})")
+        return
+    if val != "true":
+        fail(f"app.toml has iavl-disable-fastnode={val} (expected true) ({path})")
+        return
+    ok(f"app.toml enforces iavl-disable-fastnode=true ({path})")
 
 
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
-    """Post-upgrade liveness proof for the v1.28.0 SDK v0.54 migration.
-    If the chain is producing fresh blocks after activation, the store/v2
-    Commit/Query path and rebased IAVL read path are executing without a fatal
-    app-hash mismatch."""
+    """Post-restart liveness proof. If the chain is producing fresh blocks
+    after the rolling restart, the consensus-neutral changes (store/v2 prune,
+    fail-fast reads, cache disable) are executing without a fatal mismatch."""
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
         row = cur.fetchone()
@@ -283,11 +189,9 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
 
 
 def check_binary_version() -> None:
-    """Cross-check that the frontend version.txt (shipped with this
-    release) reports the upgrade target. Cheap proxy for 'we shipped the
-    correct binary'."""
-    # Built artifact (what the deploy actually ships) is checked first;
-    # source-tree `public/` is the fallback for pre-build local runs.
+    """Cross-check that the frontend version.txt (shipped with this release)
+    reports the release version. Cheap proxy for 'we shipped the correct
+    binary'."""
     candidates = [
         Path("/opt/mirage/web/frontend/build/version.txt"),
         Path("/opt/mirage/web/frontend/public/version.txt"),
@@ -300,10 +204,10 @@ def check_binary_version() -> None:
         if not p.exists():
             continue
         actual = p.read_text().strip()
-        if actual == UPGRADE_NAME:
+        if actual == RELEASE_VERSION:
             ok(f"version.txt reports {actual} ({p})")
             return
-        fail(f"version.txt at {p} reports {actual!r}, expected {UPGRADE_NAME!r}")
+        fail(f"version.txt at {p} reports {actual!r}, expected {RELEASE_VERSION!r}")
         return
     warn("version.txt not found in any known location; skipping frontend version cross-check")
 
@@ -315,7 +219,7 @@ def main() -> None:
     global passed, failed, warnings
 
     print("=" * 60)
-    print(f"  Mirage Post-Upgrade Verification ({UPGRADE_NAME})")
+    print(f"  Mirage Post-Deploy Verification ({RELEASE_VERSION})")
     print("=" * 60)
 
     section("1. Environment Variables")
@@ -346,19 +250,16 @@ def main() -> None:
         print("\nFATAL: Cannot proceed without database connections")
         sys.exit(1)
 
-    section(f"3. Upgrade Handler ({UPGRADE_NAME})")
-    check_upgrade_handler_ran()
+    section("3. inter-block-cache disabled (v1.28.2 mitigation)")
+    check_inter_block_cache_disabled()
 
-    section("4. Removed Modules (x/group, x/circuit)")
-    check_modules_removed()
-
-    section("5. Runtime Config Hardening")
+    section("4. iavl-disable-fastnode still enforced")
     check_fastnode_disabled()
 
-    section("6. Chain Liveness")
+    section("5. Chain Liveness")
     check_indexer_freshness(indexer_conn)
 
-    section("7. Binary Version Cross-Check")
+    section("6. Binary Version Cross-Check")
     check_binary_version()
 
     if backend_conn:

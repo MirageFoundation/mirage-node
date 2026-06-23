@@ -53,7 +53,7 @@ Three changes landed in response (all repo-side, no chain upgrade):
 
 1. **`inter-block-cache = false`** in `deploy/templates/node/app.toml`, applied
    to already-deployed nodes by migration
-   `deploy/migrations/v1_28_1_disable_inter_block_cache.py` (config-only, picked
+   `deploy/migrations/v1_28_2_disable_inter_block_cache.py` (config-only, picked
    up on the next miraged restart — rolling, low risk). The inter-block cache is
    a shared, mutable-across-blocks `CommitKVStore` cache and is the most likely
    remaining non-deterministic read surface. This was the Plan-A mitigation that
