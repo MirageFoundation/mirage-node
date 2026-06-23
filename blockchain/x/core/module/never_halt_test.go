@@ -2,8 +2,10 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
 	"mirage/x/core/types"
@@ -106,9 +108,14 @@ func TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease(t *
 // node only — the previous "log and continue" let one node skip mutations
 // that peers performed, producing app-hash divergence on the next round.
 //
-// PruneExpiredNonces and GetPoWMessageCount also iterate from EndBlock but
-// are non-consensus-critical (their failure paths log and continue without
-// state mutation). The blocking case is the subscriptions iterator.
+// PruneExpiredNonces also iterates from EndBlock but is non-consensus-critical:
+// it only deletes expired entries (a write whose failure logs and continues
+// without diverging state). GetPoWMessageCount, by contrast, is a
+// consensus-critical READ — its sliding-window sum feeds SetCurrentDifficulty,
+// so a raw store.Get failure there now fails fast
+// (CONSENSUS_FATAL:POW_COUNT_STORE_GET) rather than silently undercounting on
+// one node. See TestConsensusReadsPanicOnStoreGetFailure. The blocking case in
+// this test is the subscriptions iterator.
 func TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -237,4 +244,96 @@ func TestMintIfNeededPanicsOnParamsStoreGetFailure(t *testing.T) {
 	require.Panics(t, func() {
 		_ = mk.MintIfNeeded(ctx)
 	}, "MintIfNeeded must panic on store.Get failure for params")
+}
+
+// --- Difficulty / PoW-count / nonce reads: fail fast on store.Get error ----
+
+// requirePanicContains asserts fn panics and the recovered value's string form
+// contains substr. We can't use require.PanicsWithError because the tagged
+// messages embed runtime context (height, wrapped err) that we don't want to
+// pin verbatim — a substring match on the CONSENSUS_FATAL tag is the stable
+// contract.
+func requirePanicContains(t *testing.T, substr string, fn func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		require.NotNil(t, r, "expected panic containing %q, got none", substr)
+		require.Contains(t, fmt.Sprint(r), substr)
+	}()
+	fn()
+}
+
+// TestConsensusReadsPanicOnStoreGetFailure pins the fail-fast contract for the
+// difficulty / PoW-count / envelope-nonce read family. Each of these reads
+// feeds a consensus decision — the PoW tx-acceptance threshold (ante) or the
+// difficulty the chain writes in EndBlock — so a swallowed store.Get error that
+// returns a default/false on ONE node silently forks its app hash from peers'.
+// That is the mirage.talk divergence class. A raw store.Get failure must now
+// halt loudly (recoverable via the divergence watchdog) instead.
+//
+// These panics fire ONLY on a store.Get *error*, never on a legitimately absent
+// key: the "absent key -> default" behavior is unchanged and is exercised by the
+// rest of the suite (newMockKeeper seeds no difficulty/nonce, yet those reads
+// resolve to their defaults without panicking).
+func TestConsensusReadsPanicOnStoreGetFailure(t *testing.T) {
+	// ctx height is 100; powMessageCountKey(100) is the last (always in-window)
+	// iteration of the sliding-window sum, so failing it always triggers.
+	const powKey = "pow_msg_count:100"
+	// Matches keeper: fmt.Sprintf("%s%x/%d", EnvelopeNoncePrefix, []byte{0xab,0xcd}, 7).
+	const nonceKey = "envelope_nonce/abcd/7"
+
+	cases := []struct {
+		name    string
+		failKey string
+		tag     string
+		invoke  func(mk *mockKeeper, ctx sdk.Context)
+	}{
+		{"GetCurrentDifficulty", "current_difficulty", "CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetCurrentDifficulty(ctx) }},
+		{"HasCurrentDifficulty", "current_difficulty", "CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.HasCurrentDifficulty(ctx) }},
+		{"GetPreviousDifficulty", "prev_difficulty", "CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetPreviousDifficulty(ctx) }},
+		{"GetLastDifficultyChangeHeight", "last_diff_change_height", "CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetLastDifficultyChangeHeight(ctx) }},
+		{"GetConsecutiveLowUsage", "consecutive_low_usage", "CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetConsecutiveLowUsage(ctx) }},
+		{"GetPoWMessageCount", powKey, "CONSENSUS_FATAL:POW_COUNT_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetPoWMessageCount(ctx, types.DefaultParams()) }},
+		{"RecordPoWMessage", powKey, "CONSENSUS_FATAL:POW_COUNT_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.RecordPoWMessage(ctx) }},
+		{"HasEnvelopeNonce", nonceKey, "CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.HasEnvelopeNonce(ctx, []byte{0xab, 0xcd}, 7) }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mk := newMockKeeper()
+			ctx := newMockContext()
+			mk.storeService.getErrors = map[string]error{
+				tc.failKey: errors.New("simulated store.Get failure"),
+			}
+			requirePanicContains(t, tc.tag, func() { tc.invoke(mk, ctx) })
+		})
+	}
+}
+
+// TestConsensusReadsReturnDefaultsOnAbsentKey is the companion guard: with NO
+// store errors injected and the keys simply absent, the same reads must NOT
+// panic and must return their documented defaults. This pins that the fail-fast
+// change is narrowly scoped to store.Get *errors* and did not regress the
+// legitimate empty-store path.
+func TestConsensusReadsReturnDefaultsOnAbsentKey(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	require.NotPanics(t, func() {
+		require.Equal(t, uint64(0), mk.GetCurrentDifficulty(ctx), "absent difficulty -> base (0)")
+		require.False(t, mk.HasCurrentDifficulty(ctx), "absent difficulty -> Has=false")
+		require.Equal(t, uint64(0), mk.GetPreviousDifficulty(ctx), "absent prev -> current (base 0)")
+		require.Equal(t, int64(0), mk.GetLastDifficultyChangeHeight(ctx), "absent change height -> 0")
+		require.Equal(t, uint64(0), mk.GetConsecutiveLowUsage(ctx), "absent calm seq -> 0")
+		require.Equal(t, uint64(0), mk.GetPoWMessageCount(ctx, types.DefaultParams()), "no messages -> 0")
+		require.False(t, mk.HasEnvelopeNonce(ctx, []byte{0xab, 0xcd}, 7), "absent nonce -> not seen")
+	})
 }

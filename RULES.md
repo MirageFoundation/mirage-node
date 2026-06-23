@@ -56,6 +56,16 @@
   - NEVER set `authority` to the user's address
   - User's address is derived from `envelope_pubkey`
 
+### Node Recovery — ALWAYS Snapshot Diverged State Before Wiping
+
+**HARD RULE (NON-NEGOTIABLE): Never destroy a diverged chain DB without first preserving it.**
+
+- A divergence/AppHash-mismatch recovery (peer-pull, state-sync, manual wipe) MUST take a forensic snapshot of the diverged chain DBs BEFORE any wipe.
+- This is enforced in `scripts/recover.sh` at the single wipe chokepoint (`wipe_chain_dbs` → `snapshot_diverged_state`). The diverged DBs are moved into `/root/.mirage/.divergence_forensics/<utc>-h<height>/` (rename = instant + lossless) with a `MANIFEST.txt` (height, app_hash, version, mode).
+- It is NOT gated by `--force`, NOT optional, and applies to BOTH automated (watchdog) and manual recovery. The diverged state is the single most valuable artifact for root-causing the divergence (replay the offending block).
+- If you ever add a new recovery path that removes chain DBs, it MUST route through `wipe_chain_dbs` (or call `snapshot_diverged_state` first). Without the diverged DB, the divergence cannot be diagnosed — getting back online fast is no excuse for losing it.
+- Retention is bounded by `FORENSIC_KEEP` (default 2). Tune via env, never disable the capture.
+
 ### Client IP — Trusted Sources Only
 
 - **NEVER trust `X-Forwarded-For`** — trivially spoofable by the client.

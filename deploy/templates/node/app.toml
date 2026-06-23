@@ -38,10 +38,17 @@ app-db-backend = "${APP_DB_BACKEND:-goleveldb}"
 # deterministically. See docs/troubleshooting/divergence-recovery.md.
 iavl-disable-fastnode = true
 
-# inter-block-cache is left at the SDK default (enabled). The Commit<->Query
-# state race that drove the mirage.talk divergences is fixed upstream in SDK
-# v0.54 store/v2 (#24655: atomic lastCommitInfo + state-manager serialization),
-# so the cache no longer needs to be disabled as a mitigation.
+# inter-block-cache is DISABLED. Even after the SDK v0.54 store/v2 Commit<->Query
+# fixes (#24655: atomic lastCommitInfo + state-manager serialization), a single
+# node diverged again at h5522659 on a MsgVote with a supply-invariant violation
+# (recorded supply != sum of balances) — a money-conservation break that the
+# upstream race fix does not cover. The inter-block cache is a shared,
+# mutable-across-blocks CommitKVStore cache layer and is the most likely
+# remaining surface for a non-deterministic read during tx execution. We force
+# every read through the canonical store (no cross-block cache) so execution is
+# deterministic. Config-only; read by server.DefaultBaseappOptions, no binary
+# change. See docs/troubleshooting/divergence-recovery.md.
+inter-block-cache = false
 
 [api]
 enable = true

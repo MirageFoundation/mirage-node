@@ -40,6 +40,216 @@ gated by `WATCHDOG_AUTORECOVER=true`, which should be set on exactly one host
 
 ---
 
+## 0. 2026-06-22 — supply-invariant divergence (h5522659) + mitigations
+
+A single node diverged at **height 5522659** on a `MsgVote` tx with
+`CONSENSUS_FATAL:SUPPLY_INVARIANT` (recorded supply != sum of balances). This
+was **after** the v1.28.0 upgrade (SDK v0.54 store/v2 + #24655 atomic
+lastCommitInfo / state-manager serialization), so the upstream Commit↔Query
+race fix did **not** cover it. A money-conservation break on one node only is
+the signature of a non-deterministic read during tx execution.
+
+Three changes landed in response (all repo-side, no chain upgrade):
+
+1. **`inter-block-cache = false`** in `deploy/templates/node/app.toml`, applied
+   to already-deployed nodes by migration
+   `deploy/migrations/v1_28_2_disable_inter_block_cache.py` (config-only, picked
+   up on the next miraged restart — rolling, low risk). The inter-block cache is
+   a shared, mutable-across-blocks `CommitKVStore` cache and is the most likely
+   remaining non-deterministic read surface. This was the Plan-A mitigation that
+   was previously skipped.
+
+2. **Always-on pre-wipe forensic snapshot.** `recover.sh` now preserves the
+   diverged chain DBs into `/root/.mirage/.divergence_forensics/<utc>-h<height>/`
+   **before** any wipe, at the single `wipe_chain_dbs` chokepoint (so both
+   peer-pull and state-sync are covered, automated or manual, regardless of
+   `--force`). The watchdog passes `RECOVERY_REASON=watchdog:<trigger>` so the
+   capture's `MANIFEST.txt` is traceable. Retention is bounded by `FORENSIC_KEEP`
+   (default 2). **Never wipe a diverged DB without a snapshot** — it is the only
+   artifact that lets us replay the offending block. See `RULES.md`.
+
+3. **MsgVote → mint/burn audit.** The cache-sensitive reads on the vote path
+   are the balance reads that *clamp* a burn/spend amount:
+   - `deductRelayGasFee` (paid voters) → `BurnFromModuleAmount` /
+     `DeductFeeFromOwner`, which read the module/owner balance via
+     `bank.GetBalance` and clamp the burn to it (`if bal.LT(amt) { amt = bal }`,
+     `keeper.go`). A stale cached balance here changes the burned amount on the
+     affected node only → supply != balances at `AssertSupplyInvariant`
+     (EndBlock).
+   - `MintIfNeeded` (BeginBlock, mint-interval blocks) and `mintAndDistribute`
+     read params + staking state and mint/send/burn; the same cache exposure
+     applies to those store reads.
+
+   `AssertSupplyInvariant` (EndBlock) is the **detector**, not the cause: it
+   iterates all balances vs `GetSupply` and halts the node if they disagree.
+   Disabling the inter-block cache forces every one of these reads through the
+   canonical store, removing the non-determinism. Follow-up: consider whether the
+   burn-clamp fallbacks should fail hard instead of silently clamping (per
+   `RULES.md` "no fallbacks"), so a bad balance read surfaces as a rejected tx
+   identically on all nodes rather than as a per-node supply drift.
+
+### 0.1 Root-cause investigation — the IAVL pruning fork is the origin (2026-06-22)
+
+The mitigations above (fast-node off, inter-block-cache off) all address the
+**read** side of a node-local read-consistency race. A fork-vs-upstream diff of
+the repo's vendored IAVL (`blockchain/patches/iavl`) pins the **pruning** side —
+the half that was never reverted:
+
+- The fork was first introduced **2026-04-02** (`8f0aa77` + `5c384f1`, base
+  `cosmos/iavl v1.2.2`). At that point the **only non-test file changed vs
+  upstream was `nodedb.go`** — two hunks that swallow `ErrVersionDoesNotExist`
+  during pruning ("skip missing versions"). `immutable_tree.go` /
+  `mutable_tree.go` were byte-identical to upstream; the fast-node read patch
+  came **later** (`0445ee1` 2026-05-27, a response to the May divergences).
+- The same-day `app/app.go` change (`fixStalePruneSnapshotHeights`) **switched
+  active pruning ON for the first time** — its own commit message: *"stale
+  entries prevented IAVL pruning entirely … application.db 3.2 GB → 2.4 GB after
+  first compaction cycle."* Pruning runs in a background goroutine
+  (`nodedb.startPruning`) concurrently with commits and with the prod-only local
+  query traffic (indexer, backend `simulate`, reward distributor).
+- First app-hash divergences began **~2–4 weeks later** (the 2026-05-09 review
+  records a 2026-05-04 divergence at h4,349,996; then h4854225 on 05-25, h5280036
+  on 06-12, h5378002 on 06-16). The fork's own comment in `immutable_tree.go`
+  names *"pruning races"* as a cause of the fast-node index going stale.
+- **Today** the bump to `v1.2.8` means `nodedb.go` is again byte-identical to
+  upstream (upstream adopted the same "tolerate missing version" behavior via
+  `rootkeyCache`). So the swallow is now *upstream* code, and the fork's only
+  delta vs v1.2.8 is the fast-node read disable in `immutable_tree.go` /
+  `mutable_tree.go`.
+
+**Fix applied — fail-fast pruning guard (Mirage patch on `nodedb.go`).**
+`deleteVersionsTo` now distinguishes the two missing-version cases instead of
+swallowing both:
+
+- A **contiguous prefix of missing versions at the bottom** of the prune range
+  is the legitimate state-sync gap (those versions were never written locally) →
+  skip and continue, as before.
+- A version **missing above one already seen** is a hole in otherwise-present
+  history (DB corruption / pruning-bookkeeping bug) → **panic
+  `CONSENSUS_FATAL:PRUNE_HOLE`**. A deterministic crash is recoverable by the
+  watchdog (peer-pull restores the DB from a healthy peer); a silent skip leaves
+  the node running and serving reads off inconsistent state. Unit tests:
+  `blockchain/patches/iavl/nodedb_prune_fail_fast_test.go`.
+
+**Notification.** `CONSENSUS_FATAL:PRUNE_HOLE` is in the watchdog's
+`DIVERGENCE_PATTERNS` (→ peer-pull). The watchdog also gained an **external push
+alert**: set `ALERT_WEBHOOK_URL` (Slack/Discord/Mattermost/ntfy-compatible) and
+it POSTs a one-liner whenever it fires a loud alert or dispatches a recovery —
+so a crash/divergence pages a human instead of only landing in a tmux log nobody
+is watching. Unset = disabled; failures are swallowed to the forensic log and
+never stall the loop.
+
+**Independent stuck-node pager (`scripts/stuck_node_alert.py`).** The watchdog
+only pages on a `catching_up=true` + frozen node when it *also* finds a
+divergence log pattern — so a *silent* freeze (the 2026-06-16 case: no
+`wrong Block.Header.AppHash`, no marker) is invisible to it, and a watchdog that
+is itself `kill -STOP`'d (as during a manual recovery) can't page at all. This
+standalone pager closes both gaps: it runs in its **own** tmux window (separate
+process), imports nothing from the watchdog, and pages `ALERT_WEBHOOK_URL` on a
+single rule — local height frozen, or `/status` unreachable, for
+`STUCK_ALERT_SECONDS` (default 600), regardless of any log marker. It only starts
+when `ALERT_WEBHOOK_URL` is set and **never recovers anything** (detection only;
+recovery stays the watchdog's job). Logs to
+`/root/.mirage/logs/deploy/stuck_node_alert-YYYY-MM-DD.log`. Manual check:
+`docker exec mirage python3 /opt/mirage/scripts/stuck_node_alert.py --once`
+(one poll) or `--selftest` (verify config + send a test page).
+
+Note pruning itself stays **on** — it is required to bound disk growth
+(`PRUNING_KEEP_RECENT=1000`, `PRUNING_INTERVAL=100`). The fix is to make a prune
+that hits inconsistent state *halt* rather than mask it, not to disable pruning.
+
+### 0.2 Confidence & status — READ THIS before calling it fixed (2026-06-22)
+
+**Nothing in §0.1 is a proven root cause. It is the prime suspect, not a
+conviction.** Honest status of the pruning work, so nobody mistakes it for a cure:
+
+- **What was tested:** only at the **unit level** — the guard's logic
+  (`blockchain/patches/iavl/nodedb_prune_fail_fast_test.go`: a synthetic
+  mid-history hole panics; a synthetic bottom gap is skipped) and that the full
+  `miraged` binary + the watchdog compile and their tests pass. **No real
+  diverged snapshot has been replayed.** No prod box was touched.
+- **What is NOT proven:** that a pruning operation actually produced any observed
+  app-hash divergence. §0.1 is a **timeline + code-comment** argument (pruning
+  was switched on 2026-04-02, weeks before the divergences began; the fork's own
+  `immutable_tree.go` comment names "pruning races"). That is **correlation, not
+  causation.**
+- **The guard is defensive hardening, not a fix.** It converts a *silent*
+  corrupt-state prune into a *loud, recoverable, alerting* halt
+  (`CONSENSUS_FATAL:PRUNE_HOLE` → watchdog peer-pull). It does **not** make
+  divergences impossible, and it does **not** touch the read path.
+- **Surface mismatch to keep in mind:** the *observed* divergences (the
+  postmortems) were **fast-node stale reads** / a supply-invariant break during
+  block execution — a *read-path* fault, already targeted by
+  `iavl-disable-fastnode=true`, dropping fast-node from the read path, and
+  `inter-block-cache=false`. The pruning guard addresses a *different* (related)
+  failure mode; do **not** assume it would have caught the 05-25 / 06-12 / 06-16
+  events.
+- **What would actually settle it:** on an isolated box (never prod), replay the
+  offending block from a real diverged snapshot with pruning active vs
+  `pruning="nothing"`, and/or diff the diverged DB's IAVL/pruning state against a
+  healthy peer's at the same height. Tooling: `scripts/replay_divergence.sh`
+  (forensic scan, drives `blockchain/cmd/analyze-db`) plus the behavioral A/B
+  procedure documented in that script's header. **Until that runs, the pruning
+  fork is a suspect, not the culprit.**
+
+#### 0.2.1 First real-snapshot scan run — pruning-bloat hypothesis NOT supported (2026-06-22)
+
+The static half of the above finally ran against **real** snapshots (the 06-16
+diverged DB was gone — that recovery kept only `priv_validator_state.json` — but
+the **06-12** incident's full diverged DB was preserved as
+`data.preheal-20260612T164034Z`, h**5280037**, same divergence class). Both the
+diverged DB and a current **healthy** peer (139.59.9.96, never diverged) were
+copied off-host and scanned with `analyze-db`:
+
+| snapshot | commit-info (`s/<version>`) count | version floor |
+|---|---|---|
+| diverged (06-12, h5280037) | 2,133,637 | **3146400** |
+| healthy (139.59.9.96, h5532429) | 2,386,030 | **3146400** |
+
+- **Result:** the "PRUNING APPEARS BROKEN" signal (commit-info store far larger
+  than `keep-recent`) is present on the **healthy** node too, with the **same
+  version floor**. So it is **fleet-wide, not divergence-specific**, and **does
+  not implicate pruning in the divergence.** `replay_divergence.sh` was corrected
+  so its verdict no longer reads a standalone commit-info count as "consistent
+  with the prune-race hypothesis" — it now requires a diverged-vs-healthy floor
+  delta and says so.
+- **What this does and does not mean:** it rules out *commit-info bloat* as the
+  culprit. It does **not** refute the IAVL *node-level* prune race (deleting/
+  serving inconsistent nodes under concurrent reads) — a static count cannot see
+  a transient, load-triggered race. That still needs the behavioral A/B under the
+  prod-only concurrent read load (`replay_divergence.sh --procedure`), which needs
+  a snapshot whose blocks H..H+2 are locally replayable. **Still the honest
+  bottom line: the pruning fork remains a suspect, not the culprit — and the
+  cheap static evidence now leans *against* the bloat theory.**
+- **Side discovery (the real disk-growth driver):** the cosmos-sdk commit-info
+  store (`s/<version>`, ~848 B/height) is **never pruned** — ~1.83 GB of the
+  ~1.84 GB `application.db`, growing every block, fleet-wide (floor v3146400 =
+  DB-creation height). The IAVL state itself is only ~85 MB (node pruning works).
+  `min-retain-blocks=201600` is not the floor (2.1M ≫ 201600) and
+  `pruneSnapshotHeights` is healthy. **Confirmed root cause:** the store our
+  v0.54 binary actually links is `github.com/cosmos/cosmos-sdk/store/v2@v2.0.0`
+  (verified via `go mod why`: `mirage/app → baseapp → store/v2`; the legacy
+  `cosmossdk.io/store` is unused — *"main module does not need package"*). NOTE:
+  this `store/v2` is the **relocated rootmulti** module (moved into the SDK repo,
+  bumped to v2.0.0), **not** the SS/SC architectural rewrite — so it has the same
+  bug: `PruneStores()` prunes only IAVL versions and bumps the `s/earliest`
+  pointer, but never deletes commit-info (`s/<version>`), which `flushCommitInfo`
+  writes every block.   (Verified 2026-06-23 by source-fetch: `store/rootmulti/store.go` is
+  byte-identical across the `store/v2.0.0` tag, `release/v0.54.x`, and `main`,
+  none delete commit-info; there is no SS/SC store in the repo to migrate to, so
+  no upstream version fixes it — our patch is the only fix.) **Fixed (action item 12):** forked the
+  store/v2 module (`blockchain/patches/cosmos-sdk-store-v2`,
+  `replace github.com/cosmos/cosmos-sdk/store/v2 => ./patches/cosmos-sdk-store-v2`,
+  like the iavl patch) and added `pruneCommitInfo` to `PruneStores` — each prune
+  pass deletes `s/<v>` for `v < pruningHeight`, capped at 20000/pass so the
+  historical backlog drains gradually. Consensus-safe (the app hash uses the
+  *current* commit-info), so nodes draining the backlog at different rates is
+  fine, and **no chain upgrade/state migration is needed** (we are already on
+  store/v2). After deploy, expect `application.db` to shrink as the backlog
+  clears.
+
+---
+
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
 
 Run these from your workstation, in order. Each step splits the problem space

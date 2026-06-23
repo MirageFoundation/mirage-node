@@ -98,6 +98,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -130,6 +131,16 @@ RESTART_ESCALATE_WINDOW_SECONDS = int(os.environ.get("RESTART_ESCALATE_WINDOW_SE
 # polluting it from the alert path locks operators out of recovery (2026-06-12).
 ALERT_LOCK = Path(os.environ.get("ALERT_LOCK", "/root/.mirage/.divergence_alert_lock"))
 ALERT_REPEAT_SECONDS = int(os.environ.get("ALERT_REPEAT_SECONDS", "1800"))  # re-alert every 30 min
+# External push alert (independent of the tmux log nobody is watching). When
+# ALERT_WEBHOOK_URL is set the watchdog POSTs a one-line JSON {"text": ...} to it
+# whenever it fires a loud alert OR dispatches a recovery, so a node crash /
+# divergence pages a human. Provider-agnostic: Slack incoming webhook,
+# Discord (append /slack), Mattermost, ntfy. Unset = disabled (no-op). It is
+# strictly best-effort — short timeout, every error swallowed to the forensic
+# log — so a flaky webhook can never wedge or crash the watchdog loop.
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+ALERT_WEBHOOK_TIMEOUT = float(os.environ.get("ALERT_WEBHOOK_TIMEOUT", "5"))
+NODE_LABEL = os.environ.get("NODE_LABEL", "") or os.environ.get("MONIKER", "") or socket.gethostname()
 DISABLE_MARKER = Path(os.environ.get("DISABLE_MARKER", "/root/.mirage/.recovery_disabled"))
 RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover.sh"))
 RECOVERY_MODE = os.environ.get("RECOVERY_MODE", "peer-pull")
@@ -169,6 +180,12 @@ TRIGGER_PROCESS_DEAD = "process_dead"
 DIVERGENCE_PATTERNS = (
     "wrong Block.Header.AppHash",
     "CONSENSUS FAILURE!!!",
+    # Mirage fail-fast pruning guard (blockchain/patches/iavl/nodedb.go): the node
+    # panics rather than prune past a hole in version history. The local DB is
+    # inconsistent; peer-pull (restore from a healthy peer) is the correct fix,
+    # same as a divergence. Crashing also trips TRIGGER_PROCESS_DEAD, but matching
+    # the marker classifies it precisely in the forensic trail.
+    "CONSENSUS_FATAL:PRUNE_HOLE",
 )
 
 # A "CONSENSUS FAILURE!!!" line that is actually the cosmos-sdk upgrade halt
@@ -581,12 +598,7 @@ def is_catchup_divergence(
       - >= 2 healthy peers are strictly ahead of us (the canonical chain moved on).
     PURE: no I/O, no clock — trivially unit-testable.
     """
-    return bool(
-        last_advance_age_s >= catchup_stall_s
-        and div_hit
-        and healthy_peers >= 2
-        and peer_max_height > local_h
-    )
+    return bool(last_advance_age_s >= catchup_stall_s and div_hit and healthy_peers >= 2 and peer_max_height > local_h)
 
 
 def decide_action(
@@ -810,16 +822,29 @@ def _emit_peer(p: dict) -> None:
         emit("PEER", ip=p["ip"], reachable=bool(p.get("reachable")), err=p.get("err", ""), rtt_ms=p.get("rtt_ms"))
 
 
-def _invoke(argv: list[str]) -> int | None:
+def _invoke(argv: list[str], reason: str | None = None) -> int | None:
     """Run a recovery subprocess WITHOUT piping its output, so recover.sh's
     progress streams live to the tmux pane. The full step-by-step trail lives
     in recover.sh's own daily log (child_log), cross-referenced here by pid."""
     child_log = f"{LOGS_DIR}/deploy/divergence_recovery-{datetime.now(timezone.utc):%Y-%m-%d}.log"
+    env = os.environ.copy()
+    if reason:
+        # recover.sh stamps RECOVERY_REASON into the pre-wipe forensic snapshot
+        # manifest, so a captured diverged DB is always traceable back to the
+        # watchdog trigger that decided to wipe it.
+        env["RECOVERY_REASON"] = f"watchdog:{reason}"
+        # Page a human that the node crashed/diverged and recovery is starting.
+        # Deduped by ALERT_REPEAT_SECONDS so multi-attempt incidents (peer-pull
+        # retries) page once, not once per attempt.
+        global _last_external_notify
+        if time.time() - _last_external_notify >= ALERT_REPEAT_SECONDS:
+            _last_external_notify = time.time()
+            notify_external("node recovery dispatched", f"reason={reason} mode={RECOVERY_MODE}")
     try:
         # stdin from /dev/null: the watchdog runs in a tmux pane, so an inherited
         # TTY stdin would let recovery's background ssh take SIGTTIN and stop
         # (state T), which is unkillable by SIGTERM and wedges recovery forever.
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL)
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         emit("CRASH", where="invoke_spawn", argv=json.dumps(argv), err=repr(e))
         return None
@@ -828,6 +853,26 @@ def _invoke(argv: list[str]) -> int | None:
     code = proc.wait()
     emit("INVOKE", phase="end", pid=proc.pid, exit_code=code, duration_s=int(time.time() - t0))
     return code
+
+
+_last_external_notify = 0.0
+
+
+def notify_external(title: str, text: str) -> None:
+    """Best-effort external push to ALERT_WEBHOOK_URL (no-op if unset). Sends a
+    provider-agnostic {"text": ...} JSON body. NEVER raises: a short timeout and
+    a blanket except keep a flaky/unreachable webhook from stalling the loop."""
+    if not ALERT_WEBHOOK_URL:
+        return
+    body = json.dumps({"text": f"[mirage:{NODE_LABEL}] {title}\n{text}"}).encode()
+    req = urllib.request.Request(
+        ALERT_WEBHOOK_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=ALERT_WEBHOOK_TIMEOUT) as r:
+            emit("ALERT", kind="webhook-sent", status=getattr(r, "status", 0))
+    except Exception as e:  # noqa: BLE001 — notification must never break the watchdog
+        emit("ALERT", kind="webhook-failed", err=repr(e))
 
 
 def _loud_alert(trigger: str, reason: str) -> None:
@@ -842,6 +887,7 @@ def _loud_alert(trigger: str, reason: str) -> None:
     log(f"  Recover:     docker exec -it mirage bash {RECOVERY_SCRIPT} {RECOVERY_MODE} --auto")
     log("  Runbook:     docs/troubleshooting/divergence-recovery.md")
     log("============================================================")
+    notify_external("watchdog ALERT — recovery needed", f"trigger={trigger} reason={reason}")
 
 
 def _alert_once(trigger: str, reason: str) -> None:
@@ -1251,7 +1297,7 @@ def run(dry_run: bool) -> int:
                 continue
 
             # action is restart or peer-pull: execute.
-            code = _invoke(decision.argv)
+            code = _invoke(decision.argv, reason=decision.reason)
             stats["dispatches"][decision.action] = stats["dispatches"].get(decision.action, 0) + 1
             if decision.action == "restart":
                 recent_restarts.append(time.time())
@@ -1285,7 +1331,7 @@ def run(dry_run: bool) -> int:
                 for tag, kv in esc.emits:
                     emit(tag, **kv)
                 if esc.action == "peer-pull" and not dry_run:
-                    code2 = _invoke(esc.argv)
+                    code2 = _invoke(esc.argv, reason=esc.reason)
                     stats["dispatches"]["peer-pull"] += 1
                     post2 = get_status(LOCAL_RPC)
                     nh2 = None

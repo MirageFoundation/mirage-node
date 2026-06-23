@@ -745,7 +745,39 @@ func (ndb *nodeDB) deleteVersionsTo(toVersion int64) error {
 	}
 
 	rootkeyCache := newRootkeyCache()
+	// Mirage fail-fast guard (consensus safety; NOT upstream). A state-synced node
+	// legitimately lacks the versions below its snapshot/base height: they were
+	// never written to this DB and form a CONTIGUOUS prefix at the bottom of the
+	// prune range, which is safe to skip. But a version missing ABOVE one we have
+	// already seen is a hole in otherwise-present history — DB corruption or a
+	// pruning-bookkeeping bug, not a state-sync gap. Upstream IAVL silently logs
+	// and "moves on" in both cases; swallowing the second is the prune-race half
+	// of the mirage.talk app-hash divergences: it lets the node keep running and
+	// serving reads off inconsistent state. Halt loudly instead — a deterministic
+	// crash is recoverable by the divergence watchdog (peer-pull restores the DB
+	// from a healthy peer); a silent skip is not. The probe reuses rootkeyCache,
+	// so existing versions cost no extra disk read.
+	// See docs/troubleshooting/divergence-recovery.md.
+	seenExisting := false
 	for version := first; version <= toVersion; version++ {
+		_, rkErr := rootkeyCache.getRootKey(ndb, version)
+		if rkErr != nil && !errors.Is(rkErr, ErrVersionDoesNotExist) {
+			return rkErr
+		}
+		if errors.Is(rkErr, ErrVersionDoesNotExist) {
+			if seenExisting {
+				ndb.logger.Error("CONSENSUS_FATAL:PRUNE_HOLE",
+					"missing_version", version, "first", first, "prune_to", toVersion, "latest", latest)
+				panic(fmt.Errorf(
+					"CONSENSUS_FATAL:PRUNE_HOLE version=%d missing above existing history (first=%d prune_to=%d latest=%d); refusing to prune inconsistent state",
+					version, first, toVersion, latest))
+			}
+			ndb.logger.Error("pruning: skipping missing version below base (state-sync gap)",
+				"version", version, "prune_to", toVersion)
+			ndb.resetFirstVersion(version + 1)
+			continue
+		}
+		seenExisting = true
 		if err := ndb.deleteVersion(version, rootkeyCache); err != nil {
 			return err
 		}

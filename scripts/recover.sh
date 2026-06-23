@@ -296,6 +296,11 @@ stop_miraged_supervised() {
   # Failing before the wipe is important: a live miraged process can keep DB
   # files open while we remove directories underneath it, producing corruption
   # that looks like a recovery bug later.
+  #
+  # Capture the diverged height/app_hash NOW, while the node RPC is still up —
+  # wipe_chain_dbs records these in the forensic snapshot manifest, and after we
+  # stop the node the RPC is gone.
+  capture_local_divergence_context
   log "stopping miraged + supervisor (tmux $TMUX_SESSION:node)..."
   if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     tmux send-keys -t "$TMUX_SESSION:node" C-c 2>/dev/null || true
@@ -350,15 +355,110 @@ restore_priv_validator_state() {
   fi
 }
 
+# Best-effort capture of the local node's diverged height/app_hash. Must run
+# while the node RPC is still up (i.e. before stop_miraged_supervised). Values
+# land in the forensic manifest; failure here never blocks recovery.
+capture_local_divergence_context() {
+  local status
+  status="$(curl -s --max-time 3 http://localhost:26657/status 2>/dev/null || true)"
+  if [ -n "$status" ]; then
+    LOCAL_DIVERGED_HEIGHT="$(printf '%s' "$status" | python3 -c 'import sys,json
+try:
+    s=json.load(sys.stdin)["result"]["sync_info"]
+    print(s.get("latest_block_height","unknown"))
+except Exception:
+    print("unknown")' 2>/dev/null || echo unknown)"
+    LOCAL_DIVERGED_APP_HASH="$(printf '%s' "$status" | python3 -c 'import sys,json
+try:
+    s=json.load(sys.stdin)["result"]["sync_info"]
+    print(s.get("latest_app_hash","unknown"))
+except Exception:
+    print("unknown")' 2>/dev/null || echo unknown)"
+  fi
+  : "${LOCAL_DIVERGED_HEIGHT:=unknown}"
+  : "${LOCAL_DIVERGED_APP_HASH:=unknown}"
+}
+
+# Keep only the most recent $FORENSIC_KEEP forensic captures so repeated
+# recoveries cannot fill the disk. Pruned before each new capture; never
+# touches the capture currently being created.
+prune_forensic_captures() {
+  local root="${FORENSIC_ROOT:-/root/.mirage/.divergence_forensics}"
+  local keep="${FORENSIC_KEEP:-2}"
+  [ -d "$root" ] || return 0
+  # Oldest-first; drop everything except the newest (keep-1), leaving room for
+  # the one we are about to add to land at exactly $keep total.
+  local victims
+  victims="$(ls -1dt "$root"/*/ 2>/dev/null | tail -n +"$keep")"
+  [ -n "$victims" ] || return 0
+  printf '%s\n' "$victims" | while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    rm -rf "$d" && log "pruned old forensic capture: $d"
+  done
+}
+
+# HARD REQUIREMENT (do not weaken): recovery must NEVER destroy the diverged
+# chain state without preserving it first. The diverged DB is the single most
+# valuable artifact for root-causing a divergence (replay the offending block,
+# pin the diverging key). We MOVE the DB dirs into a forensic quarantine
+# (rename = instant + lossless on the same filesystem) rather than deleting
+# them. This runs unconditionally — it is NOT gated by --force.
+snapshot_diverged_state() {
+  local root="${FORENSIC_ROOT:-/root/.mirage/.divergence_forensics}"
+  local data_dir="$NODE_HOME/data"
+  local ts cap d moved=0
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  cap="$root/${ts}-h${LOCAL_DIVERGED_HEIGHT:-unknown}"
+
+  prune_forensic_captures
+  mkdir -p "$cap" || { log "WARNING: could not create forensic dir $cap; skipping snapshot"; return 0; }
+
+  for d in application.db blockstore.db cs.wal evidence.db snapshots state.db tx_index.db; do
+    [ -e "$data_dir/$d" ] || continue
+    if mv "$data_dir/$d" "$cap/$d" 2>/dev/null; then
+      moved=$((moved + 1))
+    elif cp -a "$data_dir/$d" "$cap/$d" 2>/dev/null; then
+      # Cross-device fallback: copy so we still capture, then let wipe remove
+      # the original below.
+      moved=$((moved + 1))
+    else
+      log "WARNING: failed to preserve $d into forensic capture"
+    fi
+  done
+  # priv_validator_state.json is small but useful (signed watermark at the
+  # divergence). Copy, never move — the live restore path still needs it.
+  [ -f "$data_dir/priv_validator_state.json" ] \
+    && cp "$data_dir/priv_validator_state.json" "$cap/" 2>/dev/null || true
+
+  {
+    echo "captured_utc=$ts"
+    echo "reason=${RECOVERY_REASON:-divergence}"
+    echo "recovery_mode=${RECOVERY_MODE_RUNNING:-unknown}"
+    echo "local_height=${LOCAL_DIVERGED_HEIGHT:-unknown}"
+    echo "local_app_hash=${LOCAL_DIVERGED_APP_HASH:-unknown}"
+    echo "node_version=$(miraged version 2>/dev/null | tail -n1 || echo unknown)"
+    echo "dirs_captured=$moved"
+  } > "$cap/MANIFEST.txt" 2>/dev/null || true
+
+  FORENSIC_CAPTURE_DIR="$cap"
+  log "FORENSIC: preserved diverged state ($moved dirs) -> $cap"
+}
+
 wipe_chain_dbs() {
   # The only destructive filesystem operation in normal recovery. Keep this
   # list narrow. It is chain data only; no config/, keyring, Postgres, logs, or
   # env files. tx_index.db is included even though this cluster usually runs
   # indexer="null"; rm -rf on a missing dir is fine.
+  #
+  # ALWAYS snapshot the diverged state into the forensic quarantine before
+  # destroying anything. snapshot_diverged_state moves the DB dirs aside, so the
+  # rm below is normally a no-op (defensive cleanup of any cross-device copy
+  # leftovers / dirs the move did not claim).
+  snapshot_diverged_state
   log "wiping chain DBs in $NODE_HOME/data ..."
   cd "$NODE_HOME/data"
   rm -rf application.db blockstore.db cs.wal evidence.db snapshots state.db tx_index.db
-  log "chain DBs wiped"
+  log "chain DBs wiped (diverged copy preserved at ${FORENSIC_CAPTURE_DIR:-n/a})"
 }
 
 # Captures TODAYS_LOG and SUPERVISOR_LOG_LINE_START so verify_recovery_health
@@ -573,6 +673,7 @@ setup_in_container_mode() {
 # healthy peer (forced-command on the peer side runs `recover.sh serve`),
 # extracts it on top of our wiped data dir, restarts via the supervisor.
 cmd_peer_pull() {
+  RECOVERY_MODE_RUNNING="peer-pull"
   # High-level peer-pull sequence (post-review ordering: pull BEFORE wipe so a
   # failed transfer never leaves the local node with no chain data):
   #
@@ -880,6 +981,7 @@ cmd_restart() {
 # In-container; legacy CometBFT state-sync. Kept until Phase 4 fixes the
 # v0.53 BondDenom panic. See docs/troubleshooting/incident-recovery.md.
 cmd_state_sync() {
+  RECOVERY_MODE_RUNNING="state-sync"
   # State-sync mode is kept because it is still useful for comparison/testing
   # and may become safe again after Phase 4. It is NOT the default watchdog
   # mode right now.

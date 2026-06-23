@@ -5,6 +5,13 @@ go 1.25.9
 replace (
 	// force latest sonic version for Go 1.25 support
 	github.com/bytedance/sonic => github.com/bytedance/sonic v1.15.0
+	// fix: upstream store/v2 PruneStores prunes only IAVL versions (and bumps the
+	// s/earliest pointer) but never deletes the rootmulti commit-info records
+	// (s/<version>), so they grow unbounded (one per block, fleet-wide) and become
+	// the dominant on-disk growth. Patch adds bounded commit-info pruning.
+	// Consensus-safe: the app hash uses the current commit-info only. This is the
+	// store the v0.54 baseapp actually links (cosmossdk.io/store is unused).
+	github.com/cosmos/cosmos-sdk/store/v2 => ./patches/cosmos-sdk-store-v2
 	// fix: IAVL pruning fails on state-synced nodes with "version does not exist"
 	// because deleteVersionsTo iterates consecutive versions and bails on gaps.
 	// Patch skips missing versions instead of aborting the entire prune pass.
@@ -80,6 +87,7 @@ require (
 	connectrpc.com/connect v1.18.1 // indirect
 	connectrpc.com/otelconnect v0.7.2 // indirect
 	cosmossdk.io/schema v1.1.0 // indirect
+	cosmossdk.io/store v1.1.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/4meepo/tagalign v1.4.2 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect

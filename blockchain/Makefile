@@ -50,8 +50,8 @@ test: govet govulncheck test-unit test-iavl
 # read-path correctness when fast-node index is incomplete) runs in every
 # CI/deploy gate alongside ./... — patches/iavl is a separate go module
 # (replace directive in go.mod) and is NOT picked up by ./...
-test-fast: test-fast-app test-iavl
-	@echo "--> All fast tests passed (./... + patches/iavl)"
+test-fast: test-fast-app test-iavl test-store
+	@echo "--> All fast tests passed (./... + patches/iavl + patches/cosmos-sdk-store-v2)"
 
 test-fast-app:
 	@echo "--> Running blockchain tests (./...)"
@@ -67,7 +67,17 @@ test-iavl:
 	@echo "--> Running patched IAVL tests (patches/iavl)"
 	@cd patches/iavl && go test -mod=readonly -timeout 5m .
 
-.PHONY: test test-unit test-race test-cover test-fast test-fast-app test-iavl bench
+# patches/cosmos-sdk-store-v2 is a forked store/v2 (the rootmulti module the
+# v0.54 baseapp actually links) carrying the commit-info pruning fix (upstream
+# #26551 — PruneStores never deletes s/<version> commit-info, so it grows
+# unbounded). Like patches/iavl it is a separate go module (replace directive)
+# and is NOT picked up by ./..., so it gets its own gate in test-fast to pin
+# the commit-info prune regression.
+test-store:
+	@echo "--> Running patched store/v2 tests (patches/cosmos-sdk-store-v2/rootmulti)"
+	@cd patches/cosmos-sdk-store-v2 && go test -mod=readonly -timeout 5m ./rootmulti/
+
+.PHONY: test test-unit test-race test-cover test-fast test-fast-app test-iavl test-store bench
 
 #################
 ###  Install  ###
