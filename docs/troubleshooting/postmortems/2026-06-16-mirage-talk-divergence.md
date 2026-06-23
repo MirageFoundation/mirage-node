@@ -117,8 +117,10 @@ records the mechanism for the prior prod divergences (2026-05-25 h4854225,
 2026-06-12 h5280036): *under concurrent query load the fast-node index can return
 a value one commit stale relative to the canonical tree while the version check
 still passes.* That specific vector is now **disabled** — prod runs with
-`iavl-disable-fastnode = true` (verified live; `MutableTree.Get`'s fast-node block
-is gated off and `ImmutableTree.Get` never consults it). So 2026-06-16 is a
+`iavl-disable-fastnode = true` (verified live), and the fork goes further: the
+fast-node read block was *removed* from `MutableTree.Get` — it delegates straight
+to the canonical `ImmutableTree.Get`, which never consults the index — so reads
+are fast-node-free regardless of the toggle. So 2026-06-16 is a
 **residual instance of the same class** (a node-local read returning a value
 inconsistent with committed state), reached through a *different* surface than
 fast-node.
@@ -259,8 +261,8 @@ the discriminator. Unit tests added in
 | 5 | ~~Relieve prod memory pressure~~ **REVISED (see §4.1): the trigger is NOT memory and NOT load** (it diverged while the box was idle — CPU 17.5 %, mem 45 %). **Isolate the validator from all local query/tx traffic**: point the indexer, backend (`simulate`), and reward distributor at a **separate non-validating full node**, so nothing reads the validator's ABCI/app state concurrently with block execution. Adding RAM does nothing (no limit set, `oom_kill 0`). | Prevention | **Open (highest value)** |
 | 6 | Add an external alert (independent of the watchdog) for "any node `catching_up=true` and height frozen > N min" so a future silent failure pages a human | Detection | **Open** |
 | 7 | Periodically smoke-test auto-recovery end-to-end in prod (`peer-pull --dry-run` is not enough — the `ssh`/serve path must be exercised) | Process | **Open** |
-| 8 | **Fail-fast the silent fallbacks**: make consensus-path `store.Get` error branches `panic`/halt instead of returning a default (`HasEnvelopeNonce`→`false`, `GetCurrentDifficulty`/`GetPoWMessageCount`→default). A deterministic halt is recoverable by the (now-fixed) watchdog; a silent wrong value is not. | Hardening | **Open (high value)** |
-| 9 | **Defense-in-depth**: drop the fast-node read block from `MutableTree.Get` entirely (mirror the `ImmutableTree.Get` patch) so no read path can ever consult the advisory index, regardless of the `iavl-disable-fastnode` toggle. | Hardening | **Open** |
+| 8 | **Fail-fast the silent fallbacks**: make consensus-path `store.Get` error branches `panic`/halt instead of returning a default (`HasEnvelopeNonce`→`false`, `GetCurrentDifficulty`/`GetPoWMessageCount`→default). A deterministic halt is recoverable by the (now-fixed) watchdog; a silent wrong value is not. | Hardening | **Done (2026-06-22)** — extended the fail-fast contract to the whole consensus-path read family in `x/core/keeper/keeper.go`: `HasEnvelopeNonce`, `RecordPoWMessage` (read-before-increment), `GetPoWMessageCount`, `GetCurrentDifficulty`, `HasCurrentDifficulty`, `GetPreviousDifficulty`, `GetLastDifficultyChangeHeight`, `GetConsecutiveLowUsage`. Each now panics `CONSENSUS_FATAL:*_STORE_GET` on a raw `store.Get` **error** (absent-key → default behavior unchanged). The stale "`GetPoWMessageCount` is non-consensus-critical" note in `never_halt_test.go` was corrected (its window sum feeds `SetCurrentDifficulty`). Pinned by `TestConsensusReadsPanicOnStoreGetFailure` + `TestConsensusReadsReturnDefaultsOnAbsentKey`. |
+| 9 | **Defense-in-depth**: drop the fast-node read block from `MutableTree.Get` entirely (mirror the `ImmutableTree.Get` patch) so no read path can ever consult the advisory index, regardless of the `iavl-disable-fastnode` toggle. | Hardening | **Done — already satisfied in the fork.** `MutableTree.Get` (`blockchain/patches/iavl/mutable_tree.go`) does not gate a fast-node block on the toggle; it was *removed* — `Get` delegates straight to the canonical `tree.ImmutableTree.Get(key)`, which also never consults fast-node. (Supersedes the "gated off" phrasing in §4.1: the block is gone, not merely disabled, so the read path is fast-node-free independent of `iavl-disable-fastnode`.) |
 | 10 | **Pin the exact surface**: replay block 5378001 on the `data.preheal-*` backup vs a peer's state to identify which key/module read diverged. | Investigation | **Open** |
 | 11 | Add an in-process app-hash self-check / periodic state-vs-peer reconciliation so a single-node divergence is caught at the producing node, not only at the next block's header check. | Detection | **Open** |
 

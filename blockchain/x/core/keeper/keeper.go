@@ -14,8 +14,8 @@ import (
 
 	corestore "cosmossdk.io/core/store"
 	sdkmath "cosmossdk.io/math"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	"github.com/cosmos/cosmos-sdk/codec"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
@@ -1709,8 +1709,14 @@ func (k Keeper) RecordPoWMessage(ctx sdk.Context) error {
 	key := k.powMessageCountKey(ctx.BlockHeight())
 
 	count := uint64(0)
-	if bz, err := store.Get(key); err == nil && len(bz) > 0 {
-		count = binary.BigEndian.Uint64(bz)
+	existing, err := store.Get(key)
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:POW_COUNT_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "op", "record", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d op=record: %w", ctx.BlockHeight(), err))
+	}
+	if len(existing) > 0 {
+		count = binary.BigEndian.Uint64(existing)
 	}
 	count++
 
@@ -1735,7 +1741,13 @@ func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 
 	total := uint64(0)
 	for height := periodStart; height <= currentHeight; height++ {
 		key := k.powMessageCountKey(height)
-		if bz, err := store.Get(key); err == nil && len(bz) > 0 {
+		bz, err := store.Get(key)
+		if err != nil {
+			ctx.Logger().Error("CONSENSUS_FATAL:POW_COUNT_STORE_GET",
+				"height", ctx.BlockHeight(), "read_height", height, "module", "core", "op", "window_sum", "err", err)
+			panic(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d read_height=%d op=window_sum: %w", ctx.BlockHeight(), height, err))
+		}
+		if len(bz) > 0 {
 			total += binary.BigEndian.Uint64(bz)
 		}
 	}
@@ -1823,7 +1835,12 @@ const MaxSafeDifficultySteps uint64 = (1 << 53) - 1
 func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
-	if err != nil || len(bz) == 0 {
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+	}
+	if len(bz) == 0 {
 		return BaseDifficultySteps
 	}
 	v := binary.BigEndian.Uint64(bz)
@@ -1837,7 +1854,12 @@ func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 func (k Keeper) HasCurrentDifficulty(ctx sdk.Context) bool {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
-	return err == nil && len(bz) > 0
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "op", "has", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d op=has: %w", ctx.BlockHeight(), err))
+	}
+	return len(bz) > 0
 }
 
 func (k Keeper) previousDifficultyKey() []byte { return []byte("prev_difficulty") }
@@ -1868,7 +1890,12 @@ func (k Keeper) SetCurrentDifficulty(ctx sdk.Context, difficulty uint64) error {
 func (k Keeper) GetPreviousDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.previousDifficultyKey())
-	if err != nil || len(bz) == 0 {
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+	}
+	if len(bz) == 0 {
 		return k.GetCurrentDifficulty(ctx)
 	}
 	return binary.BigEndian.Uint64(bz)
@@ -1878,7 +1905,12 @@ func (k Keeper) GetPreviousDifficulty(ctx sdk.Context) uint64 {
 func (k Keeper) GetLastDifficultyChangeHeight(ctx sdk.Context) int64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.lastChangeHeightKey())
-	if err != nil || len(bz) == 0 {
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+	}
+	if len(bz) == 0 {
 		return 0
 	}
 	return int64(binary.BigEndian.Uint64(bz))
@@ -1888,7 +1920,12 @@ func (k Keeper) GetLastDifficultyChangeHeight(ctx sdk.Context) int64 {
 func (k Keeper) GetConsecutiveLowUsage(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.consecutiveLowUsageKey())
-	if err != nil || len(bz) == 0 {
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+	}
+	if len(bz) == 0 {
 		return 0
 	}
 	return binary.BigEndian.Uint64(bz)
@@ -2886,7 +2923,9 @@ func (k Keeper) HasEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint6
 	key := []byte(fmt.Sprintf("%s%x/%d", types.EnvelopeNoncePrefix, pubkeyHash, nonce))
 	val, err := store.Get(key)
 	if err != nil {
-		return false
+		ctx.Logger().Error("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "err", err)
+		panic(fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	return val != nil
 }

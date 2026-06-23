@@ -88,6 +88,95 @@ Three changes landed in response (all repo-side, no chain upgrade):
    `RULES.md` "no fallbacks"), so a bad balance read surfaces as a rejected tx
    identically on all nodes rather than as a per-node supply drift.
 
+### 0.1 Root-cause investigation — the IAVL pruning fork is the origin (2026-06-22)
+
+The mitigations above (fast-node off, inter-block-cache off) all address the
+**read** side of a node-local read-consistency race. A fork-vs-upstream diff of
+the repo's vendored IAVL (`blockchain/patches/iavl`) pins the **pruning** side —
+the half that was never reverted:
+
+- The fork was first introduced **2026-04-02** (`8f0aa77` + `5c384f1`, base
+  `cosmos/iavl v1.2.2`). At that point the **only non-test file changed vs
+  upstream was `nodedb.go`** — two hunks that swallow `ErrVersionDoesNotExist`
+  during pruning ("skip missing versions"). `immutable_tree.go` /
+  `mutable_tree.go` were byte-identical to upstream; the fast-node read patch
+  came **later** (`0445ee1` 2026-05-27, a response to the May divergences).
+- The same-day `app/app.go` change (`fixStalePruneSnapshotHeights`) **switched
+  active pruning ON for the first time** — its own commit message: *"stale
+  entries prevented IAVL pruning entirely … application.db 3.2 GB → 2.4 GB after
+  first compaction cycle."* Pruning runs in a background goroutine
+  (`nodedb.startPruning`) concurrently with commits and with the prod-only local
+  query traffic (indexer, backend `simulate`, reward distributor).
+- First app-hash divergences began **~2–4 weeks later** (the 2026-05-09 review
+  records a 2026-05-04 divergence at h4,349,996; then h4854225 on 05-25, h5280036
+  on 06-12, h5378002 on 06-16). The fork's own comment in `immutable_tree.go`
+  names *"pruning races"* as a cause of the fast-node index going stale.
+- **Today** the bump to `v1.2.8` means `nodedb.go` is again byte-identical to
+  upstream (upstream adopted the same "tolerate missing version" behavior via
+  `rootkeyCache`). So the swallow is now *upstream* code, and the fork's only
+  delta vs v1.2.8 is the fast-node read disable in `immutable_tree.go` /
+  `mutable_tree.go`.
+
+**Fix applied — fail-fast pruning guard (Mirage patch on `nodedb.go`).**
+`deleteVersionsTo` now distinguishes the two missing-version cases instead of
+swallowing both:
+
+- A **contiguous prefix of missing versions at the bottom** of the prune range
+  is the legitimate state-sync gap (those versions were never written locally) →
+  skip and continue, as before.
+- A version **missing above one already seen** is a hole in otherwise-present
+  history (DB corruption / pruning-bookkeeping bug) → **panic
+  `CONSENSUS_FATAL:PRUNE_HOLE`**. A deterministic crash is recoverable by the
+  watchdog (peer-pull restores the DB from a healthy peer); a silent skip leaves
+  the node running and serving reads off inconsistent state. Unit tests:
+  `blockchain/patches/iavl/nodedb_prune_fail_fast_test.go`.
+
+**Notification.** `CONSENSUS_FATAL:PRUNE_HOLE` is in the watchdog's
+`DIVERGENCE_PATTERNS` (→ peer-pull). The watchdog also gained an **external push
+alert**: set `ALERT_WEBHOOK_URL` (Slack/Discord/Mattermost/ntfy-compatible) and
+it POSTs a one-liner whenever it fires a loud alert or dispatches a recovery —
+so a crash/divergence pages a human instead of only landing in a tmux log nobody
+is watching. Unset = disabled; failures are swallowed to the forensic log and
+never stall the loop.
+
+Note pruning itself stays **on** — it is required to bound disk growth
+(`PRUNING_KEEP_RECENT=1000`, `PRUNING_INTERVAL=100`). The fix is to make a prune
+that hits inconsistent state *halt* rather than mask it, not to disable pruning.
+
+### 0.2 Confidence & status — READ THIS before calling it fixed (2026-06-22)
+
+**Nothing in §0.1 is a proven root cause. It is the prime suspect, not a
+conviction.** Honest status of the pruning work, so nobody mistakes it for a cure:
+
+- **What was tested:** only at the **unit level** — the guard's logic
+  (`blockchain/patches/iavl/nodedb_prune_fail_fast_test.go`: a synthetic
+  mid-history hole panics; a synthetic bottom gap is skipped) and that the full
+  `miraged` binary + the watchdog compile and their tests pass. **No real
+  diverged snapshot has been replayed.** No prod box was touched.
+- **What is NOT proven:** that a pruning operation actually produced any observed
+  app-hash divergence. §0.1 is a **timeline + code-comment** argument (pruning
+  was switched on 2026-04-02, weeks before the divergences began; the fork's own
+  `immutable_tree.go` comment names "pruning races"). That is **correlation, not
+  causation.**
+- **The guard is defensive hardening, not a fix.** It converts a *silent*
+  corrupt-state prune into a *loud, recoverable, alerting* halt
+  (`CONSENSUS_FATAL:PRUNE_HOLE` → watchdog peer-pull). It does **not** make
+  divergences impossible, and it does **not** touch the read path.
+- **Surface mismatch to keep in mind:** the *observed* divergences (the
+  postmortems) were **fast-node stale reads** / a supply-invariant break during
+  block execution — a *read-path* fault, already targeted by
+  `iavl-disable-fastnode=true`, dropping fast-node from the read path, and
+  `inter-block-cache=false`. The pruning guard addresses a *different* (related)
+  failure mode; do **not** assume it would have caught the 05-25 / 06-12 / 06-16
+  events.
+- **What would actually settle it:** on an isolated box (never prod), replay the
+  offending block from a real diverged snapshot with pruning active vs
+  `pruning="nothing"`, and/or diff the diverged DB's IAVL/pruning state against a
+  healthy peer's at the same height. Tooling: `scripts/replay_divergence.sh`
+  (forensic scan, drives `blockchain/cmd/analyze-db`) plus the behavioral A/B
+  procedure documented in that script's header. **Until that runs, the pruning
+  fork is a suspect, not the culprit.**
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)

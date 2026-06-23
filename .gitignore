@@ -96,6 +96,7 @@ scripts/*
 !scripts/remote_hot_swap.py
 !scripts/recover.sh
 !scripts/divergence_watchdog.py
+!scripts/replay_divergence.sh
 !scripts/tests/
 !scripts/tests/**
 
