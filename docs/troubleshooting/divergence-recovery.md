@@ -139,6 +139,21 @@ so a crash/divergence pages a human instead of only landing in a tmux log nobody
 is watching. Unset = disabled; failures are swallowed to the forensic log and
 never stall the loop.
 
+**Independent stuck-node pager (`scripts/stuck_node_alert.py`).** The watchdog
+only pages on a `catching_up=true` + frozen node when it *also* finds a
+divergence log pattern — so a *silent* freeze (the 2026-06-16 case: no
+`wrong Block.Header.AppHash`, no marker) is invisible to it, and a watchdog that
+is itself `kill -STOP`'d (as during a manual recovery) can't page at all. This
+standalone pager closes both gaps: it runs in its **own** tmux window (separate
+process), imports nothing from the watchdog, and pages `ALERT_WEBHOOK_URL` on a
+single rule — local height frozen, or `/status` unreachable, for
+`STUCK_ALERT_SECONDS` (default 600), regardless of any log marker. It only starts
+when `ALERT_WEBHOOK_URL` is set and **never recovers anything** (detection only;
+recovery stays the watchdog's job). Logs to
+`/root/.mirage/logs/deploy/stuck_node_alert-YYYY-MM-DD.log`. Manual check:
+`docker exec mirage python3 /opt/mirage/scripts/stuck_node_alert.py --once`
+(one poll) or `--selftest` (verify config + send a test page).
+
 Note pruning itself stays **on** — it is required to bound disk growth
 (`PRUNING_KEEP_RECENT=1000`, `PRUNING_INTERVAL=100`). The fix is to make a prune
 that hits inconsistent state *halt* rather than mask it, not to disable pruning.

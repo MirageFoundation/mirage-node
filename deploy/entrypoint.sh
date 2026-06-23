@@ -602,6 +602,24 @@ else
   echo "==> Divergence watchdog disabled (AUTO_DIVERGENCE_RECOVERY=false on this host)"
 fi
 
+# Independent stuck-node liveness pager (postmortem AI#6). Runs in its OWN tmux
+# window — a separate process from the watchdog — so a wedged or kill -STOP'd
+# watchdog can never silence it. It pages ALERT_WEBHOOK_URL when the local height
+# is frozen, or /status is unreachable, for STUCK_ALERT_SECONDS — regardless of
+# any divergence log marker. This closes the 2026-06-16 gap where the node sat
+# catching_up=true with a frozen height for ~95 min, emitting nothing the
+# watchdog keys on, and nobody was paged. No-op without a webhook, so only start
+# it when one is configured. It NEVER recovers anything (detection only).
+if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+  echo "==> Starting stuck-node alert pager (independent of watchdog)"
+  tmux new-window -t "$SESSION" -n stuck-alert -c "$ROOT_DIR"
+  STUCK_CMD="PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/stuck_node_alert.py"
+  tmux send-keys -t "$SESSION:stuck-alert" \
+    "$STUCK_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/stuck_node_alert-%Y-%m-%d.log\")" C-m
+else
+  echo "==> Stuck-node alert pager disabled (ALERT_WEBHOOK_URL unset)"
+fi
+
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
 # Keep container alive + periodic cleanup (WAL segments, old logs)
