@@ -234,9 +234,10 @@ copied off-host and scanned with `analyze-db`:
   bumped to v2.0.0), **not** the SS/SC architectural rewrite — so it has the same
   bug: `PruneStores()` prunes only IAVL versions and bumps the `s/earliest`
   pointer, but never deletes commit-info (`s/<version>`), which `flushCommitInfo`
-  writes every block. (Verified the same in `cosmossdk.io/store@v1.1.2`,
-  `release/v0.54.x`, and SDK `main` — still unfixed upstream; only the *real*
-  SS/SC store/v2 elsewhere addresses it.) **Fixed (action item 12):** forked the
+  writes every block.   (Verified 2026-06-23 by source-fetch: `store/rootmulti/store.go` is
+  byte-identical across the `store/v2.0.0` tag, `release/v0.54.x`, and `main`,
+  none delete commit-info; there is no SS/SC store in the repo to migrate to, so
+  no upstream version fixes it — our patch is the only fix.) **Fixed (action item 12):** forked the
   store/v2 module (`blockchain/patches/cosmos-sdk-store-v2`,
   `replace github.com/cosmos/cosmos-sdk/store/v2 => ./patches/cosmos-sdk-store-v2`,
   like the iavl patch) and added `pruneCommitInfo` to `PruneStores` — each prune
