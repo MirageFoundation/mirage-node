@@ -226,16 +226,26 @@ copied off-host and scanned with `analyze-db`:
   ~1.84 GB `application.db`, growing every block, fleet-wide (floor v3146400 =
   DB-creation height). The IAVL state itself is only ~85 MB (node pruning works).
   `min-retain-blocks=201600` is not the floor (2.1M ≫ 201600) and
-  `pruneSnapshotHeights` is healthy. **Confirmed root cause:**
-  `cosmossdk.io/store@v1.1.2` `PruneStores()` prunes only IAVL versions and never
-  deletes commit-info (`s/<version>`); `flushCommitInfo` writes one per block, so
-  it grows unbounded fleet-wide. **Fixed (action item 12):** forked the store
-  module (`blockchain/patches/store`, `replace => ./patches/store`, like the iavl
-  patch) and added `pruneCommitInfo` to `PruneStores` — each prune pass deletes
-  `s/<v>` for `v < pruningHeight`, capped at 20000/pass so the historical backlog
-  drains gradually. Consensus-safe (the app hash uses the *current* commit-info).
-  The fix is consensus-neutral, so nodes draining the backlog at different rates
-  is fine. After deploy, expect `application.db` to shrink as the backlog clears.
+  `pruneSnapshotHeights` is healthy. **Confirmed root cause:** the store our
+  v0.54 binary actually links is `github.com/cosmos/cosmos-sdk/store/v2@v2.0.0`
+  (verified via `go mod why`: `mirage/app → baseapp → store/v2`; the legacy
+  `cosmossdk.io/store` is unused — *"main module does not need package"*). NOTE:
+  this `store/v2` is the **relocated rootmulti** module (moved into the SDK repo,
+  bumped to v2.0.0), **not** the SS/SC architectural rewrite — so it has the same
+  bug: `PruneStores()` prunes only IAVL versions and bumps the `s/earliest`
+  pointer, but never deletes commit-info (`s/<version>`), which `flushCommitInfo`
+  writes every block. (Verified the same in `cosmossdk.io/store@v1.1.2`,
+  `release/v0.54.x`, and SDK `main` — still unfixed upstream; only the *real*
+  SS/SC store/v2 elsewhere addresses it.) **Fixed (action item 12):** forked the
+  store/v2 module (`blockchain/patches/cosmos-sdk-store-v2`,
+  `replace github.com/cosmos/cosmos-sdk/store/v2 => ./patches/cosmos-sdk-store-v2`,
+  like the iavl patch) and added `pruneCommitInfo` to `PruneStores` — each prune
+  pass deletes `s/<v>` for `v < pruningHeight`, capped at 20000/pass so the
+  historical backlog drains gradually. Consensus-safe (the app hash uses the
+  *current* commit-info), so nodes draining the backlog at different rates is
+  fine, and **no chain upgrade/state migration is needed** (we are already on
+  store/v2). After deploy, expect `application.db` to shrink as the backlog
+  clears.
 
 ---
 

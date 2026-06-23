@@ -3,13 +3,15 @@ module mirage
 go 1.25.9
 
 replace (
-	// fix: upstream cosmossdk.io/store PruneStores prunes only IAVL versions and
-	// never deletes the rootmulti commit-info records (s/<version>), so they grow
-	// unbounded (one per block, fleet-wide). Patch adds bounded commit-info
-	// pruning. Consensus-safe: app hash uses the current commit-info only.
-	cosmossdk.io/store => ./patches/store
 	// force latest sonic version for Go 1.25 support
 	github.com/bytedance/sonic => github.com/bytedance/sonic v1.15.0
+	// fix: upstream store/v2 PruneStores prunes only IAVL versions (and bumps the
+	// s/earliest pointer) but never deletes the rootmulti commit-info records
+	// (s/<version>), so they grow unbounded (one per block, fleet-wide) and become
+	// the dominant on-disk growth. Patch adds bounded commit-info pruning.
+	// Consensus-safe: the app hash uses the current commit-info only. This is the
+	// store the v0.54 baseapp actually links (cosmossdk.io/store is unused).
+	github.com/cosmos/cosmos-sdk/store/v2 => ./patches/cosmos-sdk-store-v2
 	// fix: IAVL pruning fails on state-synced nodes with "version does not exist"
 	// because deleteVersionsTo iterates consecutive versions and bails on gaps.
 	// Patch skips missing versions instead of aborting the entire prune pass.
