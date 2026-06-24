@@ -1,7 +1,23 @@
+// Parse a URL that may be relative (e.g. local provider "/media/..."), using
+// the current origin as the base so relative media URLs resolve correctly.
+const _parseUrl = (url) => {
+    try {
+        return new URL(url);
+    } catch (_) {
+        try {
+            const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || 'http://localhost';
+            return new URL(url, origin);
+        } catch (__) {
+            return null;
+        }
+    }
+};
+
 export const isLikelyImageUrl = (url) => {
     try {
         if (!url) return false;
-        const u = new URL(url);
+        const u = _parseUrl(url);
+        if (!u) return false;
         const host = (u.hostname || '').toLowerCase();
         const path = (u.pathname || '').toLowerCase();
         if (host.endsWith('imagedelivery.net')) return true;
@@ -14,12 +30,13 @@ export const isLikelyImageUrl = (url) => {
 export const isLikelyVideoUrl = (url) => {
     try {
         if (!url) return false;
-        const u = new URL(url);
+        const u = _parseUrl(url);
+        if (!u) return false;
         const host = (u.hostname || '').toLowerCase();
         const path = (u.pathname || '').toLowerCase();
         const isStream = host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
         const isRedgifsWatch = host.endsWith('redgifs.com') && path.startsWith('/watch/');
-        const isVidExt = ['.mp4', '.webm', '.ogv', '.mov', '.mkv', '.gifv'].some((ext) => path.endsWith(ext));
+        const isVidExt = ['.mp4', '.webm', '.ogv', '.mov', '.mkv', '.gifv', '.m3u8'].some((ext) => path.endsWith(ext));
         // YouTube video URLs
         const isYoutube = (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host === 'www.youtu.be');
         return isStream || isRedgifsWatch || isVidExt || isYoutube;

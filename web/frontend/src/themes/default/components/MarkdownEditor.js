@@ -10,7 +10,7 @@ import {
     LuEyeOff,
 } from "react-icons/lu";
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
-import { getUploadUrl, downscaleImage } from "../../../utils/ImageUpload";
+import { uploadImageWithCancel } from "../../../utils/ImageUpload";
 import Api from "../../../utils/api";
 import UserAvatar from "./UserAvatar.js";
 
@@ -22,115 +22,6 @@ async function uploadVideoLazy(file, onProgress, xhrRef) {
         return mod.uploadVideoWithCancel(file, onProgress, xhrRef);
     }
     return mod.uploadVideo(file, onProgress);
-}
-
-// Wrapper for image upload with cancellation support
-async function uploadImageWithCancel(file, onProgress, xhrRef) {
-    try {
-        const originalFileName = file.name || '';
-        let originalExtension = '';
-        if (originalFileName.includes('.')) {
-            const lastDot = originalFileName.lastIndexOf('.');
-            if (lastDot > 0 && lastDot < originalFileName.length - 1) {
-                originalExtension = originalFileName.substring(lastDot).toLowerCase();
-            }
-        }
-        if (!originalExtension) {
-            if (file.type && file.type.includes('png')) {
-                originalExtension = '.png';
-            } else if (file.type && file.type.includes('gif')) {
-                originalExtension = '.gif';
-            } else if (file.type && file.type.includes('webp')) {
-                originalExtension = '.webp';
-            } else {
-                originalExtension = '.jpg';
-            }
-        }
-
-        const downscaledFile = await downscaleImage(file);
-        const { uploadURL, accountHash } = await getUploadUrl('image');
-
-        // Create XHR manually for cancellation support
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhrRef.current = xhr;
-
-            xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable && onProgress) {
-                    const progress = (e.loaded / e.total) * 100;
-                    onProgress(progress);
-                }
-            });
-
-            xhr.addEventListener('load', () => {
-                xhrRef.current = null;
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    try {
-                        const response = JSON.parse(xhr.responseText);
-                        let imageUrl = null;
-
-                        if (response.result && response.result.variants && response.result.variants.length > 0) {
-                            imageUrl = response.result.variants[0];
-                        } else if (response.result && response.result.id) {
-                            const id = response.result.id;
-                            imageUrl = `https://imagedelivery.net/${accountHash}/${id}/public`;
-                        } else if (response.variants && response.variants.length > 0) {
-                            imageUrl = response.variants[0];
-                        } else if (response.url) {
-                            imageUrl = response.url;
-                        } else if (typeof response === 'string') {
-                            imageUrl = response;
-                        }
-
-                        if (!imageUrl) {
-                            const text = xhr.responseText;
-                            const urlMatch = text.match(/https?:\/\/[^\s"']+/);
-                            if (urlMatch) {
-                                imageUrl = urlMatch[0];
-                            }
-                        }
-
-                        if (!imageUrl) {
-                            reject(new Error('Could not determine image URL from Cloudflare response'));
-                            return;
-                        }
-
-                        resolve(imageUrl);
-                    } catch (error) {
-                        reject(new Error(`Failed to parse Cloudflare response: ${error.message}`));
-                    }
-                } else {
-                    xhrRef.current = null;
-                    let errorMsg = `Upload failed with status ${xhr.status}`;
-                    try {
-                        const errorResponse = JSON.parse(xhr.responseText);
-                        if (errorResponse.errors && errorResponse.errors.length > 0) {
-                            errorMsg = errorResponse.errors[0].message || errorMsg;
-                        }
-                    } catch (_) { }
-                    reject(new Error(errorMsg));
-                }
-            });
-
-            xhr.addEventListener('error', () => {
-                xhrRef.current = null;
-                reject(new Error('Network error during upload'));
-            });
-
-            xhr.addEventListener('abort', () => {
-                xhrRef.current = null;
-                reject(new Error('Upload aborted'));
-            });
-
-            xhr.open('POST', uploadURL);
-            const formData = new FormData();
-            formData.append('file', downscaledFile);
-            xhr.send(formData);
-        });
-    } catch (error) {
-        xhrRef.current = null;
-        throw new Error(`Image upload failed: ${error.message}`);
-    }
 }
 
 /* Toolbar icons — use Lucide (react-icons/lu) for a cleaner, modern look.

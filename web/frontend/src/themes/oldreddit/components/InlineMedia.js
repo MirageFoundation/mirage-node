@@ -172,22 +172,27 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
     // HLS video player setup for Cloudflare Stream
     React.useEffect(() => {
         let videoUid = null;
+        let hlsSource = null;
         try {
             const resolved = normalizeRedgifsToMp4(url);
-            const u = new URL(resolved);
+            const u = new URL(resolved, window.location.origin);
             const host = u.hostname.toLowerCase();
             const isIframeStream = host === 'iframe.cloudflarestream.com';
             const isStreamDomain = isIframeStream || host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
             if (isStreamDomain) {
                 const match = u.pathname.match(/^\/?([^/]+)/);
                 videoUid = match ? match[1] : null;
+                if (videoUid) hlsSource = `/api/stream_proxy/${videoUid}`;
+            } else if (u.pathname.toLowerCase().endsWith('.m3u8')) {
+                // Generic HLS (e.g. Bunny Stream): play the manifest directly.
+                hlsSource = u.href;
             }
         } catch (_) { }
 
-        if (!videoRef.current || !videoUid) return;
+        if (!videoRef.current || !hlsSource) return;
 
         const video = videoRef.current;
-        const hlsUrl = `/api/stream_proxy/${videoUid}`;
+        const hlsUrl = hlsSource;
 
         const initVideo = () => {
             if (!videoRef.current) return;
@@ -337,7 +342,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         }
 
         const resolved = normalizeRedgifsToMp4(url);
-        const u = new URL(resolved);
+        const u = new URL(resolved, window.location.origin);
         const scheme = u.protocol.toLowerCase().replace(':', '');
         if (scheme !== 'http' && scheme !== 'https') throw new Error('Not http/https');
 
@@ -348,8 +353,9 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         const isImg = isImgDomain || isImgExt;
         const isIframeStream = host === 'iframe.cloudflarestream.com';
         const isStreamDomain = isIframeStream || host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
+        const isHlsExt = /\.m3u8$/i.test(p);
         const isVidExt = /\.(mp4|webm|ogv|mov|mkv|gifv)$/i.test(p);
-        const isVid = isStreamDomain || isVidExt;
+        const isVid = isStreamDomain || isVidExt || isHlsExt;
 
         const currentWidth = displayWidth || computeInitialWidth();
 
@@ -395,7 +401,7 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
             );
         }
 
-        if (isStreamDomain) {
+        if (isStreamDomain || isHlsExt) {
             let videoUid = null;
             const match = u.pathname.match(/^\/?([^/]+)/);
             videoUid = match ? match[1] : null;

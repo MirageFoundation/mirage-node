@@ -43,6 +43,36 @@ the origin is touched. Bytes never reach the node; the client still just POSTs t
 `/api/upload_media`. This is achieved via DNS/edge config and is transparent to
 both the client and the node application.
 
+`local`, `cloudflare`, and `bunny` are simply the first entries in a provider
+registry. The design is provider-agnostic: no vendor name appears outside its own
+provider class and its env var block. Adding any future provider (S3, Backblaze
+B2, GCS, Cloudinary, imgix, Mux, ...) is one subclass plus one registry entry —
+see "Adding a new provider" below.
+
+### Video resolution policy (applies to all providers)
+
+Video is gated on duration and resolution at upload time, uniformly across
+providers, to keep delivery costs bounded while still allowing crisp short clips:
+
+- Clips `<=60s` (short): allow high resolution, up to 4K. Short clips are cheap to
+  deliver regardless of resolution (small byte size), so there is no reason to
+  restrict them.
+- Clips `>60s` (long-form): capped at 1080p. This keeps long-form under the
+  per-GB delivery cost crossover and avoids the expensive "long + 4K" case.
+- An absolute max duration (`MEDIA_VIDEO_MAX_DURATION_SEC`) applies on top.
+
+Enforcement is driven by the generic `provider.transcodes` capability flag, never
+by hardcoded vendor names:
+
+- `transcodes == True` (e.g. bunny, cloudflare, a future Mux-like provider):
+  downscale long videos to 1080p via the encoding ladder (full ladder up to 2160p
+  for short clips, capped at 1080p for long-form).
+- `transcodes == False` (e.g. local, a future plain object-store provider):
+  REJECT a `>60s` upload above 1080p with a clear error. Bundling an ffmpeg
+  transcode pipeline into a self-hoster contradicts the "runs instantly, minimal
+  deps" goal, so non-transcoding providers enforce by validation rather than
+  downscaling.
+
 ### Architecture
 
 The client is uniform; storage is a pluggable knob hidden behind the one endpoint.
@@ -68,28 +98,62 @@ flowchart TD
 
 A small base class `MediaProvider` with implementations `LocalProvider`,
 `CloudflareProvider`, and `BunnyProvider`, plus a `get_media_provider()` factory
-selected by `MEDIA_PROVIDER`. The uniform `/api/upload_media` endpoint calls
-`store()`; the client never sees the provider.
+selected by `MEDIA_PROVIDER`. The interface is the ONLY contract; the backend,
+endpoint, GC, and frontend never name a specific vendor. The uniform
+`/api/upload_media` endpoint calls `store()`; the client never sees the provider.
 
-- `store(kind, stream, content_type) -> {"url","asset_id"}` — receives bytes
-  server-side and writes them to the backend (local disk write / Cloudflare
-  Images|Stream API upload / Bunny Storage|Stream API upload). This is the core
-  method; all providers implement it.
+Members:
+
+- `id: str` — stable provider key stored in `image_catalog.provider`.
+- `transcodes: bool` — capability flag that drives the video resolution policy
+  generically (downscale long-form when `True`, reject when `False`), so the
+  policy is not hardcoded to specific vendors.
+- `store(kind, stream, content_type, duration, height) -> {"url","asset_id"}` —
+  receives bytes server-side and writes them (local disk write / vendor API
+  upload). The core method; all providers implement it.
 - `delivery_url(asset_id, variant)` — build the public URL.
 - `delete(asset_id) -> bool` — the clean "easy delete" used by garbage collection.
-- `owns_url(url)` / `asset_id_from_url(url)` — URL parsing for validation and GC,
-  including legacy Cloudflare hosts.
+- `owns_url(url)` / `asset_id_from_url(url)` — URL parsing for validation and GC.
+
+Genericity rules (so this is truly pluggable, not vendor-shaped):
+
+- A `PROVIDER_REGISTRY` maps `id -> class`. The factory and URL detection both
+  iterate the registry. URL detection (validation, GC, frontend `media.js`)
+  consults `owns_url` across ALL registered providers, not just the active one, so
+  dual-read works for ANY past or future provider — not a hardcoded Cloudflare
+  special-case.
+- Cloudflare's legacy hosts are just `CloudflareProvider.owns_url`; "legacy" is not
+  a separate code path, it is the registry doing its job.
+- No vendor name appears outside its own provider class plus its env var block.
 
 Notes:
 
 - `CloudflareProvider.store()` uses Cloudflare's server-side upload API
   (`POST /images/v1`, `/stream`), NOT browser-direct. This is what lets the
   Cloudflare provider sit behind the same uniform endpoint.
+- For video, transcoding providers (`bunny`, `cloudflare`) apply the resolution
+  policy via the encoding ladder; non-transcoding providers (`local`) reject
+  long-form above 1080p instead.
 - `bunny_edge` is not a provider class — it is an operator edge deployment that
   intercepts `/api/upload_media` at the Bunny edge and performs the equivalent of
   `BunnyProvider.store()` there, returning `{url, asset_id}` so the origin is
   never touched. The node still records the asset for GC via a small edge->node
   callback. A reference edge handler lives in `deploy/bunny-edge/`.
+
+### Adding a new provider (the extension point)
+
+A future provider (e.g. S3, Backblaze B2, GCS, Cloudinary, Mux) must satisfy this
+checklist — nothing outside it changes:
+
+1. Add `XProvider(MediaProvider)` in `web/backend/media/` implementing
+   `store/delivery_url/delete/owns_url/asset_id_from_url` and setting `id` +
+   `transcodes`.
+2. Register it in `PROVIDER_REGISTRY` so the factory and URL detection pick it up.
+3. Add its env var block to `secrets.env` / `backend.env`.
+
+The uniform endpoint, video policy (via `transcodes`), GC (via `delete`), URL
+detection (via the registry), and all clients work unchanged. Bunny and Cloudflare
+are simply the first two non-local entries in this registry.
 
 ### Local provider — serving and storage
 
@@ -99,17 +163,21 @@ Notes:
   immutable cache, `X-Content-Type-Options: nosniff`, and a forced safe
   `Content-Type` / `Content-Disposition` (never serve SVG/HTML inline). An upload
   body-size cap is applied on `/api/upload_media`.
-- Video: store the raw <=60s mp4 (already duration-capped client-side) and serve
-  it directly; no transcoding/HLS. `InlineMedia` already renders direct video by
-  extension.
+- Video: store the raw mp4 and serve it directly; no transcoding/HLS.
+  `InlineMedia` already renders direct video by extension. Per the video resolution
+  policy, local accepts short clips (`<=60s`) at any resolution but REJECTS
+  long-form (`>60s`) above 1080p (no ffmpeg on the node to downscale); long-form
+  1080p clips are stored raw and served directly.
 
 ### Upload safety scanning (edge-only, not in the node)
 
 Upload safety scanning is NOT part of the node. There is no node-side scanner and
-no scanner env var. When required, scanning is handled entirely at the edge by
-Bunny Shield, which is enabled purely via DNS/Bunny configuration and is inherent
-to the `bunny_edge` deployment (uploads are scanned at Bunny's edge before reaching
-the origin).
+no scanner env var. When required, scanning is an operator/edge concern, enabled
+via DNS/edge configuration and inherent to an edge-offload deployment — it is not
+coupled to the node code path. Bunny Shield is the reference/recommended
+implementation (used by the `bunny_edge` deployment, scanning uploads at the edge
+before the origin), but the architecture does not depend on Bunny specifically:
+any edge that fronts the upload path can perform the scan.
 
 Two consequences follow, and both are stated plainly so operators are never
 surprised:
@@ -127,8 +195,9 @@ edge (`bunny_edge`).
 
 - `scripts/image_gc.py` calls `provider.delete(asset_key)` instead of a
   vendor-specific delete, picking the provider from `MEDIA_PROVIDER`. This works
-  for local (unlink), bunny (Storage DELETE), and cloudflare (Images API). View
-  tracking is unchanged; the periodic invocation in `deploy/entrypoint.sh` stays.
+  for local (unlink), bunny (Storage DELETE), cloudflare (Images API), and any
+  future provider via its `delete()`. View tracking is unchanged; the periodic
+  invocation in `deploy/entrypoint.sh` stays.
 - `image_catalog` carries a `provider` column so multi-provider asset keys do not
   collide.
 
@@ -161,6 +230,8 @@ Backend env (`deploy/templates/env/backend.env`):
 - `MEDIA_PROVIDER=local` (default)
 - `MEDIA_LOCAL_DIR`, `MEDIA_PUBLIC_BASE_URL`
 - `MEDIA_MAX_IMAGE_MB`, `MEDIA_MAX_VIDEO_MB`
+- Video policy: `MEDIA_SHORT_CLIP_SEC=60`, `MEDIA_LONGFORM_MAX_HEIGHT=1080`,
+  `MEDIA_VIDEO_MAX_DURATION_SEC`
 
 Secrets env (`deploy/templates/env/secrets.env`), all optional and
 provider-specific:
@@ -178,14 +249,25 @@ provider-specific:
   This is what keeps web, mobile, and third-party clients working identically
   against any node.
 - Tradeoff of uniformity: the endpoint is server-proxied, so upload bytes transit
-  the node for `local`/`cloudflare`/`bunny`. For 60s-capped videos and downscaled
-  images this is acceptable. `bunny_edge` is the escape hatch that keeps bytes off
-  the node, transparently at the edge, without changing the client contract.
+  the node for `local`/`cloudflare`/`bunny`. For downscaled images, short clips,
+  and 1080p-capped long-form this is acceptable. `bunny_edge` is the escape hatch
+  that keeps bytes off the node, transparently at the edge, without changing the
+  client contract.
 - Storage (`MEDIA_PROVIDER`) is the only pluggable knob in the node. Bunny is ONE
   option, never a hard dependency.
+- Genericity by construction: a `PROVIDER_REGISTRY` plus the `transcodes`
+  capability flag means no vendor name appears outside its own provider class and
+  env block. Adding S3/B2/GCS/Cloudinary/Mux is one subclass plus one registry
+  entry; video policy, GC, URL detection, and clients stay vendor-agnostic.
+- Video resolution policy bounds delivery cost: high-res (up to 4K) for `<=60s`
+  clips (cheap because short); `>60s` capped at 1080p. Transcoding providers
+  downscale via the encoding ladder; non-transcoding providers (local) reject
+  `>60s` above 1080p.
 - Upload safety scanning is deliberately NOT in the node: it is an edge concern
-  (enabled via DNS), inherent to the `bunny_edge` deployment. A node not fronted by
-  the edge has no scanning, stated plainly above.
+  (enabled via DNS), inherent to an edge-offload deployment. Bunny Shield is the
+  reference implementation, but the architecture is not Bunny-specific — any
+  scanning edge works. A node not fronted by a scanning edge has no scanning,
+  stated plainly above.
 - Existing Cloudflare-hosted media keeps working everywhere (dual-read). There is
   no data migration.
 - The `get_upload_url` shim is STRICTLY temporary with a hard ~August 2026 removal

@@ -1340,6 +1340,65 @@ def test_image_impressions(backend: str) -> None:
         _fail("image_impressions.increment_twice", f"after={after} after2={after2}")
 
 
+def test_upload_media(backend: str) -> None:
+    """Uniform provider-agnostic upload endpoint: POST /api/upload_media.
+
+    Validates the contract that holds for ALL providers (kind/file/magic-byte/
+    video-metadata checks) and, on the default local provider, a real image
+    round-trip returning {url, asset_id, kind}.
+    """
+    # 1x1 transparent PNG (valid magic bytes)
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    # Minimal sniffable MP4 header (ftyp/mp42)
+    fake_mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
+
+    url = f"{backend}/api/upload_media"
+
+    # Invalid kind -> 400 media_invalid_kind
+    r = requests.post(url, data={"kind": "bogus"}, files={"file": ("x.png", png, "image/png")}, timeout=30)
+    if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_invalid_kind":
+        _pass("upload_media.invalid_kind_rejected")
+    else:
+        _fail("upload_media.invalid_kind_rejected", f"code={r.status_code} body={r.text[:200]}")
+
+    # Missing file -> 400 media_file_required
+    r = requests.post(url, data={"kind": "image"}, timeout=30)
+    if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_file_required":
+        _pass("upload_media.missing_file_rejected")
+    else:
+        _fail("upload_media.missing_file_rejected", f"code={r.status_code} body={r.text[:200]}")
+
+    # Bad magic bytes (text labelled as image) -> 415 media_invalid_type
+    r = requests.post(url, data={"kind": "image"}, files={"file": ("x.png", b"not an image", "image/png")}, timeout=30)
+    if r.status_code == 415 and (r.json() or {}).get("error_code") == "media_invalid_type":
+        _pass("upload_media.bad_magic_rejected")
+    else:
+        _fail("upload_media.bad_magic_rejected", f"code={r.status_code} body={r.text[:200]}")
+
+    # Video without duration/height -> 400 media_metadata_required
+    r = requests.post(url, data={"kind": "video"}, files={"file": ("x.mp4", fake_mp4, "video/mp4")}, timeout=30)
+    if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_metadata_required":
+        _pass("upload_media.video_metadata_required")
+    else:
+        _fail("upload_media.video_metadata_required", f"code={r.status_code} body={r.text[:200]}")
+
+    # Valid image upload -> 200 {url, asset_id, kind}
+    r = requests.post(url, data={"kind": "image"}, files={"file": ("x.png", png, "image/png")}, timeout=30)
+    if r.status_code == 200:
+        body = r.json() or {}
+        if body.get("url") and body.get("asset_id") and body.get("kind") == "image":
+            _pass("upload_media.image_round_trip")
+        else:
+            _fail("upload_media.image_round_trip", f"body={r.text[:200]}")
+    elif r.status_code in (500, 502) and (r.json() or {}).get("error_code") == "media_provider_not_configured":
+        # Node configured for a provider whose credentials aren't set in this env.
+        _skip("upload_media.image_round_trip", "provider not configured")
+    else:
+        _fail("upload_media.image_round_trip", f"code={r.status_code} body={r.text[:200]}")
+
+
 def test_recent_content(backend: str) -> None:
     """get_recent_content returns a chronological mix of posts and comments."""
     wallet = WALLETS["free"]
