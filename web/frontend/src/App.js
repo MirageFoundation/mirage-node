@@ -7,6 +7,7 @@ import seedVault from './utils/SeedVault';
 import Api from './utils/api';
 import * as tx from './utils/tx';
 import { seedFromBootstrap as seedProfileFromBootstrap } from './utils/ProfileCache';
+import { initAnalytics, identifyUser, resetAnalyticsIdentity, trackEvent } from './utils/analytics';
 import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
@@ -75,6 +76,20 @@ const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
 
+function getRouteFamily(pathname) {
+    const path = pathname === '/' ? '/home' : pathname;
+    if (path === '/home') return 'home';
+    if (path === '/following') return 'following';
+    if (path.startsWith('/t/')) return 'topic';
+    if (path.startsWith('/p/')) return 'post';
+    if (path.startsWith('/profile') || path.startsWith('/u/')) return 'profile';
+    if (path.startsWith('/settings')) return 'settings';
+    if (path.startsWith('/search')) return 'search';
+    if (path.startsWith('/login')) return 'login';
+    if (path.startsWith('/signup')) return 'signup';
+    return 'other';
+}
+
 // Routes that should not be saved/restored
 const excludedRoutes = [
     '/login',
@@ -124,6 +139,15 @@ function RouteTracker({ children }) {
     React.useEffect(() => {
         try { Storage.touchLastSeen(); } catch (_) { }
     }, [location.pathname]);
+
+    React.useEffect(() => {
+        const path = location.pathname || '/';
+        trackEvent('page_viewed', {
+            path: path === '/' ? '/home' : path,
+            route_family: getRouteFamily(path),
+            has_query: !!location.search
+        });
+    }, [location.pathname, location.search]);
 
     // Restore last route on mount if at root
     React.useEffect(() => {
@@ -357,6 +381,14 @@ class App extends Component {
         const buildId = APP_BUILD_ID || '';
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
         try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
+
+        try {
+            initAnalytics().then(() => {
+                const publicKey = Storage.load('publicKey', '');
+                const username = Storage.load('username', '');
+                if (publicKey) identifyUser(publicKey, { username });
+            });
+        } catch (_) { }
 
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
@@ -689,11 +721,21 @@ class App extends Component {
     }
 
     setCredentials(publicKey, username, seedPhrase) {
+        const previousPublicKey = this.state.publicKey;
         this.setState({
             publicKey: publicKey,
             username: username,
             seedPhrase: seedPhrase,
         });
+
+        try {
+            if (publicKey) {
+                if (previousPublicKey && previousPublicKey !== publicKey) resetAnalyticsIdentity();
+                identifyUser(publicKey, { username });
+            } else if (previousPublicKey) {
+                resetAnalyticsIdentity();
+            }
+        } catch (_) { }
 
         Storage.save('publicKey', publicKey);
         Storage.save('username', username);

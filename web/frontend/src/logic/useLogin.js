@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { deriveKeysFromSeed } from "../utils/CryptoUtils.js";
 import { validateMnemonic } from "bip39";
 import Api from "../utils/api";
+import { trackEvent } from "../utils/analytics";
 export function useLogin({
     state,
     setCredentials
@@ -79,6 +80,7 @@ export function useLogin({
             }
 
             setCredentials(publicKey, username, normalizedSeed);
+            trackEvent("login_completed", { login_method: "wallet_import" });
             navigate('/');
         } catch (e) {
             if (mountedRef.current) setError(String(e?.message || e || 'Login failed'));

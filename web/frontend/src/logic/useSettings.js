@@ -9,6 +9,7 @@ import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "./usePendingDeletes.js";
 import { formatError } from "../utils/errorMessages";
 import { normalizeThemeId, DEFAULT_THEME_ID } from "../registry/theme";
+import { setAnalyticsTrackingEnabled } from "../utils/analytics";
 export const CheckboxInput = styled.input.attrs({
     type: 'checkbox'
 })`
@@ -233,6 +234,13 @@ export function useSettings({
             return false;
         }
     });
+    const [analyticsConsent, setAnalyticsConsent] = useState(() => {
+        try {
+            return Storage.load('analytics_consent', false) === true;
+        } catch (_) {
+            return false;
+        }
+    });
     const [referralPrecheckBusy, setReferralPrecheckBusy] = useState(false);
     const [referralPrecheckError, setReferralPrecheckError] = useState('');
     const [referralPrecheckSuccess, setReferralPrecheckSuccess] = useState('');
@@ -434,6 +442,16 @@ export function useSettings({
             setReferralPrecheckBusy(false);
         }
     };
+    const handleAnalyticsToggle = nextVal => {
+        const enabled = !!nextVal;
+        setAnalyticsConsent(enabled);
+        setAnalyticsTrackingEnabled(enabled).then(() => {
+            if (!enabled || !state.publicKey) return;
+            import('../utils/analytics').then(({ identifyUser }) => {
+                identifyUser(state.publicKey, { username: state.username });
+            }).catch(() => { });
+        });
+    };
     const handleCollapseThresholdChange = e => {
         const raw = e.target.value;
         if (raw === '' || raw === '-' || raw === '−') {
@@ -542,6 +560,7 @@ export function useSettings({
         referralPrecheckBusy,
         referralPrecheckError,
         referralPrecheckSuccess,
+        analyticsConsent,
         inviteCodesRequired,
         seedMode,
         prfSupported,
@@ -572,6 +591,7 @@ export function useSettings({
         handleThemeIdChange,
         handleThemeModeChange,
         handleReferralPrecheckToggle,
+        handleAnalyticsToggle,
         handleCollapseThresholdChange,
         handleSidebarTopicsLimitChange,
         handleSidebarPeopleLimitChange,

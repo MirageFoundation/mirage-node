@@ -1,5 +1,6 @@
 import transactionHandler from './TransactionHandler';
 import { fetchProfile, getFollowedUsers as getUsersFromCache, invalidateCache as invalidateProfileCache, isCacheValid, updateCacheUsers, scheduleRefresh } from './ProfileCache';
+import { trackEvent } from './analytics';
 
 export async function fetchFollowedUsers(viewerAddress) {
     const addr = String(viewerAddress || '').trim().toLowerCase();
@@ -80,6 +81,7 @@ export async function follow(viewerAddress, authorAddress) {
         scheduleRefresh(viewerAddress); // Clear cache, start no-cache window
         addToCache(a, viewerAddress);   // Will be skipped during no-cache window
         notifyUsersUpdated({ added: a });
+        trackEvent('user_followed');
         return [];
     } else {
         // "already followed/following" means the user's intent is satisfied
