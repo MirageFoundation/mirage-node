@@ -44,6 +44,7 @@ from settings import (
     REGISTRATION_INVITE_CODE_REQUIRED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
+    AUTO_ENABLED_AGENTS,
     NEW_USER_HIGHLIGHT_DAYS,
     PUSH_NOTIFICATIONS_ENABLED,
     ANDROID_BANNER_ENABLED,
@@ -57,6 +58,7 @@ import hmac
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urljoin, urlparse
+from auto_agents import merge_auto_enabled_agents
 from chain import (
     classify_reject as _classify_reject,
     get_block_time_seconds as _get_block_time_seconds,
@@ -599,14 +601,14 @@ def reload_params():
 
 
 def _get_enabled_agents(cur, address: str) -> list[str]:
-    """Get list of agent addresses enabled by the viewer."""
+    """Get list of agent addresses served as enabled for the viewer."""
     if not address:
         return []
     cur.execute(
         "SELECT agent FROM enabled_agents WHERE LOWER(owner) = LOWER(%s) ORDER BY position ASC",
         (address.lower(),),
     )
-    return [row[0].lower() for row in cur.fetchall()]
+    return merge_auto_enabled_agents(cur, [row[0].lower() for row in cur.fetchall()])
 
 
 def _get_blocked_posts(cur, address: str) -> set[str]:
@@ -978,7 +980,7 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
             "SELECT agent FROM enabled_agents WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
         )
-        lists["enabled_agents"] = [r[0] for r in cur.fetchall()]
+        lists["enabled_agents"] = merge_auto_enabled_agents(cur, [r[0] for r in cur.fetchall()])
         cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
@@ -1006,6 +1008,8 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         lists["blocked_topics"] = [r[0] for r in cur.fetchall()]
         conn.close()
     except Exception as e:
+        if AUTO_ENABLED_AGENTS:
+            raise
         logger.warning("Failed to load profile lists from indexer for %s: %s", addr, e)
     return lists
 
@@ -3253,6 +3257,8 @@ def _build_user_status(addr: str) -> dict:
                 )
         conn.close()
     except Exception:
+        if AUTO_ENABLED_AGENTS:
+            raise
         pass
 
     return {
@@ -3306,7 +3312,7 @@ def _build_user_followed(addr: str) -> dict:
             "SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
             (addr,),
         )
-        enabled_agents = [row[0] for row in cur.fetchall()]
+        enabled_agents = merge_auto_enabled_agents(cur, [row[0] for row in cur.fetchall()])
         cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
         followed_topics = [row[0] for row in cur.fetchall()]
         cur.execute(
@@ -3998,6 +4004,7 @@ def _build_node_config() -> dict:
         "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
         "android_banner_enabled": ANDROID_BANNER_ENABLED,
         "ios_banner_enabled": IOS_BANNER_ENABLED,
+        "auto_enabled_agents": list(AUTO_ENABLED_AGENTS),
     }
 
     _NODE_CONFIG_CACHE = dict(resp)

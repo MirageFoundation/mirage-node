@@ -6,6 +6,7 @@ import os
 import threading
 import time
 
+from auto_agents import merge_auto_enabled_agents
 from db import connect_backend_db, connect_db
 from logging_utils import logger
 from settings import (
@@ -711,7 +712,10 @@ def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -
     cand_topics = list({c["topic"] for c in candidates if c["topic"]})
 
     icur.execute("SELECT LOWER(agent) FROM enabled_agents WHERE LOWER(owner) = %s", (owner_lc,))
-    agents = [str(r[0] or "").strip().lower() for r in icur.fetchall() if r[0]]
+    agents = merge_auto_enabled_agents(
+        icur,
+        [str(r[0] or "").strip().lower() for r in icur.fetchall() if r[0]],
+    )
 
     post_owners = [owner_lc] + (agents if not IGNORE_AGENT_BLOCKED_POSTS else [])
     user_owners = [owner_lc] + (agents if not IGNORE_AGENT_BLOCKED_USERS else [])

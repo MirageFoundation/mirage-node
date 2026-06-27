@@ -108,6 +108,38 @@ const IntroParagraph = styled.p`
     }
 `;
 
+const EnforcedBanner = styled.div`
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0 1rem 1rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.surface2};
+    border-radius: 8px;
+    color: ${({ theme }) => theme.colors.cardBodyText};
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.45;
+
+    svg {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        margin-top: 0.1rem;
+        color: ${({ theme }) => theme.colors.subtleText};
+    }
+
+    strong {
+        color: ${({ theme }) => theme.colors.text};
+        font-weight: 600;
+    }
+
+    @media (max-width: 600px) {
+        margin: 0 0 0.9rem;
+    }
+`;
+
 const ErrorBanner = styled.div`
     display: flex;
     align-items: center;
@@ -427,6 +459,7 @@ export default function AgentsView({ state }) {
         displayOrder,
         sortedAgents,
         enabledCount,
+        autoEnabledAgents,
     } = useAgents({ state });
 
     const renderShell = (body) => (
@@ -459,6 +492,15 @@ export default function AgentsView({ state }) {
                     <strong>Choose the agents you trust</strong> to shape your feed. Originals stay on-chain; agents can hide spam, fix tags, translate, or rewrite content for you.
                 </IntroParagraph>
             </IntroBlock>
+            {autoEnabledAgents.length > 0 && (
+                <EnforcedBanner role="note">
+                    <HiUserGroup aria-hidden="true" />
+                    <span>
+                        <strong>This server enforces the following agents for everyone:</strong>{' '}
+                        {autoEnabledAgents.map(a => a.displayName).join(', ')}
+                    </span>
+                </EnforcedBanner>
+            )}
         </>
     );
 
