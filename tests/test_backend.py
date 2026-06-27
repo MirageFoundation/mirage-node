@@ -36,6 +36,7 @@ from tests.cases.test_backend_content import (
     test_edit_target_immutability,
     test_seen_posts,
     test_image_impressions,
+    test_upload_media,
     test_recent_content,
 )
 from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
@@ -92,6 +93,7 @@ ALL_CATEGORIES = {
     "subscribe_gift_agent": test_subscribe_gift_agent,
     "seen_posts": test_seen_posts,
     "image_impressions": test_image_impressions,
+    "upload_media": test_upload_media,
     "recent_content": test_recent_content,
 }
 
@@ -101,6 +103,7 @@ STATELESS_CATEGORIES = {
     "search",
     "tier_config_api",
     "image_impressions",
+    "upload_media",
 }
 
 

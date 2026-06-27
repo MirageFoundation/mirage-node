@@ -685,22 +685,26 @@ def init_backend_schema() -> None:
                 {"event_key", "recipient", "actor", "event_type", "created_at", "amount", "tx_hash"},
             )
 
-            # ── Image catalog + view tracking (Cloudflare Images GC) ─────
+            # ── Image catalog + view tracking (media GC) ──────────────────
+            # `provider` records which media provider stored the asset so GC
+            # deletes via the right backend even after a node switches providers.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS image_catalog (
                     image_id TEXT PRIMARY KEY,
                     created_at BIGINT NOT NULL,
-                    deleted_at BIGINT
+                    deleted_at BIGINT,
+                    provider TEXT
                 )
             """
             )
+            cur.execute("ALTER TABLE image_catalog ADD COLUMN IF NOT EXISTS provider TEXT")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_image_catalog_created_at ON image_catalog(created_at)")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_image_catalog_gc_candidates "
                 "ON image_catalog(created_at) WHERE deleted_at IS NULL"
             )
-            _assert_table_schema("image_catalog", {"image_id", "created_at", "deleted_at"})
+            _assert_table_schema("image_catalog", {"image_id", "created_at", "deleted_at", "provider"})
 
             cur.execute(
                 """

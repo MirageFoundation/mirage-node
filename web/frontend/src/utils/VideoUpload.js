@@ -1,103 +1,10 @@
-import Api from './api';
-
-function assertAllowedUploadUrl(uploadUrl) {
-    let parsed;
-    try {
-        parsed = new URL(String(uploadUrl || ''));
-    } catch (_) {
-        throw new Error('Invalid upload URL');
-    }
-    const host = parsed.hostname.toLowerCase();
-    const isAllowedHost = host.endsWith('videodelivery.net') || host.endsWith('cloudflarestream.com');
-    if (parsed.protocol !== 'https:' || !isAllowedHost) {
-        throw new Error('Upload URL host is not allowed');
-    }
-}
+import { uploadToNode } from './ImageUpload';
 
 /**
- * Get a Stream direct upload URL
+ * Read duration + dimensions from a video file in-browser. These are sent to
+ * the node so it can enforce the video resolution policy (the node has no
+ * transcoder on the default local provider).
  */
-export async function getUploadUrlVideo() {
-    const response = await Api.post('get_upload_url', { type: 'video' }, { timeoutMs: 20000 });
-    if (!response || !response.uploadURL) {
-        throw new Error('Invalid response from server (video)');
-    }
-    return {
-        uploadURL: response.uploadURL,
-        provider: response.provider || 'stream',
-        uid: response.uid || '',
-    };
-}
-
-/**
- * Upload to Cloudflare Stream direct upload URL
- * Returns the video UID from the Stream API response
- */
-export async function uploadToStreamCancellable(file, uploadUrl, onProgress, xhrRef) {
-    return new Promise((resolve, reject) => {
-        try {
-            assertAllowedUploadUrl(uploadUrl);
-        } catch (e) {
-            reject(e);
-            return;
-        }
-        const xhr = new XMLHttpRequest();
-        if (xhrRef) {
-            try { xhrRef.current = xhr; } catch (_) { }
-        }
-        if (onProgress && xhr.upload) {
-            xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable) onProgress((e.loaded / e.total) * 100);
-            });
-        }
-        xhr.addEventListener('load', () => {
-            if (xhrRef) {
-                try { xhrRef.current = null; } catch (_) { }
-            }
-            if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                    // Try to parse a uid/id from Stream response when available
-                    const responseText = xhr.responseText || '{}';
-                    const json = JSON.parse(responseText);
-                    const result = json && json.result ? json.result : {};
-                    const uid = result.uid || result.id || json.uid || json.id || null;
-                    resolve(uid || true);
-                } catch (e) {
-                    console.warn('[VideoUpload] Could not parse upload response:', e, xhr.responseText);
-                    // Some responses are empty; resolve success and let caller fall back
-                    resolve(true);
-                }
-            } else {
-                try {
-                    const err = JSON.parse(xhr.responseText || '{}');
-                    const msg = (err && err.errors && err.errors[0] && err.errors[0].message) || `HTTP ${xhr.status}`;
-                    console.error('[VideoUpload] Upload failed:', xhr.status, msg, xhr.responseText);
-                    reject(new Error(msg));
-                } catch (_) {
-                    console.error('[VideoUpload] Upload failed:', xhr.status, xhr.responseText);
-                    reject(new Error(`HTTP ${xhr.status}`));
-                }
-            }
-        });
-        xhr.addEventListener('error', () => {
-            if (xhrRef) {
-                try { xhrRef.current = null; } catch (_) { }
-            }
-            reject(new Error('Network error during upload'));
-        });
-        xhr.addEventListener('abort', () => {
-            if (xhrRef) {
-                try { xhrRef.current = null; } catch (_) { }
-            }
-            reject(new Error('Upload aborted'));
-        });
-        xhr.open('POST', uploadUrl);
-        const formData = new FormData();
-        formData.append('file', file);
-        xhr.send(formData);
-    });
-}
-
 function getVideoMeta(file) {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
@@ -109,9 +16,7 @@ function getVideoMeta(file) {
             window.URL.revokeObjectURL(video.src);
             resolve({ duration, width, height });
         };
-        video.onerror = () => {
-            reject(new Error('Invalid video file'));
-        };
+        video.onerror = () => reject(new Error('Invalid video file'));
         video.src = window.URL.createObjectURL(file);
     });
 }
@@ -123,41 +28,36 @@ function appendDimensionsToUrl(url, width, height) {
 }
 
 /**
- * High-level: upload a video file to Stream and return an embeddable iframe URL
- */
-export async function uploadVideo(file, onProgress) {
-    const meta = await getVideoMeta(file);
-    if (meta.duration > 60) {
-        throw new Error(`Video is too long (${Math.round(meta.duration)}s). Maximum allowed duration is 60 seconds.`);
-    }
-    const { uploadURL, uid } = await getUploadUrlVideo();
-    const returnedUid = await uploadToStreamCancellable(file, uploadURL, onProgress);
-    const finalUid = (typeof returnedUid === 'string' && returnedUid) ? returnedUid : uid;
-    if (!finalUid) {
-        throw new Error('Could not determine video UID from upload response');
-    }
-    return appendDimensionsToUrl(`https://videodelivery.net/${finalUid}/manifest/video.m3u8`, meta.width, meta.height);
-}
-
-/**
- * High-level with cancellation support
+ * Upload a video to the node with cancellation support.
+ * The node enforces duration/resolution policy and returns the playable URL.
+ * @param {File} file
+ * @param {(progress:number)=>void} [onProgress]
+ * @param {{current: XMLHttpRequest|null}} [xhrRef]
+ * @returns {Promise<string>} final video URL
  */
 export async function uploadVideoWithCancel(file, onProgress, xhrRef) {
     try {
         const meta = await getVideoMeta(file);
-        if (meta.duration > 60) {
-            throw new Error(`Video is too long (${Math.round(meta.duration)}s). Maximum allowed duration is 60 seconds.`);
-        }
-        const { uploadURL, uid } = await getUploadUrlVideo();
-        const returnedUid = await uploadToStreamCancellable(file, uploadURL, onProgress, xhrRef);
-        const finalUid = (typeof returnedUid === 'string' && returnedUid) ? returnedUid : uid;
-        if (!finalUid) {
-            throw new Error('Could not determine video UID from upload response');
-        }
-        return appendDimensionsToUrl(`https://videodelivery.net/${finalUid}/manifest/video.m3u8`, meta.width, meta.height);
+        const fields = {
+            duration: Math.round(meta.duration || 0),
+            width: meta.width,
+            height: meta.height,
+        };
+        const url = await uploadToNode(file, 'video', fields, onProgress, xhrRef);
+        return appendDimensionsToUrl(url, meta.width, meta.height);
     } catch (e) {
+        if (e && e.message === 'Upload aborted') throw e;
         console.error('[VideoUpload] Upload error:', e);
         throw e;
     }
 }
 
+/**
+ * High-level upload without external cancellation handle.
+ * @param {File} file
+ * @param {(progress:number)=>void} [onProgress]
+ * @returns {Promise<string>}
+ */
+export async function uploadVideo(file, onProgress) {
+    return uploadVideoWithCancel(file, onProgress, { current: null });
+}

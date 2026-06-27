@@ -248,6 +248,71 @@ copied off-host and scanned with `analyze-db`:
   store/v2). After deploy, expect `application.db` to shrink as the backlog
   clears.
 
+### 0.3 First post-deploy soak — the guard fired for real + a new lead (2026-06-25)
+
+~2.5 days after v1.28.2 rolled to the whole mainnet-1 validator set (mirage.talk
++ mirage.vote + 146.190.108.140 + 139.59.9.96), a fleet-wide log scan
+(forensic captures, watchdog events, AppHash markers, restart cadence) found:
+
+- **Zero state/app-hash divergences.** No `wrong Block.Header.AppHash` on any
+  node; all four on the same chain and in sync. mirage.talk specifically — the
+  only historically-diverging node — was clean (0 PRUNE_HOLE, 0 app-hash).
+
+- **The PRUNE_HOLE guard fired once, in the wild, exactly as designed.** On
+  **mirage.vote, 2026-06-24 18:22:37Z**:
+  `CONSENSUS_FATAL:PRUNE_HOLE missing_version=5569770 (first=5558400 prune_to=5571899 latest=5572900)`.
+  A version was missing **above** existing history during a prune pass, so the
+  guard panicked instead of pruning inconsistent state; the supervisor restarted
+  miraged 5s later, it replayed the WAL and rejoined. **It happened once and did
+  NOT recur** (0 on 06-23, 0 on 06-25), so it was a *transient* prune-bookkeeping
+  inconsistency, not persistent on-disk corruption. Pre-v1.28.2 this is the case
+  upstream IAVL would have silently swallowed and kept serving reads off — i.e.
+  it is concrete evidence the prune race is **real** and is now *contained*
+  (converted to a recoverable crash). It is **not** proof it was the divergence
+  cause; no app-hash break accompanied it. (`WATCHDOG_AUTORECOVER` is off on
+  mirage.vote, so the watchdog only alerted — no peer-pull, no forensic snapshot
+  was taken; the in-process supervisor restart was enough.)
+
+- **NEW fault — `pebble: closed` panic on shutdown, fleet-wide (root-caused).**
+  Every node hits it on its weekly maintenance restart (counts 06-23..06-25:
+  mirage.talk **3**, mirage.vote 2, 146.190.108.140 2, 139.59.9.96 1). The log
+  shows a **double-close of `application.db` during graceful shutdown**:
+
+  ```
+  INF Closing application.db module=baseapp
+  INF Closing snapshots/metadata.db module=baseapp
+  INF Closing application.db module=baseapp      <-- closed a SECOND time
+  FATAL: panic: pebble: closed
+  ```
+
+  **Root cause (confirmed, source-level):** upstream cosmos-sdk `v0.54.3`
+  `server/start.go` `startInProcess` registers **two** deferred cleanups that
+  both call `app.Close()` (`startCmtNode` cleanup L418 + `startApp` cleanup
+  L643), and `baseapp.(*BaseApp).Close()` (L1155) is not idempotent — it closes
+  `app.db` unconditionally. First defer closes cleanly (app.db + snapshots),
+  second defer re-closes `app.db` → `pebble: closed`. Stock wiring
+  (`server.StartCmd(newApp,…)`), pure upstream bug.
+
+  **Trigger (confirmed):** the `mirage-weekly-upgrade.timer` systemd timer runs a
+  **weekly** `apt full-upgrade` (~04:00, staggered per host, with a chain-liveness
+  pre-flight). It upgrades `docker-ce`/`containerd.io`, which **restarts the
+  Docker daemon**, bouncing every `unless-stopped` container → miraged SIGTERM →
+  the double-close. Intended security maintenance; benign.
+
+  **Correction to the first-pass hypothesis:** the double-close does **not**
+  meaningfully seed the prune holes — the *first* close is clean, so `app.db` is
+  closed properly; the panic is the redundant second close at the tail of an
+  orderly shutdown. (Also: the one observed PRUNE_HOLE on mirage.vote fired ~14 h
+  *after* that node's restart, not at shutdown.) The real cost is signal/noise:
+  every weekly restart logs a `FATAL: panic` + non-zero exit, polluting the
+  crash/forensic monitoring and able to mask a real `Close()` error. Fix (06-16
+  postmortem item 13): wrap the `db` passed to `newApp` in an idempotent-`Close`
+  shim so the second close is a no-op (no SDK fork; optionally report upstream).
+
+- **Caveats:** only ~2.5 days of soak, and the external pager is still disabled
+  (`ALERT_WEBHOOK_URL` unset) — none of the above paged anyone; it was found only
+  by manual log scan.
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)

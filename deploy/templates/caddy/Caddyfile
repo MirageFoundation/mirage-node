@@ -47,6 +47,27 @@ ${DOMAIN:-:80} {
 		}
 	}
 
+	# Uniform media upload endpoint: allow large request bodies (video) and a
+	# lighter rate limit than the generic API zone. Must precede @api.
+	@upload {
+		path /api/upload_media
+	}
+	handle @upload {
+		request_body {
+			max_size 350MB
+		}
+		rate_limit {
+			zone upload_limit {
+				key {client_ip}
+				events 4
+				window 10s
+			}
+		}
+		reverse_proxy 127.0.0.1:5000 {
+			header_up CF-Connecting-IP {client_ip}
+		}
+	}
+
 	@api {
 		path /api/*
 	}
@@ -61,6 +82,20 @@ ${DOMAIN:-:80} {
 		reverse_proxy 127.0.0.1:5000 {
 			header_up CF-Connecting-IP {client_ip}
 		}
+	}
+
+	# Locally-hosted media (MEDIA_PROVIDER=local): served from the node's disk.
+	# Safe headers: never sniff, never render arbitrary types inline.
+	@media {
+		path /media/*
+	}
+	handle @media {
+		root * ${MEDIA_LOCAL_DIR:-/root/.mirage/media}
+		uri strip_prefix /media
+		header Cache-Control "public, max-age=31536000, immutable"
+		header X-Content-Type-Options "nosniff"
+		header Content-Disposition "inline"
+		file_server
 	}
 
 	# Chain RPC (CometBFT) - includes WebSocket at /chain/rpc/websocket

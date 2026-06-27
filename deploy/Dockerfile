@@ -62,6 +62,11 @@ RUN npm install --no-audit --no-fund --no-save --legacy-peer-deps @babel/plugin-
 # Copy frontend sources only (avoid invalidating cache on unrelated changes)
 COPY web/frontend/ /opt/mirage/web/frontend/
 
+# FAQ markdown is embedded into the frontend at build time: config-overrides.js
+# reads ../../docs/FAQ.md (resolves to /opt/mirage/docs/FAQ.md). It must exist
+# before `npm run build` or the React build fails with ENOENT.
+COPY docs/FAQ.md /opt/mirage/docs/FAQ.md
+
 # Build frontend (version comes from build args provided by deploy script)
 ARG GIT_BRANCH
 ARG GIT_HASH

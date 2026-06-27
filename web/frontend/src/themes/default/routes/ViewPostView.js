@@ -3869,7 +3869,7 @@ function ViewPostView({
                                                 </>}
                                             </ColumnFlex>
                                         </CardComponent>
-                                        {!!focusedCommentId && String(post.post_id).toLowerCase() === focusedCommentId && <StyledThreadReminder>
+                                        {isRoot && !!focusedCommentId && <StyledThreadReminder>
                                             You are viewing a single comment's thread.{' '}
                                             {!showContext ? <>
                                                 Click{' '}
@@ -3888,7 +3888,7 @@ function ViewPostView({
                                         {isRoot && <CommentsHeaderRow>
                                             <CommentsHeaderTitle>
                                                 Comments
-                                                {typeof (mergedRoot?.comments ?? root?.comments) === 'number' && <CommentsHeaderCount>({mergedRoot?.comments ?? root?.comments})</CommentsHeaderCount>}
+                                                {typeof post.comments === 'number' && <CommentsHeaderCount>({post.comments})</CommentsHeaderCount>}
                                             </CommentsHeaderTitle>
                                         </CommentsHeaderRow>}
                                         {isRoot && annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id) && p.level > 0).length === 0 && <VPStateBlock>

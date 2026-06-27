@@ -1,4 +1,6 @@
 const webpack = require('webpack');
+const fs = require('fs');
+const path = require('path');
 
 // Suppress source map generation to avoid noisy warnings from dependencies
 process.env.GENERATE_SOURCEMAP = 'false';
@@ -27,6 +29,8 @@ if (typeof global !== 'undefined') {
 }
 
 module.exports = function override(config) {
+    const faqMarkdown = fs.readFileSync(path.resolve(__dirname, '../../docs/FAQ.md'), 'utf8');
+
     // Configure HtmlWebpackPlugin to not evaluate code that might access localStorage
     const htmlWebpackPlugin = config.plugins.find(
         plugin => plugin.constructor.name === 'HtmlWebpackPlugin'
@@ -64,6 +68,9 @@ module.exports = function override(config) {
     // Ignore uvu (test runner) that gets pulled in by remark-gfm dependencies
     // Replace process/browser imports to use the fallback resolution
     config.plugins = (config.plugins || []).concat([
+        new webpack.DefinePlugin({
+            __MIRAGE_FAQ_MARKDOWN__: JSON.stringify(faqMarkdown),
+        }),
         new webpack.IgnorePlugin({
             resourceRegExp: /^uvu$/,
             contextRegExp: /node_modules/,

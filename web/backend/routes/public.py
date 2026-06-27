@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from flask import Blueprint, jsonify, request, has_request_context
 
-from error_utils import safe_error, api_error_code
+from error_utils import safe_error, api_error_code, api_error
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
@@ -53,6 +53,7 @@ import time
 import calendar
 from datetime import datetime as dt
 import hashlib
+import hmac
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urljoin, urlparse
@@ -395,34 +396,23 @@ def _enrich_media_meta(cur, posts: list[dict]) -> None:
             post["media_meta"] = meta_map[pid]
 
 
-_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
-_IMAGE_VARIANT_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
-
-
 def _collect_image_impression_ids(posts: list[dict]) -> set[str]:
-    """Return unique Cloudflare image IDs from post media URLs."""
-    from urllib.parse import urlparse
+    """Return unique image asset ids from post media URLs, across all providers.
+
+    Provider-agnostic: consults the media provider registry so view tracking
+    works for local/cloudflare/bunny and any future provider (and dual-read of
+    legacy Cloudflare URLs).
+    """
+    from media import image_asset_id_from_url
 
     ids: set[str] = set()
     for post in posts or []:
-        media = post.get("media") or []
-        for raw_url in media:
+        for raw_url in post.get("media") or []:
             if not raw_url:
                 continue
-            parsed = urlparse(str(raw_url))
-            host = (parsed.hostname or "").lower()
-            if not host.endswith("imagedelivery.net"):
-                continue
-            parts = [p for p in parsed.path.split("/") if p]
-            if len(parts) < 3:
-                raise ValueError("invalid imagedelivery url path")
-            image_id = parts[1]
-            variant = parts[2]
-            if not _IMAGE_ID_RE.match(image_id):
-                raise ValueError("invalid imagedelivery image_id")
-            if not _IMAGE_VARIANT_RE.match(variant):
-                raise ValueError("invalid imagedelivery variant")
-            ids.add(image_id.lower())
+            asset_id = image_asset_id_from_url(str(raw_url))
+            if asset_id:
+                ids.add(asset_id)
     return ids
 
 
@@ -4000,6 +3990,7 @@ def _build_node_config() -> dict:
         "validator_consensus_address": valcons,
         "validator_moniker": validator_moniker,
         "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
+        "mixpanel_token": os.environ.get("REACT_APP_MIXPANEL_TOKEN", ""),
         "registration_enabled": REGISTRATION_ENABLED,
         "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
         "quests_enabled": QUESTS_ENABLED,
@@ -7600,16 +7591,150 @@ def mark_inbox_viewed():
         return safe_error(e)
 
 
-@public_bp.route("/api/get_upload_url", methods=["POST"])
-def get_upload_url():
-    """Get a direct upload URL for client-side uploads.
+def _parse_int_field(raw) -> Optional[int]:
+    """Parse a non-negative int from a form field; None if missing/invalid."""
+    if raw is None:
+        return None
+    try:
+        return int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return None
 
-    - type=image -> Cloudflare Images direct upload
-    - type=video -> Cloudflare Stream direct upload
+
+@public_bp.route("/api/upload_media", methods=["POST"])
+def upload_media():
+    """Uniform, provider-agnostic media upload endpoint.
+
+    multipart form:
+      - kind: "image" | "video"
+      - file: the bytes
+      - duration, height: required for video (probed client-side)
+
+    Returns {url, asset_id, kind}. All provider specifics (local disk / Cloudflare
+    / Bunny) are hidden behind this single endpoint, so every client uploads the
+    same way regardless of what storage the node runs.
     """
     rid = next_request_id()
-    log_event(rid, "get_upload_url.begin")
+    log_event(rid, "upload_media.begin")
     try:
+        from media import (
+            MediaError,
+            enforce_video_policy,
+            get_media_provider,
+            validate_upload,
+        )
+
+        kind = (request.form.get("kind") or request.args.get("kind") or "").strip().lower()
+        if kind not in ("image", "video"):
+            return api_error_code("media_invalid_kind", 400)
+
+        f = request.files.get("file")
+        if f is None:
+            return api_error_code("media_file_required", 400)
+        data = f.read()
+
+        try:
+            provider = get_media_provider()
+            ext = validate_upload(kind, data, f.mimetype)
+            duration = height = None
+            if kind == "video":
+                duration = _parse_int_field(request.form.get("duration"))
+                height = _parse_int_field(request.form.get("height"))
+                enforce_video_policy(provider.transcodes, duration, height)
+            result = provider.store(kind, data, f.mimetype, ext=ext, duration=duration, height=height)
+        except MediaError as me:
+            log_event(rid, "upload_media.rejected", code=me.code, kind=kind)
+            return api_error(me.code, me.message, me.status)
+
+        # Register images in the catalog for GC tracking (videos are not GC'd).
+        if kind == "image":
+            asset_id = str(result.get("asset_id", "")).strip()
+            if asset_id:
+                with connect_backend_db() as bconn:
+                    with bconn.cursor() as bcur:
+                        bcur.execute(
+                            "INSERT INTO image_catalog (image_id, created_at, provider) "
+                            "VALUES (%s, %s, %s) ON CONFLICT (image_id) DO NOTHING",
+                            (asset_id, int(time.time()), provider.id),
+                        )
+                log_event(rid, "image_catalog.registered", image_id=asset_id, provider=provider.id)
+
+        log_event(rid, "upload_media.ok", kind=kind, provider=provider.id)
+        return jsonify(result)
+    except Exception as e:
+        log_event(rid, "upload_media.err", error=str(e))
+        return safe_error(e)
+
+
+@public_bp.route("/api/media_edge_register", methods=["POST"])
+def media_edge_register():
+    """Asset-registration callback for edge-offload deployments (e.g. bunny_edge).
+
+    When an edge handler stores an upload itself (bytes never reach the node), it
+    calls this endpoint so the node still tracks the image for garbage collection.
+    Authenticated with an HMAC-SHA256 over the raw body keyed by
+    BUNNY_EDGE_CALLBACK_SECRET. Disabled (503) when no secret is configured.
+    """
+    rid = next_request_id()
+    try:
+        secret = os.environ.get("BUNNY_EDGE_CALLBACK_SECRET", "").strip()
+        if not secret:
+            return api_error_code("not_configured", 503)
+
+        raw = request.get_data() or b""
+        provided = request.headers.get("X-Mirage-Edge-Signature", "")
+        expected = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(provided, expected):
+            log_event(rid, "media_edge_register.bad_sig")
+            return api_error_code("media_edge_unauthorized", 403)
+
+        data = json.loads(raw or b"{}")
+        asset_id = str(data.get("asset_id", "")).strip()
+        kind = str(data.get("kind", "image")).strip().lower()
+        provider_id = str(data.get("provider", "bunny")).strip().lower()
+        # Only images are GC-tracked (videos are not), matching upload_media.
+        if asset_id and kind == "image":
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    bcur.execute(
+                        "INSERT INTO image_catalog (image_id, created_at, provider) "
+                        "VALUES (%s, %s, %s) ON CONFLICT (image_id) DO NOTHING",
+                        (asset_id, int(time.time()), provider_id),
+                    )
+            log_event(rid, "media_edge_register.ok", image_id=asset_id, provider=provider_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        log_event(rid, "media_edge_register.err", error=str(e))
+        return safe_error(e)
+
+
+# =============================================================================
+# ===== DEPRECATED LEGACY SHIM - REMOVE AFTER 2026-08 - DO NOT BUILD ON THIS =====
+# get_upload_url returns the OLD Cloudflare browser-direct upload shape, kept ONLY
+# so old mobile builds keep working during the dual-provider cutover. New clients
+# (web + updated app) MUST use POST /api/upload_media instead. This endpoint is
+# intentionally limited to the cloudflare provider and MUST be deleted after
+# ~August 2026, after which mirage.talk's Cloudflare credentials can be retired.
+# See docs/guides/media_providers.md ("Legacy get_upload_url shim").
+# =============================================================================
+@public_bp.route("/api/get_upload_url", methods=["POST"])
+def get_upload_url():
+    """DEPRECATED legacy Cloudflare direct-upload shim. Use /api/upload_media.
+
+    REMOVE AFTER 2026-08. Only active when MEDIA_PROVIDER=cloudflare.
+    """
+    rid = next_request_id()
+    # Loud per-call deprecation warning so lingering callers show up in logs and
+    # we can tell exactly when it is safe to delete this shim.
+    logger.warning("DEPRECATED get_upload_url called - remove after 2026-08")
+    log_event(rid, "get_upload_url.begin", deprecated=True)
+    try:
+        from media import active_provider_id
+
+        if active_provider_id() != "cloudflare":
+            log_event(rid, "get_upload_url.unsupported_provider")
+            return api_error_code("legacy_upload_unsupported", 410)
+
         data = request.get_json(force=True) or {}
         upload_type = str(data.get("type", "image")).strip().lower()
 
@@ -7708,8 +7833,9 @@ def get_upload_url():
             with connect_backend_db() as bconn:
                 with bconn.cursor() as bcur:
                     bcur.execute(
-                        "INSERT INTO image_catalog (image_id, created_at) VALUES (%s, %s) ON CONFLICT (image_id) DO NOTHING",
-                        (upload_id_norm, int(time.time())),
+                        "INSERT INTO image_catalog (image_id, created_at, provider) "
+                        "VALUES (%s, %s, %s) ON CONFLICT (image_id) DO NOTHING",
+                        (upload_id_norm, int(time.time()), "cloudflare"),
                     )
             log_event(rid, "image_catalog.registered", image_id=upload_id_norm)
 
