@@ -17,7 +17,6 @@ import { updateNotification } from "../utils/notifications";
 import { requireThemeColor } from "../utils/themeColor";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
-import { trackEvent } from "../utils/analytics";
 export const pickCard = requireThemeColor;
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
@@ -2006,7 +2005,6 @@ export function useViewPost({
                         try {
                             Storage.setPendingPostHighlight(txHash);
                         } catch (_) { }
-                        trackEvent("comment_posted", { target_type: root && root.post_id === commentId ? "post" : "comment", has_media: !!replyAttachedUrl[commentId] });
                         navigate(`/p/${commentId}`);
                         return;
                     }
@@ -2066,7 +2064,6 @@ export function useViewPost({
                             replyBusy: false
                         });
                     } catch (_) { }
-                    trackEvent("comment_posted", { target_type: root && root.post_id === commentId ? "post" : "comment", has_media: !!replyAttachedUrl[commentId] });
 
                     // Flash and scroll to new comment
                     setTimeout(() => {

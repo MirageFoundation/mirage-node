@@ -5,7 +5,6 @@ import * as tx from "../utils/tx.js";
 import Api from "../utils/api";
 import Storage from "../utils/Storage";
 import { formatError } from "../utils/errorMessages";
-import { trackEvent } from "../utils/analytics";
 export const TAG_OPTIONS = [{
     value: '',
     label: 'No tag (safe)'
@@ -102,11 +101,10 @@ export function useCreatePost({
     // Track component mount status
     React.useEffect(() => {
         mountedRef.current = true;
-        if (!isEditMode) trackEvent('post_create_opened');
         return () => {
             mountedRef.current = false;
         };
-    }, [isEditMode]);
+    }, []);
     const isSafeImageUrl = url => {
         try {
             const u = new URL(url);
@@ -671,11 +669,6 @@ export function useCreatePost({
                             thumbnail: thumb
                         }
                     }));
-                    trackEvent('post_created', {
-                        has_media: media.length > 0 || !!firstLineUrl,
-                        media_count: media.length,
-                        tag: tag || undefined
-                    });
                     // Only navigate if user is still on this page
                     if (mountedRef.current) {
                         navigate(`/p/${txHash}`);

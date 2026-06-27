@@ -8,7 +8,6 @@ import * as tx from "../utils/tx";
 import Api from "../utils/api";
 import { getMaxUsernameSize, getMinUsernameSize } from "../utils/chainParams";
 import { formatError } from "../utils/errorMessages";
-import { trackEvent } from "../utils/analytics";
 export function useCreateAccount({
     state,
     setCredentials
@@ -236,12 +235,9 @@ export function useCreateAccount({
         }
     };
     const initializeAccount = (existingSeed = null) => {
-        const analyticsConsent = Storage.load('analytics_consent', false);
         Storage.clear();
-        if (analyticsConsent) Storage.save('analytics_consent', true);
         const newSeedPhrase = existingSeed || generateMnemonic();
         setSeedPhrase(newSeedPhrase);
-        trackEvent("onboarding_started", { source: existingSeed ? "recovery_phrase" : "wallet_created" });
         try {
             // Derive public key/address from seed phrase
             const {
@@ -428,8 +424,6 @@ export function useCreateAccount({
                 },
                 replace: true
             });
-            trackEvent("username_set", { has_invite_code: !!codeClean, used_referrer: !!usingReferrer });
-            trackEvent("sign_up_completed", { sign_up_method: importedSeed ? "wallet_import" : "wallet_created" });
             setCredentials(publicKey, finalUsername, seedPhrase);
         } catch (e) {
             setSubmitError(String(e?.message || e || "Submit failed"));

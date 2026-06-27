@@ -467,7 +467,6 @@ export default function SettingsView({
         referralPrecheckBusy,
         referralPrecheckError,
         referralPrecheckSuccess,
-        analyticsConsent,
         inviteCodesRequired,
         seedMode,
         prfSupported,
@@ -498,7 +497,6 @@ export default function SettingsView({
         handleThemeIdChange,
         handleThemeModeChange,
         handleReferralPrecheckToggle,
-        handleAnalyticsToggle,
         handleCollapseThresholdChange,
         getThemeExplanation,
         handleDeleteAccount
@@ -555,18 +553,6 @@ export default function SettingsView({
                                 {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
                             </ValueBox>
                         </Row>}
-
-                        <Row>
-                            <Label style={{
-                                whiteSpace: 'normal'
-                            }}>Usage analytics:</Label>
-                            <ValueBox>
-                                <CheckboxLabel>
-                                    <CheckboxInput checked={analyticsConsent} onChange={e => handleAnalyticsToggle(!!e.target.checked)} />
-                                    Share anonymous usage data to help improve Mirage
-                                </CheckboxLabel>
-                            </ValueBox>
-                        </Row>
 
                         <Row>
                             <Label style={{
