@@ -980,7 +980,7 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
             "SELECT agent FROM enabled_agents WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
         )
-        lists["enabled_agents"] = merge_auto_enabled_agents(cur, [r[0] for r in cur.fetchall()])
+        lists["enabled_agents"] = [r[0] for r in cur.fetchall()]
         cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
@@ -1008,8 +1008,6 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         lists["blocked_topics"] = [r[0] for r in cur.fetchall()]
         conn.close()
     except Exception as e:
-        if AUTO_ENABLED_AGENTS:
-            raise
         logger.warning("Failed to load profile lists from indexer for %s: %s", addr, e)
     return lists
 
@@ -3257,8 +3255,6 @@ def _build_user_status(addr: str) -> dict:
                 )
         conn.close()
     except Exception:
-        if AUTO_ENABLED_AGENTS:
-            raise
         pass
 
     return {
@@ -3312,7 +3308,7 @@ def _build_user_followed(addr: str) -> dict:
             "SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
             (addr,),
         )
-        enabled_agents = merge_auto_enabled_agents(cur, [row[0] for row in cur.fetchall()])
+        enabled_agents = [row[0] for row in cur.fetchall()]
         cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
         followed_topics = [row[0] for row in cur.fetchall()]
         cur.execute(

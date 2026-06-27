@@ -300,6 +300,7 @@ export function useAgents({
         await refreshEnabledOrder();
     }, [viewerAddress, isApplyingOrder, hasDraftChanges, pendingAgents, draftOrder, refreshEnabledOrder, normalizeOrder, enabledOrder]);
     const displayOrder = draftOrder.length ? draftOrder : enabledOrder;
+    const enforcedSet = React.useMemo(() => new Set(autoEnabledAddresses), [autoEnabledAddresses]);
     const {
         sortedAgents,
         enabledCount
@@ -316,18 +317,19 @@ export function useAgents({
         const enabled = [];
         const enabledSetLocal = new Set(displayOrder);
         for (const addr of displayOrder) {
+            if (enforcedSet.has(addr)) continue;
             const entry = byAddr.get(addr);
             if (entry) enabled.push(entry);
         }
         const rest = agents.map(agent => ({
             ...agent,
             addressLower: String(agent.address || '').toLowerCase()
-        })).filter(agent => agent.addressLower && !enabledSetLocal.has(agent.addressLower)).sort((a, b) => (b.last_active || 0) - (a.last_active || 0));
+        })).filter(agent => agent.addressLower && !enabledSetLocal.has(agent.addressLower) && !enforcedSet.has(agent.addressLower)).sort((a, b) => (b.last_active || 0) - (a.last_active || 0));
         return {
             sortedAgents: [...enabled, ...rest],
             enabledCount: enabled.length
         };
-    }, [agents, displayOrder]);
+    }, [agents, displayOrder, enforcedSet]);
     const autoEnabledAgents = React.useMemo(() => {
         if (!autoEnabledAddresses.length) return [];
         const byAddr = new Map();
@@ -336,10 +338,17 @@ export function useAgents({
             if (key) byAddr.set(key, agent);
         }
         return autoEnabledAddresses.map(addr => {
-            const entry = byAddr.get(addr);
-            const username = entry?.username || '';
+            const entry = byAddr.get(addr) || {};
+            const username = entry.username || '';
             const displayName = username ? `@${username}` : `${addr.slice(0, 12)}…`;
-            return { address: addr, username, displayName };
+            return {
+                address: addr,
+                username,
+                displayName,
+                biography: entry.biography || '',
+                last_active: entry.last_active || null,
+                level: Number(entry.level) || 10
+            };
         });
     }, [autoEnabledAddresses, agents]);
     return {

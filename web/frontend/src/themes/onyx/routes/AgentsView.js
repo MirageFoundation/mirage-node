@@ -118,25 +118,23 @@ const ErrorMessage = styled.div`
     border: 1px solid ${({ theme }) => theme.colors.dangerBorder};
     border-radius: 6px;
 `;
-const EnforcedBanner = styled.div`
-    color: ${({
-    theme
-}) => theme.colors.text};
-    font-size: 0.72rem;
-    line-height: 1.45;
-    padding: 0.55rem 0.75rem;
-    margin-bottom: 0.75rem;
-    background: ${({
-    theme
-}) => theme.colors.panelAlt};
-    border: 1px solid ${({
-    theme
-}) => theme.colors.border};
+const EnforcedTag = styled.span`
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.6rem;
     border-radius: 6px;
-
-    strong {
-        font-weight: 600;
-    }
+    border: 1px solid ${({
+  theme
+}) => theme.colors.border};
+    background: ${({
+  theme
+}) => theme.colors.panel};
+    color: ${({
+  theme
+}) => theme.colors.subtleText};
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
 `;
 const OrderControls = styled.div`
     display: inline-flex;
@@ -264,12 +262,36 @@ export default function AgentsView({
                         <SectionSubtitle>
                             The result is an <em>open marketplace of moderation</em> where quality rises through competition, not central authority.
                         </SectionSubtitle>
-                        {autoEnabledAgents.length > 0 && <EnforcedBanner role="note">
-                            <strong>This server enforces the following agents for everyone:</strong>{' '}
-                            {autoEnabledAgents.map(a => a.displayName).join(', ')}
-                        </EnforcedBanner>}
-                        {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
-                        {loadingAgents || loadingEnabled ? <EmptyMessage>Loading agents...</EmptyMessage> : sortedAgents.length === 0 ? <EmptyMessage>No agents available yet.</EmptyMessage> : <AgentsList>
+                            {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
+                            {autoEnabledAgents.length > 0 && <>
+                                <Divider>enforced by this server</Divider>
+                                <SectionSubtitle style={{
+                  marginBottom: '0.25rem'
+                }}>
+                                    These agents are enabled for everyone on this server. You can't disable them.
+                                </SectionSubtitle>
+                                <AgentsList>
+                                    {autoEnabledAgents.map(agent => <AgentCard key={`enforced-${agent.address}`}>
+                                        <AgentRow>
+                                            <AgentInfo>
+                                                <AgentNameRow>
+                                                    <AgentName to={`/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`}>
+                                                        {agent.displayName}
+                                                    </AgentName>
+                                                    <AgentLastActive>
+                                                        {agent.last_active ? `(active ${formatTimeAgo(agent.last_active)})` : '(no activity yet)'}
+                                                    </AgentLastActive>
+                                                </AgentNameRow>
+                                                {agent.biography && <AgentBio>{agent.biography}</AgentBio>}
+                                            </AgentInfo>
+                                            <AgentActions>
+                                                <EnforcedTag title="Enabled for everyone on this server">Enforced</EnforcedTag>
+                                            </AgentActions>
+                                        </AgentRow>
+                                    </AgentCard>)}
+                                </AgentsList>
+                            </>}
+                            {loadingAgents || loadingEnabled ? <EmptyMessage>Loading agents...</EmptyMessage> : sortedAgents.length === 0 ? (autoEnabledAgents.length === 0 ? <EmptyMessage>No agents available yet.</EmptyMessage> : null) : <AgentsList>
                             {sortedAgents.map((agent, idx) => {
                                 const addrLower = (agent.address || '').toLowerCase();
                                 const enabled = isEnabled(agent.address);
