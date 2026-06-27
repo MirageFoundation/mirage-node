@@ -10,7 +10,6 @@ import ConfirmDialog from "../components/ConfirmDialog.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
 import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
@@ -1922,7 +1921,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                         </ComposerColumn>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
             <ConfirmDialog
                 open={!!pendingNavHref}

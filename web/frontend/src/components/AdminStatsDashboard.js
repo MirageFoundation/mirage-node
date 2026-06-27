@@ -1,8 +1,25 @@
 import React, { useMemo } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
+import {
+    ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+    XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from "recharts";
 import { useStats } from "../logic/useStats";
 import Storage from "../utils/Storage";
+
+const CHART_COLORS = {
+    newUsers: "#2563eb",
+    active: "#22c55e",
+    posts: "#8b5cf6",
+    comments: "#f59e0b",
+    retention: "#2563eb",
+};
+
+const shortDay = (t) => {
+    const d = new Date(t * 1000);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+};
 
 /**
  * Admin-only, fleet-wide growth dashboard. Theme-neutral: reads a few common
@@ -40,15 +57,24 @@ const Controls = styled.div`
     margin-bottom: 1.25rem;
 `;
 
+// Fixed brand blue so the active state always has white-on-blue contrast,
+// independent of whatever the theme's accent token resolves to.
+const ACCENT = "#2563eb";
+
 const PresetBtn = styled.button`
-    border: 1px solid ${({ theme }) => tok(theme, "border", "#333")};
-    background: ${({ $active, theme }) => ($active ? tok(theme, "accent", tok(theme, "voteUp", "#3b82f6")) : "transparent")};
+    border: 1px solid ${({ $active, theme }) => ($active ? ACCENT : tok(theme, "border", "#3a3a3a"))};
+    background: ${({ $active }) => ($active ? ACCENT : "transparent")};
     color: ${({ $active, theme }) => ($active ? "#fff" : tok(theme, "text", "#e6e6e6"))};
     border-radius: 6px;
-    padding: 0.35rem 0.7rem;
+    padding: 0.35rem 0.75rem;
     font-size: 0.78rem;
     font-weight: 600;
     cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+    &:hover {
+        border-color: ${ACCENT};
+        background: ${({ $active }) => ($active ? ACCENT : "rgba(37,99,235,0.12)")};
+    }
 `;
 
 const DateInput = styled.input`
@@ -129,6 +155,29 @@ const Message = styled.div`
     font-size: 0.85rem;
 `;
 
+const ChartGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 0.8rem;
+`;
+
+const ChartCard = styled.div`
+    border: 1px solid ${({ theme }) => tok(theme, "border", "#333")};
+    border-radius: 10px;
+    padding: 0.9rem 0.9rem 0.6rem;
+`;
+
+const ChartTitle = styled.div`
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 0.6rem;
+`;
+
+const ChartHeight = styled.div`
+    width: 100%;
+    height: 220px;
+`;
+
 function isAdmin() {
     try {
         return (Number(Storage.load("user_level", "0")) || 0) >= 100;
@@ -184,13 +233,21 @@ export default function AdminStatsDashboard() {
     }
 
     const g = aggregate && aggregate.growth;
-    const c = aggregate && aggregate.contributors;
+    const o = aggregate && aggregate.onchain;
     const r = aggregate && aggregate.retention;
+    const series = (aggregate && aggregate.series) || [];
+    const retentionData = r ? ["d7", "d14", "d30"].map(k => ({
+        name: k.toUpperCase(),
+        rate: r[k].eligible ? Math.round(r[k].rate * 1000) / 10 : null,
+        label: `${r[k].retained}/${r[k].eligible}`,
+    })) : [];
+    const axisColor = tok(theme, "text", "#e6e6e6");
+    const gridColor = "rgba(127,127,127,0.18)";
 
     return (
         <Page>
             <Helmet><title>Stats | Mirage</title></Helmet>
-            <Title>Growth & Fundraising Stats</Title>
+            <Title>Growth Stats</Title>
             <Subtitle>
                 Fleet-wide, admin-only. {aggregate ? `${aggregate.servers_counted} server(s) reporting` : ""}
                 {win ? ` · ${formatDate(win.start)} – ${formatDate(win.end)}` : ""}
@@ -218,34 +275,96 @@ export default function AdminStatsDashboard() {
 
             {!loading && !error && aggregate && (
                 <>
-                    <SectionHeader>Growth</SectionHeader>
+                    <SectionHeader>On-chain (all activity in window)</SectionHeader>
                     <TileGrid>
-                        <Tile><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active in window (engaged, incl. lurkers)</TileLabel></Tile>
-                        <Tile><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors</TileLabel></Tile>
-                        <Tile><TileValue>{formatNumber(g.new_users)}</TileValue><TileLabel>New users</TileLabel></Tile>
-                        <Tile><TileValue>{formatPercent(g.signup_conversion)}</TileValue><TileLabel>Signup conversion</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (post/comment)</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
                     </TileGrid>
 
-                    <SectionHeader>Contributors</SectionHeader>
+                    <SectionHeader>Tracked visitors (since tracking began)</SectionHeader>
                     <TileGrid>
-                        <Tile><TileValue>{formatNumber(c.contributors)}</TileValue><TileLabel>Contributors (post/comment)</TileLabel></Tile>
-                        <Tile><TileValue>{formatNumber(c.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
-                        <Tile><TileValue>{formatNumber(c.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
-                        <Tile><TileValue>{formatNumber(c.posts_per_contributor, 2)}</TileValue><TileLabel>Posts / contributor</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active (engaged, incl. lurkers)</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(g.signups)}</TileValue><TileLabel>Signups (visitor → account)</TileLabel></Tile>
+                        <Tile><TileValue>{g.visitors ? formatPercent(g.signup_conversion) : "—"}</TileValue><TileLabel>Signup conversion</TileLabel></Tile>
                     </TileGrid>
+
+                    <SectionHeader>Trends</SectionHeader>
+                    <ChartGrid>
+                        <ChartCard>
+                            <ChartTitle>New users & active per day</ChartTitle>
+                            <ChartHeight>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={series} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                        <defs>
+                                            <linearGradient id="gNew" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor={CHART_COLORS.newUsers} stopOpacity={0.35} />
+                                                <stop offset="100%" stopColor={CHART_COLORS.newUsers} stopOpacity={0} />
+                                            </linearGradient>
+                                            <linearGradient id="gActive" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor={CHART_COLORS.active} stopOpacity={0.35} />
+                                                <stop offset="100%" stopColor={CHART_COLORS.active} stopOpacity={0} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid stroke={gridColor} vertical={false} />
+                                        <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
+                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
+                                        <Tooltip labelFormatter={shortDay} contentStyle={{ fontSize: 12 }} />
+                                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                                        <Area type="monotone" dataKey="new_users" name="New users" stroke={CHART_COLORS.newUsers} fill="url(#gNew)" strokeWidth={2} />
+                                        <Area type="monotone" dataKey="active" name="Active" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </ChartHeight>
+                        </ChartCard>
+                        <ChartCard>
+                            <ChartTitle>Posts & comments per day</ChartTitle>
+                            <ChartHeight>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={series} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                        <CartesianGrid stroke={gridColor} vertical={false} />
+                                        <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
+                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
+                                        <Tooltip labelFormatter={shortDay} contentStyle={{ fontSize: 12 }} />
+                                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                                        <Bar dataKey="posts" name="Posts" stackId="a" fill={CHART_COLORS.posts} radius={[0, 0, 0, 0]} />
+                                        <Bar dataKey="comments" name="Comments" stackId="a" fill={CHART_COLORS.comments} radius={[2, 2, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </ChartHeight>
+                        </ChartCard>
+                    </ChartGrid>
 
                     <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
                     <Subtitle style={{ margin: "0 0 0.6rem" }}>
                         Of the {formatNumber(r.cohort_size)} users who signed up in this window, how many were still active later:
                     </Subtitle>
-                    <TileGrid>
-                        {["d7", "d14", "d30"].map(k => (
-                            <Tile key={k}>
-                                <TileValue>{formatPercent(r[k].rate)}</TileValue>
-                                <TileLabel>{k.toUpperCase()} retention ({formatNumber(r[k].retained)}/{formatNumber(r[k].eligible)})</TileLabel>
-                            </Tile>
-                        ))}
-                    </TileGrid>
+                    <ChartGrid>
+                        <ChartCard>
+                            <ChartTitle>Retention by horizon</ChartTitle>
+                            <ChartHeight>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={retentionData} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                        <CartesianGrid stroke={gridColor} vertical={false} />
+                                        <XAxis dataKey="name" tick={{ fontSize: 12, fill: axisColor }} stroke={gridColor} />
+                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} unit="%" domain={[0, 100]} width={40} />
+                                        <Tooltip contentStyle={{ fontSize: 12 }} formatter={(v) => (v == null ? "—" : `${v}%`)} />
+                                        <Bar dataKey="rate" name="Retention" fill={CHART_COLORS.retention} radius={[3, 3, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </ChartHeight>
+                        </ChartCard>
+                        <TileGrid style={{ alignContent: "start" }}>
+                            {["d7", "d14", "d30"].map(k => (
+                                <Tile key={k}>
+                                    <TileValue>{r[k].eligible ? formatPercent(r[k].rate) : "—"}</TileValue>
+                                    <TileLabel>{k.toUpperCase()} retention ({formatNumber(r[k].retained)}/{formatNumber(r[k].eligible)})</TileLabel>
+                                </Tile>
+                            ))}
+                        </TileGrid>
+                    </ChartGrid>
 
                     {campaigns.length > 0 && (
                         <>
@@ -276,7 +395,7 @@ export default function AdminStatsDashboard() {
                         </>
                     )}
 
-                    <SectionHeader>Servers</SectionHeader>
+                    <SectionHeader>Servers ({servers.length})</SectionHeader>
                     <Table>
                         <thead>
                             <tr>
@@ -290,7 +409,7 @@ export default function AdminStatsDashboard() {
                                 const ok = s.status === "ok";
                                 const st = s.stats || {};
                                 const sg = st.growth || {};
-                                const sc = st.contributors || {};
+                                const so = st.onchain || {};
                                 const sr = (st.retention && st.retention.d7) || {};
                                 return (
                                     <tr key={i}>
@@ -298,9 +417,9 @@ export default function AdminStatsDashboard() {
                                         <Td><StatusPill $ok={ok}>{s.status}</StatusPill></Td>
                                         <Td $right>{ok ? formatNumber(sg.visitors) : "—"}</Td>
                                         <Td $right>{ok ? formatNumber(sg.active) : "—"}</Td>
-                                        <Td $right>{ok ? formatNumber(sg.new_users) : "—"}</Td>
-                                        <Td $right>{ok ? formatNumber(sc.contributors) : "—"}</Td>
-                                        <Td $right>{ok ? formatPercent(sr.rate) : "—"}</Td>
+                                        <Td $right>{ok ? formatNumber(so.new_users) : "—"}</Td>
+                                        <Td $right>{ok ? formatNumber(so.contributors) : "—"}</Td>
+                                        <Td $right>{ok && sr.eligible ? formatPercent(sr.rate) : "—"}</Td>
                                     </tr>
                                 );
                             })}

@@ -163,8 +163,8 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 100, "active": 40, "new_users": 10},
-                "contributors": {"contributors": 5, "posts": 20, "comments": 30},
+                "growth": {"visitors": 100, "active": 40, "signups": 10},
+                "onchain": {"new_users": 80, "contributors": 5, "posts": 20, "comments": 30},
                 "retention": {
                     "cohort_size": 10,
                     "d7": {"eligible": 8, "retained": 4},
@@ -176,8 +176,8 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 50, "active": 10, "new_users": 5},
-                "contributors": {"contributors": 5, "posts": 0, "comments": 10},
+                "growth": {"visitors": 50, "active": 10, "signups": 5},
+                "onchain": {"new_users": 20, "contributors": 5, "posts": 0, "comments": 10},
                 "retention": {
                     "cohort_size": 5,
                     "d7": {"eligible": 2, "retained": 1},
@@ -191,12 +191,13 @@ def test_stats_pure(backend):
     checks = [
         agg["growth"]["visitors"] == 150,
         agg["growth"]["active"] == 50,
-        agg["growth"]["new_users"] == 15,
+        agg["growth"]["signups"] == 15,
         agg["growth"]["signup_conversion"] == round(15 / 150, 4),
-        agg["contributors"]["contributors"] == 10,
-        agg["contributors"]["posts"] == 20,
-        agg["contributors"]["comments"] == 40,
-        agg["contributors"]["posts_per_contributor"] == round(60 / 10, 2),
+        agg["onchain"]["new_users"] == 100,
+        agg["onchain"]["contributors"] == 10,
+        agg["onchain"]["posts"] == 20,
+        agg["onchain"]["comments"] == 40,
+        agg["onchain"]["posts_per_contributor"] == round(60 / 10, 2),
         agg["retention"]["cohort_size"] == 15,
         agg["retention"]["d7"]["eligible"] == 10,
         agg["retention"]["d7"]["retained"] == 5,

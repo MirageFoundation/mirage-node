@@ -1,10 +1,10 @@
 import styled from "styled-components";
 
 /**
- * Shared feed-column + right-rail layout primitives for the default
+ * Shared feed-column layout primitives for the default
  * theme. Extracted from `MainView` so multiple routes (home feed, post
  * details / comments view, etc.) can render the same 720 px feed column
- * with the `FeedRightRail` footer pinned on the right edge.
+ * with consistent desktop centering.
  *
  * The two components cooperate via attribute selectors — `FeedRailRow`
  * mirrors the caller's `$feedViewMode` onto `data-feed-view-mode`, and
@@ -27,10 +27,9 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
     box-sizing: border-box;
 
     @media (min-width: 1001px) {
-        /* Always fill at least the Main column's viewport height so the
-         * right rail (align-self: flex-end) sits on the bottom of the
-         * viewport even when the feed content is shorter than the
-         * screen (empty inbox, single post, loading state, etc.).
+        /* Always fill at least the Main column's viewport height so short
+         * states (empty inbox, single post, loading state, etc.) keep the
+         * same page rhythm as full feeds.
          *
          * Math: Layout shell is min-height: calc(100vh - 2.5rem - 1px)
          * (TopBar + divider). Main adds 0.5rem top + 3rem bottom
@@ -57,30 +56,27 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
             gap: 1.5rem;
         }
 
-        /* Sidebar hidden (card OR compact): center the feed + rail pair
-         * as a single block inside Main with the same breathing gap as
-         * the sidebar-visible states. Compact now matches card exactly
-         * so the feed column width + rail placement are identical in
-         * both view modes. */
+        /* Sidebar hidden (card OR compact): center the feed column inside
+         * Main. Compact now matches card exactly so the feed column width
+         * is identical in both view modes. */
         [data-sidebar-hidden='true'] &[data-feed-view-mode='card'],
         [data-sidebar-hidden='true'] &[data-feed-view-mode='compact'] {
-            max-width: calc(820px + 1.5rem + 260px);
+            max-width: 820px;
             margin-left: auto;
             margin-right: auto;
             gap: 1.5rem;
         }
     }
 
-    /* Very large screens (> average laptop): ALWAYS center the feed+rail
-     * pair inside Main with a consistent 1.5rem gap between them,
-     * regardless of sidebar visibility or view mode. Higher specificity
+    /* Very large screens (> average laptop): ALWAYS center the feed column
+     * inside Main regardless of sidebar visibility or view mode. Higher specificity
      * (two attribute selectors) so these rules beat the 1001px rules
      * above even at equal cascade order. Feed column grows to 960 px
      * (up from the 820 px laptop cap) so content reads more comfortably
      * on large desktops / external monitors. */
     @media (min-width: 1500px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
-            max-width: calc(960px + 1.5rem + 260px);
+            max-width: 960px;
             margin-left: auto;
             margin-right: auto;
             gap: 1.5rem;
@@ -88,11 +84,10 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
     }
 
     /* Ultrawide / 4K displays (> 1900 px): feed column grows to 1200 px
-     * so the feed+rail pair fills more of the viewport on large external
-     * monitors. Rail width stays fixed at 260 px. */
+     * so the feed fills more of the viewport on large external monitors. */
     @media (min-width: 1900px) {
         [data-sidebar-hidden] &[data-feed-view-mode] {
-            max-width: calc(1200px + 1.5rem + 260px);
+            max-width: 1200px;
             margin-left: auto;
             margin-right: auto;
             gap: 1.5rem;
@@ -103,9 +98,9 @@ export const FeedRailRow = styled.div.attrs(({ $feedViewMode }) => ({
 /**
  * Feed column inside `FeedRailRow`.
  *   - Sidebar visible (card or compact): 820 px fixed track.
- *   - Sidebar hidden (card or compact): 820 px fixed (centered with
- *     the rail). Compact mode intentionally matches card so the feed
- *     width + rail placement are identical in both modes.
+ *   - Sidebar hidden (card or compact): 820 px fixed and centered.
+ *     Compact mode intentionally matches card so the feed width is
+ *     identical in both modes.
  *   - >= 1500 px (large desktops): column grows to 960 px.
  *   - <= 1000 px: collapses to viewport-filling width (rail hidden).
  */

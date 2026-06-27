@@ -18,7 +18,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { useReports } from "../../../logic/useReports";
 
 /**
@@ -32,9 +31,8 @@ import { useReports } from "../../../logic/useReports";
  *  - R7 row title 0.78rem/600, meta 0.62rem/500 subtleText.
  *
  * Shell structure mirrors `InboxView` / `FollowsView` / `BlocksView` /
- * `AgentsView`: `FeedRailRow` + `FeedCol` + `FeedRightRail` so the page
- * keeps the standard right rail and responsive width bumps every other
- * list route in the theme uses.
+ * `AgentsView`: `FeedRailRow` + `FeedCol` so the page keeps the standard
+ * responsive width bumps every other list route in the theme uses.
  */
 
 const ReportsWrap = styled.div`
@@ -357,7 +355,6 @@ export default function ReportsView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );

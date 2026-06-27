@@ -953,6 +953,7 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
             <MenuItem to="/follows" onClick={() => handleItemClick('/follows')}>Follows</MenuItem>
             <MenuItem to="/blocks" onClick={() => handleItemClick('/blocks')}>Blocks</MenuItem>
             <MenuItem to="/agents" onClick={() => handleItemClick('/agents')}>Agents</MenuItem>
+            <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuItem to="/network" onClick={() => handleItemClick('/network')}>Network</MenuItem>
             {referralsEnabled && (
                 <MenuItem to="/referrals" onClick={() => handleItemClick('/referrals')}>Referrals</MenuItem>
@@ -966,7 +967,6 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
                 </>
             )}
             <MenuDivider />
-            <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuButton type="button" onClick={handleSignOutClick}>Sign out</MenuButton>
         </>
     );

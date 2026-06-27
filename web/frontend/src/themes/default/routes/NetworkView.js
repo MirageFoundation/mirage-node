@@ -3,7 +3,6 @@ import styled, { useTheme } from "styled-components";
 import { HiClipboardDocument, HiCheck } from "react-icons/hi2";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { Skeleton, ListRowSkeletonList } from "../components/Skeleton.js";
 import { formatMirageCompact } from "../../../utils/formatters";
 import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
@@ -1114,7 +1113,6 @@ export default function NetworkView({ state }) {
                         </NetworkTabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );

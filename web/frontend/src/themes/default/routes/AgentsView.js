@@ -17,7 +17,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { useAgents, formatTimeAgo } from "../../../logic/useAgents";
 import UserAvatar from "../components/UserAvatar.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -479,7 +478,6 @@ export default function AgentsView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );

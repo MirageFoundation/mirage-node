@@ -14,7 +14,6 @@ import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import QuestHeroCard from "../components/QuestHeroCard.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { FeedSortToggle, FeedViewToggle, loadViewMode, saveViewMode, VIEW_MODE_CHANGE_EVENT } from "../ListFeedView.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
@@ -1972,7 +1971,6 @@ const MainView = ({
                         </ModernPostFeed>
                     </MainFeedPanel>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
 
             {/* Invite Code Modal */}

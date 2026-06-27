@@ -9,7 +9,6 @@ import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
@@ -2442,7 +2441,6 @@ function ViewPostView({
                         </BlockedPostState>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }
@@ -2479,7 +2477,6 @@ function ViewPostView({
                         </VPStateBlock>}
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }
@@ -3929,7 +3926,6 @@ function ViewPostView({
                         </ModernPostFeed>
                     </MainContentWrapper>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
             {renderMobileReplyOverlay()}
             {/**
@@ -4207,7 +4203,6 @@ function ViewPostView({
                         </ModernPostFeed>
                     </MainContentWrapper>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }

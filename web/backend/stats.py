@@ -18,12 +18,14 @@ Core model (see the Server Stats Redesign plan):
 """
 
 import re
+import socket
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import has_request_context, request
 
+from chain import get_connected_peers
 from client_ip import hash_visitor_id
 from db import connect_backend_db, connect_db
 
@@ -269,15 +271,18 @@ def _resolved_event_cte() -> str:
     logged-in self into one identity.
     """
     return (
-        "SELECT COALESCE(e.address, v.address, e.visitor_hash) AS ident, e.event_type, e.created_at "
+        "SELECT COALESCE(e.address, v.address, e.visitor_hash) AS ident, e.event_type, e.created_at, "
+        "(e.address IS NOT NULL OR v.address IS NOT NULL) AS has_addr "
         "FROM stats_events e LEFT JOIN stats_visitors v ON v.visitor_hash = e.visitor_hash "
         "WHERE e.created_at BETWEEN %s AND %s"
     )
 
 
-def _growth_visitors(start: int, end: int) -> Tuple[int, int]:
-    """(visitors, active) for the window: distinct identities with any event,
-    and with an engagement event (DAU-style)."""
+def _growth_visitors(start: int, end: int) -> Tuple[int, int, int]:
+    """(visitors, active, signups) for the tracked-visitor population in the window:
+    distinct identities with any event; with an engagement event (DAU-style); and
+    that are bound to a Mirage address (i.e. signed up / authenticated). All three
+    come from the same population so signups/visitors is a real conversion <= 100%."""
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -285,13 +290,14 @@ def _growth_visitors(start: int, end: int) -> Tuple[int, int]:
                 WITH ev AS ({_resolved_event_cte()})
                 SELECT
                     COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL),
-                    COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL AND event_type = 'engagement')
+                    COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL AND event_type = 'engagement'),
+                    COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL AND has_addr)
                 FROM ev
                 """,
                 (start, end),
             )
             row = cur.fetchone()
-            return int(row[0] or 0), int(row[1] or 0)
+            return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
 
 
 def _new_users(start: int, end: int) -> int:
@@ -469,6 +475,59 @@ def _campaigns(start: int, end: int, limit: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
+def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
+    """Per-day buckets across the window for charting. On-chain lines (new_users,
+    posts, comments) have full history; tracked lines (active) only populate after
+    visitor tracking began. Always returns one point per day so charts are dense."""
+    new_users_by_day: Dict[int, int] = {}
+    posts_by_day: Dict[int, Tuple[int, int]] = {}
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT (created_at/%s)*%s AS d, COUNT(*) FROM profiles "
+                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0) GROUP BY d",
+                (DAY, DAY, start, end),
+            )
+            new_users_by_day = {int(d): int(n) for d, n in cur.fetchall()}
+            cur.execute(
+                "SELECT (created_at/%s)*%s AS d, "
+                "COUNT(*) FILTER (WHERE COALESCE(target,'') = ''), "
+                "COUNT(*) FILTER (WHERE COALESCE(target,'') <> '') "
+                "FROM posts WHERE created_at BETWEEN %s AND %s GROUP BY d",
+                (DAY, DAY, start, end),
+            )
+            posts_by_day = {int(d): (int(p), int(c)) for d, p, c in cur.fetchall()}
+
+    active_by_day: Dict[int, int] = {}
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"WITH ev AS ({_resolved_event_cte()}) "
+                "SELECT (created_at/%s)*%s AS d, "
+                "COUNT(DISTINCT ident) FILTER (WHERE event_type = 'engagement') "
+                "FROM ev GROUP BY d",
+                (start, end, DAY, DAY),
+            )
+            active_by_day = {int(d): int(a) for d, a in cur.fetchall()}
+
+    out: List[Dict[str, int]] = []
+    day = (start // DAY) * DAY
+    last = (end // DAY) * DAY
+    while day <= last:
+        posts, comments = posts_by_day.get(day, (0, 0))
+        out.append(
+            {
+                "t": day,
+                "new_users": new_users_by_day.get(day, 0),
+                "posts": posts,
+                "comments": comments,
+                "active": active_by_day.get(day, 0),
+            }
+        )
+        day += DAY
+    return out
+
+
 def local_server_label() -> str:
     import os
 
@@ -486,20 +545,23 @@ def local_server_label() -> str:
 def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
     """Full metric bundle for this server over [start, end]."""
     now_ts = int(time.time())
-    visitors, active = _growth_visitors(start, end)
+    visitors, active, signups = _growth_visitors(start, end)
     new_users = _new_users(start, end)
     contributors, posts, comments = _contributors(start, end)
     return {
         "server": local_server_label(),
         "generated_at": now_ts,
         "window": {"start": start, "end": end},
+        # Tracked-visitor funnel (only counts activity since visitor tracking began).
         "growth": {
             "visitors": visitors,
             "active": active,
-            "new_users": new_users,
-            "signup_conversion": round(new_users / visitors, 4) if visitors else 0.0,
+            "signups": signups,
+            "signup_conversion": round(signups / visitors, 4) if visitors else 0.0,
         },
-        "contributors": {
+        # On-chain facts over the window (full history, independent of visitor tracking).
+        "onchain": {
+            "new_users": new_users,
             "contributors": contributors,
             "posts": posts,
             "comments": comments,
@@ -507,6 +569,7 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
         },
         "retention": _retention(start, end, now_ts),
         "campaigns": _campaigns(start, end),
+        "series": _daily_series(start, end),
     }
 
 
@@ -547,26 +610,33 @@ def _normalize_moniker_url(moniker: str) -> Optional[str]:
 def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: int) -> Dict[str, Any]:
     """Sum additive metrics across reachable servers. Rates are recomputed from
     the summed numerators/denominators so they stay meaningful fleet-wide."""
-    visitors = active = new_users = 0
+    visitors = active = signups = new_users = 0
     contributors = posts = comments = 0
     cohort_size = 0
     ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained]
+    series_by_day: Dict[int, Dict[str, int]] = {}
     for s in ok_servers:
         st = s.get("stats") or {}
         g = st.get("growth") or {}
-        c = st.get("contributors") or {}
+        o = st.get("onchain") or {}
         r = st.get("retention") or {}
         visitors += int(g.get("visitors") or 0)
         active += int(g.get("active") or 0)
-        new_users += int(g.get("new_users") or 0)
-        contributors += int(c.get("contributors") or 0)
-        posts += int(c.get("posts") or 0)
-        comments += int(c.get("comments") or 0)
+        signups += int(g.get("signups") or 0)
+        new_users += int(o.get("new_users") or 0)
+        contributors += int(o.get("contributors") or 0)
+        posts += int(o.get("posts") or 0)
+        comments += int(o.get("comments") or 0)
         cohort_size += int(r.get("cohort_size") or 0)
         for k in ("d7", "d14", "d30"):
             d = r.get(k) or {}
             ret[k][0] += int(d.get("eligible") or 0)
             ret[k][1] += int(d.get("retained") or 0)
+        for pt in st.get("series") or []:
+            t = int(pt.get("t") or 0)
+            agg_pt = series_by_day.setdefault(t, {"t": t, "new_users": 0, "posts": 0, "comments": 0, "active": 0})
+            for f in ("new_users", "posts", "comments", "active"):
+                agg_pt[f] += int(pt.get(f) or 0)
     retention = {"cohort_size": cohort_size}
     for k in ("d7", "d14", "d30"):
         eligible, retained = ret[k]
@@ -581,33 +651,90 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         "growth": {
             "visitors": visitors,
             "active": active,
-            "new_users": new_users,
-            "signup_conversion": round(new_users / visitors, 4) if visitors else 0.0,
+            "signups": signups,
+            "signup_conversion": round(signups / visitors, 4) if visitors else 0.0,
         },
-        "contributors": {
+        "onchain": {
+            "new_users": new_users,
             "contributors": contributors,
             "posts": posts,
             "comments": comments,
             "posts_per_contributor": round((posts + comments) / contributors, 2) if contributors else 0.0,
         },
         "retention": retention,
+        "series": [series_by_day[t] for t in sorted(series_by_day)],
     }
 
 
+def _endpoint_host(url: str) -> str:
+    """Extract the bare host from an http(s) base URL (drops scheme/port/path)."""
+    host = url.split("://", 1)[-1].split("/", 1)[0]
+    if ":" in host:
+        maybe_host, maybe_port = host.rsplit(":", 1)
+        if maybe_port.isdigit():
+            host = maybe_host
+    return host
+
+
+def _resolve_ip(host: str) -> Optional[str]:
+    """Best-effort DNS resolution so two endpoints for the same node (its domain
+    and its raw peer IP) collapse to one. Returns None if the host can't resolve."""
+    try:
+        return socket.gethostbyname(host)
+    except OSError:
+        return None
+
+
 def discover_servers() -> List[str]:
-    """Canonical fleet list: this server plus validator monikers that normalize
-    to web URLs. Raw IPs are never treated as stats endpoints."""
-    servers: List[str] = []
+    """Full fleet, derived entirely from live network state — never hardcoded.
+
+    Two on-chain sources are unioned: validators (which advertise a web endpoint
+    via a domain moniker when they have one) and the same connected_peers list the
+    /network page uses (every P2P peer this node sees, by network IP). Nodes without
+    a domain are reached at their peer IP — this is server-to-server fan-out only and
+    is never an identity key. Endpoints that resolve to the same IP (a node's domain
+    vs its raw IP) collapse to one, preferring the domain form.
+    """
+    candidates: List[str] = []
     local = local_server_label()
     if local.startswith("http"):
-        servers.append(local.rstrip("/"))
+        candidates.append(local.rstrip("/"))
+
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
             row = cur.fetchone()
             validators = row[0] if row and isinstance(row[0], list) else []
+    peers = get_connected_peers()
+
+    # Domains first so they win the dedup over a raw IP for the same node.
     for v in validators:
         url = _normalize_moniker_url(v.get("moniker", "") if isinstance(v, dict) else "")
-        if url and url not in servers:
-            servers.append(url)
+        if url:
+            candidates.append(url)
+    for p in peers:
+        if not isinstance(p, dict):
+            continue
+        url = _normalize_moniker_url(p.get("moniker", ""))
+        if not url:
+            ip = str(p.get("ip", "") or "").strip()
+            if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", ip):
+                url = f"http://{ip}"
+        if url:
+            candidates.append(url)
+
+    servers: List[str] = []
+    seen_urls: set = set()
+    seen_ips: set = set()
+    for url in candidates:
+        key = url.rstrip("/")
+        if key in seen_urls:
+            continue
+        ip = _resolve_ip(_endpoint_host(key))
+        if ip and ip in seen_ips:
+            continue
+        seen_urls.add(key)
+        if ip:
+            seen_ips.add(ip)
+        servers.append(key)
     return servers
