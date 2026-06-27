@@ -7899,16 +7899,24 @@ def media_edge_register():
 # ===== DEPRECATED LEGACY SHIM - REMOVE AFTER 2026-08 - DO NOT BUILD ON THIS =====
 # get_upload_url returns the OLD Cloudflare browser-direct upload shape, kept ONLY
 # so old mobile builds keep working during the dual-provider cutover. New clients
-# (web + updated app) MUST use POST /api/upload_media instead. This endpoint is
-# intentionally limited to the cloudflare provider and MUST be deleted after
-# ~August 2026, after which mirage.talk's Cloudflare credentials can be retired.
-# See docs/guides/media_providers.md ("Legacy get_upload_url shim").
+# (web + updated app) MUST use POST /api/upload_media instead.
+#
+# SMOOTH CUTOVER: this shim is gated on Cloudflare CREDENTIALS being present, NOT
+# on the node's active MEDIA_PROVIDER. That is deliberate: it lets a node move new
+# uploads to bunny/local (or a bunny_edge deployment) while old mobile builds keep
+# uploading to Cloudflare through here until the app ships /api/upload_media. The
+# uploaded media still renders everywhere via dual-read.
+#
+# MUST be deleted after ~August 2026 together with mirage.talk's Cloudflare
+# credentials. See docs/guides/media_providers.md ("Legacy get_upload_url shim").
 # =============================================================================
 @public_bp.route("/api/get_upload_url", methods=["POST"])
 def get_upload_url():
     """DEPRECATED legacy Cloudflare direct-upload shim. Use /api/upload_media.
 
-    REMOVE AFTER 2026-08. Only active when MEDIA_PROVIDER=cloudflare.
+    REMOVE AFTER 2026-08. Active whenever Cloudflare credentials are configured,
+    independent of MEDIA_PROVIDER, so old mobile builds keep working after the node
+    switches its active provider to bunny/local.
     """
     rid = next_request_id()
     # Loud per-call deprecation warning so lingering callers show up in logs and
@@ -7916,9 +7924,11 @@ def get_upload_url():
     logger.warning("DEPRECATED get_upload_url called - remove after 2026-08")
     log_event(rid, "get_upload_url.begin", deprecated=True)
     try:
-        from media import active_provider_id
-
-        if active_provider_id() != "cloudflare":
+        # Gate on Cloudflare credentials, NOT the active provider, so this keeps
+        # serving old mobile builds even when MEDIA_PROVIDER is bunny/local.
+        cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+        cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+        if not (cf_account and cf_token):
             log_event(rid, "get_upload_url.unsupported_provider")
             return api_error_code("legacy_upload_unsupported", 410)
 

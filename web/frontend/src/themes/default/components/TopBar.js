@@ -761,7 +761,7 @@ function GuestMenu() {
     const [themeMode, setThemeMode] = useState(() => {
         try {
             const v = Storage.load('theme_mode', 'time');
-            return v === 'light' || v === 'dark' || v === 'time' ? v : 'time';
+            return v === 'light' || v === 'dark' || v === 'system' || v === 'time' ? v : 'time';
         } catch (_) {
             return 'time';
         }
@@ -877,6 +877,19 @@ function GuestMenu() {
                         >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                            </svg>
+                        </ModeIconButton>
+                        <ModeIconButton
+                            type="button"
+                            $active={themeMode === 'system'}
+                            onClick={() => handleModePick('system')}
+                            aria-pressed={themeMode === 'system'}
+                            aria-label="System mode"
+                            title="System"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
                             </svg>
                         </ModeIconButton>
                         <ModeIconButton

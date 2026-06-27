@@ -18,11 +18,11 @@ Core model (see the Server Stats Redesign plan):
 """
 
 import re
-import socket
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from flask import has_request_context, request
 
 from chain import get_connected_peers
@@ -666,23 +666,27 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
     }
 
 
-def _endpoint_host(url: str) -> str:
-    """Extract the bare host from an http(s) base URL (drops scheme/port/path)."""
-    host = url.split("://", 1)[-1].split("/", 1)[0]
-    if ":" in host:
-        maybe_host, maybe_port = host.rsplit(":", 1)
-        if maybe_port.isdigit():
-            host = maybe_host
-    return host
+def _peer_endpoint(ip: str) -> Optional[str]:
+    """Resolve a P2P peer IP to a fleet web endpoint, or None to skip it.
 
-
-def _resolve_ip(host: str) -> Optional[str]:
-    """Best-effort DNS resolution so two endpoints for the same node (its domain
-    and its raw peer IP) collapse to one. Returns None if the host can't resolve."""
-    try:
-        return socket.gethostbyname(host)
-    except OSError:
+    A node that has its own domain serves https and redirects plain http to it
+    (and is already represented by its validator domain moniker, possibly behind
+    a CDN whose DNS hides the origin IP). A domain-less node (e.g. a bare
+    validator) instead serves the API directly over http on its IP. So we probe
+    http://<ip>: a redirect to https means "domain node — skip" (avoids listing
+    the same node twice); a direct response means "this IP is its only endpoint".
+    """
+    if not re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", ip):
         return None
+    try:
+        resp = requests.get(f"http://{ip}/api/get_peers", timeout=3, allow_redirects=False)
+    except requests.RequestException:
+        # Can't probe it (down/filtered); surface it so it shows as unreachable
+        # rather than silently vanishing from the fleet.
+        return f"http://{ip}"
+    if 300 <= resp.status_code < 400 and resp.headers.get("Location", "").startswith("https"):
+        return None
+    return f"http://{ip}"
 
 
 def discover_servers() -> List[str]:
@@ -690,51 +694,41 @@ def discover_servers() -> List[str]:
 
     Two on-chain sources are unioned: validators (which advertise a web endpoint
     via a domain moniker when they have one) and the same connected_peers list the
-    /network page uses (every P2P peer this node sees, by network IP). Nodes without
-    a domain are reached at their peer IP — this is server-to-server fan-out only and
-    is never an identity key. Endpoints that resolve to the same IP (a node's domain
-    vs its raw IP) collapse to one, preferring the domain form.
+    /network page uses (every P2P peer this node sees, by network IP). Domain nodes
+    come from validators; domain-less nodes are reached at their peer IP (see
+    _peer_endpoint, which skips peers that are really a domain node). Server-to-
+    server fan-out only; a peer IP is never an identity/merge key.
     """
-    candidates: List[str] = []
+    servers: List[str] = []
+    seen: set = set()
+
+    def add(url: Optional[str]) -> None:
+        if not url:
+            return
+        key = url.rstrip("/")
+        if key not in seen:
+            seen.add(key)
+            servers.append(key)
+
     local = local_server_label()
     if local.startswith("http"):
-        candidates.append(local.rstrip("/"))
+        add(local)
 
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
             row = cur.fetchone()
             validators = row[0] if row and isinstance(row[0], list) else []
-    peers = get_connected_peers()
 
-    # Domains first so they win the dedup over a raw IP for the same node.
     for v in validators:
-        url = _normalize_moniker_url(v.get("moniker", "") if isinstance(v, dict) else "")
-        if url:
-            candidates.append(url)
-    for p in peers:
+        add(_normalize_moniker_url(v.get("moniker", "") if isinstance(v, dict) else ""))
+
+    for p in get_connected_peers():
         if not isinstance(p, dict):
             continue
         url = _normalize_moniker_url(p.get("moniker", ""))
         if not url:
-            ip = str(p.get("ip", "") or "").strip()
-            if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", ip):
-                url = f"http://{ip}"
-        if url:
-            candidates.append(url)
+            url = _peer_endpoint(str(p.get("ip", "") or "").strip())
+        add(url)
 
-    servers: List[str] = []
-    seen_urls: set = set()
-    seen_ips: set = set()
-    for url in candidates:
-        key = url.rstrip("/")
-        if key in seen_urls:
-            continue
-        ip = _resolve_ip(_endpoint_host(key))
-        if ip and ip in seen_ips:
-            continue
-        seen_urls.add(key)
-        if ip:
-            seen_ips.add(ip)
-        servers.append(key)
     return servers

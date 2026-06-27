@@ -206,8 +206,24 @@ edge (`bunny_edge`).
 Older mobile builds expect the old browser-direct Cloudflare upload flow. To avoid
 breaking them during the dual-provider cutover on mirage.talk, the legacy
 `get_upload_url` endpoint is kept as a thin backward-compatible shim that returns
-the old Cloudflare direct-upload shape — ONLY when the client lacks the new-upload
-capability flag and the provider is `cloudflare`.
+the old Cloudflare direct-upload shape.
+
+Smooth cutover (the important part): the shim is gated on **Cloudflare credentials
+being present**, NOT on the node's active `MEDIA_PROVIDER`. This is what makes the
+switch seamless — a node can set `MEDIA_PROVIDER=bunny` (or run a `bunny_edge`
+deployment) for all NEW uploads while old mobile builds keep uploading to
+Cloudflare through `get_upload_url`, because the Cloudflare creds are still
+configured. Both paths coexist:
+
+- New clients (web + updated app) → `POST /api/upload_media` → bunny/edge.
+- Old mobile builds → `POST /api/get_upload_url` → Cloudflare (unchanged).
+- The edge handler only intercepts `/api/upload_media`, so `get_upload_url` always
+  reaches the origin node and behaves identically to before.
+
+Honest tradeoff: because old-app uploads still go browser-direct to Cloudflare,
+they bypass any edge upload-safety scan (e.g. Bunny Shield) until the app moves to
+`/api/upload_media`. This is the unavoidable cost of not breaking old builds, and
+it ends when the shim is retired.
 
 This shim is temporary and MUST be removed after ~August 2026. To make that
 impossible to forget, the implementation:
@@ -219,9 +235,26 @@ impossible to forget, the implementation:
   tell exactly when it is safe to delete.
 
 Once OTA-updated app versions dominate, delete the shim and retire mirage.talk's
-Cloudflare credentials. The app-side switch to `/api/upload_media` (shipped via
-EAS OTA) is tracked separately; the node only guarantees backward compatibility so
-the app is never the thing that breaks.
+Cloudflare credentials (removing the creds alone is enough to disable the shim —
+it then returns `410 legacy_upload_unsupported`). The app-side switch to
+`/api/upload_media` (shipped via EAS OTA) is tracked separately; the node only
+guarantees backward compatibility so the app is never the thing that breaks.
+
+### Recommended bunny_edge cutover for mirage.talk (zero app breakage)
+
+1. Create the Bunny resources and set `BUNNY_*` + `BUNNY_EDGE_CALLBACK_SECRET` in
+   `~/.mirage/env/secrets.env`.
+2. Deploy the edge script (`deploy/bunny-edge/`) in front of `/api/upload_media`
+   with the same secret; enable Bunny Shield scanning on that path.
+3. Set `MEDIA_PROVIDER=bunny` in `~/.mirage/env/backend.env` (origin fallback +
+   consistent behavior if the edge is ever bypassed).
+4. KEEP the existing `CLOUDFLARE_*` credentials in place. This is what keeps the
+   legacy `get_upload_url` shim alive for old mobile builds.
+
+Result: new web + updated-app uploads go through the scanning edge into Bunny; old
+mobile builds keep uploading to Cloudflare via the shim; all previously stored
+Cloudflare media keeps rendering (dual-read). When old app versions die out, drop
+the `CLOUDFLARE_*` creds and delete the shim.
 
 ### Configuration
 
