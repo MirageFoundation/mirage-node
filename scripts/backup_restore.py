@@ -471,8 +471,22 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
                 echo "ERROR: indexer SQL dump is only ${DUMP_SIZE} bytes — dump likely failed" >&2
                 exit 1
             fi
-            # Backend DB (may not exist on older nodes)
-            PGPASSWORD=mirage_backend pg_dump -h 127.0.0.1 -U mirage_backend -d mirage_backend > /root/.mirage/backup_backend.sql 2>/dev/null || true
+            # Backend DB. The SQL dump is now the ONLY copy of this data in the
+            # backup (the raw postgres/ data dir is no longer tarred), so a failed
+            # dump must fail the whole backup — never silently ship an empty one.
+            HAS_BACKEND_DB=$(su - postgres -c "psql -tAc \\"SELECT 1 FROM pg_database WHERE datname='"'"'mirage_backend'"'"'\\"" 2>/dev/null | tr -d " ")
+            if [ "$HAS_BACKEND_DB" = "1" ]; then
+                PGPASSWORD=mirage_backend pg_dump -h 127.0.0.1 -U mirage_backend -d mirage_backend > /root/.mirage/backup_backend.sql
+                BACKEND_DUMP_SIZE=$(stat -c%s /root/.mirage/backup_backend.sql 2>/dev/null || echo 0)
+                if [ "$BACKEND_DUMP_SIZE" -lt 1000 ]; then
+                    echo "ERROR: backend SQL dump is only ${BACKEND_DUMP_SIZE} bytes — dump likely failed" >&2
+                    exit 1
+                fi
+                echo "pg_dump: backend db=mirage_backend size=${BACKEND_DUMP_SIZE} bytes"
+            else
+                echo "No mirage_backend DB present (older node); skipping backend dump"
+                rm -f /root/.mirage/backup_backend.sql
+            fi
         '
     """,
     )
@@ -491,6 +505,10 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         '--exclude=".mirage/*.tgz" '
         '--exclude=".mirage/node/data/cs.wal" '
         '--exclude=".mirage/node/data/tx_index.db" '
+        '--exclude=".mirage/data.preheal-*" '
+        '--exclude=".mirage/data.wiped.*" '
+        '--exclude=".mirage/.divergence_forensics" '
+        '--exclude=".mirage/postgres" '
         "2>/dev/null | cut -f1'",
         capture=True,
     )
@@ -501,6 +519,16 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     status(f"Streaming backup to {local_path} (~{estimated_gb:.1f} GB compressed)...")
 
     # Stream: remote tar | gzip | pv (local progress) | local file
+    # Forensic/recovery leftovers (data.preheal-*, data.wiped.*, .divergence_forensics)
+    # are diverged-state captures kept on the host for replay — they must NOT inflate
+    # routine backups. They are preserved in place on the server, just not shipped.
+    #
+    # .mirage/postgres (the raw PG data dir, ~1 GB) is intentionally NOT tarred: it is
+    # a byte-for-byte duplicate of data we already capture as logical SQL dumps
+    # (backup_indexer.sql / backup_backend.sql), and the restore path DROPs+recreates
+    # both DBs purely from those dumps — the raw dir's contents are never used. Restore
+    # rebuilds an empty cluster via pg_createcluster (same as a fresh deploy) when the
+    # dir is absent. Excluding it roughly halves backup size with zero data loss.
     tar_cmd = (
         "cd /root && tar cf - "
         '--exclude=".mirage/tmp" '
@@ -508,6 +536,10 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         '--exclude=".mirage/*.tgz" '
         '--exclude=".mirage/node/data/cs.wal" '
         '--exclude=".mirage/node/data/tx_index.db" '
+        '--exclude=".mirage/data.preheal-*" '
+        '--exclude=".mirage/data.wiped.*" '
+        '--exclude=".mirage/.divergence_forensics" '
+        '--exclude=".mirage/postgres" '
         ".mirage | gzip"
     )
     with open(local_path, "wb") as f:
@@ -797,7 +829,7 @@ reseed_db_sequences() {
     local db="$1"
     echo "Reseeding serial sequences in $db..."
     su - postgres -c "psql -v ON_ERROR_STOP=1 -d \"$db\" <<'SQL_EOF'
-DO $$
+DO \$\$
 DECLARE
     rec RECORD;
 BEGIN
@@ -829,24 +861,32 @@ BEGIN
             rec.table_name
         );
     END LOOP;
-END $$;
+END \$\$;
 SQL_EOF"
 }
-
-if [ ! -f "$PG_DATA_DIR/PG_VERSION" ]; then
-    echo "ERROR: PostgreSQL data directory missing: $PG_DATA_DIR" >&2
-    exit 1
-fi
 
 echo "DEBUG: Making /root traversable for postgres user"
 chmod o+x /root /root/.mirage
 
-echo "DEBUG: Ensuring postgres owns $PG_DATA_DIR"
-chown -R postgres:postgres "$PG_DATA_DIR"
-chmod 700 "$PG_DATA_DIR"
+if [ ! -f "$PG_DATA_DIR/PG_VERSION" ]; then
+    # Backups no longer ship the raw postgres data dir (it duplicates the SQL
+    # dumps). Rebuild an empty cluster from scratch here, mirroring the fresh-
+    # deploy path in deploy/entrypoint.sh, then load the dumps below. Old backups
+    # that still contain the dir skip this branch and keep working unchanged.
+    echo "No PostgreSQL data dir in backup — creating a fresh cluster at $PG_DATA_DIR"
+    pg_dropcluster 16 main 2>/dev/null || true
+    mkdir -p "$PG_DATA_DIR"
+    chown postgres:postgres "$PG_DATA_DIR"
+    chmod 700 "$PG_DATA_DIR"
+    pg_createcluster 16 main --datadir="$PG_DATA_DIR" --locale=C.UTF-8
+else
+    echo "DEBUG: Ensuring postgres owns $PG_DATA_DIR"
+    chown -R postgres:postgres "$PG_DATA_DIR"
+    chmod 700 "$PG_DATA_DIR"
 
-echo "DEBUG: Pointing postgres to $PG_DATA_DIR"
-sed -i "s|^data_directory = .*|data_directory = '$PG_DATA_DIR'|" "$PG_CONF"
+    echo "DEBUG: Pointing postgres to $PG_DATA_DIR"
+    sed -i "s|^data_directory = .*|data_directory = '$PG_DATA_DIR'|" "$PG_CONF"
+fi
 
 echo "Starting PostgreSQL..."
 pg_ctlcluster 16 main start
