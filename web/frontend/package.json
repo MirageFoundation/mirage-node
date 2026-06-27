@@ -16,6 +16,7 @@
         "crypto-browserify": "^3.12.0",
         "crypto-js": "^4.2.0",
         "hls.js": "^1.5.7",
+        "mixpanel-browser": "^2.80.0",
         "process": "^0.11.10",
         "react": "^19.2.3",
         "react-app-rewired": "^2.2.1",

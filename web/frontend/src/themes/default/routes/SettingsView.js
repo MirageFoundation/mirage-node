@@ -741,6 +741,7 @@ export default function SettingsView({ state }) {
         referralPrecheckBusy,
         referralPrecheckError,
         referralPrecheckSuccess,
+        analyticsConsent,
         inviteCodesRequired,
         seedMode,
         prfSupported,
@@ -771,6 +772,7 @@ export default function SettingsView({ state }) {
         handleThemeIdChange,
         handleThemeModeChange,
         handleReferralPrecheckToggle,
+        handleAnalyticsToggle,
         handleCollapseThresholdChange,
         handleSidebarTopicsLimitChange,
         handleSidebarPeopleLimitChange,
@@ -929,6 +931,20 @@ export default function SettingsView({ state }) {
                                     <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
                                 </ClickableRowRight>
                             </ClickableSettingRow>
+
+                            <SectionHeader>Privacy</SectionHeader>
+
+                            <SettingRow>
+                                <SettingControl>
+                                    <ToggleRow as="div">
+                                        <div>
+                                            <ToggleLabel>Usage Analytics</ToggleLabel>
+                                            <ToggleDesc>Share anonymous usage data to help improve Mirage</ToggleDesc>
+                                        </div>
+                                        <Toggle checked={analyticsConsent} onChange={e => handleAnalyticsToggle(!!e.target.checked)} />
+                                    </ToggleRow>
+                                </SettingControl>
+                            </SettingRow>
 
                             {inviteCodesRequired && <>
                                 <SectionHeader>Referrals</SectionHeader>

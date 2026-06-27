@@ -3,6 +3,7 @@ import * as tx from '../utils/tx';
 import Storage from '../utils/Storage';
 import { updateNotification } from '../utils/notifications';
 import { markPostVoted } from './useSeenPosts';
+import { trackEvent } from '../utils/analytics';
 
 export function usePendingVotes() {
     const [pendingVotes, setPendingVotes] = useState({});
@@ -109,6 +110,10 @@ export function useVoteHandler({ state, updatePost }) {
             if (result && result.success === false) {
                 throw new Error(result.error || 'Vote failed');
             }
+            trackEvent('vote_cast', {
+                direction: newDir === 1 ? 'up' : newDir === -1 ? 'down' : 'clear',
+                target_type: postObj?.target ? 'comment' : 'post'
+            });
         } catch (e) {
             try {
                 if (typeof updatePost === 'function') {
