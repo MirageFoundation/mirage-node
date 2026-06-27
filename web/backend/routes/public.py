@@ -3990,7 +3990,6 @@ def _build_node_config() -> dict:
         "validator_consensus_address": valcons,
         "validator_moniker": validator_moniker,
         "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
-        "mixpanel_token": os.environ.get("REACT_APP_MIXPANEL_TOKEN", ""),
         "registration_enabled": REGISTRATION_ENABLED,
         "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
         "quests_enabled": QUESTS_ENABLED,

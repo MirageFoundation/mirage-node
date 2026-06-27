@@ -7,7 +7,6 @@ import seedVault from './utils/SeedVault';
 import Api from './utils/api';
 import * as tx from './utils/tx';
 import { seedFromBootstrap as seedProfileFromBootstrap } from './utils/ProfileCache';
-import { initAnalytics, trackEvent } from './utils/analytics';
 import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
@@ -76,20 +75,6 @@ const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
 
-function getRouteFamily(pathname) {
-    const path = pathname === '/' ? '/home' : pathname;
-    if (path === '/home') return 'home';
-    if (path === '/following') return 'following';
-    if (path.startsWith('/t/')) return 'topic';
-    if (path.startsWith('/p/')) return 'post';
-    if (path.startsWith('/profile') || path.startsWith('/u/')) return 'profile';
-    if (path.startsWith('/settings')) return 'settings';
-    if (path.startsWith('/search')) return 'search';
-    if (path.startsWith('/login')) return 'login';
-    if (path.startsWith('/signup')) return 'signup';
-    return 'other';
-}
-
 // Routes that should not be saved/restored
 const excludedRoutes = [
     '/login',
@@ -139,14 +124,6 @@ function RouteTracker({ children }) {
     React.useEffect(() => {
         try { Storage.touchLastSeen(); } catch (_) { }
     }, [location.pathname]);
-
-    React.useEffect(() => {
-        const path = location.pathname || '/';
-        trackEvent('page_viewed', {
-            route_family: getRouteFamily(path),
-            has_query: !!location.search
-        });
-    }, [location.pathname, location.search]);
 
     // Restore last route on mount if at root
     React.useEffect(() => {
@@ -381,12 +358,6 @@ class App extends Component {
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
         try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
 
-        initAnalytics();
-        // The Mixpanel token arrives with the backend node config, which may land
-        // after mount; retry init once it's cached (init is idempotent/no-op if ready).
-        this._onNodeConfigUpdated = () => { initAnalytics(); };
-        window.addEventListener('nodeConfigUpdated', this._onNodeConfigUpdated);
-
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
             if ((e.ctrlKey || e.metaKey) && (e.key === '.' || e.code === 'Period')) {
@@ -482,7 +453,6 @@ class App extends Component {
 
     componentWillUnmount() {
         try { window.removeEventListener('keydown', this._onKeyDown); } catch (_) { }
-        try { window.removeEventListener('nodeConfigUpdated', this._onNodeConfigUpdated); } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
         try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
         try { window.removeEventListener('themeIdChanged', this._onThemeIdChange); } catch (_) { }
