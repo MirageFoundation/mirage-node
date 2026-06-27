@@ -6,6 +6,8 @@
  * deploy/templates/env/frontend.env to point at a remote node instead.
  */
 
+import { getVisitorId, VISITOR_HEADER } from './visitorId';
+
 /**
  * @returns {string}
  */
@@ -26,8 +28,6 @@ function getBaseUrl() {
 }
 
 const API_BASE = getBaseUrl();
-
-import { getVisitorId, VISITOR_HEADER } from './visitorId';
 
 /**
  * Merge the analytics visitor header into a request's headers. Sent on every
