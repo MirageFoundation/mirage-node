@@ -125,41 +125,6 @@ def init_backend_schema() -> None:
 
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS referral_trust_scores (
-                    referrer_address VARCHAR(64) PRIMARY KEY,
-                    trust_score DECIMAL(5,2) DEFAULT 1.0,
-                    total_referrals INT DEFAULT 0,
-                    approved_referrals INT DEFAULT 0,
-                    rejected_referrals INT DEFAULT 0,
-                    last_updated BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-                )
-            """
-            )
-
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS referral_analysis (
-                    id SERIAL PRIMARY KEY,
-                    referee_address VARCHAR(64) NOT NULL,
-                    referrer_address VARCHAR(64) NOT NULL,
-                    analysis_date BIGINT NOT NULL,
-                    classification VARCHAR(20),
-                    confidence DECIMAL(3,2),
-                    similarity_to_referrer DECIMAL(3,2),
-                    flags TEXT[],
-                    recommendation VARCHAR(20),
-                    admin_decision VARCHAR(20),
-                    decided_at BIGINT,
-                    UNIQUE(referee_address, analysis_date)
-                )
-            """
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_referral_analysis_referrer ON referral_analysis(referrer_address)"
-            )
-
-            cur.execute(
-                """
                 CREATE TABLE IF NOT EXISTS referral_user_accruals (
                     beneficiary_address VARCHAR(64) NOT NULL,
                     referee_address VARCHAR(64) NOT NULL,
@@ -815,7 +780,6 @@ def init_backend_schema() -> None:
             _SERIAL_TABLES = [
                 ("pending_rewards", "id"),
                 ("referral_pending_rewards", "id"),
-                ("referral_analysis", "id"),
                 ("reports", "id"),
                 ("push_tokens", "id"),
                 ("push_receipts", "id"),
