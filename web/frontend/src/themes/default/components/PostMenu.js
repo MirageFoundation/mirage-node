@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useNavigate } from "react-router-dom";
+import { requireAccount } from "../../../utils/openBrowsing";
 import {
     HiOutlineLink,
     HiOutlineUserPlus,
@@ -368,7 +369,8 @@ export function MoreMenuChip({
 
     const handleFollowUser = useCallback(async e => {
         stop(e); setOpen(false);
-        if (!isLoggedIn || !authorAddress) return;
+        if (!authorAddress) return;
+        if (!requireAccount('follow users')) return;
         const next = !followingUser;
         setFollowOverride(next);
         try {
@@ -379,7 +381,8 @@ export function MoreMenuChip({
 
     const handleFollowTopic = useCallback(async e => {
         stop(e); setOpen(false);
-        if (!isLoggedIn || !topic) return;
+        if (!topic) return;
+        if (!requireAccount('follow topics')) return;
         const next = !followingTopic;
         setTopicFollowOverride(next);
         try {

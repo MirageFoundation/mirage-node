@@ -509,8 +509,20 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
                 "-lc",
                 "docker exec mirage sed -i "
                 "'s/^REGISTRATION_ENABLED=.*/REGISTRATION_ENABLED=true/; "
-                "s/^REGISTRATION_INVITE_CODE_REQUIRED=.*/REGISTRATION_INVITE_CODE_REQUIRED=false/' "
+                "s/^REGISTRATION_INVITE_CODE_REQUIRED=.*/REGISTRATION_INVITE_CODE_REQUIRED=false/; "
+                "s/^OPEN_BROWSING_ENABLED=.*/OPEN_BROWSING_ENABLED=true/' "
                 "/root/.mirage/env/backend.env 2>/dev/null || true",
+            ]
+        )
+        # OPEN_BROWSING_ENABLED is required (settings.require_bool_env); append if
+        # this node's backend.env predates the template that introduced it.
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage sh -c "
+                "'grep -q ^OPEN_BROWSING_ENABLED= /root/.mirage/env/backend.env "
+                "|| echo OPEN_BROWSING_ENABLED=true >> /root/.mirage/env/backend.env' 2>/dev/null || true",
             ]
         )
 

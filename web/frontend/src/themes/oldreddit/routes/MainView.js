@@ -1180,6 +1180,7 @@ const MainView = ({
         dismissIPhoneBanner,
         showNsfwHero,
         isLoggedIn,
+        openBrowsingEnabled,
         inviteCodesEnabled,
         questsEnabled,
         showAndroidBanner,
@@ -1211,6 +1212,8 @@ const MainView = ({
         setTopic,
         routeTopic
     });
+    // Open browsing: guests read the feed too; logged-in-only chrome keeps isLoggedIn.
+    const canBrowse = isLoggedIn || openBrowsingEnabled;
     if (error) {
         return <StyledError>{error}</StyledError>;
     }
@@ -1540,22 +1543,22 @@ const MainView = ({
                             </HomeFeedInfoDescription>
                         </HomeFeedInfoCard>}
 
-                        {/* Loading state - only show to logged-in users */}
-                        {isLoggedIn && showLoadingPosts && <LoadingCard $size={cardSize}>
+                        {/* Loading state */}
+                        {canBrowse && showLoadingPosts && <LoadingCard $size={cardSize}>
                             <LoadingSpinner />
                             <LoadingText>Loading posts...</LoadingText>
                         </LoadingCard>}
 
-                        {/* Empty home feed - only show to logged-in users */}
-                        {isLoggedIn && showEmptyHome && <EmptyHomeMessage />}
+                        {/* Empty home feed */}
+                        {canBrowse && showEmptyHome && <EmptyHomeMessage />}
 
-                        {/* No posts available - only show to logged-in users */}
-                        {isLoggedIn && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                        {/* No posts available */}
+                        {canBrowse && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                             <LoadingText>{noPostsMessage}</LoadingText>
                         </LoadingCard>}
 
-                        {/* Invite-only hero - shown to logged-out users on all feeds */}
-                        {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
+                        {/* Welcome / signup hero - only when browsing is gated (open browsing off) */}
+                        {!canBrowse && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
                             <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
                                 fontSize: '0.55em',
                                 marginLeft: '0.25em',
@@ -1591,8 +1594,8 @@ const MainView = ({
                             </InviteOnlyHeroButtons>
                         </InviteOnlyHero>}
 
-                        {/* Posts grid - only show to logged-in users */}
-                        {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                        {/* Posts grid */}
+                        {canBrowse && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
                             const family = getThemeFamily(state?.themeId);
                             const FeedComponent = family.Feed;
                             const visiblePosts = orderedPosts.filter(p => {
@@ -1615,8 +1618,8 @@ const MainView = ({
                             return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} feedNavTopic={urlTopic} sidebar={sidebarContent} />;
                         })()}
 
-                        {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
-                        {isLoggedIn && <div ref={bottomSentinelRef} style={{
+                        {canBrowse && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
+                        {canBrowse && <div ref={bottomSentinelRef} style={{
                             width: '100%',
                             minHeight: '1px'
                         }}>

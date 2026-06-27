@@ -5,6 +5,8 @@ import { ThemeProvider } from 'styled-components';
 import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
 import Api from './utils/api';
+import { captureFirstTouchAttribution } from './utils/visitorId';
+import AuthPromptModal from './components/AuthPromptModal';
 import * as tx from './utils/tx';
 import { seedFromBootstrap as seedProfileFromBootstrap } from './utils/ProfileCache';
 import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
@@ -293,6 +295,10 @@ class App extends Component {
         // a fresh reload if needed. We clear it here because if we got to componentDidMount,
         // the app has loaded successfully.
         try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch (_) { }
+
+        // Capture first-touch UTM attribution for this visitor (idempotent
+        // server-side; first-touch is never overwritten). Best-effort.
+        try { captureFirstTouchAttribution(); } catch (_) { }
 
         // On hard refresh, invalidate the chain_config timestamp only — chain config
         // is genuinely volatile (params, difficulty). nodeConfig is deployment-static
@@ -954,6 +960,7 @@ class App extends Component {
                         <BrowserRouter>
                             <RouteTracker>
                                 <Shell state={this.state}>
+                                    <AuthPromptModal />
                                     <React.Suspense fallback={null}>
                                         <Routes>
                                             <Route

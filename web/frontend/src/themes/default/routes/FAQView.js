@@ -102,93 +102,6 @@ const SearchHint = styled.div`
     line-height: 1.35;
 `;
 
-const SectionChips = styled.nav`
-    display: none;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    overflow-x: auto;
-    scrollbar-width: thin;
-
-    @media (max-width: 1000px) {
-        display: flex;
-        gap: 0.45rem;
-    }
-
-    @media (max-width: 600px) {
-        padding: 0.75rem 0;
-    }
-`;
-
-const SectionChip = styled.a`
-    flex: 0 0 auto;
-    color: ${({ theme }) => theme.colors.text};
-    background: ${({ theme }) => theme.colors.panelAlt};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 999px;
-    padding: 0.42rem 0.65rem;
-    font-size: 0.67rem;
-    font-weight: 600;
-    line-height: 1;
-    text-decoration: none;
-
-    &:hover,
-    &:focus-visible {
-        color: ${({ theme }) => theme.colors.link};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-        text-decoration: none;
-    }
-`;
-
-const TocRail = styled.aside`
-    display: none;
-
-    @media (min-width: 1001px) {
-        display: flex;
-        flex-direction: column;
-        gap: 0.45rem;
-        width: 260px;
-        flex: 0 0 260px;
-        align-self: flex-start;
-        position: sticky;
-        top: 4.25rem;
-        max-height: calc(100vh - 5.25rem);
-        overflow: auto;
-        padding: 0.85rem 1rem;
-        box-sizing: border-box;
-        color: ${({ theme }) => theme.colors.subtleText};
-        font-size: 0.66rem;
-        line-height: 1.4;
-    }
-`;
-
-const TocTitle = styled.div`
-    color: ${({ theme }) => theme.colors.text};
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    margin-bottom: 0.25rem;
-`;
-
-const TocList = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-`;
-
-const TocLink = styled.a`
-    color: ${({ theme }) => theme.colors.subtleText};
-    text-decoration: none;
-    font-weight: 600;
-    line-height: 1.35;
-
-    &:hover,
-    &:focus-visible {
-        color: ${({ theme }) => theme.colors.link};
-        text-decoration: underline;
-    }
-`;
-
 const FAQContent = styled.article`
     display: flex;
     flex-direction: column;
@@ -285,6 +198,39 @@ const QuestionSummary = styled.summary`
     &:focus-visible {
         color: ${({ theme }) => theme.colors.link};
         outline: none;
+    }
+`;
+
+const SummaryText = styled.span`
+    flex: 1 1 auto;
+    min-width: 0;
+`;
+
+const CopyLink = styled.a`
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3.4rem;
+    height: 1.35rem;
+    padding: 0 0.45rem;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    border-radius: 999px;
+    color: ${({ theme }) => theme.colors.subtleText};
+    background: ${({ theme }) => theme.colors.panelAlt};
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-decoration: none;
+    opacity: 0.75;
+
+    &:hover,
+    &:focus-visible {
+        color: ${({ theme }) => theme.colors.link};
+        border-color: ${({ theme }) => theme.colors.borderStrong};
+        text-decoration: none;
+        opacity: 1;
     }
 `;
 
@@ -469,6 +415,16 @@ function normalizeSearch(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+function readHashId() {
+    if (typeof window === 'undefined') return '';
+    const raw = (window.location.hash || '').replace(/^#/, '');
+    try {
+        return decodeURIComponent(raw);
+    } catch (_) {
+        return raw;
+    }
+}
+
 function filterFAQ(faq, query) {
     const needle = normalizeSearch(query);
     if (!needle) return faq.sections;
@@ -515,39 +471,60 @@ function AnswerMarkdown({ children }) {
     );
 }
 
-function SectionNavigation({ sections }) {
-    return (
-        <>
-            <TocTitle>Sections</TocTitle>
-            <TocList>
-                {sections.map(section => (
-                    <TocLink key={section.id} href={`#${section.id}`}>
-                        {section.title}
-                    </TocLink>
-                ))}
-            </TocList>
-        </>
-    );
-}
-
-function MobileSectionNavigation({ sections }) {
-    return (
-        <SectionChips aria-label="FAQ sections">
-            {sections.map(section => (
-                <SectionChip key={section.id} href={`#${section.id}`}>
-                    {section.title.replace(/^\d+\.\s*/, '')}
-                </SectionChip>
-            ))}
-        </SectionChips>
-    );
-}
-
 export default function FAQView() {
     const faq = React.useMemo(() => parseFAQ(FAQ_MARKDOWN), []);
     const [query, setQuery] = React.useState('');
+    const [activeId, setActiveId] = React.useState(readHashId);
+    const [copiedId, setCopiedId] = React.useState('');
+    const copyTimer = React.useRef(0);
     const visibleSections = React.useMemo(() => filterFAQ(faq, query), [faq, query]);
     const hasQuery = normalizeSearch(query).length > 0;
     const visibleQuestionCount = visibleSections.reduce((total, section) => total + section.questions.length, 0);
+
+    // Deep-linking: open and scroll to the targeted entry once it has rendered.
+    const scrollToId = React.useCallback((id) => {
+        if (!id || typeof window === 'undefined') return;
+        window.setTimeout(() => {
+            const el = document.getElementById(id);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
+    }, []);
+
+    React.useEffect(() => {
+        const id = readHashId();
+        if (id) scrollToId(id);
+    }, [scrollToId]);
+
+    React.useEffect(() => {
+        const onHash = () => {
+            const id = readHashId();
+            setActiveId(id);
+            if (id) scrollToId(id);
+        };
+        window.addEventListener('hashchange', onHash);
+        return () => window.removeEventListener('hashchange', onHash);
+    }, [scrollToId]);
+
+    React.useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+
+    const copyQuestionLink = React.useCallback((event, id) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const { origin, pathname, search } = window.location;
+        const url = `${origin}${pathname}${search}#${id}`;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url);
+            }
+        } catch (_) { /* clipboard unavailable */ }
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', `${pathname}${search}#${id}`);
+        }
+        setActiveId(id);
+        setCopiedId(id);
+        window.clearTimeout(copyTimer.current);
+        copyTimer.current = window.setTimeout(() => setCopiedId(''), 1500);
+    }, []);
 
     return (
         <ContentGrid>
@@ -571,7 +548,7 @@ export default function FAQView() {
                                                 type="search"
                                                 value={query}
                                                 onChange={event => setQuery(event.target.value)}
-                                                placeholder="Try CSAM, agents, subscriptions, nodes, privacy..."
+                                                placeholder="Try agents, subscriptions, nodes, privacy..."
                                             />
                                             <SearchHint>
                                                 {hasQuery
@@ -580,7 +557,6 @@ export default function FAQView() {
                                             </SearchHint>
                                         </SearchWrap>
                                     </HeaderRow>
-                                    <MobileSectionNavigation sections={faq.sections} />
                                     <FAQContent>
                                         {visibleSections.length === 0 ? (
                                             <EmptyState>No FAQ entries match that search.</EmptyState>
@@ -597,9 +573,19 @@ export default function FAQView() {
                                                         <QuestionCard
                                                             key={question.id}
                                                             id={question.id}
-                                                            open={hasQuery || (sectionIndex === 0 && questionIndex === 0)}
+                                                            open={hasQuery || question.id === activeId || (sectionIndex === 0 && questionIndex === 0)}
                                                         >
-                                                            <QuestionSummary>{question.title}</QuestionSummary>
+                                                            <QuestionSummary>
+                                                                <SummaryText>{question.title}</SummaryText>
+                                                                <CopyLink
+                                                                    href={`#${question.id}`}
+                                                                    onClick={event => copyQuestionLink(event, question.id)}
+                                                                    title="Copy link to this question"
+                                                                    aria-label="Copy link to this question"
+                                                                >
+                                                                    {copiedId === question.id ? 'Copied' : 'Link'}
+                                                                </CopyLink>
+                                                            </QuestionSummary>
                                                             <AnswerMarkdown>{question.markdown}</AnswerMarkdown>
                                                         </QuestionCard>
                                                     ))}
@@ -612,9 +598,6 @@ export default function FAQView() {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <TocRail aria-label="FAQ table of contents">
-                    <SectionNavigation sections={faq.sections} />
-                </TocRail>
             </FeedRailRow>
         </ContentGrid>
     );

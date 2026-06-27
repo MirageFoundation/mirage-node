@@ -618,6 +618,10 @@ export function useMain({
     }, [nodeConfig]);
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled);
+    // Open browsing: when on, logged-out visitors fetch & read the feed/topics
+    // (account prompts only fire on write/social actions). When off, behavior is
+    // unchanged: logged-out users get the welcome/invite screen, no content fetch.
+    const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
     const nowMs = Date.now();
     const androidBannerCooldownActive = androidBannerDismissedAt > 0 && (nowMs - androidBannerDismissedAt) < APP_BANNER_COOLDOWN_MS;
     const iphoneBannerCooldownActive = iphoneBannerDismissedAt > 0 && (nowMs - iphoneBannerDismissedAt) < APP_BANNER_COOLDOWN_MS;
@@ -945,10 +949,13 @@ export function useMain({
     const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false) => {
         if (!isMountedRef.current) return;
 
-        // Never fetch posts for logged-out users
+        // Logged-out users only fetch when open browsing is on. Guests have no
+        // personalized home/following feed, so show the public "all" feed instead.
         const viewer = Storage.load("publicKey", "");
-        if (!viewer || viewer === 'guest') return;
+        const isGuest = !viewer || viewer === 'guest';
+        if (isGuest && !openBrowsingEnabled) return;
         if (topic === "") topic = "all";
+        if (isGuest && (topic === 'home' || topic === 'following')) topic = 'all';
         const isHomeFeed = topic === 'home';
         const isFollowingFeed = topic === 'following';
         if (topic !== state.topic) {
@@ -1121,7 +1128,7 @@ export function useMain({
             Api.get('get_posts', params).then(handleResponse).catch(onError);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts]);
+    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback(allowNsfw => {
@@ -1392,8 +1399,9 @@ export function useMain({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentPage, urlTopic, hasMorePosts, isLoadingMore]);
     useEffect(() => {
-        // Skip topics fetch for logged-out users - they can't navigate topics anyway
-        if (!isLoggedIn) return;
+        // Skip topics fetch for logged-out users, unless open browsing is on (then
+        // they can navigate topics like anyone else).
+        if (!isLoggedIn && !openBrowsingEnabled) return;
         const storedTopicsData = Storage.load("topics", {
             topics: [],
             lastFetched: null
@@ -1434,13 +1442,14 @@ export function useMain({
         } else if (stored.length > 0) {
             setTopics(stored);
         }
-    }, [isLoggedIn, viewerAddress]);
+    }, [isLoggedIn, viewerAddress, openBrowsingEnabled]);
     useEffect(() => {
         window.getPosts = getPosts; // Expose getPosts globally
         let cancelled = false;
 
-        // Skip posts fetch for logged-out users - they see the welcome screen instead
-        if (!isLoggedIn) {
+        // Skip posts fetch for logged-out users, unless open browsing is on (then
+        // they read the feed as a guest; account prompts fire only on write actions).
+        if (!isLoggedIn && !openBrowsingEnabled) {
             setIsLoading(false);
             return;
         }
@@ -1484,7 +1493,7 @@ export function useMain({
             clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlTopic, location.pathname]);
+    }, [urlTopic, location.pathname, openBrowsingEnabled]);
 
     // Refetch when homeSortMode changes (magic/newest toggle)
     const prevHomeSortModeRef = useRef(homeSortMode);
@@ -1757,6 +1766,7 @@ export function useMain({
         isLoggedIn,
         inviteCodesEnabled,
         questsEnabled,
+        openBrowsingEnabled,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,

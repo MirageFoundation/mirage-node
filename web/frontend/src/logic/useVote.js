@@ -3,6 +3,7 @@ import * as tx from '../utils/tx';
 import Storage from '../utils/Storage';
 import { updateNotification } from '../utils/notifications';
 import { markPostVoted } from './useSeenPosts';
+import { requireAccount } from '../utils/openBrowsing';
 
 export function usePendingVotes() {
     const [pendingVotes, setPendingVotes] = useState({});
@@ -58,9 +59,10 @@ export function useVoteHandler({ state, updatePost }) {
 
     const handleVote = useCallback(async (postObj, direction) => {
         const postIdValue = postObj?.post_id;
-        const isLoggedIn = !!state.publicKey;
-
-        if (!isLoggedIn || !postIdValue) return;
+        if (!postIdValue) return;
+        // Open browsing: logged-out visitors get the signup prompt; on invite-only
+        // nodes this stays silent (the action is unreachable there anyway).
+        if (!requireAccount('vote')) return;
 
         const key = String(postIdValue).toLowerCase();
         if (isPending(postIdValue) || localPendingRef.current.has(key)) return;

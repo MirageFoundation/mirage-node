@@ -943,6 +943,7 @@ function ViewPostView({
         location,
         navigate,
         questsEnabled,
+        openBrowsingEnabled,
         isMobile,
         goBackToFeed,
         viewerAddress,
@@ -2373,7 +2374,7 @@ function ViewPostView({
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
     // Redirect non-logged-in users to home (shows welcome banner)
-    if (!isLoggedIn) {
+    if (!isLoggedIn && !openBrowsingEnabled) {
         return <Navigate to="/home" replace />;
     }
     if (root) {

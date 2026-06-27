@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+"""Admin stats: signed access, attribution ingest, and pure metric logic.
+
+These cover the half of the funnel the chain can't see. The admin endpoints are
+strictly admin-only (level >= 100), so the integration tests assert the negative
+paths (no/invalid signature, and a valid signature from a non-admin wallet ->
+403). The pure-function tests verify metric math, server discovery normalization,
+and event classification without a live DB.
+"""
+
+import os
+import sys
+
+from tests.common import (
+    _pass,
+    _fail,
+    _skip,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _generate_wallet,
+    sign_canonical,
+)
+
+
+def _signed_stats_payload(wallet, ts: int, nonce: int) -> dict:
+    addr = str(wallet.address())
+    pub = wallet.public_key().public_key_bytes
+    signed = f"stats:{addr.lower()}:{ts}:{nonce}".encode("utf-8")
+    sig = sign_canonical(wallet, signed)
+    return {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "address": addr,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+    }
+
+
+def test_stats_admin_auth(backend):
+    # 1. Missing signature fields -> 400.
+    code, resp = _post(f"{backend}/api/admin/stats/export", {"start": 0, "end": _now_ms() // 1000})
+    if code == 400:
+        _pass("stats.export_requires_auth", code=code)
+    else:
+        _fail("stats.export_requires_auth", f"expected 400, got {code}: {resp}")
+
+    # 2. Valid signature from a non-admin wallet -> 403 (signature verified, but
+    #    the caller is not an admin). This proves both the signature path and the
+    #    admin gate in one shot.
+    wallet = _generate_wallet()
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    payload = _signed_stats_payload(wallet, ts, nonce)
+    payload.update({"start": 0, "end": ts // 1000})
+    code, resp = _post(f"{backend}/api/admin/stats/export", payload)
+    if code == 403:
+        _pass("stats.export_non_admin_forbidden", code=code)
+    else:
+        _fail("stats.export_non_admin_forbidden", f"expected 403, got {code}: {resp}")
+
+    # 3. Invalid signature (signed for a different nonce) -> 400. Signature is
+    #    verified before the replay guard, so this fails closed.
+    ts2 = _now_ms()
+    good_nonce = _fresh_nonce()
+    payload2 = _signed_stats_payload(wallet, ts2, good_nonce)
+    payload2["envelope_nonce"] = str(_fresh_nonce())  # mismatch -> signature invalid
+    payload2.update({"start": 0, "end": ts2 // 1000})
+    code, resp = _post(f"{backend}/api/admin/stats/export", payload2)
+    if code == 400:
+        _pass("stats.export_invalid_signature", code=code)
+    else:
+        _fail("stats.export_invalid_signature", f"expected 400, got {code}: {resp}")
+
+    # 4. Aggregate endpoint is gated the same way.
+    code, resp = _post(f"{backend}/api/admin/stats/aggregate", {"start": 0, "end": ts // 1000})
+    if code == 400:
+        _pass("stats.aggregate_requires_auth", code=code)
+    else:
+        _fail("stats.aggregate_requires_auth", f"expected 400, got {code}: {resp}")
+
+
+def test_stats_attribution(backend):
+    # Missing visitor_id -> 400.
+    code, resp = _post(f"{backend}/api/stats/visitor_attribution", {"utm_source": "x"})
+    if code == 400:
+        _pass("stats.attribution_requires_visitor", code=code)
+    else:
+        _fail("stats.attribution_requires_visitor", f"expected 400, got {code}: {resp}")
+
+    # First-touch ingest succeeds and is idempotent (second call also ok).
+    vid = f"test-visitor-{_rand_str(10)}"
+    body = {"visitor_id": vid, "platform": "web", "utm_source": "instagram", "utm_campaign": f"camp_{_rand_str(4)}"}
+    code, resp = _post(f"{backend}/api/stats/visitor_attribution", body)
+    ok1 = code == 200 and isinstance(resp, dict) and resp.get("ok") is True
+    code2, resp2 = _post(f"{backend}/api/stats/visitor_attribution", body)
+    ok2 = code2 == 200 and isinstance(resp2, dict) and resp2.get("ok") is True
+    if ok1 and ok2:
+        _pass("stats.attribution_first_touch_idempotent")
+    else:
+        _fail("stats.attribution_first_touch_idempotent", f"call1=({code},{resp}) call2=({code2},{resp2})")
+
+
+def test_stats_pure(backend):
+    """Pure metric/discovery/classification logic, no DB required."""
+    backend_src = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+    )
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    try:
+        import stats as st
+        from client_ip import hash_visitor_id
+    except Exception as e:  # backend source/env not importable in this harness
+        _skip("stats.pure", f"backend modules not importable: {e}")
+        return
+
+    # Moniker -> URL normalization for server discovery.
+    cases = {
+        "mirage.vote": "https://mirage.vote",
+        "https://mirage.talk": "https://mirage.talk",
+        "159.203.114.27": None,  # raw IP is never a stats endpoint
+        "no-dot": None,
+    }
+    bad = {m: st._normalize_moniker_url(m) for m, exp in cases.items() if st._normalize_moniker_url(m) != exp}
+    if not bad:
+        _pass("stats.moniker_normalization")
+    else:
+        _fail("stats.moniker_normalization", f"mismatches: {bad}")
+
+    # Event classification: engagement vs visit vs ignored.
+    klass = {
+        "/api/get_posts": "engagement",
+        "/api/get_comments": "engagement",
+        "/api/get_profile": "engagement",
+        "/api/search": "engagement",
+        "/api/get_node_config": "visit",
+        "/api/admin/stats/export": None,
+        "/static/app.js": None,
+    }
+    cbad = {p: st._classify_event(p) for p, exp in klass.items() if st._classify_event(p) != exp}
+    if not cbad:
+        _pass("stats.event_classification")
+    else:
+        _fail("stats.event_classification", f"mismatches: {cbad}")
+
+    # Visitor hashing: deterministic, salted, None on empty.
+    h1 = hash_visitor_id("abc")
+    h2 = hash_visitor_id("abc")
+    if h1 and h1 == h2 and hash_visitor_id("") is None and hash_visitor_id("abc") != hash_visitor_id("abd"):
+        _pass("stats.visitor_hash_deterministic")
+    else:
+        _fail("stats.visitor_hash_deterministic", f"h1={h1} h2={h2}")
+
+    # Aggregation sums additive metrics and recomputes rates from summed parts.
+    servers = [
+        {
+            "status": "ok",
+            "stats": {
+                "growth": {"visitors": 100, "active": 40, "new_users": 10},
+                "contributors": {"contributors": 5, "posts": 20, "comments": 30},
+                "retention": {
+                    "cohort_size": 10,
+                    "d7": {"eligible": 8, "retained": 4},
+                    "d14": {"eligible": 6, "retained": 3},
+                    "d30": {"eligible": 4, "retained": 1},
+                },
+            },
+        },
+        {
+            "status": "ok",
+            "stats": {
+                "growth": {"visitors": 50, "active": 10, "new_users": 5},
+                "contributors": {"contributors": 5, "posts": 0, "comments": 10},
+                "retention": {
+                    "cohort_size": 5,
+                    "d7": {"eligible": 2, "retained": 1},
+                    "d14": {"eligible": 0, "retained": 0},
+                    "d30": {"eligible": 0, "retained": 0},
+                },
+            },
+        },
+    ]
+    agg = st.aggregate_server_stats(servers, 0, 100)
+    checks = [
+        agg["growth"]["visitors"] == 150,
+        agg["growth"]["active"] == 50,
+        agg["growth"]["new_users"] == 15,
+        agg["growth"]["signup_conversion"] == round(15 / 150, 4),
+        agg["contributors"]["contributors"] == 10,
+        agg["contributors"]["posts"] == 20,
+        agg["contributors"]["comments"] == 40,
+        agg["contributors"]["posts_per_contributor"] == round(60 / 10, 2),
+        agg["retention"]["cohort_size"] == 15,
+        agg["retention"]["d7"]["eligible"] == 10,
+        agg["retention"]["d7"]["retained"] == 5,
+        agg["retention"]["d7"]["rate"] == round(5 / 10, 4),
+        agg["servers_counted"] == 2,
+    ]
+    if all(checks):
+        _pass("stats.aggregate_math")
+    else:
+        _fail("stats.aggregate_math", f"agg={agg} checks={checks}")

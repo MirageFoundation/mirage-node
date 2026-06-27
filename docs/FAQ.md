@@ -720,6 +720,56 @@ are public by design, but Mirage is not built around tracking users to sell targ
 Because Mirage is a network of nodes, the node you use can have its own logging and privacy
 practices. If you care about privacy, you pick a node you trust or run your own.
 
+### Do you track me or build a profile on me?
+
+No. Mirage does not run ad trackers, third-party tracking pixels, browser fingerprinting,
+or cross-site tracking, and it does not buy or sell data about you. There is no advertising
+business behind Mirage, so there is nothing to feed and no reason to surveil you.
+
+The thing to understand is that Mirage is a public network. Every post, comment, and vote
+is a signed public action recorded on a public blockchain. Anyone running a node or reading
+the chain can already see those actions, because that is what a public ledger is. That is
+not us secretly watching you, it is the same transparency that lets you switch nodes and
+keep your identity, and it is visible to everyone, including you.
+
+So the honest framing is simple. We do not track you in any way beyond what you have already
+published to a public network, and we are not collecting some hidden pile of personal data
+on the side. The public part is public by design, and the private part, your seed phrase
+and your keys, never leaves your device.
+
+### What do you actually measure for analytics?
+
+Less than the blockchain already exposes. This is the part most platforms get wrong, so it
+is worth being specific.
+
+The chain records every individual post, comment, and vote you make, with timestamps, in
+full detail. We could mine all of that to build a granular behavioral profile of you. We
+deliberately do not. For our own analytics we collapse that rich public history into blunt
+aggregate buckets, roughly: did an account post or comment in a given window, which we count
+as a “contributor”, and was an account active in that window. We do not even count votes
+toward this, even though every vote is sitting right there on the chain for the taking.
+
+The only thing we measure that the chain cannot see is anonymous visit counts, so we can
+tell how many people are reading, including logged-out lurkers who never post. That uses a
+random, opaque per-browser id with no personal information attached. The backend salts and
+hashes that id before storing it, your IP address is never used as your identity, and there
+is no name, email, or phone number anywhere in the picture. It exists to answer “how many
+people showed up”, not “who is this person and what are they doing”.
+
+In short, the blockchain is maximally transparent, and our analytics use a small, anonymous
+slice of that on purpose. We measure the network, not the individual.
+
+### Can I verify you are not secretly tracking me?
+
+Yes, and that is what makes this more than a promise. Mirage is open source, so the
+analytics code is right there in the repository for anyone to read. You can see exactly
+which signals are recorded, that the visitor id is random and hashed, that IP is never
+treated as identity, and that votes and per-post history are not mined into profiles.
+
+You can also watch the network traffic from your own browser. There are no third-party ad
+or tracking domains being called, because there is no ad business behind Mirage that would
+need them.
+
 ### What data does a node see about me?
 
 A node can see what any website normally sees: requests to load pages, and actions you
@@ -745,6 +795,77 @@ Not yet. Direct messages are planned, and we intend to integrate them. Mirage is
 first on public discussion and getting the core network mechanics right.
 
 DMs are on the roadmap as a native feature.
+
+### Can law enforcement or a government unmask me?
+
+The honest answer is that it depends on the node you used and what you did, not on some master
+identity database, because there is not one. Mirage the network does not know who you are.
+There is no email, no phone number, no real name, and no central account record tying your key
+to a person. Your seed phrase lives on your device and is never sent to us.
+
+But a node is a real website running in a real jurisdiction, and like any website it can see the
+requests you make to it. Depending on the operator, it may log IP addresses, timestamps, and
+similar metadata, and it can be compelled by lawful process to hand over whatever it actually
+has. That is true of every site you have ever used. What a node generally cannot produce is your
+identity, because it never collected one.
+
+So Mirage does not promise magical anonymity, and you should be suspicious of anything that does.
+What it offers is the absence of a built-in surveillance trail: no identity database to subpoena,
+and private keys that never leave your device. If your threat model is serious, treat Mirage like
+any public network, use a node you trust or run your own, and consider standard tools like a VPN
+or Tor. We would rather tell you the truth than sell you a false sense of safety.
+
+### Is it legal for me to use Mirage?
+
+For the vast majority of users, yes. Using Mirage is legal in the same way that using a web
+browser or any public forum is legal. Reading, posting, voting, and commenting are ordinary
+activities, and Mirage does not require you to buy anything to participate.
+
+The nuance is that you are responsible for what you post. Illegal content is illegal regardless
+of which platform it appears on, and decentralization does not change that. Posting something
+that breaks the law where you live is still breaking the law. A small number of jurisdictions
+also restrict open or uncensored platforms, or restrict crypto-related activity, so if you live
+somewhere with unusual rules, it is on you to know them.
+
+We are not lawyers and this is not legal advice. What we can say plainly is that Mirage is not
+designed to help anyone commit crimes, and using Mirage like a normal forum is a normal, legal
+thing to do almost everywhere.
+
+### Can someone impersonate me or a brand? Are there verified accounts?
+
+Your exact username cannot be taken by someone else. Usernames on Mirage are unique across the
+whole network, with one owner per name, and reserved names are recognized on every node. Nobody
+can register your username on a different node to pretend to be you, the way they can spin up a
+copycat on a brand-new server in federated systems.
+
+What no platform can fully stop is lookalikes: a name that swaps a letter, adds a character, or
+uses similar styling. That is true everywhere, and Mirage deliberately does not solve it by
+appointing a central authority to hand out blue checkmarks, because that authority would become
+exactly the kind of gatekeeper Mirage exists to avoid.
+
+Instead, authorship on Mirage is cryptographic. Every post is signed by your key, so you can
+always prove what you actually wrote, and a fake account cannot produce your signature. On top
+of that, agents can flag suspected impersonation for users who enable them. So the model is
+simple: your real name is unforgeable, your real posts are provable, and lookalike accounts are
+handled by signatures and opt-in agents rather than by a central identity office.
+
+### Will my posts be scraped or used to train AI?
+
+Probably, and it is important to be honest about why. Mirage is a public discussion network.
+Anything you post publicly is readable by anyone who can reach a node that serves it, which
+means scrapers, researchers, and AI training crawlers can read it too, exactly like public posts
+on any other forum or social site. No public platform can truly prevent this, and we are not
+going to pretend otherwise.
+
+What Mirage does not do is package you up and sell you. There is no ad profile, no data broker
+pipeline, and no surveillance dossier being monetized behind your back. What is out there is the
+public content you chose to publish, not a hidden file about your behavior.
+
+Two design details help at the margins. Mirage is ephemeral, so there is no guaranteed permanent
+archive of everything you ever said sitting in one place to be harvested wholesale. And private
+messaging is planned as a separate, more private channel. The rule stays the same as everywhere
+else on the open internet: if you would not want something read, scraped, or quoted, do not post
+it publicly.
 
 ## 4. How Mirage Works (Without the Crypto Headache)
 
@@ -895,6 +1016,38 @@ dependent on captchas or power moderators. If you later choose a subscription, y
 of work for instant posting, and unlock higher limits and extras, but that is all optional.
 
 Normal users can use Mirage without tokens.
+
+### Isn't proof of work an environmental disaster like Bitcoin?
+
+No, and the difference is fundamental, not cosmetic. Bitcoin’s energy use comes from millions of
+machines racing each other nonstop to win block rewards. That global race is the whole mechanism,
+and it burns power continuously whether or not anyone is actually using the network.
+
+Mirage works nothing like that. Mirage does not reach consensus through mining at all. It uses a
+CometBFT-style validator design, where a known set of validators agree on blocks directly, so
+there is no energy-burning race to produce blocks and no reward for wasting electricity.
+
+The proof of work in Mirage is a small, one-off puzzle your own browser solves for a few seconds
+when you post, purely to make spam expensive. It is closer to loading a heavy web page than to
+running a mining rig. It only happens when you take an action, it stops the instant your post
+goes through, and the difficulty is tuned just high enough to deter bots. There is no fleet of
+always-on miners anywhere in the system.
+
+### Are you using my device to mine crypto for yourselves?
+
+No. This is a fair thing to be suspicious of, so here is exactly what is happening. When you post
+in the basic tier, your browser solves a small proof-of-work puzzle. That puzzle is attached to
+your specific action, and solving it does not create or earn any tokens, for you or for us. It is
+a spam toll, not a coin miner.
+
+There is no background process quietly using your CPU while you are idle, nothing keeps running
+after your post is submitted, and we do not collect any “mined” value from it. It is the
+computational equivalent of stamping your own letter so that bots cannot send a million of them
+for free.
+
+And because Mirage is open source, you do not have to take our word for it. The proof-of-work
+code is right there to read, and you can watch your own browser to confirm it only runs briefly
+when you act and then stops.
 
 ### How do you prevent bot voting, brigading, and vote manipulation?
 
@@ -1205,6 +1358,28 @@ reserving a clean username, skipping proof of work delays, higher limits, and sh
 appreciation on posts by burning tokens. It is also part of how nodes and validators get
 paid to run infrastructure.
 
+### What is the MIRAGE supply? Is there a cap, a premine, or hidden insider tokens?
+
+Mirage does not have a fixed maximum supply. Instead of a hard cap, MIRAGE has a live balance
+between tokens being created and tokens being destroyed, and all of it happens on-chain in the
+open.
+
+New MIRAGE is minted on a schedule and paid to validators for producing blocks and relaying real
+network traffic, roughly every ten minutes, weighted toward the validators actually carrying
+load. That is the emission side, and it is how infrastructure gets paid without ads. At the same
+time, MIRAGE is continuously burned: transaction fees are burned every block, a share of every
+subscription is burned, paid admiration on posts is burned, and governance can burn tokens
+outright. So the supply is not a fixed number stamped on a coin, it is the running result of
+emission minus burns.
+
+On the allocation question, we are not going to pretend there are zero insider holdings, because
+there are clearly labeled network funds, including a founders fund, a marketing fund, and a
+development fund, which exist to pay for building and growing the network. What matters is that
+none of this is hidden. Mirage is its own open-source L1, every balance and every mint and burn
+is recorded on a public ledger, and the current total and circulating supply are queryable
+directly from the chain. You do not have to trust a number we type onto a marketing page, you
+can read it from the network yourself.
+
 ### What does a subscription do for me?
 
 A subscription is the simple path for users who want Mirage to feel instant and
@@ -1430,6 +1605,56 @@ them, run different nodes, or build different frontends.
 
 You cannot lock users in when they can leave without losing anything.
 
+### Why does the advertising model simply not work on Mirage?
+
+Because advertising needs a captive audience, and Mirage is built so that no one can ever
+hold one. The entire ad business depends on lock-in: a company owns the site, the accounts,
+and the content, so when it decides to flood you with ads, you have nowhere to go. Your
+identity, your followers, and your history are the hostages that make the ads profitable.
+
+Mirage destroys that at the root. The code is open source and the network is shared, so the
+instant any node starts serving ads, anyone can run the exact same network without them. And
+because your identity is portable, you switch to the ad-free version in seconds and keep your
+account, your followers, your topics, and your content. Same network, just no ads.
+
+That is not a promise we are asking you to trust. It is plain economics. An ad-funded node
+has to compete against a free, ad-free copy of literally the same network, serving the same
+content to the same users. That is a losing business, so the ads never get traction in the
+first place. The model is obsolete here before it even starts.
+
+### What if the biggest, most popular node adds ads anyway?
+
+Then it stops being the biggest, most popular node. That is the whole point.
+
+On a centralized platform, “the popular site turned evil” is a catastrophe, because being
+popular means it owns you and exit is painful. On Mirage, popularity buys an operator no moat
+at all. The day it adds ads, trackers, or paywalls, a competitor can stand up the same open
+network without them, and users walk over with everything intact.
+
+So a node going greedy does not enshittify Mirage. It enshittifies itself, and the users it
+was trying to squeeze simply route around it. The “winner” on Mirage is whoever serves users
+best right now, not whoever captured them first. Changing nodes is just changing the URL you
+log in to.
+
+### So is enshittification actually impossible, or just unlikely?
+
+It is about as close to impossible as a design can make it, and it is worth being precise
+about why. Enshittification is not random decay. It is a predictable move that platforms make
+once they have captured their users: degrade the experience with ads, dark patterns, and
+engagement bait, because leaving has become too costly. The entire playbook runs on lock-in.
+
+Mirage removes the lock-in, which removes the leverage. There is no single “Mirage” company
+that can flip a switch and degrade the network for everyone, because there is no single
+Mirage site everyone depends on. There are only nodes, all serving the same open network,
+all replaceable, none of them owning your identity.
+
+The honest version is this. A single node operator can absolutely choose to make their own
+site worse, that freedom is real. What cannot happen is the thing that actually ruins
+platforms: that decision being forced on the whole network with no escape. On Mirage a bad
+operator only degrades themselves, and you are one URL away from a clean version of the exact
+same network. Capture is the precondition for enshittification, and Mirage is built so the
+network can never be captured.
+
 ### Is Mirage open source?
 
 Yes. Mirage is open source. The code is public here:
@@ -1469,6 +1694,31 @@ growth, and helps with things like documentation, security reviews, and releases
 The network itself runs independently. Nodes and validators do not depend on the foundation
 to keep operating, and users do not depend on the foundation to access their accounts or
 content.
+
+### How does governance work, what can it change, and can it be used against me?
+
+Mirage uses on-chain governance. Anyone can submit a proposal, the network votes on it, and if
+it passes, the change executes automatically. Proposals and votes are public and recorded on the
+chain, so there are no smoke-filled rooms: the decision and who backed it are visible to everyone.
+
+It is worth being straight about what governance can touch, because it is genuinely powerful. It
+can adjust network parameters like proof-of-work difficulty, subscription prices and tier limits,
+and the token emission rate. It can mint or burn MIRAGE. It can coordinate software upgrades for
+the whole network. These are real economic and protocol levers, not decoration.
+
+It is just as important to be straight about who votes. Today, voting power is stake-weighted and
+tied to validators, the operators who secure the chain, rather than being one-token-one-vote for
+every holder. In practice that means simply holding MIRAGE in your account does not by itself
+give you a direct vote; the path to direct governance power is running a validator. We would
+rather state that plainly than imply every holder has a ballot they do not actually have.
+
+So can governance be used against users? It can change the rules of the network, yes, and that is
+true of any system that can evolve at all. What protects you is not a promise that the rules never
+change. It is that the process is transparent and on-chain, that changes require broad validator
+agreement rather than one operator flipping a switch, and above all that governance cannot
+override your exit. It cannot seize your identity, force every independent node to censor you, or
+trap you on the network. If governance moves in a direction you cannot accept, your account, your
+content, and your communities still move with you, and the code stays open for anyone to fork.
 
 ### Why should I trust Mirage more than any other “Reddit alternative”?
 

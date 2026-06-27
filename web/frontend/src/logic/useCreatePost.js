@@ -5,6 +5,7 @@ import * as tx from "../utils/tx.js";
 import Api from "../utils/api";
 import Storage from "../utils/Storage";
 import { formatError } from "../utils/errorMessages";
+import { requireAccount } from "../utils/openBrowsing";
 export const TAG_OPTIONS = [{
     value: '',
     label: 'No tag (safe)'
@@ -574,7 +575,7 @@ export function useCreatePost({
             setSubmitError(`Content too long (${content.length} > ${limits.maxContent} chars)`);
             return;
         }
-        if (!state.publicKey) {
+        if (!requireAccount('post')) {
             return;
         }
         setIsSubmitting(true);

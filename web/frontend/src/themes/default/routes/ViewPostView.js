@@ -1990,6 +1990,7 @@ function ViewPostView({
         location,
         navigate,
         questsEnabled,
+        openBrowsingEnabled,
         isMobile,
         goBackToFeed,
         viewerAddress,
@@ -3448,7 +3449,9 @@ function ViewPostView({
     // Check if user is logged in
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
-    if (!isLoggedIn) {
+    // Open browsing: guests may read the post; the signup prompt fires only when
+    // they try to vote/comment/follow. Otherwise keep the logged-out gate.
+    if (!isLoggedIn && !openBrowsingEnabled) {
         return <ContentGrid>
             <FeedRailRow $feedViewMode="card">
                 <FeedCol>

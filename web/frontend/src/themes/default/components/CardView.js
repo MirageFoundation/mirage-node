@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "
 import ReactDOM from "react-dom";
 import styled, { useTheme, css } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
+import { requireAccount } from "../../../utils/openBrowsing";
 import {
     HiOutlineLink,
     HiOutlinePencilSquare,
@@ -913,7 +914,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleFollowUser = useCallback(async () => {
         closeAllMenus();
-        if (!isLoggedIn || !authorAddress) return;
+        if (!authorAddress) return;
+        if (!requireAccount('follow users')) return;
         const next = !followingUser;
         setFollowOverride(next);
         try {
@@ -926,7 +928,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleFollowTopic = useCallback(async () => {
         closeAllMenus();
-        if (!isLoggedIn || !topic) return;
+        if (!topic) return;
+        if (!requireAccount('follow topics')) return;
         const next = !followingTopic;
         setTopicFollowOverride(next);
         try {

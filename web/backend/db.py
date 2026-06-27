@@ -718,6 +718,96 @@ def init_backend_schema() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_image_views_count ON image_views(view_count)")
             _assert_table_schema("image_views", {"image_id", "view_count", "last_viewed_at"})
 
+            # ── Stats: visitor identity + first/last-touch attribution ────
+            # Backend-owned analytics for the half of the funnel the chain
+            # cannot see: anonymous lurkers, active browsing, and where a
+            # visitor came from. On-chain facts (signups, posts, comments)
+            # stay authoritative in the indexer and are never duplicated here.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stats_visitors (
+                    visitor_hash TEXT PRIMARY KEY,
+                    address TEXT,
+                    platform TEXT,
+                    first_seen_at BIGINT NOT NULL,
+                    last_seen_at BIGINT NOT NULL,
+                    first_touch_at BIGINT,
+                    first_touch_utm_source TEXT,
+                    first_touch_utm_medium TEXT,
+                    first_touch_utm_campaign TEXT,
+                    first_touch_utm_content TEXT,
+                    first_touch_utm_term TEXT,
+                    first_touch_ref TEXT,
+                    last_touch_at BIGINT,
+                    last_touch_utm_source TEXT,
+                    last_touch_utm_campaign TEXT,
+                    CONSTRAINT stats_visitors_addr_lower CHECK (address IS NULL OR address = LOWER(address))
+                )
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stats_visitors_address "
+                "ON stats_visitors(address) WHERE address IS NOT NULL"
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_visitors_last_seen ON stats_visitors(last_seen_at DESC)")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stats_visitors_first_campaign "
+                "ON stats_visitors(first_touch_utm_campaign) WHERE first_touch_utm_campaign IS NOT NULL"
+            )
+            _assert_table_schema(
+                "stats_visitors",
+                {
+                    "visitor_hash",
+                    "address",
+                    "platform",
+                    "first_seen_at",
+                    "last_seen_at",
+                    "first_touch_at",
+                    "first_touch_utm_source",
+                    "first_touch_utm_medium",
+                    "first_touch_utm_campaign",
+                    "first_touch_utm_content",
+                    "first_touch_utm_term",
+                    "first_touch_ref",
+                    "last_touch_at",
+                    "last_touch_utm_source",
+                    "last_touch_utm_campaign",
+                },
+            )
+
+            # ── Stats: browse/engagement event log (non-chain signals only) ─
+            # Only 'visit' and 'engagement' live here. signup/post/comment are
+            # derived from the indexer; storing them here would duplicate chain
+            # data and risk drift.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stats_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at BIGINT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    visitor_hash TEXT,
+                    address TEXT,
+                    path TEXT,
+                    CONSTRAINT stats_events_addr_lower CHECK (address IS NULL OR address = LOWER(address))
+                )
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stats_events_type_created ON stats_events(event_type, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stats_events_addr_created "
+                "ON stats_events(address, created_at DESC) WHERE address IS NOT NULL"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stats_events_visitor_created "
+                "ON stats_events(visitor_hash, created_at DESC) WHERE visitor_hash IS NOT NULL"
+            )
+            _assert_table_schema(
+                "stats_events",
+                {"id", "created_at", "event_type", "visitor_hash", "address", "path"},
+            )
+
             # ── Fix SERIAL sequences after data migration ─────────────────
             # The DB-split migration inserts rows with explicit id values but
             # doesn't advance the sequences.  Reset each SERIAL sequence to
@@ -730,6 +820,7 @@ def init_backend_schema() -> None:
                 ("push_tokens", "id"),
                 ("push_receipts", "id"),
                 ("push_nonces", "id"),
+                ("stats_events", "id"),
             ]
             for table, col in _SERIAL_TABLES:
                 seq_name = f"{table}_{col}_seq"

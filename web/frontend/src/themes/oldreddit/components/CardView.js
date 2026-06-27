@@ -6,6 +6,7 @@ import { getThemeFamily } from "../../../registry/theme";
 import InlineMedia from "./InlineMedia";
 import Button from "./Button";
 import Storage from '../../../utils/Storage';
+import { requireAccount } from '../../../utils/openBrowsing';
 import * as tx from "../../../utils/tx.js";
 import Api from '../../../utils/api';
 import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../../utils/Subscriptions';
@@ -1180,10 +1181,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleDonate = () => {
         setMenuOpen(false);
         if (!post || !post.user_id) return;
-        if (!hasValidAccount) {
-            alert('Please log in to donate');
-            return;
-        }
+        if (!requireAccount('donate')) return;
         setConfirmDelete(false);
         setConfirmSuspendQuests(false);
         setSuspendSuccess(null);
@@ -1239,10 +1237,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleGiftSubscription = () => {
         setMenuOpen(false);
         if (!post || !post.user_id || isSubscribePending(post.user_id)) return;
-        if (!hasValidAccount) {
-            alert('Please log in to gift a subscription');
-            return;
-        }
+        if (!requireAccount('gift a subscription')) return;
         const level = (Number(post.author_level) || 0) >= 10 ? 10 : 1;
         const target = post.user_id;
         console.debug('[CardView] gift-subscribe.confirm', { target, level });
@@ -1586,11 +1581,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setMenuOpen(false);
         if (!post || (!post.user_id && !post.author)) return;
         const authorAddress = post.user_id || post.author;
+        if (!requireAccount('follow users')) return;
         const viewerAddress = Storage.load('publicKey', '');
-        if (!viewerAddress || viewerAddress === 'guest') {
-            alert('Please log in to follow users');
-            return;
-        }
         try {
             await follow(viewerAddress, authorAddress);
             setFollowOverride(true);
@@ -1619,11 +1611,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setMenuOpen(false);
         if (!post || !post.topic) return;
         const topic = post.topic;
+        if (!requireAccount('follow topics')) return;
         const viewerAddress = Storage.load('publicKey', '');
-        if (!viewerAddress || viewerAddress === 'guest') {
-            alert('Please log in to follow topics');
-            return;
-        }
         try {
             await subscribe(viewerAddress, topic);
             setTopicFollowOverride(true);

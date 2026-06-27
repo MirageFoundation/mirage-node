@@ -1423,6 +1423,7 @@ const MainView = ({
         dismissModerationReminder,
         snoozeModerationReminder,
         isLoggedIn,
+        openBrowsingEnabled,
         inviteCodesEnabled,
         questsEnabled,
         showAndroidBanner,
@@ -1454,6 +1455,9 @@ const MainView = ({
         setTopic,
         routeTopic
     });
+    // Open browsing: guests may read the feed too. Content-rendering branches use
+    // canBrowse; logged-in-only chrome (heroes, banners) keeps using isLoggedIn.
+    const canBrowse = isLoggedIn || openBrowsingEnabled;
     const [feedViewMode, setFeedViewMode] = useState(() => loadViewMode());
     useEffect(() => {
         const syncFeedViewMode = () => setFeedViewMode(loadViewMode());
@@ -1891,24 +1895,24 @@ const MainView = ({
                                 </BlockedTopicActions>
                             </BlockedTopicState>}
 
-                            {/* Loading state - only show to logged-in users */}
-                            {isLoggedIn && !isUrlTopicBlocked && showLoadingPosts && (
+                            {/* Loading state */}
+                            {canBrowse && !isUrlTopicBlocked && showLoadingPosts && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                     <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
                                     <FeedCardSkeletonList count={5} />
                                 </FeedSkeletonColumn>
                             )}
 
-                            {/* Empty home feed - only show to logged-in users */}
-                            {isLoggedIn && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
+                            {/* Empty home feed */}
+                            {canBrowse && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
 
-                            {/* No posts available - only show to logged-in users */}
-                            {isLoggedIn && !isUrlTopicBlocked && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                            {/* No posts available */}
+                            {canBrowse && !isUrlTopicBlocked && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                                 <LoadingText>{noPostsMessage}</LoadingText>
                             </LoadingCard>}
 
-                            {/* Invite-only hero - shown to logged-out users on all feeds */}
-                            {!isLoggedIn && <LoggedOutPromptCard
+                            {/* Welcome / signup hero - only when browsing is gated (open browsing off) */}
+                            {!canBrowse && <LoggedOutPromptCard
                                 role="region"
                                 aria-label="Welcome to Mirage"
                                 title={urlTopic === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
@@ -1929,8 +1933,8 @@ const MainView = ({
                                 secondaryLabel="Sign in"
                             />}
 
-                            {/* Posts grid - only show to logged-in users */}
-                            {isLoggedIn && !isUrlTopicBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                            {/* Posts grid */}
+                            {canBrowse && !isUrlTopicBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
                                 const family = getThemeFamily(state?.themeId);
                                 const FeedComponent = family.Feed;
                                 const visiblePosts = orderedPosts.filter(p => {
@@ -1952,12 +1956,12 @@ const MainView = ({
                                 return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
                             })()}
 
-                            {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
+                            {canBrowse && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                     <FeedCardSkeleton />
                                 </FeedSkeletonColumn>
                             )}
-                            {isLoggedIn && <div ref={bottomSentinelRef} style={{
+                            {canBrowse && <div ref={bottomSentinelRef} style={{
                                 width: '100%',
                                 minHeight: '1px'
                             }}>

@@ -42,6 +42,7 @@ from settings import (
     IGNORE_AGENT_BLOCKED_USERS,
     REGISTRATION_ENABLED,
     REGISTRATION_INVITE_CODE_REQUIRED,
+    OPEN_BROWSING_ENABLED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
     AUTO_ENABLED_AGENTS,
@@ -3994,6 +3995,7 @@ def _build_node_config() -> dict:
         "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
         "registration_enabled": REGISTRATION_ENABLED,
         "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
+        "open_browsing_enabled": OPEN_BROWSING_ENABLED,
         "quests_enabled": QUESTS_ENABLED,
         "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
@@ -7593,6 +7595,189 @@ def mark_inbox_viewed():
         return safe_error(e)
 
 
+# ── Admin stats (signed, admin-only, fleet-aggregated) ───────────────────────
+
+# One signed payload type for every stats surface: `stats:{addr}:{ts}:{nonce}`.
+# The aggregate endpoint forwards the admin's identical proof to peer export
+# endpoints, so a single signature authorizes the whole fan-out.
+STATS_ADMIN_ACTION = "stats"
+STATS_ADMIN_MIN_LEVEL = 100
+
+
+def _verify_admin_stats_request(data: dict):
+    """Verify a signed admin stats request. Returns (address, None) or
+    (None, (response, code)). Mirrors the inbox signing pattern and additionally
+    requires the caller to be an admin (profiles.level >= 100)."""
+    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request, get_user_level
+
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
+    address = (data.get("address") or "").strip()
+    if "timestamp" not in data:
+        return None, (jsonify({"error": "timestamp required"}), 400)
+    try:
+        timestamp = int(data.get("timestamp"))
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": "invalid timestamp"}), 400)
+
+    nonce, err = _parse_envelope_nonce(data)
+    if err is not None:
+        return None, (err[0], err[1])
+    if not (pub_b64 and sig_b64):
+        return None, (jsonify({"error": "missing required fields"}), 400)
+
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return None, (jsonify({"error": "invalid relay fields"}), 400)
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return None, (jsonify({"error": "invalid relay fields"}), 400)
+
+    user_addr = _derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, (jsonify({"error": "invalid pubkey"}), 400)
+    if address and address.lower() != user_addr.lower():
+        return None, (jsonify({"error": "address does not match pubkey"}), 400)
+
+    signed_payload = f"{STATS_ADMIN_ACTION}:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return None, (jsonify({"error": "invalid signature"}), 400)
+
+    ok, gerr = _guard_push_request(user_addr, STATS_ADMIN_ACTION, timestamp, nonce)
+    if not ok:
+        return None, (gerr[0], gerr[1])
+
+    if get_user_level(user_addr) < STATS_ADMIN_MIN_LEVEL:
+        return None, (jsonify({"error": "forbidden"}), 403)
+
+    return user_addr.lower(), None
+
+
+def _parse_stats_window(data: dict):
+    """Parse [start, end] unix-second window. Defaults to the last 30 days."""
+    now_ts = int(time.time())
+    try:
+        end = int(data.get("end")) if data.get("end") not in (None, "") else now_ts
+    except (TypeError, ValueError):
+        end = now_ts
+    try:
+        start = int(data.get("start")) if data.get("start") not in (None, "") else (end - 30 * 86400)
+    except (TypeError, ValueError):
+        start = end - 30 * 86400
+    if start > end:
+        start, end = end, start
+    return start, end
+
+
+@public_bp.route("/api/admin/stats/export", methods=["POST"])
+def admin_stats_export():
+    """Return this server's local stats for the signed window. Admin-only."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    addr, err = _verify_admin_stats_request(data)
+    if err is not None:
+        return err[0], err[1]
+    start, end = _parse_stats_window(data)
+    try:
+        import stats as _stats
+
+        payload = _stats.compute_local_stats(start, end)
+        log_event(rid, "admin_stats_export.ok", address=addr, start=start, end=end)
+        return jsonify(payload)
+    except Exception as e:
+        log_event(rid, "admin_stats_export.err", error=str(e))
+        return safe_error(e)
+
+
+@public_bp.route("/api/admin/stats/aggregate", methods=["POST"])
+def admin_stats_aggregate():
+    """Verify the admin signature, compute local stats, fan out the identical
+    signed proof to peer export endpoints, and return {aggregate, servers}.
+    Failed peers are reported explicitly; never zero-filled."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    addr, err = _verify_admin_stats_request(data)
+    if err is not None:
+        return err[0], err[1]
+    start, end = _parse_stats_window(data)
+
+    import stats as _stats
+
+    servers: List[Dict[str, Any]] = []
+
+    # Local server, computed in-process (never HTTP self-call).
+    local_label = _stats.local_server_label()
+    try:
+        local_stats = _stats.compute_local_stats(start, end)
+        servers.append({"server": local_label, "status": "ok", "stats": local_stats})
+    except Exception as e:
+        log_event(rid, "admin_stats_aggregate.local_err", error=str(e))
+        servers.append({"server": local_label, "status": "bad_response", "error": str(e)})
+
+    # Forward the admin's identical proof to remote peers.
+    proof = {
+        "pubkey": data.get("pubkey"),
+        "signature": data.get("signature"),
+        "address": data.get("address"),
+        "timestamp": data.get("timestamp"),
+        "envelope_nonce": data.get("envelope_nonce"),
+        "start": start,
+        "end": end,
+    }
+    local_norm = local_label.rstrip("/")
+    for base_url in _stats.discover_servers():
+        if base_url.rstrip("/") == local_norm:
+            continue
+        entry: Dict[str, Any] = {"server": base_url}
+        try:
+            resp = requests.post(
+                urljoin(base_url + "/", "api/admin/stats/export"),
+                json=proof,
+                timeout=6,
+            )
+            if resp.status_code == 200:
+                entry["status"] = "ok"
+                entry["stats"] = resp.json()
+            elif resp.status_code in (401, 403):
+                entry["status"] = "unauthorized"
+            else:
+                entry["status"] = "bad_response"
+                entry["http_status"] = resp.status_code
+        except requests.RequestException:
+            entry["status"] = "unreachable"
+        except Exception as e:  # noqa: BLE001
+            entry["status"] = "bad_response"
+            entry["error"] = str(e)
+        servers.append(entry)
+
+    aggregate = _stats.aggregate_server_stats([s for s in servers if s.get("status") == "ok"], start, end)
+    log_event(rid, "admin_stats_aggregate.ok", address=addr, servers=len(servers))
+    return jsonify({"aggregate": aggregate, "servers": servers, "window": {"start": start, "end": end}})
+
+
+@public_bp.route("/api/stats/visitor_attribution", methods=["POST"])
+def stats_visitor_attribution():
+    """Public analytics ingest: record first-touch UTM for a visitor id.
+    Idempotent; first-touch is never overwritten. No signature required (it is
+    anonymous analytics), but it writes only attribution, never reads."""
+    data = request.get_json(silent=True) or {}
+    visitor_id = str(data.get("visitor_id", "")).strip()
+    if not visitor_id:
+        return jsonify({"error": "visitor_id required"}), 400
+    platform = str(data.get("platform", "")).strip().lower() or None
+    utm = {
+        k: str(data.get(k, "")).strip() for k in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+    }
+    ref = str(data.get("ref", "")).strip()
+    import stats as _stats
+
+    _stats.record_attribution(visitor_id, platform, utm, ref)
+    return jsonify({"ok": True})
+
+
 def _parse_int_field(raw) -> Optional[int]:
     """Parse a non-negative int from a form field; None if missing/invalid."""
     if raw is None:
@@ -8594,6 +8779,14 @@ def get_stats():
     rid = next_request_id()
     tab = request.args.get("tab", "overview").lower()
     log_event(rid, "get_stats.begin", tab=tab)
+
+    # Admin-only: this endpoint exposes sensitive financial/subscriber data and is
+    # superseded by the signed /api/admin/stats/* fleet API. Require the same signed
+    # admin proof. Signing fields may arrive via query string (GET) or JSON body.
+    auth_data = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    _addr, _err = _verify_admin_stats_request(auth_data)
+    if _err is not None:
+        return _err[0], _err[1]
 
     # Route to tab-specific handlers
     if tab == "signups":

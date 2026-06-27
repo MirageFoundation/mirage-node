@@ -15,6 +15,7 @@ import { sortComments } from "../utils/SortComments";
 import { getCollapseThreshold, shouldAutoCollapse } from "../utils/Comments";
 import { updateNotification } from "../utils/notifications";
 import { requireThemeColor } from "../utils/themeColor";
+import { requireAccount } from "../utils/openBrowsing";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
 export const pickCard = requireThemeColor;
@@ -146,6 +147,7 @@ export function useViewPost({
         }
     }, [nodeConfigTick]);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled);
+    const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
     // reliably return to the originating feed route (including /t/:topic).
@@ -392,6 +394,7 @@ export function useViewPost({
     const handleFollowToggle = async authorAddr => {
         const author = String(authorAddr || '').trim().toLowerCase();
         if (!author || isUserPending(author)) return;
+        if (!requireAccount('follow users')) return;
         const wasFollowing = isFollowingAuthor(author);
         try {
             if (wasFollowing) {
@@ -419,6 +422,7 @@ export function useViewPost({
     const handleTopicFollowToggle = async topic => {
         const t = String(topic || '').trim().toLowerCase();
         if (!t || isTopicPending(t)) return;
+        if (!requireAccount('follow topics')) return;
         const wasSubscribed = isSubscribedTopic(topic);
         // Optimistic update
         if (wasSubscribed) {
@@ -1887,6 +1891,7 @@ export function useViewPost({
 
     const handleSubmit = commentId => async event => {
         event.preventDefault();
+        if (!requireAccount('comment')) return;
         const replyStringRaw = state.posts[commentId]?.replyText || "";
         let replyString = replyStringRaw.trim();
         // Prepend attached media URL if present (same behavior as create_post)
@@ -2682,6 +2687,7 @@ export function useViewPost({
         location,
         navigate,
         questsEnabled,
+        openBrowsingEnabled,
         isMobile,
         goBackToFeed,
         viewerAddress,
