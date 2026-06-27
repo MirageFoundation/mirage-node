@@ -393,6 +393,7 @@ function Sidebar({ state }) {
     return (
         <Aside aria-label="Sidebar">
             <Section>
+                <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
                 <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} />
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
@@ -475,12 +476,6 @@ function Sidebar({ state }) {
                     </Section>
                 </>
             )}
-
-            <SectionDivider />
-
-            <Section>
-                <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
-            </Section>
 
         </Aside>
     );
