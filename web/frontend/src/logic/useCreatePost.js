@@ -672,7 +672,6 @@ export function useCreatePost({
                         }
                     }));
                     trackEvent('post_created', {
-                        topic,
                         has_media: media.length > 0 || !!firstLineUrl,
                         media_count: media.length,
                         tag: tag || undefined

@@ -86,7 +86,7 @@ export async function subscribe(address, topic) {
         scheduleRefresh(address); // Clear cache, start no-cache window
         addToCache(t, address);   // Will be skipped during no-cache window
         notifyTopicsUpdated({ added: lower });
-        trackEvent('topic_followed', { topic: lower });
+        trackEvent('topic_followed');
         return [];
     } else {
         // "already followed" means the user's intent is satisfied

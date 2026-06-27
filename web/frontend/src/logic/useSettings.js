@@ -445,12 +445,7 @@ export function useSettings({
     const handleAnalyticsToggle = nextVal => {
         const enabled = !!nextVal;
         setAnalyticsConsent(enabled);
-        setAnalyticsTrackingEnabled(enabled).then(() => {
-            if (!enabled || !state.publicKey) return;
-            import('../utils/analytics').then(({ identifyUser }) => {
-                identifyUser(state.publicKey, { username: state.username });
-            }).catch(() => { });
-        });
+        setAnalyticsTrackingEnabled(enabled);
     };
     const handleCollapseThresholdChange = e => {
         const raw = e.target.value;

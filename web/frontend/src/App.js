@@ -7,7 +7,7 @@ import seedVault from './utils/SeedVault';
 import Api from './utils/api';
 import * as tx from './utils/tx';
 import { seedFromBootstrap as seedProfileFromBootstrap } from './utils/ProfileCache';
-import { initAnalytics, identifyUser, resetAnalyticsIdentity, trackEvent } from './utils/analytics';
+import { initAnalytics, trackEvent } from './utils/analytics';
 import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
@@ -143,7 +143,6 @@ function RouteTracker({ children }) {
     React.useEffect(() => {
         const path = location.pathname || '/';
         trackEvent('page_viewed', {
-            path: path === '/' ? '/home' : path,
             route_family: getRouteFamily(path),
             has_query: !!location.search
         });
@@ -382,13 +381,11 @@ class App extends Component {
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
         try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
 
-        try {
-            initAnalytics().then(() => {
-                const publicKey = Storage.load('publicKey', '');
-                const username = Storage.load('username', '');
-                if (publicKey) identifyUser(publicKey, { username });
-            });
-        } catch (_) { }
+        initAnalytics();
+        // The Mixpanel token arrives with the backend node config, which may land
+        // after mount; retry init once it's cached (init is idempotent/no-op if ready).
+        this._onNodeConfigUpdated = () => { initAnalytics(); };
+        window.addEventListener('nodeConfigUpdated', this._onNodeConfigUpdated);
 
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
@@ -485,6 +482,7 @@ class App extends Component {
 
     componentWillUnmount() {
         try { window.removeEventListener('keydown', this._onKeyDown); } catch (_) { }
+        try { window.removeEventListener('nodeConfigUpdated', this._onNodeConfigUpdated); } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
         try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
         try { window.removeEventListener('themeIdChanged', this._onThemeIdChange); } catch (_) { }
@@ -721,21 +719,11 @@ class App extends Component {
     }
 
     setCredentials(publicKey, username, seedPhrase) {
-        const previousPublicKey = this.state.publicKey;
         this.setState({
             publicKey: publicKey,
             username: username,
             seedPhrase: seedPhrase,
         });
-
-        try {
-            if (publicKey) {
-                if (previousPublicKey && previousPublicKey !== publicKey) resetAnalyticsIdentity();
-                identifyUser(publicKey, { username });
-            } else if (previousPublicKey) {
-                resetAnalyticsIdentity();
-            }
-        } catch (_) { }
 
         Storage.save('publicKey', publicKey);
         Storage.save('username', username);
