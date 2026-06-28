@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
 import {
     ResponsiveContainer, AreaChart, Area, BarChart, Bar,
-    XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+    XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine,
 } from "recharts";
 import { useStats } from "../logic/useStats";
 import Storage from "../utils/Storage";
@@ -16,9 +16,12 @@ const CHART_COLORS = {
     retention: "#2563eb",
 };
 
+// Backend buckets days at UTC midnight, so label them in UTC too. Using local
+// getMonth/getDate would shift every label back a day for viewers west of UTC
+// (e.g. a 6/23 00:00 UTC bucket rendered as "6/22" at UTC-4).
 const shortDay = (t) => {
     const d = new Date(t * 1000);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 };
 
 /**
@@ -155,6 +158,50 @@ const Message = styled.div`
     font-size: 0.85rem;
 `;
 
+const SourceLegend = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    border: 1px solid ${({ theme }) => tok(theme, "border", "#333")};
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.74rem;
+    line-height: 1.45;
+`;
+
+const LegendItem = styled.div`
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+`;
+
+const Dot = styled.span`
+    flex: 0 0 auto;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: ${({ $c }) => $c};
+    transform: translateY(1px);
+`;
+
+// Inline caveat under a section, used to spell out exactly what a metric does
+// and does not cover (esp. on-chain-retroactive vs tracked-since-a-date).
+const Note = styled.div`
+    font-size: 0.72rem;
+    line-height: 1.45;
+    opacity: 0.7;
+    margin: 0 0 0.7rem;
+    max-width: 720px;
+`;
+
+const Warn = styled(Note)`
+    opacity: 1;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    border-left: 3px solid #f59e0b;
+    padding-left: 0.6rem;
+`;
+
 const ChartGrid = styled.div`
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -236,6 +283,18 @@ export default function AdminStatsDashboard() {
     const o = aggregate && aggregate.onchain;
     const r = aggregate && aggregate.retention;
     const series = (aggregate && aggregate.series) || [];
+    const trackingSince = (aggregate && aggregate.tracking_since) || null;
+    const trackingSinceLabel = trackingSince ? formatDate(trackingSince) : null;
+    // Whether the selected window predates visitor tracking. If so, the tracked
+    // metrics are empty and the browsing half of retention can't be seen.
+    const windowEndsBeforeTracking = !!(trackingSince && win && win.end < trackingSince);
+    const windowStartsBeforeTracking = !!(trackingSince && win && win.start < trackingSince);
+    // Day bucket tracking began. Tracked lines (Active) are nulled before this so
+    // the chart shows a gap, not a misleading flat zero, prior to tracking.
+    const trackingSinceDay = trackingSince ? Math.floor(trackingSince / 86400) * 86400 : null;
+    const chartSeries = trackingSinceDay == null
+        ? series
+        : series.map(pt => ({ ...pt, active: pt.t < trackingSinceDay ? null : pt.active }));
     const retentionData = r ? ["d7", "d14", "d30"].map(k => ({
         name: k.toUpperCase(),
         rate: r[k].eligible ? Math.round(r[k].rate * 1000) / 10 : null,
@@ -275,17 +334,49 @@ export default function AdminStatsDashboard() {
 
             {!loading && !error && aggregate && (
                 <>
-                    <SectionHeader>On-chain (all activity in window)</SectionHeader>
+                    <SourceLegend>
+                        <LegendItem>
+                            <Dot $c={CHART_COLORS.posts} />
+                            <span>
+                                <strong>On-chain</strong> — recorded by the blockchain since genesis.
+                                Accurate for <strong>any</strong> historical window: new users, contributors,
+                                posts, comments.
+                            </span>
+                        </LegendItem>
+                        <LegendItem>
+                            <Dot $c={CHART_COLORS.active} />
+                            <span>
+                                <strong>Visitor tracking</strong> (Mirage-owned) — visitors, active browsing,
+                                signups and campaigns.{" "}
+                                {trackingSinceLabel
+                                    ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
+                                    : <>No tracked events recorded yet, so these are still empty.</>}
+                            </span>
+                        </LegendItem>
+                    </SourceLegend>
+
+                    <SectionHeader>On-chain — full history (retroactive)</SectionHeader>
+                    <Note>Counts every signup / post / comment in the window straight from the chain. Reliable for past windows.</Note>
                     <TileGrid>
-                        <Tile><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users</TileLabel></Tile>
-                        <Tile><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (post/comment)</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users (signups)</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (posted/commented)</TileLabel></Tile>
                         <Tile><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
                         <Tile><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
                     </TileGrid>
 
-                    <SectionHeader>Tracked visitors (since tracking began)</SectionHeader>
+                    <SectionHeader>
+                        Visitor tracking{trackingSinceLabel ? ` — only since ${trackingSinceLabel}` : ""}
+                    </SectionHeader>
+                    <Note>
+                        <strong>Active</strong> = made ≥1 content request (posts, comments, profiles, topics or search)
+                        in the window — i.e. actually browsing, logged in or a logged-out lurker. Votes, config polls
+                        and bare page loads don't count.
+                    </Note>
+                    {windowEndsBeforeTracking && (
+                        <Warn>This window ends before tracking began, so every number below is 0 by definition — not a real reading.</Warn>
+                    )}
                     <TileGrid>
-                        <Tile><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active (engaged, incl. lurkers)</TileLabel></Tile>
+                        <Tile><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active (browsing, incl. lurkers)</TileLabel></Tile>
                         <Tile><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors</TileLabel></Tile>
                         <Tile><TileValue>{formatNumber(g.signups)}</TileValue><TileLabel>Signups (visitor → account)</TileLabel></Tile>
                         <Tile><TileValue>{g.visitors ? formatPercent(g.signup_conversion) : "—"}</TileValue><TileLabel>Signup conversion</TileLabel></Tile>
@@ -297,7 +388,7 @@ export default function AdminStatsDashboard() {
                             <ChartTitle>New users & active per day</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={series} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                    <AreaChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
                                         <defs>
                                             <linearGradient id="gNew" x1="0" y1="0" x2="0" y2="1">
                                                 <stop offset="0%" stopColor={CHART_COLORS.newUsers} stopOpacity={0.35} />
@@ -313,8 +404,16 @@ export default function AdminStatsDashboard() {
                                         <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
                                         <Tooltip labelFormatter={shortDay} contentStyle={{ fontSize: 12 }} />
                                         <Legend wrapperStyle={{ fontSize: 11 }} />
+                                        {trackingSinceDay != null && (
+                                            <ReferenceLine
+                                                x={trackingSinceDay}
+                                                stroke={CHART_COLORS.active}
+                                                strokeDasharray="4 3"
+                                                label={{ value: "tracking start", position: "insideTopRight", fontSize: 10, fill: CHART_COLORS.active }}
+                                            />
+                                        )}
                                         <Area type="monotone" dataKey="new_users" name="New users" stroke={CHART_COLORS.newUsers} fill="url(#gNew)" strokeWidth={2} />
-                                        <Area type="monotone" dataKey="active" name="Active" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} />
+                                        <Area type="monotone" dataKey="active" name="Active" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} connectNulls={false} />
                                     </AreaChart>
                                 </ResponsiveContainer>
                             </ChartHeight>
@@ -323,7 +422,7 @@ export default function AdminStatsDashboard() {
                             <ChartTitle>Posts & comments per day</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={series} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                    <BarChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
                                         <CartesianGrid stroke={gridColor} vertical={false} />
                                         <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
                                         <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
@@ -338,9 +437,22 @@ export default function AdminStatsDashboard() {
                     </ChartGrid>
 
                     <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
-                    <Subtitle style={{ margin: "0 0 0.6rem" }}>
+                    <Subtitle style={{ margin: "0 0 0.4rem" }}>
                         Of the {formatNumber(r.cohort_size)} users who signed up in this window, how many were still active later:
                     </Subtitle>
+                    <Note>
+                        <strong>Still active</strong> at horizon N (D7/D14/D30) = at or after their signup + N days they
+                        either <strong>posted/commented</strong> (on-chain, retroactive) <strong>or browsed</strong>
+                        {" "}(tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}). Each horizon only
+                        counts users who signed up early enough that N days have already elapsed (shown as retained/eligible).
+                    </Note>
+                    {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
+                        <Warn>
+                            {windowEndsBeforeTracking
+                                ? "This cohort signed up entirely before tracking began, so \"active later\" only counts people who posted or commented — returning lurkers are invisible. Treat these rates as a floor (real retention is higher)."
+                                : `Part of this cohort signed up before tracking began${trackingSinceLabel ? ` (${trackingSinceLabel})` : ""}; for those users only posting/commenting counts as active, so the rates are a conservative floor.`}
+                        </Warn>
+                    )}
                     <ChartGrid>
                         <ChartCard>
                             <ChartTitle>Retention by horizon</ChartTitle>

@@ -187,24 +187,48 @@ def test_stats_pure(backend):
             },
         },
     ]
+    # Add per-day series so we can assert series combine rules too: on-chain
+    # fields max, tracked 'active' sums.
+    servers[0]["stats"]["series"] = [{"t": 0, "new_users": 80, "posts": 20, "comments": 30, "active": 40}]
+    servers[1]["stats"]["series"] = [{"t": 0, "new_users": 20, "posts": 0, "comments": 10, "active": 10}]
     agg = st.aggregate_server_stats(servers, 0, 100)
     checks = [
+        # tracked metrics SUM across nodes
         agg["growth"]["visitors"] == 150,
         agg["growth"]["active"] == 50,
         agg["growth"]["signups"] == 15,
         agg["growth"]["signup_conversion"] == round(15 / 150, 4),
-        agg["onchain"]["new_users"] == 100,
-        agg["onchain"]["contributors"] == 10,
+        # on-chain metrics are identical per node -> MAX, never summed
+        agg["onchain"]["new_users"] == 80,
+        agg["onchain"]["contributors"] == 5,
         agg["onchain"]["posts"] == 20,
-        agg["onchain"]["comments"] == 40,
-        agg["onchain"]["posts_per_contributor"] == round(60 / 10, 2),
-        agg["retention"]["cohort_size"] == 15,
-        agg["retention"]["d7"]["eligible"] == 10,
-        agg["retention"]["d7"]["retained"] == 5,
-        agg["retention"]["d7"]["rate"] == round(5 / 10, 4),
+        agg["onchain"]["comments"] == 30,
+        agg["onchain"]["posts_per_contributor"] == round(50 / 5, 2),
+        # retention cohort/eligible/retained are chain-derived -> MAX
+        agg["retention"]["cohort_size"] == 10,
+        agg["retention"]["d7"]["eligible"] == 8,
+        agg["retention"]["d7"]["retained"] == 4,
+        agg["retention"]["d7"]["rate"] == round(4 / 8, 4),
         agg["servers_counted"] == 2,
+        # series: on-chain max, tracked active summed
+        agg["series"][0]["new_users"] == 80,
+        agg["series"][0]["posts"] == 20,
+        agg["series"][0]["comments"] == 30,
+        agg["series"][0]["active"] == 50,
     ]
     if all(checks):
         _pass("stats.aggregate_math")
     else:
         _fail("stats.aggregate_math", f"agg={agg} checks={checks}")
+
+    # Fleet tracking_since is the earliest across reporting nodes; None when no
+    # node has recorded anything yet (so the UI can say "tracking hasn't started").
+    s_a = {"status": "ok", "stats": {"tracking_since": 5000}}
+    s_b = {"status": "ok", "stats": {"tracking_since": 3000}}
+    s_none = {"status": "ok", "stats": {}}
+    earliest = st.aggregate_server_stats([s_a, s_b, s_none], 0, 100)["tracking_since"]
+    blank = st.aggregate_server_stats([s_none], 0, 100)["tracking_since"]
+    if earliest == 3000 and blank is None:
+        _pass("stats.aggregate_tracking_since")
+    else:
+        _fail("stats.aggregate_tracking_since", f"earliest={earliest} blank={blank}")

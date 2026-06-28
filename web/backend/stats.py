@@ -528,6 +528,21 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
     return out
 
 
+def _tracking_since() -> Optional[int]:
+    """Unix ts of the earliest recorded event on this node — i.e. when Mirage
+    visitor tracking effectively began here. None if nothing is recorded yet.
+
+    Everything in the "tracked" bucket (visitors/active/signups/campaigns and the
+    browsing half of retention) is necessarily blank before this instant. On-chain
+    metrics are unaffected: the chain has full history regardless.
+    """
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MIN(created_at) FROM stats_events")
+            row = cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else None
+
+
 def local_server_label() -> str:
     import os
 
@@ -551,6 +566,9 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
     return {
         "server": local_server_label(),
         "generated_at": now_ts,
+        # When visitor tracking began on this node. Tracked metrics below are
+        # blank before this; on-chain metrics have full history regardless.
+        "tracking_since": _tracking_since(),
         "window": {"start": start, "end": end},
         # Tracked-visitor funnel (only counts activity since visitor tracking began).
         "growth": {
@@ -608,35 +626,49 @@ def _normalize_moniker_url(moniker: str) -> Optional[str]:
 
 
 def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: int) -> Dict[str, Any]:
-    """Sum additive metrics across reachable servers. Rates are recomputed from
-    the summed numerators/denominators so they stay meaningful fleet-wide."""
+    """Combine per-server stats into one fleet view.
+
+    Two different combine rules, because the data has two natures:
+
+    - Tracked metrics (visitors/active/signups, daily ``active``) are per-node:
+      a visitor hits exactly one server, so these are SUMMED.
+    - On-chain metrics (new_users/contributors/posts/comments, the retention
+      cohort, daily new_users/posts/comments) are global chain facts that every
+      full node indexes identically. Summing them would count the same rows once
+      per server (~Nx inflation), so we take the MAX across nodes instead — max,
+      not first, so a node that is behind/catching up can't drag the fleet view
+      below the most-synced node's complete count.
+    """
     visitors = active = signups = new_users = 0
     contributors = posts = comments = 0
     cohort_size = 0
-    ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained]
+    ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained] (max)
     series_by_day: Dict[int, Dict[str, int]] = {}
     for s in ok_servers:
         st = s.get("stats") or {}
         g = st.get("growth") or {}
         o = st.get("onchain") or {}
         r = st.get("retention") or {}
+        # tracked → sum
         visitors += int(g.get("visitors") or 0)
         active += int(g.get("active") or 0)
         signups += int(g.get("signups") or 0)
-        new_users += int(o.get("new_users") or 0)
-        contributors += int(o.get("contributors") or 0)
-        posts += int(o.get("posts") or 0)
-        comments += int(o.get("comments") or 0)
-        cohort_size += int(r.get("cohort_size") or 0)
+        # on-chain → max (identical across nodes; never sum)
+        new_users = max(new_users, int(o.get("new_users") or 0))
+        contributors = max(contributors, int(o.get("contributors") or 0))
+        posts = max(posts, int(o.get("posts") or 0))
+        comments = max(comments, int(o.get("comments") or 0))
+        cohort_size = max(cohort_size, int(r.get("cohort_size") or 0))
         for k in ("d7", "d14", "d30"):
             d = r.get(k) or {}
-            ret[k][0] += int(d.get("eligible") or 0)
-            ret[k][1] += int(d.get("retained") or 0)
+            ret[k][0] = max(ret[k][0], int(d.get("eligible") or 0))
+            ret[k][1] = max(ret[k][1], int(d.get("retained") or 0))
         for pt in st.get("series") or []:
             t = int(pt.get("t") or 0)
             agg_pt = series_by_day.setdefault(t, {"t": t, "new_users": 0, "posts": 0, "comments": 0, "active": 0})
-            for f in ("new_users", "posts", "comments", "active"):
-                agg_pt[f] += int(pt.get(f) or 0)
+            agg_pt["active"] += int(pt.get("active") or 0)  # tracked → sum
+            for f in ("new_users", "posts", "comments"):     # on-chain → max
+                agg_pt[f] = max(agg_pt[f], int(pt.get(f) or 0))
     retention = {"cohort_size": cohort_size}
     for k in ("d7", "d14", "d30"):
         eligible, retained = ret[k]
@@ -645,9 +677,18 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
             "retained": retained,
             "rate": round(retained / eligible, 4) if eligible else 0.0,
         }
+    # Earliest moment any reporting node began tracking — the fleet-wide boundary
+    # before which all tracked metrics are blank.
+    since_vals = [
+        int((s.get("stats") or {}).get("tracking_since"))
+        for s in ok_servers
+        if (s.get("stats") or {}).get("tracking_since")
+    ]
+    tracking_since = min(since_vals) if since_vals else None
     return {
         "window": {"start": start, "end": end},
         "servers_counted": len(ok_servers),
+        "tracking_since": tracking_since,
         "growth": {
             "visitors": visitors,
             "active": active,
