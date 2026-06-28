@@ -643,6 +643,7 @@ export function useCreatePost({
                         thumbnail: thumb,
                         direction: 1,
                         user_vote: 1,
+                        user_weight: 1,
                         points: 1,
                         comments: 0,
                         deleted: false,

@@ -1,33 +1,52 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.28.2.
+Post-deploy verification for v1.29.0.
 
-Only v1.28.2-specific checks are included. Generic prior-upgrade checks
-have been removed per the /upgrade workflow: keep only checks needed to
-validate THIS release.
+Per the /upgrade workflow this file is rewritten every release to check ONLY
+what THIS release changes — generic/prior-upgrade checks are removed so a green
+run is a precise statement about the current rollout. It is a manual post-deploy
+probe (not run automatically by deploy/deploy.sh):
 
-What v1.28.2 actually changes
------------------------------
-This is a rolling PATCH release (no on-chain upgrade handler, no governance
-proposal, no chain halt) — every change is consensus-neutral, halt-on-error,
-disk-GC, or pure ops. The deploy-visible effects this script verifies:
-
-  1. inter-block-cache = false in node app.toml (divergence mitigation,
-     applied by deploy/migrations/v1_28_2_disable_inter_block_cache.py).
-  2. iavl-disable-fastnode = true is still enforced (carried divergence knob).
-  3. The chain is live after the rolling restart (indexer freshness).
-  4. The shipped binary/frontend reports the release version.
-
-Not verified here (no runtime signature):
-  - store/v2 commit-info pruning drains over many prune passes; it is exercised
-    by rootmulti/commit_info_prune_test.go, not observable in a point check.
-  - consensus-path fail-fast reads + IAVL prune-hole guard only fire on an
-    actual storage error; covered by Go tests (never_halt_test.go,
-    nodedb_prune_fail_fast_test.go).
-
-Usage:
-  python scripts/verify_upgrade.py                     # inside container
+  python scripts/verify_upgrade.py                       # inside container
   docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
+
+What v1.29.0 actually changes (deploy-visible, and therefore checked here)
+-------------------------------------------------------------------------
+v1.29.0 is the "single edge vendor" release: mirage.vote / mirage.talk move
+behind Bunny.net (edge + Bunny Shield upload scanning), media uploads become
+fail-closed on any node without a scanning edge, and video limits grow to ~30
+minutes. The config the deploy migrations + templates land — and that this
+script verifies — is:
+
+  1. MEDIA_UPLOADS_ENABLED — fail-closed upload gate, pinned PER NODE by
+     deploy/migrations/v1_29_0_media_uploads_enabled.py: `true` only on the
+     domains behind a scanning edge (mirage.vote, mirage.talk), `false`
+     everywhere else (e.g. the IP-only nodes). settings.py only treats the
+     literal "false" as off, so we evaluate the same way the backend does.
+  2. 30-min video caps — MEDIA_VIDEO_MAX_DURATION_SEC 600->1800 and
+     MEDIA_MAX_VIDEO_MB 300->1500 (deploy/migrations/v1_29_0_video_caps_30min.py;
+     Caddy @upload max_size is raised in the template alongside).
+  3. AntiSpamBot default agent — added to AUTO_ENABLED_AGENTS on mirage.talk ONLY
+     (deploy/migrations/v1_29_0_mirage_talk_antispam_agent.py).
+  4. Edge cache correctness — Caddy stamps `Cache-Control: no-store` on the
+     dynamic @api and /chain/* routes so the CDN never caches them.
+  5. Edge client-IP trust — deploy/refresh_edge_ips.py is wired into the
+     entrypoint (and a daily refresh) to emit /etc/caddy/trusted-proxies.caddy
+     so Caddy resolves the real client IP behind Cloudflare/Bunny.
+  6. The chain is live after the rolling restart (indexer freshness).
+  7. The shipped frontend reports the release version.
+
+Config is read from the process environment (os.environ) because that is exactly
+what the backend runs with: deploy.sh starts the container with --env-file for
+each ~/.mirage/env/*.env, and `docker exec` inherits that same environment. So a
+value here is the value the live backend sees, not just what's on disk.
+
+Not verified here (no point-in-time deploy signature):
+  - The origin nftables firewall (deploy/setup_origin_firewall.sh) and Bunny
+    dashboard state (pull zones, Shield, DNS) are infrastructure outside the
+    container; validate those with the runbook, not this script.
+  - The Bunny Stream thumbnail backfill is a one-shot indexer migration whose
+    effect is historical rows; it has no steady-state runtime signature.
 """
 from __future__ import annotations
 
@@ -36,7 +55,6 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "web" / "backend"))
@@ -48,8 +66,26 @@ except ImportError:
     sys.exit(1)
 
 
-# Constant tied to THIS release. If it changes, this file must change.
-RELEASE_VERSION = "v1.28.2"
+# ─── Constants tied to THIS release. If any change, this file must change. ─────
+
+RELEASE_VERSION = "v1.29.0"
+
+# Domains that sit behind a scanning edge (Bunny Shield) and therefore accept
+# public uploads. Must match UPLOAD_DOMAINS in the media-uploads migration.
+UPLOAD_DOMAINS = {"mirage.vote", "mirage.talk"}
+
+# AntiSpamBot — default-enabled agent on mirage.talk only.
+ANTISPAM_AGENT = "mirage17jn2j2wwnvqdhtecwfh0wa0vpj9qa5gcalztap"
+ANTISPAM_DOMAIN = "mirage.talk"
+
+# 30-min video caps: (env key, old default we replaced, new value).
+VIDEO_CAPS = [
+    ("MEDIA_VIDEO_MAX_DURATION_SEC", "600", "1800"),
+    ("MEDIA_MAX_VIDEO_MB", "300", "1500"),
+]
+
+CADDYFILE = Path("/etc/caddy/Caddyfile")
+TRUSTED_PROXIES = Path("/etc/caddy/trusted-proxies.caddy")
 
 
 passed = 0
@@ -92,71 +128,107 @@ def require_env(key: str) -> str:
     return val
 
 
-# ─── app.toml discovery ───────────────────────────────────────────────
+def env_value(key: str) -> str:
+    return os.environ.get(key, "").strip()
 
 
-def find_app_toml() -> Path | None:
-    candidates = [
-        Path("/root/.mirage/node/config/app.toml"),
-        Path.home() / ".mirage" / "node" / "config" / "app.toml",
-        Path.cwd() / "main" / "config" / "app.toml",
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
-    return None
+# ─── v1.29.0 checks ───────────────────────────────────────────────────────────
 
 
-def _read_toml_bool(content: str, key: str) -> str | None:
-    m = re.search(rf"(?m)^\s*{re.escape(key)}\s*=\s*(true|false)\s*$", content)
-    return m.group(1) if m else None
+def check_media_uploads_gate() -> None:
+    """Fail-closed upload gate, pinned per node.
+
+    A node only accepts public uploads when it sits behind a scanning edge.
+    settings.py disables uploads only when the value is literally "false", so we
+    derive the *effective* state the same way and compare it to what this domain
+    should be (true behind Bunny, false everywhere else)."""
+    domain = env_value("DOMAIN").lower()
+    behind_edge = domain in UPLOAD_DOMAINS
+    expected = "true" if behind_edge else "false"
+
+    raw = env_value("MEDIA_UPLOADS_ENABLED")
+    effective = "false" if raw.lower() == "false" else "true"  # mirrors settings.py
+
+    where = domain or "(no DOMAIN — IP-only node)"
+    if effective == expected:
+        if behind_edge:
+            ok(f"MEDIA_UPLOADS_ENABLED={effective} for {where} (uploads accepted behind Bunny Shield)")
+        else:
+            ok(f"MEDIA_UPLOADS_ENABLED={effective} for {where} (uploads refused — no scanning edge)")
+    else:
+        fail(
+            f"MEDIA_UPLOADS_ENABLED is effectively {effective} for {where}, expected {expected} "
+            f"(raw={raw!r}) — fail-closed gate not applied for this node"
+        )
 
 
-# ─── v1.28.2 checks ──────────────────────────────────────────────────
+def check_video_caps() -> None:
+    """30-minute video caps. The migration only bumps nodes still on the old
+    default, so a deliberate operator override is a warning (not a failure); the
+    OLD default or a missing value means the cap was not applied (failure)."""
+    for key, old_default, new_value in VIDEO_CAPS:
+        val = env_value(key)
+        if not val:
+            fail(f"{key} not set (expected {new_value})")
+        elif val == new_value:
+            ok(f"{key}={val} (30-min video caps applied)")
+        elif val == old_default:
+            fail(f"{key}={val} is the old default — v1.29.0 cap not applied (expected {new_value})")
+        else:
+            warn(f"{key}={val} (operator-customized; not the {new_value} default)")
 
 
-def check_inter_block_cache_disabled() -> None:
-    """The primary v1.28.2 mitigation: the shared cross-block CommitKVStore
-    cache must be off on disk so the next/already-applied restart runs without
-    it. Fail hard — this is the headline change."""
-    path = find_app_toml()
-    if path is None:
-        fail("app.toml not found in known locations; cannot verify inter-block-cache")
+def check_antispam_agent() -> None:
+    """AntiSpamBot is a default agent on mirage.talk ONLY. On every other node
+    this is a no-op, so we skip with an informational note."""
+    domain = env_value("DOMAIN").lower()
+    if domain != ANTISPAM_DOMAIN:
+        info(f"AntiSpamBot check skipped (domain={domain or '(none)'}; only applies to {ANTISPAM_DOMAIN})")
         return
-    content = path.read_text(errors="ignore")
-    val = _read_toml_bool(content, "inter-block-cache")
-    if val is None:
-        # Absent means the SDK default (enabled) applies — the migration should
-        # have inserted an explicit false. Treat as failure.
-        fail(f"app.toml has no inter-block-cache key (SDK default is ENABLED) ({path})")
-        return
-    if val != "false":
-        fail(f"app.toml has inter-block-cache={val} (expected false) ({path})")
-        return
-    ok(f"app.toml enforces inter-block-cache=false ({path})")
+    agents = [a.strip() for a in env_value("AUTO_ENABLED_AGENTS").split(",") if a.strip()]
+    if ANTISPAM_AGENT in agents:
+        ok(f"AntiSpamBot present in AUTO_ENABLED_AGENTS ({len(agents)} agent(s) total)")
+    else:
+        fail(f"AntiSpamBot missing from AUTO_ENABLED_AGENTS on {ANTISPAM_DOMAIN} (got: {agents or 'none'})")
 
 
-def check_fastnode_disabled() -> None:
-    """Carried divergence knob from v1.27/v1.28.0 — must remain enforced."""
-    path = find_app_toml()
-    if path is None:
-        fail("app.toml not found in known locations; cannot verify iavl-disable-fastnode")
+def check_cache_control_no_store() -> None:
+    """The dynamic API and chain routes must send Cache-Control: no-store so the
+    CDN never serves stale API/RPC responses. Verified from the rendered
+    Caddyfile (the source of truth for the header). Expect three: @api,
+    /chain/rpc, /chain/rest."""
+    if not CADDYFILE.exists():
+        fail(f"Caddyfile not found ({CADDYFILE}); cannot verify no-store headers")
         return
-    content = path.read_text(errors="ignore")
-    val = _read_toml_bool(content, "iavl-disable-fastnode")
-    if val is None:
-        fail(f"app.toml missing iavl-disable-fastnode ({path})")
+    content = CADDYFILE.read_text(errors="ignore")
+    n = len(re.findall(r'Cache-Control\s+"no-store"', content))
+    if n >= 3:
+        ok(f'Caddyfile stamps Cache-Control "no-store" on API + chain routes ({n} directives)')
+    elif n > 0:
+        warn(f'Caddyfile has only {n} no-store directive(s); expected >=3 (@api, /chain/rpc, /chain/rest)')
+    else:
+        fail('Caddyfile has no Cache-Control "no-store" on dynamic routes')
+
+
+def check_trusted_proxies() -> None:
+    """The entrypoint runs deploy/refresh_edge_ips.py to emit trusted-proxies.caddy
+    so Caddy can recover the real client IP behind the edge. The file must exist
+    and carry a trusted_proxies directive regardless of which edge provider."""
+    if not TRUSTED_PROXIES.exists():
+        fail(f"trusted-proxies.caddy not found ({TRUSTED_PROXIES}); edge IP refresh did not run")
         return
-    if val != "true":
-        fail(f"app.toml has iavl-disable-fastnode={val} (expected true) ({path})")
+    content = TRUSTED_PROXIES.read_text(errors="ignore")
+    if "trusted_proxies" not in content:
+        fail("trusted-proxies.caddy present but has no trusted_proxies directive")
         return
-    ok(f"app.toml enforces iavl-disable-fastnode=true ({path})")
+    provider = env_value("EDGE_PROVIDER") or "(default/cloudflare)"
+    ok(f"trusted-proxies.caddy present with trusted_proxies (EDGE_PROVIDER={provider})")
 
 
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
-    """Post-restart liveness proof. If the chain is producing fresh blocks
-    after the rolling restart, the consensus-neutral changes (store/v2 prune,
-    fail-fast reads, cache disable) are executing without a fatal mismatch."""
+    """Post-restart liveness proof: if the chain is producing fresh blocks after
+    the rolling restart, the deploy's consensus-neutral changes are executing
+    without a fatal mismatch."""
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
         row = cur.fetchone()
@@ -189,9 +261,8 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
 
 
 def check_binary_version() -> None:
-    """Cross-check that the frontend version.txt (shipped with this release)
-    reports the release version. Cheap proxy for 'we shipped the correct
-    binary'."""
+    """Cross-check that the shipped frontend version.txt reports the release
+    version — a cheap proxy for 'we shipped the correct build'."""
     candidates = [
         Path("/opt/mirage/web/frontend/build/version.txt"),
         Path("/opt/mirage/web/frontend/public/version.txt"),
@@ -212,7 +283,7 @@ def check_binary_version() -> None:
     warn("version.txt not found in any known location; skipping frontend version cross-check")
 
 
-# ─── Main ─────────────────────────────────────────────────────────────
+# ─── Main ─────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
@@ -250,16 +321,25 @@ def main() -> None:
         print("\nFATAL: Cannot proceed without database connections")
         sys.exit(1)
 
-    section("3. inter-block-cache disabled (v1.28.2 mitigation)")
-    check_inter_block_cache_disabled()
+    section("3. Media uploads fail-closed gate (per node)")
+    check_media_uploads_gate()
 
-    section("4. iavl-disable-fastnode still enforced")
-    check_fastnode_disabled()
+    section("4. 30-minute video caps")
+    check_video_caps()
 
-    section("5. Chain Liveness")
+    section("5. Default agents (AntiSpamBot on mirage.talk)")
+    check_antispam_agent()
+
+    section("6. Edge cache headers (Cache-Control: no-store)")
+    check_cache_control_no_store()
+
+    section("7. Edge client-IP trust (trusted-proxies.caddy)")
+    check_trusted_proxies()
+
+    section("8. Chain Liveness")
     check_indexer_freshness(indexer_conn)
 
-    section("6. Binary Version Cross-Check")
+    section("9. Binary Version Cross-Check")
     check_binary_version()
 
     if backend_conn:
