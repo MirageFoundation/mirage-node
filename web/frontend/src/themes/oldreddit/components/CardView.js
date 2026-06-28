@@ -12,7 +12,7 @@ import Api from '../../../utils/api';
 import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
 import { requireThemeColor } from "../../../utils/themeColor";
-import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../../../utils/media";
+import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import useBalance from "../../../logic/useBalance";
@@ -1728,6 +1728,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const isDirectImage = isLikelyImageUrl(firstLinkInContent);
     const isPrimaryVideo = isLikelyVideoUrl(firstLinkInContent);
+    const mediaDownloads = getDownloadableMedia(mediaArr || (firstLinkInContent ? [firstLinkInContent] : []));
     const YOUTUBE_THUMB_ZOOM = 1.3;
     const isYoutubeThumb = (() => {
         try {
@@ -2308,6 +2309,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     style={{ top: menuPosition.top, left: Math.max(10, menuPosition.left) }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
+                                    {mediaDownloads.map((d, i) => (
+                                        <MenuItem key={`dl-${i}`} onClick={(e) => { e.stopPropagation(); setMenuOpen(false); triggerMediaDownload(d); }}>
+                                            {mediaDownloadLabel(d.kind, i, mediaDownloads.length)}
+                                        </MenuItem>
+                                    ))}
                                     {isOwnPost && (
                                         <>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleEditPost(); }}>Edit post</MenuItem>

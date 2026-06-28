@@ -1,6 +1,5 @@
 import React from "react";
 import styled, { useTheme } from "styled-components";
-import MediaDownloadButton from "../../../components/MediaDownloadButton";
 import { normalizeRedgifsToMp4, extractRedgifsId, redgifsCanonicalWatchUrl } from "../../../utils/media";
 
 const StyledLink = styled.a`
@@ -308,7 +307,6 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
             const aspectPadding = '56.25%'; // 16:9 default
             return (
                 <div style={{ position: 'relative', width: '100%', paddingTop: aspectPadding, borderRadius: '4px', overflow: 'hidden' }}>
-                    <MediaDownloadButton url={url} kind="video" />
                     <iframe
                         src={embedUrl}
                         title="Redgifs embed"
@@ -388,7 +386,6 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         if (isImg) {
             return (
                 <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-block', maxWidth: mediaStyle.maxWidth, verticalAlign: 'top' }}>
-                    <MediaDownloadButton url={resolved} kind="image" />
                     <img
                         src={resolved}
                         alt="(inline media)"
@@ -425,7 +422,6 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                         borderRadius: '4px',
                     }}
                 >
-                    <MediaDownloadButton url={url} kind="video" />
                     {!isMobile && (
                         <>
                             <div style={{ position: 'absolute', top: 0, left: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />
@@ -480,7 +476,6 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                         borderRadius: '4px',
                     }}
                 >
-                    <MediaDownloadButton url={src} kind="video" />
                     {!isMobile && (
                         <>
                             <div style={{ position: 'absolute', top: 0, left: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />

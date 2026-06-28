@@ -189,8 +189,12 @@ def test_stats_pure(backend):
     ]
     # Add per-day series so we can assert series combine rules too: on-chain
     # fields max, tracked 'active' sums.
-    servers[0]["stats"]["series"] = [{"t": 0, "new_users": 80, "posts": 20, "comments": 30, "active": 40}]
-    servers[1]["stats"]["series"] = [{"t": 0, "new_users": 20, "posts": 0, "comments": 10, "active": 10}]
+    servers[0]["stats"]["series"] = [
+        {"t": 0, "new_users": 80, "posts": 20, "comments": 30, "active": 40, "d7_eligible": 10, "d7_retained": 6}
+    ]
+    servers[1]["stats"]["series"] = [
+        {"t": 0, "new_users": 20, "posts": 0, "comments": 10, "active": 10, "d7_eligible": 3, "d7_retained": 1}
+    ]
     agg = st.aggregate_server_stats(servers, 0, 100)
     checks = [
         # tracked metrics SUM across nodes
@@ -215,6 +219,9 @@ def test_stats_pure(backend):
         agg["series"][0]["posts"] == 20,
         agg["series"][0]["comments"] == 30,
         agg["series"][0]["active"] == 50,
+        # per-day D7 cohort outcome is chain-derived -> MAX
+        agg["series"][0]["d7_eligible"] == 10,
+        agg["series"][0]["d7_retained"] == 6,
     ]
     if all(checks):
         _pass("stats.aggregate_math")

@@ -475,12 +475,16 @@ def _campaigns(start: int, end: int, limit: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
-def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
+def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
     """Per-day buckets across the window for charting. On-chain lines (new_users,
-    posts, comments) have full history; tracked lines (active) only populate after
-    visitor tracking began. Always returns one point per day so charts are dense."""
+    contributors, posts, comments) have full history; tracked lines (active) only
+    populate after visitor tracking began. Each bucket also carries per-signup-day
+    D7 cohort retention (d7_retained / d7_eligible_users): of the people who signed
+    up that day whose 7-day horizon has elapsed, how many were still active at/after
+    signup+7d. Always returns one point per day so charts are dense."""
     new_users_by_day: Dict[int, int] = {}
     posts_by_day: Dict[int, Tuple[int, int, int]] = {}
+    cohort: Dict[str, int] = {}
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -498,6 +502,12 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
                 (DAY, DAY, start, end),
             )
             posts_by_day = {int(d): (int(p), int(c), int(ctrb)) for d, p, c, ctrb in cur.fetchall()}
+            cur.execute(
+                "SELECT LOWER(owner), created_at FROM profiles "
+                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0)",
+                (start, end),
+            )
+            cohort = {r[0]: int(r[1]) for r in cur.fetchall()}
 
     active_by_day: Dict[int, int] = {}
     with connect_backend_db() as conn:
@@ -510,6 +520,41 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
                 (start, end, DAY, DAY),
             )
             active_by_day = {int(d): int(a) for d, a in cur.fetchall()}
+
+    # Last-active timestamp per cohort member (on-chain post/comment OR tracked
+    # engagement), used to judge whether each signup was retained at D7.
+    last_active: Dict[str, int] = {}
+    if cohort:
+        addrs = list(cohort.keys())
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT LOWER(owner), MAX(created_at) FROM posts WHERE LOWER(owner) = ANY(%s) GROUP BY 1",
+                    (addrs,),
+                )
+                for o, mx in cur.fetchall():
+                    last_active[o] = int(mx or 0)
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT address, MAX(created_at) FROM stats_events "
+                    "WHERE event_type = 'engagement' AND address = ANY(%s) GROUP BY 1",
+                    (addrs,),
+                )
+                for a, mx in cur.fetchall():
+                    if a:
+                        last_active[a] = max(last_active.get(a, 0), int(mx or 0))
+
+    d7_eligible_by_day: Dict[int, int] = {}
+    d7_retained_by_day: Dict[int, int] = {}
+    horizon = 7 * DAY
+    for addr, signup_at in cohort.items():
+        if signup_at + horizon > now_ts:
+            continue  # D7 horizon hasn't elapsed yet for this signup
+        day = (signup_at // DAY) * DAY
+        d7_eligible_by_day[day] = d7_eligible_by_day.get(day, 0) + 1
+        if last_active.get(addr, 0) >= signup_at + horizon:
+            d7_retained_by_day[day] = d7_retained_by_day.get(day, 0) + 1
 
     out: List[Dict[str, int]] = []
     day = (start // DAY) * DAY
@@ -524,6 +569,8 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
                 "posts": posts,
                 "comments": comments,
                 "active": active_by_day.get(day, 0),
+                "d7_eligible": d7_eligible_by_day.get(day, 0),
+                "d7_retained": d7_retained_by_day.get(day, 0),
             }
         )
         day += DAY
@@ -589,7 +636,7 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
         },
         "retention": _retention(start, end, now_ts),
         "campaigns": _campaigns(start, end),
-        "series": _daily_series(start, end),
+        "series": _daily_series(start, end, now_ts),
     }
 
 
@@ -667,9 +714,21 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
             ret[k][1] = max(ret[k][1], int(d.get("retained") or 0))
         for pt in st.get("series") or []:
             t = int(pt.get("t") or 0)
-            agg_pt = series_by_day.setdefault(t, {"t": t, "new_users": 0, "contributors": 0, "posts": 0, "comments": 0, "active": 0})
+            agg_pt = series_by_day.setdefault(
+                t,
+                {
+                    "t": t,
+                    "new_users": 0,
+                    "contributors": 0,
+                    "posts": 0,
+                    "comments": 0,
+                    "active": 0,
+                    "d7_eligible": 0,
+                    "d7_retained": 0,
+                },
+            )
             agg_pt["active"] += int(pt.get("active") or 0)  # tracked → sum
-            for f in ("new_users", "contributors", "posts", "comments"):  # on-chain → max
+            for f in ("new_users", "contributors", "posts", "comments", "d7_eligible", "d7_retained"):  # on-chain → max
                 agg_pt[f] = max(agg_pt[f], int(pt.get(f) or 0))
     retention = {"cohort_size": cohort_size}
     for k in ("d7", "d14", "d30"):

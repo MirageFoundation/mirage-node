@@ -17,12 +17,13 @@ import {
     HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
     HiOutlineDocumentText,
+    HiOutlineArrowDownTray,
 } from "react-icons/hi2";
 
 import { getThemeFamily } from "../../../registry/theme";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { normalizeTag } from "../../../utils/ContentTags";
-import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
+import { isLikelyImageUrl, isLikelyVideoUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import * as tx from "../../../utils/tx";
 import { follow, unfollow, isFollowing } from "../../../utils/FollowUsers";
 import { subscribe, unsubscribe, isSubscribed } from "../../../utils/Subscriptions";
@@ -735,11 +736,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         ? safePost.original_content
         : safePost.content;
 
-    const { mediaUrl, body } = useMemo(
+    const { mediaUrl, mediaList, body } = useMemo(
         () => resolveDisplayContent({ ...safePost, content: displayRawContent }),
         [safePost, displayRawContent],
     );
     const hasMedia = !!mediaUrl;
+    const mediaDownloads = useMemo(() => getDownloadableMedia(mediaList), [mediaList]);
 
     const hasTag = !!(safePost.tag && String(safePost.tag).trim());
     const normalizedTag = hasTag ? normalizeTag(String(safePost.tag).trim()) : '';
@@ -1354,6 +1356,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     <HiOutlineClipboardDocument />
                                     <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
                                 </MenuItemBtn>
+                                {mediaDownloads.map((d, i) => (
+                                    <MenuItemBtn
+                                        key={`dl-${i}`}
+                                        type="button"
+                                        onClick={(e) => { stop(e); closeAllMenus(); triggerMediaDownload(d); }}
+                                    >
+                                        <HiOutlineArrowDownTray />
+                                        <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length)}</span>
+                                    </MenuItemBtn>
+                                ))}
                                 {hasAgentOriginal && (
                                     <MenuItemBtn type="button" onClick={handleToggleOriginal}>
                                         <HiOutlineDocumentText />

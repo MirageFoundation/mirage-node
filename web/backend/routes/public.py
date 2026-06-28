@@ -54,8 +54,6 @@ from settings import (
 import time
 import calendar
 from datetime import datetime as dt
-import hashlib
-import hmac
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urljoin, urlparse
@@ -7853,48 +7851,6 @@ def upload_media():
         return safe_error(e)
 
 
-@public_bp.route("/api/media_edge_register", methods=["POST"])
-def media_edge_register():
-    """Asset-registration callback for edge-offload deployments (e.g. bunny_edge).
-
-    When an edge handler stores an upload itself (bytes never reach the node), it
-    calls this endpoint so the node still tracks the image for garbage collection.
-    Authenticated with an HMAC-SHA256 over the raw body keyed by
-    BUNNY_EDGE_CALLBACK_SECRET. Disabled (503) when no secret is configured.
-    """
-    rid = next_request_id()
-    try:
-        secret = os.environ.get("BUNNY_EDGE_CALLBACK_SECRET", "").strip()
-        if not secret:
-            return api_error_code("not_configured", 503)
-
-        raw = request.get_data() or b""
-        provided = request.headers.get("X-Mirage-Edge-Signature", "")
-        expected = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(provided, expected):
-            log_event(rid, "media_edge_register.bad_sig")
-            return api_error_code("media_edge_unauthorized", 403)
-
-        data = json.loads(raw or b"{}")
-        asset_id = str(data.get("asset_id", "")).strip()
-        kind = str(data.get("kind", "image")).strip().lower()
-        provider_id = str(data.get("provider", "bunny")).strip().lower()
-        # Only images are GC-tracked (videos are not), matching upload_media.
-        if asset_id and kind == "image":
-            with connect_backend_db() as bconn:
-                with bconn.cursor() as bcur:
-                    bcur.execute(
-                        "INSERT INTO image_catalog (image_id, created_at, provider) "
-                        "VALUES (%s, %s, %s) ON CONFLICT (image_id) DO NOTHING",
-                        (asset_id, int(time.time()), provider_id),
-                    )
-            log_event(rid, "media_edge_register.ok", image_id=asset_id, provider=provider_id)
-        return jsonify({"ok": True})
-    except Exception as e:
-        log_event(rid, "media_edge_register.err", error=str(e))
-        return safe_error(e)
-
-
 # =============================================================================
 # ===== DEPRECATED LEGACY SHIM - REMOVE AFTER 2026-08 - DO NOT BUILD ON THIS =====
 # get_upload_url returns the OLD Cloudflare browser-direct upload shape, kept ONLY
@@ -7903,7 +7859,7 @@ def media_edge_register():
 #
 # SMOOTH CUTOVER: this shim is gated on Cloudflare CREDENTIALS being present, NOT
 # on the node's active MEDIA_PROVIDER. That is deliberate: it lets a node move new
-# uploads to bunny/local (or a bunny_edge deployment) while old mobile builds keep
+# uploads to bunny/local while old mobile builds keep
 # uploading to Cloudflare through here until the app ships /api/upload_media. The
 # uploaded media still renders everywhere via dual-read.
 #

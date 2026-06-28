@@ -14,7 +14,7 @@ import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRe
 import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
-import { getVideoThumbnailUrl } from "../../../utils/media";
+import { getVideoThumbnailUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -1783,6 +1783,13 @@ function ViewPostView({
         const userLevel = Number(Storage.load('user_level', '0')) || 0;
         const isAdmin = hasValidAccount && userLevel >= 100;
         const isOpen = openMenuId === post.post_id;
+        const mediaDownloads = getDownloadableMedia((() => {
+            if (Array.isArray(post.media) && post.media.length > 0) return post.media;
+            const raw = String(post.content || '');
+            const idx = raw.indexOf('\n');
+            const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+            return /^https?:\/\//i.test(first) ? [first] : [];
+        })());
         const authorAddr = String(post.user_id || '').trim().toLowerCase();
         const isFollowingThisAuthor = isFollowingAuthor(authorAddr);
         const userSuspendedStatus = post.user_id ? userSuspendedMap[post.user_id] : undefined;
@@ -1815,6 +1822,11 @@ function ViewPostView({
                 top: menuPosition.top,
                 left: menuPosition.left
             }} onClick={e => e.stopPropagation()}>
+                {mediaDownloads.map((d, i) => (
+                    <MenuItem key={`dl-${i}`} onClick={() => { setOpenMenuId(null); triggerMediaDownload(d); }}>
+                        {mediaDownloadLabel(d.kind, i, mediaDownloads.length)}
+                    </MenuItem>
+                ))}
                 {isOwnPost && <>
                     <MenuItem onClick={() => {
                         setOpenMenuId(null);

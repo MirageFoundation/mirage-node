@@ -131,6 +131,43 @@ export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
     };
 };
 
+// Classify a media URL for download labeling/handling.
+const _mediaKind = (url) => (isLikelyVideoUrl(url) ? 'video' : (isLikelyImageUrl(url) ? 'image' : 'media'));
+
+// Resolve a post's media URL(s) into a list of downloadable entries. Media with
+// no direct download (YouTube, HLS manifests, etc) is skipped. Each entry is the
+// `getMediaDownloadInfo` result plus the detected `kind`.
+export const getDownloadableMedia = (urls) => {
+    const list = Array.isArray(urls) ? urls : (urls ? [urls] : []);
+    const out = [];
+    for (const url of list) {
+        const kind = _mediaKind(url);
+        const info = getMediaDownloadInfo(url, kind);
+        if (info) out.push({ ...info, kind });
+    }
+    return out;
+};
+
+// Human label for a download menu row. Appends an index when a post has more
+// than one downloadable item so each row is distinguishable.
+export const mediaDownloadLabel = (kind, index, total) => {
+    const base = kind === 'video' ? 'Download video' : kind === 'image' ? 'Download image' : 'Download media';
+    return total > 1 ? `${base} ${index + 1}` : base;
+};
+
+// Trigger a browser download for a resolved `getMediaDownloadInfo` entry.
+export const triggerMediaDownload = (info) => {
+    if (!info || !info.href || typeof document === 'undefined') return;
+    const a = document.createElement('a');
+    a.href = info.href;
+    if (info.filename) a.download = info.filename;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+};
+
 // Ephemeral client-side video posters. Maps a freshly-uploaded video URL to a
 // local object-URL poster captured from the source file, so the composer can
 // show a preview instantly instead of waiting for the provider to transcode and

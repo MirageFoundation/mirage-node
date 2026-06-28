@@ -17,7 +17,7 @@ import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRe
 import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
-import { getVideoThumbnailUrl } from "../../../utils/media";
+import { getVideoThumbnailUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
@@ -46,6 +46,7 @@ import {
     HiOutlineFlag,
     HiOutlineHashtag,
     HiOutlineShieldExclamation,
+    HiOutlineArrowDownTray,
     HiChevronDown,
     HiCheck,
 } from "react-icons/hi2";
@@ -2790,6 +2791,14 @@ function ViewPostView({
                         setOpenMenuId(null);
                         toggleShowOriginal(post.post_id);
                     };
+                    const mediaUrlsForDownload = (() => {
+                        if (Array.isArray(post.media) && post.media.length > 0) return post.media;
+                        const raw = String(post.content || '');
+                        const idx = raw.indexOf('\n');
+                        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+                        return /^https?:\/\//i.test(first) ? [first] : [];
+                    })();
+                    const mediaDownloads = getDownloadableMedia(mediaUrlsForDownload);
                     return <>
                         <MenuItem onClick={handleCopyLink}>
                             <HiOutlineLink />
@@ -2799,6 +2808,12 @@ function ViewPostView({
                             <HiOutlineClipboardDocument />
                             <span>Copy text</span>
                         </MenuItem>
+                        {mediaDownloads.map((d, i) => (
+                            <MenuItem key={`dl-${i}`} onClick={() => { setOpenMenuId(null); triggerMediaDownload(d); }}>
+                                <HiOutlineArrowDownTray />
+                                <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length)}</span>
+                            </MenuItem>
+                        ))}
                         {hasAgentOriginalForPost && (
                             <MenuItem onClick={handleToggleOriginal}>
                                 <HiOutlineDocumentText />
