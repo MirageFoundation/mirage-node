@@ -685,7 +685,7 @@ def init_backend_schema() -> None:
 
             # ── Stats: visitor identity + first/last-touch attribution ────
             # Backend-owned analytics for the half of the funnel the chain
-            # cannot see: anonymous lurkers, active browsing, and where a
+            # cannot see: logged-out visitors, read/vote activity, and where a
             # visitor came from. On-chain facts (signups, posts, comments)
             # stay authoritative in the indexer and are never duplicated here.
             cur.execute(
@@ -740,8 +740,8 @@ def init_backend_schema() -> None:
                 },
             )
 
-            # ── Stats: browse/engagement event log (non-chain signals only) ─
-            # Only 'visit' and 'engagement' live here. signup/post/comment are
+            # ── Stats: visit/engagement request log ───────────────────────
+            # Only request activity lives here. signup/post/comment facts are
             # derived from the indexer; storing them here would duplicate chain
             # data and risk drift.
             cur.execute(

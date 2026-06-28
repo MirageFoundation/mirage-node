@@ -392,7 +392,7 @@ export default function AdminStatsDashboard() {
     const trackingSince = (aggregate && aggregate.tracking_since) || null;
     const trackingSinceLabel = trackingSince ? formatDate(trackingSince) : null;
     // Whether the selected window predates visitor tracking. If so, the tracked
-    // metrics are empty and the browsing half of retention can't be seen.
+    // metrics are empty and the tracked-engagement half of retention can't be seen.
     const windowEndsBeforeTracking = !!(trackingSince && win && win.end < trackingSince);
     const windowStartsBeforeTracking = !!(trackingSince && win && win.start < trackingSince);
     // Day bucket tracking began. Tracked lines (Active) are nulled before this so
@@ -477,8 +477,8 @@ export default function AdminStatsDashboard() {
                         <LegendItem>
                             <Dot $c={CHART_COLORS.active} />
                             <span>
-                                <strong>Visitor tracking</strong> (Mirage-owned) — visitors, active browsing,
-                                signups and campaigns.{" "}
+                                <strong>Visitor tracking</strong> (Mirage-owned) — logged-out visitors,
+                                logged-in active users, signups and campaigns.{" "}
                                 {trackingSinceLabel
                                     ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
                                     : <>No tracked events recorded yet, so these are still empty.</>}
@@ -499,203 +499,204 @@ export default function AdminStatsDashboard() {
                         Visitor tracking{trackingSinceLabel ? ` — only since ${trackingSinceLabel}` : ""}
                     </SectionHeader>
                     <Note>
-                        <strong>Active</strong> = made ≥1 content request (posts, comments, profiles, topics or search)
-                        in the window — i.e. actually browsing, logged in or a logged-out lurker. Votes, config polls
-                        and bare page loads don't count.
+                        <strong>Contributors</strong> post or comment. <strong>Active users</strong> are logged-in
+                        users who read, browse, search, view profiles/topics or vote without posting/commenting.
+                        <strong>Visitors</strong> are logged-out users.
                     </Note>
                     {windowEndsBeforeTracking && (
                         <Warn>This window ends before tracking began, so every number below is 0 by definition — not a real reading.</Warn>
                     )}
                     <TileGrid>
-                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active (browsing, incl. lurkers)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(g.signups)}</TileValue><TileLabel>Signups (visitor → account)</TileLabel></Tile>
-                        <Tile $accent="#f59e0b"><TileValue>{g.visitors ? formatPercent(g.signup_conversion) : "—"}</TileValue><TileLabel>Signup conversion</TileLabel></Tile>
-                    </TileGrid>
+                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active users</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (logged out)</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(g.signups)}</TileValue><TileLabel>Tracked signed-in users</TileLabel></Tile>
+                        <Tile $accent="#f59e0b"><TileValue={(g.visitors || g.signups) ? formatPercent(g.signup_conversion) : "—"}</TileValue><TileLabel>Signed-in share</TileLabel></Tile>
+                </TileGrid>
 
-                    <SectionHeader>Trends</SectionHeader>
-                    <Note>
-                        <strong>D7 outcome</strong> splits each day's signups by what happened 7 days later:
-                        green = still active, red = churned, grey = too recent to judge yet. The full bar height
-                        is that day's new users — so the red share is your weekly drop-off.
-                    </Note>
-                    <ChartGrid>
-                        <ChartCard>
-                            <ChartTitle>Active &amp; contributors per day (stacked)</ChartTitle>
-                            <ChartHeight>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
-                                        <defs>
-                                            <linearGradient id="gContrib" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor={CHART_COLORS.contributors} stopOpacity={0.55} />
-                                                <stop offset="100%" stopColor={CHART_COLORS.contributors} stopOpacity={0.05} />
-                                            </linearGradient>
-                                            <linearGradient id="gActive" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor={CHART_COLORS.active} stopOpacity={0.55} />
-                                                <stop offset="100%" stopColor={CHART_COLORS.active} stopOpacity={0.05} />
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid stroke={gridColor} vertical={false} />
-                                        <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
-                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
-                                        <Tooltip labelFormatter={shortDay} contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
-                                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                                        {trackingSinceDay != null && (
-                                            <ReferenceLine
-                                                x={trackingSinceDay}
-                                                stroke={CHART_COLORS.active}
-                                                strokeDasharray="4 3"
-                                                label={{ value: "tracking start", position: "insideTopRight", fontSize: 10, fill: CHART_COLORS.active }}
-                                            />
-                                        )}
-                                        <Area type="monotone" dataKey="contributors" name="Contributors" stackId="eng" stroke={CHART_COLORS.contributors} fill="url(#gContrib)" strokeWidth={2} />
-                                        <Area type="monotone" dataKey="active" name="Active" stackId="eng" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} connectNulls={false} />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            </ChartHeight>
-                        </ChartCard>
-                        <ChartCard>
-                            <ChartTitle>New signups by day — D7 outcome</ChartTitle>
-                            <ChartHeight>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
-                                        <CartesianGrid stroke={gridColor} vertical={false} />
-                                        <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
-                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
-                                        <Tooltip labelFormatter={shortDay} contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} cursor={{ fill: "rgba(130,132,148,0.1)" }} />
-                                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                                        <Bar dataKey="d7_retained" name="Retained @ D7" stackId="s" fill={CHART_COLORS.retained} />
-                                        <Bar dataKey="d7_churned" name="Churned by D7" stackId="s" fill={CHART_COLORS.churned} />
-                                        <Bar dataKey="d7_pending" name="Too recent (<7d)" stackId="s" fill={CHART_COLORS.pending} radius={[3, 3, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </ChartHeight>
-                        </ChartCard>
-                        <ChartCard>
-                            <ChartTitle>Posts &amp; comments per day</ChartTitle>
-                            <ChartHeight>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
-                                        <CartesianGrid stroke={gridColor} vertical={false} />
-                                        <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
-                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
-                                        <Tooltip labelFormatter={shortDay} contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} cursor={{ fill: "rgba(130,132,148,0.1)" }} />
-                                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                                        <Bar dataKey="posts" name="Posts" stackId="a" fill={CHART_COLORS.posts} radius={[0, 0, 0, 0]} />
-                                        <Bar dataKey="comments" name="Comments" stackId="a" fill={CHART_COLORS.comments} radius={[3, 3, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </ChartHeight>
-                        </ChartCard>
-                    </ChartGrid>
+            <SectionHeader>Trends</SectionHeader>
+            <Note>
+                <strong>D7 outcome</strong> splits each day's signups by what happened 7 days later:
+                green = still active, red = churned, grey = too recent to judge yet. The full bar height
+                is that day's new users — so the red share is your weekly drop-off.
+            </Note>
+            <ChartGrid>
+                <ChartCard>
+                    <ChartTitle>Active &amp; contributors per day (stacked)</ChartTitle>
+                    <ChartHeight>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="gContrib" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={CHART_COLORS.contributors} stopOpacity={0.55} />
+                                        <stop offset="100%" stopColor={CHART_COLORS.contributors} stopOpacity={0.05} />
+                                    </linearGradient>
+                                    <linearGradient id="gActive" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={CHART_COLORS.active} stopOpacity={0.55} />
+                                        <stop offset="100%" stopColor={CHART_COLORS.active} stopOpacity={0.05} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid stroke={gridColor} vertical={false} />
+                                <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
+                                <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
+                                <Tooltip labelFormatter={shortDay} contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
+                                <Legend wrapperStyle={{ fontSize: 11 }} />
+                                {trackingSinceDay != null && (
+                                    <ReferenceLine
+                                        x={trackingSinceDay}
+                                        stroke={CHART_COLORS.active}
+                                        strokeDasharray="4 3"
+                                        label={{ value: "tracking start", position: "insideTopRight", fontSize: 10, fill: CHART_COLORS.active }}
+                                    />
+                                )}
+                                <Area type="monotone" dataKey="contributors" name="Contributors" stackId="eng" stroke={CHART_COLORS.contributors} fill="url(#gContrib)" strokeWidth={2} />
+                                <Area type="monotone" dataKey="active" name="Active" stackId="eng" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} connectNulls={false} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </ChartHeight>
+                </ChartCard>
+                <ChartCard>
+                    <ChartTitle>New signups by day — D7 outcome</ChartTitle>
+                    <ChartHeight>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                <CartesianGrid stroke={gridColor} vertical={false} />
+                                <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
+                                <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
+                                <Tooltip labelFormatter={shortDay} contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} cursor={{ fill: "rgba(130,132,148,0.1)" }} />
+                                <Legend wrapperStyle={{ fontSize: 11 }} />
+                                <Bar dataKey="d7_retained" name="Retained @ D7" stackId="s" fill={CHART_COLORS.retained} />
+                                <Bar dataKey="d7_churned" name="Churned by D7" stackId="s" fill={CHART_COLORS.churned} />
+                                <Bar dataKey="d7_pending" name="Too recent (<7d)" stackId="s" fill={CHART_COLORS.pending} radius={[3, 3, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartHeight>
+                </ChartCard>
+                <ChartCard>
+                    <ChartTitle>Posts &amp; comments per day</ChartTitle>
+                    <ChartHeight>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                <CartesianGrid stroke={gridColor} vertical={false} />
+                                <XAxis dataKey="t" tickFormatter={shortDay} tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} minTickGap={24} />
+                                <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} allowDecimals={false} width={36} />
+                                <Tooltip labelFormatter={shortDay} contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} cursor={{ fill: "rgba(130,132,148,0.1)" }} />
+                                <Legend wrapperStyle={{ fontSize: 11 }} />
+                                <Bar dataKey="posts" name="Posts" stackId="a" fill={CHART_COLORS.posts} radius={[0, 0, 0, 0]} />
+                                <Bar dataKey="comments" name="Comments" stackId="a" fill={CHART_COLORS.comments} radius={[3, 3, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartHeight>
+                </ChartCard>
+            </ChartGrid>
 
-                    <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
-                    <SubNote>
-                        Of the {formatNumber(r.cohort_size)} users who signed up in this window, how many were still active later:
-                    </SubNote>
-                    <Note>
-                        <strong>Still active</strong> at horizon N (D7/D14/D30) = at or after their signup + N days they
-                        either <strong>posted/commented</strong> (on-chain, retroactive) <strong>or browsed</strong>
-                        {" "}(tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}). Each horizon only
-                        counts users who signed up early enough that N days have already elapsed (shown as retained/eligible).
-                    </Note>
-                    {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
-                        <Warn>
-                            {windowEndsBeforeTracking
-                                ? "This cohort signed up entirely before tracking began, so \"active later\" only counts people who posted or commented — returning lurkers are invisible. Treat these rates as a floor (real retention is higher)."
-                                : `Part of this cohort signed up before tracking began${trackingSinceLabel ? ` (${trackingSinceLabel})` : ""}; for those users only posting/commenting counts as active, so the rates are a conservative floor.`}
-                        </Warn>
-                    )}
-                    <ChartGrid>
-                        <ChartCard>
-                            <ChartTitle>Retention by horizon</ChartTitle>
-                            <ChartHeight>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={retentionData} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
-                                        <CartesianGrid stroke={gridColor} vertical={false} />
-                                        <XAxis dataKey="name" tick={{ fontSize: 12, fill: axisColor }} stroke={gridColor} />
-                                        <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} unit="%" domain={[0, 100]} width={40} />
-                                        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} cursor={{ fill: "rgba(130,132,148,0.1)" }} formatter={(v) => (v == null ? "—" : `${v}%`)} />
-                                        <Bar dataKey="rate" name="Retention" fill={CHART_COLORS.retention} radius={[4, 4, 0, 0]} maxBarSize={64} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </ChartHeight>
-                        </ChartCard>
-                        <TileGrid style={{ alignContent: "start" }}>
-                            {["d7", "d14", "d30"].map(k => (
-                                <Tile key={k} $accent={CHART_COLORS.retention}>
-                                    <TileValue>{r[k].eligible ? formatPercent(r[k].rate) : "—"}</TileValue>
-                                    <TileLabel>{k.toUpperCase()} retention ({formatNumber(r[k].retained)}/{formatNumber(r[k].eligible)})</TileLabel>
-                                </Tile>
-                            ))}
-                        </TileGrid>
-                    </ChartGrid>
+            <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
+            <SubNote>
+                Of the {formatNumber(r.cohort_size)} users who signed up in this window, how many were still active later:
+            </SubNote>
+            <Note>
+                <strong>Still active</strong> at horizon N (D7/D14/D30) = at or after their signup + N days they
+                either <strong>posted/commented</strong> (on-chain, retroactive) <strong>or browsed/voted</strong>
+                {" "}(tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}). Each horizon only
+                counts users who signed up early enough that N days have already elapsed (shown as retained/eligible).
+            </Note>
+            {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
+                <Warn>
+                    {windowEndsBeforeTracking
+                        ? "This cohort signed up entirely before tracking began, so \"active later\" only counts people who posted or commented — returning lurkers are invisible. Treat these rates as a floor (real retention is higher)."
+                        : `Part of this cohort signed up before tracking began${trackingSinceLabel ? ` (${trackingSinceLabel})` : ""}; for those users only posting/commenting counts as active, so the rates are a conservative floor.`}
+                </Warn>
+            )}
+            <ChartGrid>
+                <ChartCard>
+                    <ChartTitle>Retention by horizon</ChartTitle>
+                    <ChartHeight>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={retentionData} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                                <CartesianGrid stroke={gridColor} vertical={false} />
+                                <XAxis dataKey="name" tick={{ fontSize: 12, fill: axisColor }} stroke={gridColor} />
+                                <YAxis tick={{ fontSize: 11, fill: axisColor }} stroke={gridColor} unit="%" domain={[0, 100]} width={40} />
+                                <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} cursor={{ fill: "rgba(130,132,148,0.1)" }} formatter={(v) => (v == null ? "—" : `${v}%`)} />
+                                <Bar dataKey="rate" name="Retention" fill={CHART_COLORS.retention} radius={[4, 4, 0, 0]} maxBarSize={64} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartHeight>
+                </ChartCard>
+                <TileGrid style={{ alignContent: "start" }}>
+                    {["d7", "d14", "d30"].map(k => (
+                        <Tile key={k} $accent={CHART_COLORS.retention}>
+                            <TileValue>{r[k].eligible ? formatPercent(r[k].rate) : "—"}</TileValue>
+                            <TileLabel>{k.toUpperCase()} retention ({formatNumber(r[k].retained)}/{formatNumber(r[k].eligible)})</TileLabel>
+                        </Tile>
+                    ))}
+                </TileGrid>
+            </ChartGrid>
 
-                    {campaigns.length > 0 && (
-                        <>
-                            <SectionHeader>Attribution (first-touch campaigns)</SectionHeader>
-                            <Card style={{ padding: "0.4rem 0.6rem" }}>
-                                <Table>
-                                    <thead>
-                                        <tr>
-                                            <Th>Source</Th><Th>Campaign</Th>
-                                            <Th $right>Visitors</Th><Th $right>Signups</Th>
-                                            <Th $right>Signup conv.</Th>
-                                            <Th $right>Contributors</Th><Th $right>Contrib. conv.</Th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {campaigns.map((cp, i) => (
-                                            <Tr key={i}>
-                                                <Td>{cp.source || "—"}</Td>
-                                                <Td>{cp.campaign || "—"}</Td>
-                                                <Td $right>{formatNumber(cp.visitors)}</Td>
-                                                <Td $right>{formatNumber(cp.signups)}</Td>
-                                                <Td $right>{formatPercent(cp.signupConversion)}</Td>
-                                                <Td $right>{formatNumber(cp.contributors)}</Td>
-                                                <Td $right>{formatPercent(cp.contributorConversion)}</Td>
-                                            </Tr>
-                                        ))}
-                                    </tbody>
-                                </Table>
-                            </Card>
-                        </>
-                    )}
-
-                    <SectionHeader>Servers ({servers.length})</SectionHeader>
+            {campaigns.length > 0 && (
+                <>
+                    <SectionHeader>Attribution (first-touch campaigns)</SectionHeader>
                     <Card style={{ padding: "0.4rem 0.6rem" }}>
                         <Table>
                             <thead>
                                 <tr>
-                                    <Th>Server</Th><Th>Status</Th>
-                                    <Th $right>Visitors</Th><Th $right>Active</Th>
-                                    <Th $right>New users</Th><Th $right>Contributors</Th><Th $right>D7</Th>
+                                    <Th>Source</Th><Th>Campaign</Th>
+                                    <Th $right>Visitors</Th><Th $right>Signups</Th>
+                                    <Th $right>Signup conv.</Th>
+                                    <Th $right>Contributors</Th><Th $right>Contrib. conv.</Th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {servers.map((s, i) => {
-                                    const ok = s.status === "ok";
-                                    const st = s.stats || {};
-                                    const sg = st.growth || {};
-                                    const so = st.onchain || {};
-                                    const sr = (st.retention && st.retention.d7) || {};
-                                    return (
-                                        <Tr key={i}>
-                                            <Td>{s.server}</Td>
-                                            <Td><StatusPill $ok={ok}>{s.status}</StatusPill></Td>
-                                            <Td $right>{ok ? formatNumber(sg.visitors) : "—"}</Td>
-                                            <Td $right>{ok ? formatNumber(sg.active) : "—"}</Td>
-                                            <Td $right>{ok ? formatNumber(so.new_users) : "—"}</Td>
-                                            <Td $right>{ok ? formatNumber(so.contributors) : "—"}</Td>
-                                            <Td $right>{ok && sr.eligible ? formatPercent(sr.rate) : "—"}</Td>
-                                        </Tr>
-                                    );
-                                })}
+                                {campaigns.map((cp, i) => (
+                                    <Tr key={i}>
+                                        <Td>{cp.source || "—"}</Td>
+                                        <Td>{cp.campaign || "—"}</Td>
+                                        <Td $right>{formatNumber(cp.visitors)}</Td>
+                                        <Td $right>{formatNumber(cp.signups)}</Td>
+                                        <Td $right>{formatPercent(cp.signupConversion)}</Td>
+                                        <Td $right>{formatNumber(cp.contributors)}</Td>
+                                        <Td $right>{formatPercent(cp.contributorConversion)}</Td>
+                                    </Tr>
+                                ))}
                             </tbody>
                         </Table>
                     </Card>
                 </>
             )}
-        </Page>
+
+            <SectionHeader>Servers ({servers.length})</SectionHeader>
+            <Card style={{ padding: "0.4rem 0.6rem" }}>
+                <Table>
+                    <thead>
+                        <tr>
+                            <Th>Server</Th><Th>Status</Th>
+                            <Th $right>Logged-out visitors</Th><Th $right>Active users</Th>
+                            <Th $right>New users</Th><Th $right>Contributors</Th><Th $right>D7</Th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {servers.map((s, i) => {
+                            const ok = s.status === "ok";
+                            const st = s.stats || {};
+                            const sg = st.growth || {};
+                            const so = st.onchain || {};
+                            const sr = (st.retention && st.retention.d7) || {};
+                            return (
+                                <Tr key={i}>
+                                    <Td>{s.server}</Td>
+                                    <Td><StatusPill $ok={ok}>{s.status}</StatusPill></Td>
+                                    <Td $right>{ok ? formatNumber(sg.visitors) : "—"}</Td>
+                                    <Td $right>{ok ? formatNumber(sg.active) : "—"}</Td>
+                                    <Td $right>{ok ? formatNumber(so.new_users) : "—"}</Td>
+                                    <Td $right>{ok ? formatNumber(so.contributors) : "—"}</Td>
+                                    <Td $right>{ok && sr.eligible ? formatPercent(sr.rate) : "—"}</Td>
+                                </Tr>
+                            );
+                        })}
+                    </tbody>
+                </Table>
+            </Card>
+        </>
+    )
+}
+        </Page >
     );
 }
