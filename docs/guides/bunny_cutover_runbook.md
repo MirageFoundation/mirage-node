@@ -44,7 +44,7 @@ flowchart LR
   firewall (below) and `MEDIA_UPLOADS_ENABLED=false` on non-edge nodes.
 - **Real client IP**: behind a CDN, Caddy must be told which upstreams to trust and
   which header carries the real IP, or rate limiting and abuse logging see the CDN
-  instead of the user. `EDGE_PROVIDER` drives `deploy/refresh_bunny_ips.py`, which
+  instead of the user. `EDGE_PROVIDER` drives `deploy/refresh_edge_ips.py`, which
   writes `/etc/caddy/trusted-proxies.caddy` (imported by the Caddyfile).
 - **Origin TLS**: once `mirage.vote` DNS points at Bunny, Caddy can no longer renew
   the cert for `mirage.vote` via HTTP-01 (the challenge goes to Bunny). So we add an
@@ -77,7 +77,7 @@ node down:
 DOMAIN=mirage.vote ORIGIN_DOMAIN=origin.mirage.vote LOGS_DIR=$HOME/.mirage/logs \
   python3 /opt/mirage/deploy/render_template.py \
   /opt/mirage/deploy/templates/caddy/Caddyfile /tmp/Caddyfile.test
-EDGE_PROVIDER=both CADDY_DIR=/tmp python3 /opt/mirage/deploy/refresh_bunny_ips.py
+EDGE_PROVIDER=both CADDY_DIR=/tmp python3 /opt/mirage/deploy/refresh_edge_ips.py
 cp /tmp/trusted-proxies.caddy /tmp/   # ensure import target is next to the test file
 caddy validate --config /tmp/Caddyfile.test --adapter caddyfile
 ```
@@ -174,8 +174,8 @@ Once traffic flows through Bunny and is verified, restrict the origin so nobody 
 reach it directly (and skip scanning). On the **host** (not the container), as root:
 
 ```bash
-/opt/mirage/deploy/lock_origin_to_bunny.sh --apply     # :443 -> Bunny IPs only
-/opt/mirage/deploy/lock_origin_to_bunny.sh --status
+/opt/mirage/deploy/setup_origin_firewall.sh --apply     # :443 -> Bunny IPs only
+/opt/mirage/deploy/setup_origin_firewall.sh --status
 ```
 
 This installs an nftables allowlist for `:443` (coexists with UFW), keeps `:80`
@@ -202,14 +202,14 @@ old mobile builds — see media_providers.md.)
       edge-cached.
 - [ ] An upload succeeds and a known-bad sample is blocked by Shield.
 - [ ] `/chain/rest` + `/chain/rpc` respond; `/chain/rpc/websocket` connects.
-- [ ] `lock_origin_to_bunny.sh --status` shows the table + timer; direct origin
+- [ ] `setup_origin_firewall.sh --status` shows the table + timer; direct origin
       `:443` from a non-Bunny IP is refused; site still loads via Bunny.
 
 ## Rollback
 
 Each step reverses independently:
 
-- **Firewall**: `lock_origin_to_bunny.sh --unlock` (reopens `:443` via UFW).
+- **Firewall**: `setup_origin_firewall.sh --unlock` (reopens `:443` via UFW).
 - **DNS**: point `mirage.vote` back at the node IP (or Cloudflare). Caddy already
   holds/renews the `mirage.vote` cert again once DNS is direct.
 - **Edge env**: set `EDGE_PROVIDER=cloudflare` (or `both`) and restart.

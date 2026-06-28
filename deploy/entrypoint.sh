@@ -169,7 +169,7 @@ echo "✓ Caddyfile verified"
 # Non-fatal: in cloudflare mode this is a local write; in bunny/both it keeps the
 # last-known file on a transient fetch failure.
 echo "==> Generating Caddy trusted-proxy config (EDGE_PROVIDER=${EDGE_PROVIDER:-cloudflare})..."
-python3 "$ROOT_DIR/deploy/refresh_bunny_ips.py" || echo "WARN: refresh_bunny_ips.py failed; using existing trusted-proxies.caddy if present"
+python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" || echo "WARN: refresh_edge_ips.py failed; using existing trusted-proxies.caddy if present"
 
 # Kill any existing tmux session
 if tmux has-session -t "$SESSION" 2>/dev/null; then

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy/lock_origin_to_bunny.sh
+# deploy/setup_origin_firewall.sh
 #
 # Restrict this origin's public HTTPS (:443) to Bunny's edge IPs, so once the
 # node's DNS points at Bunny, nobody can bypass the scanning edge (Bunny Shield
@@ -32,7 +32,7 @@ set -euo pipefail
 TABLE="mirage_origin"
 BUNNY_IPV4_URL="https://api.bunny.net/system/edgeserverlist"
 BUNNY_IPV6_URL="https://api.bunny.net/system/edgeserverlist/ipv6"
-SELF_PATH="/usr/local/sbin/mirage-lock-origin.sh"
+SELF_PATH="/usr/local/sbin/mirage-origin-firewall.sh"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 say() { echo; echo "==> $*"; }
@@ -138,7 +138,7 @@ NFT
 install_self_and_timer() {
     say "Installing self-refresh timer (daily)"
     install -m 0755 "$0" "$SELF_PATH"
-    cat > /etc/systemd/system/mirage-bunny-fw.service <<UNIT
+    cat > /etc/systemd/system/mirage-origin-fw.service <<UNIT
 [Unit]
 Description=Refresh Bunny edge IP allowlist for origin :443 firewall
 After=network-online.target
@@ -148,7 +148,7 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=${SELF_PATH} --refresh
 UNIT
-    cat > /etc/systemd/system/mirage-bunny-fw.timer <<UNIT
+    cat > /etc/systemd/system/mirage-origin-fw.timer <<UNIT
 [Unit]
 Description=Daily refresh of Bunny edge IP allowlist
 
@@ -161,8 +161,8 @@ Persistent=true
 WantedBy=timers.target
 UNIT
     systemctl daemon-reload
-    systemctl enable --now mirage-bunny-fw.timer >/dev/null
-    echo "    mirage-bunny-fw.timer enabled."
+    systemctl enable --now mirage-origin-fw.timer >/dev/null
+    echo "    mirage-origin-fw.timer enabled."
 }
 
 status() {
@@ -176,14 +176,14 @@ status() {
     fi
     echo
     echo "== timer =="
-    systemctl list-timers mirage-bunny-fw.timer --no-pager 2>/dev/null | sed -n '1,3p' || true
+    systemctl list-timers mirage-origin-fw.timer --no-pager 2>/dev/null | sed -n '1,3p' || true
 }
 
 unlock() {
     say "Removing origin lockdown"
     nft delete table inet "${TABLE}" 2>/dev/null && echo "    table removed" || echo "    table not present"
-    systemctl disable --now mirage-bunny-fw.timer >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/mirage-bunny-fw.service /etc/systemd/system/mirage-bunny-fw.timer "$SELF_PATH"
+    systemctl disable --now mirage-origin-fw.timer >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/mirage-origin-fw.service /etc/systemd/system/mirage-origin-fw.timer "$SELF_PATH"
     systemctl daemon-reload || true
     echo "    :443 is governed by UFW again (open per UFW rules)."
 }

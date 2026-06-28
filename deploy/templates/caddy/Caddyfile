@@ -3,7 +3,7 @@
 	servers {
 		# Real client IP from the edge in front of this node. The trusted-proxy
 		# ranges + header are generated at startup into trusted-proxies.caddy by
-		# deploy/refresh_bunny_ips.py based on EDGE_PROVIDER (cloudflare | bunny |
+		# deploy/refresh_edge_ips.py based on EDGE_PROVIDER (cloudflare | bunny |
 		# both), so {client_ip} stays correct whether this node is behind
 		# Cloudflare or Bunny. Default (cloudflare) preserves prior behavior.
 		import trusted-proxies.caddy

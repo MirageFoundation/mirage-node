@@ -324,7 +324,7 @@ Edge / node env (`deploy/templates/env/node.env`) — only relevant when a node 
 fronted by a CDN edge:
 
 - `EDGE_PROVIDER=cloudflare|bunny|both` — which edge sits in front of the node, so
-  Caddy derives the real client IP correctly. `deploy/refresh_bunny_ips.py` turns
+  Caddy derives the real client IP correctly. `deploy/refresh_edge_ips.py` turns
   this into `/etc/caddy/trusted-proxies.caddy` at startup.
 - `ORIGIN_DOMAIN` — origin hostname Bunny connects to (e.g. `origin.mirage.vote`),
   kept pointing at the server IP so Caddy can renew TLS via HTTP-01 after the

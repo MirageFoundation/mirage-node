@@ -57,7 +57,7 @@ client_ip_headers CF-Connecting-IP
 
 
 def _log(msg: str) -> None:
-    print(f"[refresh_bunny_ips] {msg}", flush=True)
+    print(f"[refresh_edge_ips] {msg}", flush=True)
 
 
 def _fetch(url: str, timeout: int = 15) -> str:
