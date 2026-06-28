@@ -45,6 +45,92 @@ export const isLikelyVideoUrl = (url) => {
     }
 };
 
+const _safeFilenamePart = (value) => {
+    const cleaned = String(value || '').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '');
+    return cleaned || 'media';
+};
+
+const _extensionFromPath = (path) => {
+    const match = String(path || '').match(/\.(png|jpe?g|gif|webp|bmp|avif|mp4|webm|ogv|mov|mkv|gifv)$/i);
+    if (!match) return '';
+    return match[0].toLowerCase() === '.gifv' ? '.mp4' : match[0].toLowerCase();
+};
+
+const _filenameFromUrl = (u, kind, extOverride = '') => {
+    const parts = (u.pathname || '').split('/').filter(Boolean);
+    const last = parts.length ? parts[parts.length - 1] : '';
+    const decodedLast = last;
+    const existingExt = _extensionFromPath(decodedLast);
+    if (existingExt) return _safeFilenamePart(decodedLast.replace(/\.gifv$/i, '.mp4'));
+
+    const ext = extOverride || '';
+    const slug = parts.length ? parts[parts.length - 1] : 'media';
+    return `mirage-${kind || 'media'}-${_safeFilenamePart(slug)}${ext}`;
+};
+
+export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
+    if (!rawUrl) return null;
+    const resolved = normalizeRedgifsToMp4(rawUrl);
+    const u = _parseUrl(resolved);
+    if (!u) return null;
+
+    const scheme = u.protocol.toLowerCase();
+    if (scheme !== 'http:' && scheme !== 'https:') return null;
+
+    const host = (u.hostname || '').toLowerCase();
+    const path = (u.pathname || '').toLowerCase();
+    const isYoutube = (
+        host === 'www.youtube.com' ||
+        host === 'youtube.com' ||
+        host === 'm.youtube.com' ||
+        host === 'youtu.be' ||
+        host === 'www.youtu.be'
+    );
+    if (isYoutube) return null;
+
+    const isCloudflareStream = host === 'iframe.cloudflarestream.com' ||
+        host.endsWith('cloudflarestream.com') ||
+        host.endsWith('videodelivery.net');
+    if (isCloudflareStream) {
+        const videoUid = (u.pathname || '').split('/').filter(Boolean)[0];
+        if (!videoUid) return null;
+        const href = `https://videodelivery.net/${videoUid}/downloads/default.mp4`;
+        return {
+            href,
+            filename: `mirage-video-${_safeFilenamePart(videoUid)}.mp4`,
+        };
+    }
+
+    const bunnyPlaylistMatch = path.match(/^\/([^/]+)\/playlist\.m3u8$/);
+    if (bunnyPlaylistMatch) {
+        const videoId = bunnyPlaylistMatch[1];
+        const href = new URL(u.toString());
+        href.pathname = `/${videoId}/play_1080p.mp4`;
+        href.search = '';
+        return {
+            href: href.toString(),
+            filename: `mirage-video-${_safeFilenamePart(videoId)}.mp4`,
+        };
+    }
+
+    if (path.endsWith('.m3u8')) return null;
+
+    if (path.endsWith('.gifv')) {
+        const mp4Url = new URL(u.toString());
+        mp4Url.pathname = mp4Url.pathname.replace(/\.gifv$/i, '.mp4');
+        return {
+            href: mp4Url.toString(),
+            filename: _filenameFromUrl(mp4Url, 'video', '.mp4'),
+        };
+    }
+
+    const filenameExt = kind === 'image' && host.endsWith('imagedelivery.net') ? '.jpg' : '';
+    return {
+        href: u.toString(),
+        filename: _filenameFromUrl(u, kind, filenameExt),
+    };
+};
+
 // Photon (WordPress.com CDN) - works with redgifs and other domains wsrv blocks
 export const buildPhotonUrl = (src, { w, h } = {}) => {
     try {

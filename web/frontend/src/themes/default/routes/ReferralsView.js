@@ -1342,7 +1342,7 @@ function ReferralsView({ state }) {
                     <SectionBody style={{ paddingTop: '0.85rem' }}>
                         <HeroCard>
                             <HeroTopRow>
-                                <HeroEyebrow>Invite & earn</HeroEyebrow>
+                                <HeroEyebrow>Invite users</HeroEyebrow>
                                 {inviteCodesRequired && !referralPrecheckEnabled ? (
                                     <HeroBadge $tone="danger" title="Your referral link is turned off">
                                         Link off
@@ -1574,7 +1574,7 @@ function ReferralsView({ state }) {
                         <StateTitle>{isOwnReferrals ? 'No referrals yet' : 'No referrals found'}</StateTitle>
                         <StateMessage>
                             {isOwnReferrals
-                                ? 'Share your link above to start earning referral activity.'
+                                ? 'Share your link above to start tracking referral activity.'
                                 : 'This address has not referred anyone yet.'}
                         </StateMessage>
                     </StateBlock>

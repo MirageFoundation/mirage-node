@@ -538,25 +538,24 @@ export function useViewPost({
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
             const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
+            // Admins (>=100) map to the agent tier on-chain (see LevelToTierIndex
+            // in params.go); they are NOT uncapped — the chain enforces the agent
+            // tier's max_content_length. Show that real cap.
             const isAdmin = userLevel >= 100;
             const tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxContent = parseInt(tier.max_content_length) || 0;
-            if (isAdmin) {
-                maxContent = Number.MAX_SAFE_INTEGER;
-            } else if (!maxContent) {
-                maxContent = 1000;
-            }
+            if (!maxContent) maxContent = 1000;
             return {
                 maxContent,
                 willPayFee: userLevel >= 1,
-                unlimited: isAdmin
+                isAdmin
             };
         } catch (e) {
             console.error('[ViewPostView] Error calculating limits:', e);
             return {
                 maxContent: 1000,
                 willPayFee: false,
-                unlimited: false
+                isAdmin: false
             };
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps

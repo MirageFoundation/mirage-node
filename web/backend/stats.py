@@ -480,7 +480,7 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
     posts, comments) have full history; tracked lines (active) only populate after
     visitor tracking began. Always returns one point per day so charts are dense."""
     new_users_by_day: Dict[int, int] = {}
-    posts_by_day: Dict[int, Tuple[int, int]] = {}
+    posts_by_day: Dict[int, Tuple[int, int, int]] = {}
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -492,11 +492,12 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
             cur.execute(
                 "SELECT (created_at/%s)*%s AS d, "
                 "COUNT(*) FILTER (WHERE COALESCE(target,'') = ''), "
-                "COUNT(*) FILTER (WHERE COALESCE(target,'') <> '') "
+                "COUNT(*) FILTER (WHERE COALESCE(target,'') <> ''), "
+                "COUNT(DISTINCT LOWER(owner)) "
                 "FROM posts WHERE created_at BETWEEN %s AND %s GROUP BY d",
                 (DAY, DAY, start, end),
             )
-            posts_by_day = {int(d): (int(p), int(c)) for d, p, c in cur.fetchall()}
+            posts_by_day = {int(d): (int(p), int(c), int(ctrb)) for d, p, c, ctrb in cur.fetchall()}
 
     active_by_day: Dict[int, int] = {}
     with connect_backend_db() as conn:
@@ -514,11 +515,12 @@ def _daily_series(start: int, end: int) -> List[Dict[str, int]]:
     day = (start // DAY) * DAY
     last = (end // DAY) * DAY
     while day <= last:
-        posts, comments = posts_by_day.get(day, (0, 0))
+        posts, comments, contributors = posts_by_day.get(day, (0, 0, 0))
         out.append(
             {
                 "t": day,
                 "new_users": new_users_by_day.get(day, 0),
+                "contributors": contributors,
                 "posts": posts,
                 "comments": comments,
                 "active": active_by_day.get(day, 0),
@@ -665,9 +667,9 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
             ret[k][1] = max(ret[k][1], int(d.get("retained") or 0))
         for pt in st.get("series") or []:
             t = int(pt.get("t") or 0)
-            agg_pt = series_by_day.setdefault(t, {"t": t, "new_users": 0, "posts": 0, "comments": 0, "active": 0})
+            agg_pt = series_by_day.setdefault(t, {"t": t, "new_users": 0, "contributors": 0, "posts": 0, "comments": 0, "active": 0})
             agg_pt["active"] += int(pt.get("active") or 0)  # tracked → sum
-            for f in ("new_users", "posts", "comments"):     # on-chain → max
+            for f in ("new_users", "contributors", "posts", "comments"):  # on-chain → max
                 agg_pt[f] = max(agg_pt[f], int(pt.get(f) or 0))
     retention = {"cohort_size": cohort_size}
     for k in ("d7", "d14", "d30"):

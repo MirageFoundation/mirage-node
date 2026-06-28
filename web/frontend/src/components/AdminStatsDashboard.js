@@ -10,6 +10,7 @@ import Storage from "../utils/Storage";
 
 const CHART_COLORS = {
     newUsers: "#2563eb",
+    contributors: "#14b8a6",
     active: "#22c55e",
     posts: "#8b5cf6",
     comments: "#f59e0b",
@@ -292,9 +293,13 @@ export default function AdminStatsDashboard() {
     // Day bucket tracking began. Tracked lines (Active) are nulled before this so
     // the chart shows a gap, not a misleading flat zero, prior to tracking.
     const trackingSinceDay = trackingSince ? Math.floor(trackingSince / 86400) * 86400 : null;
-    const chartSeries = trackingSinceDay == null
-        ? series
-        : series.map(pt => ({ ...pt, active: pt.t < trackingSinceDay ? null : pt.active }));
+    // Drop the current (still-building) UTC day so charts end at the last complete day.
+    const todayDay = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const chartSeries = series
+        .filter(pt => pt.t < todayDay)
+        .map(pt => (trackingSinceDay == null
+            ? pt
+            : { ...pt, active: pt.t < trackingSinceDay ? null : pt.active }));
     const retentionData = r ? ["d7", "d14", "d30"].map(k => ({
         name: k.toUpperCase(),
         rate: r[k].eligible ? Math.round(r[k].rate * 1000) / 10 : null,
@@ -385,7 +390,7 @@ export default function AdminStatsDashboard() {
                     <SectionHeader>Trends</SectionHeader>
                     <ChartGrid>
                         <ChartCard>
-                            <ChartTitle>New users & active per day</ChartTitle>
+                            <ChartTitle>New users, contributors & active per day</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <AreaChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
@@ -393,6 +398,10 @@ export default function AdminStatsDashboard() {
                                             <linearGradient id="gNew" x1="0" y1="0" x2="0" y2="1">
                                                 <stop offset="0%" stopColor={CHART_COLORS.newUsers} stopOpacity={0.35} />
                                                 <stop offset="100%" stopColor={CHART_COLORS.newUsers} stopOpacity={0} />
+                                            </linearGradient>
+                                            <linearGradient id="gContrib" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor={CHART_COLORS.contributors} stopOpacity={0.3} />
+                                                <stop offset="100%" stopColor={CHART_COLORS.contributors} stopOpacity={0} />
                                             </linearGradient>
                                             <linearGradient id="gActive" x1="0" y1="0" x2="0" y2="1">
                                                 <stop offset="0%" stopColor={CHART_COLORS.active} stopOpacity={0.35} />
@@ -413,6 +422,7 @@ export default function AdminStatsDashboard() {
                                             />
                                         )}
                                         <Area type="monotone" dataKey="new_users" name="New users" stroke={CHART_COLORS.newUsers} fill="url(#gNew)" strokeWidth={2} />
+                                        <Area type="monotone" dataKey="contributors" name="Contributors" stroke={CHART_COLORS.contributors} fill="url(#gContrib)" strokeWidth={2} />
                                         <Area type="monotone" dataKey="active" name="Active" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} connectNulls={false} />
                                     </AreaChart>
                                 </ResponsiveContainer>

@@ -295,28 +295,23 @@ export function useCreatePost({
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
             const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
-            // Admins (>=100) are uncapped on the client — no maxLength enforced.
-            // Use Number.MAX_SAFE_INTEGER as a sentinel so existing maxLength
-            // checks become effectively no-ops while remaining numeric.
+            // Admins (>=100) map to the agent tier on-chain (see LevelToTierIndex
+            // in params.go); they are NOT uncapped — the chain enforces the agent
+            // tier's max_content_length / max_title_length. Show that real cap.
             const isAdmin = userLevel >= 100;
             let tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxTitle = parseInt(tier.max_title_length) || 0;
             let maxContent = parseInt(tier.max_content_length) || 0;
-            if (isAdmin) {
-                maxTitle = Number.MAX_SAFE_INTEGER;
-                maxContent = Number.MAX_SAFE_INTEGER;
-            } else {
-                // Sensible fallbacks if chain config hasn't loaded yet.
-                if (!maxTitle) maxTitle = 150;
-                if (!maxContent) maxContent = 1000;
-            }
+            // Sensible fallbacks if chain config hasn't loaded yet.
+            if (!maxTitle) maxTitle = 150;
+            if (!maxContent) maxContent = 1000;
             return {
                 maxTitle,
                 maxContent,
                 maxTopic: parseInt(chain.max_topic_size) || 50,
                 minTopic: parseInt(chain.min_topic_size) || 2,
                 willPayFee: userLevel >= 1,
-                unlimited: isAdmin
+                isAdmin
             };
         } catch (e) {
             console.error('[CreatePostView] Error calculating limits:', e);
@@ -326,7 +321,7 @@ export function useCreatePost({
                 maxTopic: 50,
                 minTopic: 2,
                 willPayFee: false,
-                unlimited: false
+                isAdmin: false
             };
         }
     }, [configUpdateTrigger]);
