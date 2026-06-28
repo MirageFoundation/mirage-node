@@ -60,8 +60,10 @@ need nft nftables
 need curl curl
 need jq jq
 
-fetch_ipv4() { curl -fsS --max-time 20 "$BUNNY_IPV4_URL" | jq -r '.[]' | grep -E '^[0-9.]+$' || true; }
-fetch_ipv6() { curl -fsS --max-time 20 "$BUNNY_IPV6_URL" | jq -r '.[]' | grep -E ':' || true; }
+# Strict charset filters: the fetched lists are embedded in the nft ruleset, so
+# anything that isn't a bare IPv4/IPv6 literal is dropped here (defence in depth).
+fetch_ipv4() { curl -fsS --max-time 20 "$BUNNY_IPV4_URL" | jq -r '.[]' | grep -E '^[0-9]+(\.[0-9]+){3}$' || true; }
+fetch_ipv6() { curl -fsS --max-time 20 "$BUNNY_IPV6_URL" | jq -r '.[]' | grep -E '^[0-9A-Fa-f:]+$' || true; }
 
 # Join lines into a comma-separated nft set element list.
 join_set() { paste -sd, - ; }
@@ -75,27 +77,34 @@ build_table() {
     [[ "$n4" -gt 0 ]] || die "fetched 0 Bunny IPv4 addresses; refusing to lock :443 (would block everything)"
     echo "    Bunny IPv4: $n4   IPv6: $n6"
 
-    local elems4 elems6
+    local elems4 elems6 ruleset
     elems4="$(printf '%s\n' "$v4" | join_set)"
     elems6="$(printf '%s\n' "$v6" | join_set)"
 
     say "Installing nftables table '$TABLE' (guards tcp/443)"
-    # Build the whole table atomically: create-if-missing, delete, then recreate
-    # fresh in a single transaction. This fully replaces any prior table (no
-    # duplicate chains/rules) with zero open window during the swap.
-    nft -f - <<NFT
-table inet ${TABLE} { }
-delete table inet ${TABLE}
-table inet ${TABLE} {
+    # Build the whole table atomically into a temp file, VALIDATE it (nft -c), and
+    # only then apply it: create-if-missing, delete, then recreate fresh in a
+    # single transaction. This fully replaces any prior table (no duplicate
+    # chains/rules) with zero open window during the swap.
+    #
+    # The skeleton heredoc interpolates only ${TABLE} (a trusted constant). The
+    # fetched Bunny IP lists are appended via printf ARGUMENTS below, never through
+    # shell expansion, so a malformed upstream entry can't inject shell or nft.
+    ruleset="$(mktemp)"
+    # QUOTED heredoc: nothing inside is expanded by the shell, so comments may
+    # contain backticks / $(...) and a stray token can never run a command or
+    # inject nft. The table name (a trusted constant) is substituted afterward.
+    cat > "$ruleset" <<'NFT'
+table inet __TABLE__ { }
+delete table inet __TABLE__
+table inet __TABLE__ {
     set bunny4 {
         type ipv4_addr
         flags interval
-        ${elems4:+elements = { ${elems4} }}
     }
     set bunny6 {
         type ipv6_addr
         flags interval
-        ${elems6:+elements = { ${elems6} }}
     }
 
     chain input {
@@ -137,6 +146,23 @@ table inet ${TABLE} {
     }
 }
 NFT
+    sed -i "s/__TABLE__/${TABLE}/g" "$ruleset"
+
+    # Populate the sets via printf args (data never shell-expanded). nft tolerates
+    # the trailing empty `{ }` only when there are elements, so guard each.
+    if [[ -n "$elems4" ]]; then
+        printf 'add element inet %s bunny4 { %s }\n' "$TABLE" "$elems4" >> "$ruleset"
+    fi
+    if [[ -n "$elems6" ]]; then
+        printf 'add element inet %s bunny6 { %s }\n' "$TABLE" "$elems6" >> "$ruleset"
+    fi
+
+    if ! nft -c -f "$ruleset"; then
+        rm -f "$ruleset"
+        die "nft ruleset failed validation; NOT applying (origin :443 left unchanged)"
+    fi
+    nft -f "$ruleset"
+    rm -f "$ruleset"
     echo "    table installed."
 }
 
