@@ -119,14 +119,21 @@ table inet ${TABLE} {
         # path (Docker's DOCKER-USER/FORWARD rules), never 'input'. This nft hook
         # at priority -1 runs before Docker's iptables FORWARD (priority 0), so it
         # is what actually blocks direct-to-origin hits that bypass Bunny.
+        #
+        # CRITICAL: only police DNAT'd connections (inbound to the published :443).
+        # The container's OWN outbound HTTPS (saddr 172.17.0.x, masqueraded) also
+        # crosses this hook with dport 443 — if we dropped that, we'd cut off all
+        # outbound HTTPS from the node (Bunny API, push, ACME, ...). `ct status
+        # dnat` matches only the inbound published-port flow, so outbound is
+        # untouched and falls through to the chain's accept policy.
         type filter hook forward priority -1; policy accept;
 
         ct state established,related accept
 
-        # Only Bunny may reach the container's :443.
-        tcp dport 443 ip  saddr @bunny4 accept
-        tcp dport 443 ip6 saddr @bunny6 accept
-        tcp dport 443 drop
+        # Only Bunny may reach the container's published :443.
+        ct status dnat tcp dport 443 ip  saddr @bunny4 accept
+        ct status dnat tcp dport 443 ip6 saddr @bunny6 accept
+        ct status dnat tcp dport 443 drop
     }
 }
 NFT
