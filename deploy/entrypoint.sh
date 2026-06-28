@@ -640,6 +640,13 @@ while true; do
         SECONDS_SINCE_CLEANUP=0
         find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
         find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+        # Refresh the edge trusted-proxy ranges. Bunny rotates its ~1000 edge IPs
+        # over time; without this, {client_ip} would degrade for traffic arriving
+        # via new Bunny edges (rate limiting/logging would see the edge, not the
+        # user). No-op for EDGE_PROVIDER=cloudflare (the plugin self-updates; this
+        # just rewrites an unchanged snippet). Hot-reloads Caddy only on a change.
+        python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" \
+            2>&1 | tee -a "$LOGS_DIR/deploy/refresh-edge-ips-$(date -u +%Y-%m-%d).log" || true
         # Image GC: delete unused Cloudflare Images (off by default)
         if [ "${IMAGE_GC_ENABLED:-false}" = "true" ]; then
             python3 "$ROOT_DIR/scripts/image_gc.py" --days 7 --limit 100 \

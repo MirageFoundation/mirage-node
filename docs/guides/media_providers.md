@@ -206,6 +206,15 @@ surprised:
 - This cannot be a bundled node default: the relevant known-hash safety databases
   are access-gated and cannot be shipped inside open-source software, so scanning
   can only ever be an operator/edge concern.
+- Edge CSAM detection (Bunny Shield) is **known-hash, image-oriented**: a file is
+  reduced to a PDQ perceptual hash and matched against a third-party database. It
+  reliably catches known CSAM **images**, but it does NOT meaningfully inspect the
+  visual content of **video frames**, and known-hash matching never catches novel
+  (previously unseen) material. Antivirus covers malware, not this. So raising the
+  video limit (now 30 min) increases the share of uploaded content the edge scan
+  does not cover. This is a real residual risk, not a solved problem — moderation,
+  reporting, and takedown remain necessary; the edge scan is one layer, not a
+  guarantee.
 
 #### `MEDIA_UPLOADS_ENABLED` — fail-closed upload gate
 
