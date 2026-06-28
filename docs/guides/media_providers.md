@@ -37,12 +37,6 @@ Storage is the one pluggable knob in the node. It is selected with the
 - `MEDIA_PROVIDER=bunny` — the backend uploads to Bunny Storage (AccessKey) and
   Bunny Stream; an Optimizer-enabled pull zone is used for delivery.
 
-`bunny_edge` is not a client-visible mode. It is an operator deployment in which
-the same `/api/upload_media` path is intercepted by a Bunny edge handler before
-the origin is touched. Bytes never reach the node; the client still just POSTs to
-`/api/upload_media`. This is achieved via DNS/edge config and is transparent to
-both the client and the node application.
-
 `local`, `cloudflare`, and `bunny` are simply the first entries in a provider
 registry. The design is provider-agnostic: no vendor name appears outside its own
 provider class and its env var block. Adding any future provider (S3, Backblaze
@@ -73,24 +67,55 @@ by hardcoded vendor names:
   deps" goal, so non-transcoding providers enforce by validation rather than
   downscaling.
 
+### Video posters / thumbnails (client guidance — read this for mobile)
+
+When a video upload returns, `url` is the playable stream (an HLS playlist for
+transcoding providers), e.g. Bunny `https://{host}/{guid}/playlist.m3u8`. A still
+poster is derived from that URL, and the path differs per provider:
+
+- Bunny Stream:     `https://{host}/{guid}/thumbnail.jpg`  (note: NO `thumbnails/`)
+- Cloudflare Stream: `https://{host}/{uid}/thumbnails/thumbnail.jpg`
+
+**CRITICAL timing caveat.** The provider generates that server-side thumbnail
+during transcoding, which is NOT instant — Bunny Stream returns **HTTP 404** for
+`/{guid}/thumbnail.jpg` until processing finishes (seconds to minutes). A client
+that fetches the poster immediately after upload and never retries will show a
+permanently blank tile, even after the video is ready (the failed `<img>`/request
+is never retried). This is the single most common "video preview is blank" bug.
+
+Two correct ways to handle it:
+
+1. **Instant local poster (recommended for the composer / just-uploaded preview).**
+   The uploader already has the source file, so capture the first frame on the
+   client and show THAT immediately — zero dependence on the provider finishing.
+   - Web: `captureVideoPoster()` in `web/frontend/src/utils/media.js` decodes the
+     file into a hidden `<video>`, draws a frame to a canvas, and registers the
+     resulting object URL against the returned video URL so every preview
+     (`getVideoThumbnailUrl`) uses it instantly.
+   - Mobile: do the equivalent with the platform thumbnailer on the local file you
+     just uploaded — iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`,
+     or `expo-video-thumbnails` — and show that until the post is published.
+2. **Server thumbnail with retry.** If you must use the server poster (e.g. an
+   existing post in the feed where there is no local file), that is fine: by the
+   time a post is viewed the video is already processed. Only for the brief
+   just-uploaded window, retry the poster on error (with a cache-busting query)
+   until it loads instead of giving up on the first 404.
+
+For already-published posts (feed / detail views) the server thumbnail is the
+right source and is reliably available — no special handling needed.
+
 ### Architecture
 
 The client is uniform; storage is a pluggable knob hidden behind the one endpoint.
-The `bunny_edge` deployment swaps the origin handler for an edge handler without
-changing the client contract.
 
 ```mermaid
 flowchart TD
-  Client["Client (web / mobile / 3rd-party)"] -->|"POST /api/upload_media (file)"| Entry{Upload path}
-  Entry -->|"normal nodes"| Backend[Node backend]
-  Entry -.->|"bunny_edge deployment (edge intercepts path)"| EdgeScript["Bunny edge handler"]
+  Client["Client (web / mobile / 3rd-party)"] -->|"POST /api/upload_media (file)"| Backend[Node backend]
   Backend -->|"provider.store()"| Provider
   Provider -->|local| Disk[Node disk -> Caddy /media/*]
   Provider -->|cloudflare| CF[Cloudflare Images/Stream API]
   Provider -->|bunny| BunnyStore[Bunny Storage / Stream]
-  EdgeScript -->|"store at edge"| BunnyStore
   Backend -->|"returns {url, asset_id}"| Client
-  EdgeScript -->|"returns {url, asset_id}"| Client
   GC[image_gc.py] -->|"provider.delete()"| Provider
 ```
 
@@ -134,11 +159,6 @@ Notes:
 - For video, transcoding providers (`bunny`, `cloudflare`) apply the resolution
   policy via the encoding ladder; non-transcoding providers (`local`) reject
   long-form above 1080p instead.
-- `bunny_edge` is not a provider class — it is an operator edge deployment that
-  intercepts `/api/upload_media` at the Bunny edge and performs the equivalent of
-  `BunnyProvider.store()` there, returning `{url, asset_id}` so the origin is
-  never touched. The node still records the asset for GC via a small edge->node
-  callback. A reference edge handler lives in `deploy/bunny-edge/`.
 
 ### Adding a new provider (the extension point)
 
@@ -173,11 +193,10 @@ are simply the first two non-local entries in this registry.
 
 Upload safety scanning is NOT part of the node. There is no node-side scanner and
 no scanner env var. When required, scanning is an operator/edge concern, enabled
-via DNS/edge configuration and inherent to an edge-offload deployment — it is not
-coupled to the node code path. Bunny Shield is the reference/recommended
-implementation (used by the `bunny_edge` deployment, scanning uploads at the edge
-before the origin), but the architecture does not depend on Bunny specifically:
-any edge that fronts the upload path can perform the scan.
+via DNS/edge configuration in front of the upload path — it is not coupled to the
+node code path. Bunny Shield is the reference/recommended implementation (scanning
+uploads at the edge before the origin), but the architecture does not depend on
+Bunny specifically: any edge that fronts the upload path can perform the scan.
 
 Two consequences follow, and both are stated plainly so operators are never
 surprised:
@@ -188,8 +207,38 @@ surprised:
   are access-gated and cannot be shipped inside open-source software, so scanning
   can only ever be an operator/edge concern.
 
-For mirage.talk, the canonical option for scanning is to front uploads through the
-edge (`bunny_edge`).
+#### `MEDIA_UPLOADS_ENABLED` — fail-closed upload gate
+
+Because scanning lives at the edge, a node that is NOT behind a scanning edge
+must not accept public uploads at all. That is enforced by a single backend flag
+`MEDIA_UPLOADS_ENABLED` (`backend.env`):
+
+- `true` — the node accepts uploads. Only set this where a scanning edge fronts
+  the upload path (Bunny Shield upload scanning).
+- `false` — both `POST /api/upload_media` and the legacy `POST /api/get_upload_url`
+  return `403 uploads_disabled`. Media already stored elsewhere still renders
+  (reads are unaffected); only new uploads to this node are refused.
+
+The default is `true` for fresh installs (preserves prior behavior), but the
+per-node migration `v1.29.0-media-uploads-enabled` pins it explicitly on existing
+nodes: `true` only on the domains that run a scanning edge
+(`mirage.vote`, `mirage.talk`) and `false` on every other node (e.g. the IP-only
+nodes). This is the same per-node gatekeeper pattern as `OPEN_BROWSING_ENABLED`.
+
+#### Mirage's deployment: two independent scanning edges
+
+Mirage runs uploads on two independent nodes, each behind its own Bunny edge with
+Shield upload scanning, each writing to the shared `mirage` storage zone:
+
+- `mirage.vote` and `mirage.talk`: `MEDIA_UPLOADS_ENABLED=true`, behind Bunny.
+- `n3` / `n4` (IP-only): `MEDIA_UPLOADS_ENABLED=false`. They never accept uploads,
+  so they need no scanning edge. Media uploaded on vote/talk still renders on them
+  (the `mirage-img` / `mirage-video` pull-zone URLs are global).
+
+They are deliberately independent (no central upload node): if one edge is down,
+the other still accepts uploads. The full per-node procedure (DNS, Bunny Shield,
+client-IP, origin firewall, origin TLS) lives in
+[bunny_cutover_runbook.md](bunny_cutover_runbook.md).
 
 ### Garbage collection (the "easy delete")
 
@@ -206,8 +255,21 @@ edge (`bunny_edge`).
 Older mobile builds expect the old browser-direct Cloudflare upload flow. To avoid
 breaking them during the dual-provider cutover on mirage.talk, the legacy
 `get_upload_url` endpoint is kept as a thin backward-compatible shim that returns
-the old Cloudflare direct-upload shape — ONLY when the client lacks the new-upload
-capability flag and the provider is `cloudflare`.
+the old Cloudflare direct-upload shape.
+
+Smooth cutover (the important part): the shim is gated on **Cloudflare credentials
+being present**, NOT on the node's active `MEDIA_PROVIDER`. This is what makes the
+switch seamless — a node can set `MEDIA_PROVIDER=bunny` for all NEW uploads while
+old mobile builds keep uploading to Cloudflare through `get_upload_url`, because
+the Cloudflare creds are still configured. Both paths coexist:
+
+- New clients (web + updated app) → `POST /api/upload_media` → bunny.
+- Old mobile builds → `POST /api/get_upload_url` → Cloudflare (unchanged).
+
+Honest tradeoff: because old-app uploads still go browser-direct to Cloudflare,
+they bypass any edge upload-safety scan (e.g. Bunny Shield) until the app moves to
+`/api/upload_media`. This is the unavoidable cost of not breaking old builds, and
+it ends when the shim is retired.
 
 This shim is temporary and MUST be removed after ~August 2026. To make that
 impossible to forget, the implementation:
@@ -219,19 +281,54 @@ impossible to forget, the implementation:
   tell exactly when it is safe to delete.
 
 Once OTA-updated app versions dominate, delete the shim and retire mirage.talk's
-Cloudflare credentials. The app-side switch to `/api/upload_media` (shipped via
-EAS OTA) is tracked separately; the node only guarantees backward compatibility so
-the app is never the thing that breaks.
+Cloudflare credentials (removing the creds alone is enough to disable the shim —
+it then returns `410 legacy_upload_unsupported`). The app-side switch to
+`/api/upload_media` (shipped via EAS OTA) is tracked separately; the node only
+guarantees backward compatibility so the app is never the thing that breaks.
+
+### Recommended Bunny cutover (zero app breakage)
+
+Storage and edge are separate steps. Switching `MEDIA_PROVIDER=bunny` only changes
+where new bytes are stored; it does NOT put scanning in front of uploads. Fronting
+a node with the Bunny scanning edge (and the client-IP / firewall / TLS that go
+with it) is the full cutover, documented step-by-step in
+[bunny_cutover_runbook.md](bunny_cutover_runbook.md). The short version:
+
+1. Create the Bunny resources and set `BUNNY_*` in `~/.mirage/env/secrets.env`.
+2. Set `MEDIA_PROVIDER=bunny` in `~/.mirage/env/backend.env`. New uploads now go
+   server-side into Bunny Storage / Stream.
+3. Put the node behind Bunny with Shield upload scanning, set `EDGE_PROVIDER=bunny`
+   and `MEDIA_UPLOADS_ENABLED=true`, point DNS at Bunny, and lock the origin to
+   Bunny IPs — see the runbook.
+4. KEEP the existing `CLOUDFLARE_*` credentials in place. This is what keeps the
+   legacy `get_upload_url` shim alive for old mobile builds.
+
+Result: new web + updated-app uploads go into Bunny (scanned at the edge); old
+mobile builds keep uploading to Cloudflare via the shim; all previously stored
+Cloudflare media keeps rendering (dual-read). When old app versions die out, drop
+the `CLOUDFLARE_*` creds and delete the shim.
 
 ### Configuration
 
 Backend env (`deploy/templates/env/backend.env`):
 
 - `MEDIA_PROVIDER=local` (default)
+- `MEDIA_UPLOADS_ENABLED=true` — fail-closed upload gate; set `false` on any node
+  not behind a scanning edge (see "Upload safety scanning" above).
 - `MEDIA_LOCAL_DIR`, `MEDIA_PUBLIC_BASE_URL`
 - `MEDIA_MAX_IMAGE_MB`, `MEDIA_MAX_VIDEO_MB`
 - Video policy: `MEDIA_SHORT_CLIP_SEC=60`, `MEDIA_LONGFORM_MAX_HEIGHT=1080`,
   `MEDIA_VIDEO_MAX_DURATION_SEC`
+
+Edge / node env (`deploy/templates/env/node.env`) — only relevant when a node is
+fronted by a CDN edge:
+
+- `EDGE_PROVIDER=cloudflare|bunny|both` — which edge sits in front of the node, so
+  Caddy derives the real client IP correctly. `deploy/refresh_edge_ips.py` turns
+  this into `/etc/caddy/trusted-proxies.caddy` at startup.
+- `ORIGIN_DOMAIN` — origin hostname Bunny connects to (e.g. `origin.mirage.vote`),
+  kept pointing at the server IP so Caddy can renew TLS via HTTP-01 after the
+  public domain moves to Bunny.
 
 Secrets env (`deploy/templates/env/secrets.env`), all optional and
 provider-specific:
@@ -239,8 +336,6 @@ provider-specific:
 - Cloudflare: `CLOUDFLARE_*` (kept for the cloudflare provider and legacy shim)
 - Bunny: `BUNNY_STORAGE_ZONE`, `BUNNY_STORAGE_ACCESS_KEY`, `BUNNY_PULL_ZONE_HOST`,
   `BUNNY_STREAM_LIBRARY_ID`, `BUNNY_STREAM_API_KEY`
-- `bunny_edge` deployment: `BUNNY_EDGE_CALLBACK_SECRET` (shared HMAC so the edge
-  handler can authenticate its asset-registration callback to the node)
 
 ### Key decisions and honest tradeoffs
 
@@ -250,9 +345,9 @@ provider-specific:
   against any node.
 - Tradeoff of uniformity: the endpoint is server-proxied, so upload bytes transit
   the node for `local`/`cloudflare`/`bunny`. For downscaled images, short clips,
-  and 1080p-capped long-form this is acceptable. `bunny_edge` is the escape hatch
-  that keeps bytes off the node, transparently at the edge, without changing the
-  client contract.
+  and 1080p-capped long-form this is acceptable. If keeping bytes off the node ever
+  becomes necessary, fronting the upload path with an edge handler is a future
+  optimization that does not change the client contract.
 - Storage (`MEDIA_PROVIDER`) is the only pluggable knob in the node. Bunny is ONE
   option, never a hard dependency.
 - Genericity by construction: a `PROVIDER_REGISTRY` plus the `transcodes`

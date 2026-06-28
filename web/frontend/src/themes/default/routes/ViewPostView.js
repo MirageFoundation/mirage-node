@@ -9,14 +9,15 @@ import VoteSection from "../components/VoteSection.js";
 import * as tx from "../../../utils/tx.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
 import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
+import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
+import { getVideoThumbnailUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
@@ -45,6 +46,7 @@ import {
     HiOutlineFlag,
     HiOutlineHashtag,
     HiOutlineShieldExclamation,
+    HiOutlineArrowDownTray,
     HiChevronDown,
     HiCheck,
 } from "react-icons/hi2";
@@ -1990,6 +1992,8 @@ function ViewPostView({
         location,
         navigate,
         questsEnabled,
+        openBrowsingEnabled,
+        nodeConfigLoaded,
         isMobile,
         goBackToFeed,
         viewerAddress,
@@ -2441,7 +2445,6 @@ function ViewPostView({
                         </BlockedPostState>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }
@@ -2478,7 +2481,6 @@ function ViewPostView({
                         </VPStateBlock>}
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }
@@ -2789,6 +2791,14 @@ function ViewPostView({
                         setOpenMenuId(null);
                         toggleShowOriginal(post.post_id);
                     };
+                    const mediaUrlsForDownload = (() => {
+                        if (Array.isArray(post.media) && post.media.length > 0) return post.media;
+                        const raw = String(post.content || '');
+                        const idx = raw.indexOf('\n');
+                        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+                        return /^https?:\/\//i.test(first) ? [first] : [];
+                    })();
+                    const mediaDownloads = getDownloadableMedia(mediaUrlsForDownload);
                     return <>
                         <MenuItem onClick={handleCopyLink}>
                             <HiOutlineLink />
@@ -2798,6 +2808,12 @@ function ViewPostView({
                             <HiOutlineClipboardDocument />
                             <span>Copy text</span>
                         </MenuItem>
+                        {mediaDownloads.map((d, i) => (
+                            <MenuItem key={`dl-${i}`} onClick={() => { setOpenMenuId(null); triggerMediaDownload(d); }}>
+                                <HiOutlineArrowDownTray />
+                                <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length)}</span>
+                            </MenuItem>
+                        ))}
                         {hasAgentOriginalForPost && (
                             <MenuItem onClick={handleToggleOriginal}>
                                 <HiOutlineDocumentText />
@@ -3020,21 +3036,6 @@ function ViewPostView({
             })()}
         </MetaRow>;
     };
-    const getVideoThumbnailUrl = url => {
-        try {
-            if (!url) return null;
-            const u = new URL(url);
-            const host = u.hostname.toLowerCase();
-            const isStream = host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
-            if (!isStream) return null;
-            const parts = u.pathname.split('/').filter(Boolean);
-            const uid = parts[0];
-            if (!uid) return null;
-            return `${u.origin}/${uid}/thumbnails/thumbnail.jpg`;
-        } catch (_) {
-            return null;
-        }
-    };
     const displayReplyBox = (post, forMobileOverlay = false) => {
         if (!state.posts[post.post_id]?.replyOpen) return <div></div>;
         const isEdit = state.posts[post.post_id]?.replyMode === 'edit';
@@ -3094,6 +3095,7 @@ function ViewPostView({
                                     });
                                 }} />
                                 {replyThumbLoading[post.post_id] && <MediaSpinner />}
+                                {replyAttachedType[post.post_id] === 'video' && !replyThumbLoading[post.post_id] && <VideoPlayBadge size={26} />}
                                 <MediaRemoveButton type="button" tabIndex={-1} disabled={isBusy} onClick={() => {
                                     if (isBusy) return;
                                     setReplyAttachedType(prev => {
@@ -3347,7 +3349,7 @@ function ViewPostView({
                                 ...prev,
                                 [post.post_id]: progress ?? undefined
                             }));
-                        }} suffixLabel={limits.unlimited ? '(admin)' : (limits.willPayFee ? '(paid tier)' : '(free tier)')} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
+                        }} suffixLabel={limits.isAdmin ? '(admin)' : (limits.willPayFee ? '(paid tier)' : '(free tier)')} showUploadButton={false} belowElement={replySubmitError[post.post_id] ? <ReplyErrorMessage role="alert">{replySubmitError[post.post_id]}</ReplyErrorMessage> : null} />
                     </DefaultEditorChrome>
                     <ReplyActionsRow>
                         <div style={{
@@ -3358,8 +3360,8 @@ function ViewPostView({
                             flex: '1 1 auto',
                             alignSelf: 'flex-start'
                         }}>
-                            <ReplyCounter $warn={!limits.unlimited && replyText.length >= limits.maxContent}>
-                                {limits.unlimited ? `${replyText.length} / unlimited (admin)` : `${replyText.length} / ${limits.maxContent} ${limits.willPayFee ? '(paid tier)' : '(free tier)'}`}
+                            <ReplyCounter $warn={replyText.length >= limits.maxContent}>
+                                {`${replyText.length} / ${limits.maxContent} ${limits.isAdmin ? '(admin)' : (limits.willPayFee ? '(paid tier)' : '(free tier)')}`}
                             </ReplyCounter>
                         </div>
                         <StyledSubmitButtonContainer>
@@ -3448,7 +3450,10 @@ function ViewPostView({
     // Check if user is logged in
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
-    if (!isLoggedIn) {
+    // Open browsing: guests may read the post; the signup prompt fires only when
+    // they try to vote/comment/follow. Otherwise keep the logged-out gate. Wait for
+    // node config before gating so a shared link doesn't flash the sign-in card.
+    if (!isLoggedIn && !openBrowsingEnabled && nodeConfigLoaded) {
         return <ContentGrid>
             <FeedRailRow $feedViewMode="card">
                 <FeedCol>
@@ -3926,7 +3931,6 @@ function ViewPostView({
                         </ModernPostFeed>
                     </MainContentWrapper>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
             {renderMobileReplyOverlay()}
             {/**
@@ -4204,7 +4208,6 @@ function ViewPostView({
                         </ModernPostFeed>
                     </MainContentWrapper>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>;
     }

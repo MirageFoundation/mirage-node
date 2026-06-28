@@ -410,19 +410,20 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
 
         if (isImg) {
             return (
-                <img
-                    ref={wrapperRef}
-                    src={resolved}
-                    alt="(inline media)"
-                    draggable={false}
-                    style={mediaStyle}
-                    onLoad={(e) => {
-                        if (!mountedRef.current) return;
-                        setNaturalWidth(e.currentTarget.naturalWidth);
-                        setNaturalHeight(e.currentTarget.naturalHeight);
-                    }}
-                    {...resizeHandlers}
-                />
+                <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-block', maxWidth: mediaStyle.maxWidth, verticalAlign: 'top' }}>
+                    <img
+                        src={resolved}
+                        alt="(inline media)"
+                        draggable={false}
+                        style={mediaStyle}
+                        onLoad={(e) => {
+                            if (!mountedRef.current) return;
+                            setNaturalWidth(e.currentTarget.naturalWidth);
+                            setNaturalHeight(e.currentTarget.naturalHeight);
+                        }}
+                        {...resizeHandlers}
+                    />
+                </div>
             );
         }
 

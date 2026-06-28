@@ -1214,6 +1214,8 @@ const MainView = ({
         dismissIPhoneBanner,
         showNsfwHero,
         isLoggedIn,
+        openBrowsingEnabled,
+        nodeConfigLoaded,
         inviteCodesEnabled,
         questsEnabled,
         showAndroidBanner,
@@ -1245,6 +1247,10 @@ const MainView = ({
         setTopic,
         routeTopic
     });
+    // Open browsing: guests read the feed too; logged-in-only chrome keeps isLoggedIn.
+    // Before node config loads we don't know if open browsing is on, so allow
+    // browsing (skeleton) and only let the gated splash show once config is known.
+    const canBrowse = isLoggedIn || openBrowsingEnabled || !nodeConfigLoaded;
     if (error) {
         return <StyledError>{error}</StyledError>;
     }
@@ -1592,22 +1598,22 @@ const MainView = ({
                         </HomeFeedInfoDescription>
                     </HomeFeedInfoCard>}
 
-                    {/* Loading state - only show to logged-in users */}
-                    {isLoggedIn && showLoadingPosts && <LoadingCard $size={cardSize}>
+                    {/* Loading state (also covers the pre-node-config window) */}
+                    {canBrowse && (showLoadingPosts || !nodeConfigLoaded) && <LoadingCard $size={cardSize}>
                         <LoadingSpinner />
                         <LoadingText>Loading posts...</LoadingText>
                     </LoadingCard>}
 
-                    {/* Empty home feed - only show to logged-in users */}
-                    {isLoggedIn && showEmptyHome && <EmptyHomeMessage />}
+                    {/* Empty home feed */}
+                    {canBrowse && nodeConfigLoaded && showEmptyHome && <EmptyHomeMessage />}
 
-                    {/* No posts available - only show to logged-in users */}
-                    {isLoggedIn && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                    {/* No posts available */}
+                    {canBrowse && nodeConfigLoaded && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                         <LoadingText>No posts available</LoadingText>
                     </LoadingCard>}
 
-                    {/* Invite-only hero - shown to logged-out users on all feeds */}
-                    {!isLoggedIn && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
+                    {/* Welcome / signup hero - only when browsing is gated (open browsing off) */}
+                    {!canBrowse && <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
                         <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
                         <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{
                             fontSize: '0.5em',
@@ -1653,8 +1659,8 @@ const MainView = ({
                         </InviteOnlyHeroButtons>
                     </InviteOnlyHero>}
 
-                    {/* Posts grid - only show to logged-in users */}
-                    {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                    {/* Posts grid */}
+                    {canBrowse && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
                         const family = getThemeFamily(state?.themeId);
                         const FeedComponent = family.Feed;
                         const visiblePosts = orderedPosts.filter(p => {
@@ -1665,8 +1671,8 @@ const MainView = ({
                         return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={urlTopic === 'home' || urlTopic === 'following'} />;
                     })()}
 
-                    {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
-                    {isLoggedIn && <div ref={bottomSentinelRef} style={{
+                    {canBrowse && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && <LoadingMoreIndicator>Loading more...</LoadingMoreIndicator>}
+                    {canBrowse && <div ref={bottomSentinelRef} style={{
                         width: '100%',
                         minHeight: '1px'
                     }}>

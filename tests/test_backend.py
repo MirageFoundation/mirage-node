@@ -52,6 +52,7 @@ from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_b
 from tests.cases.test_backend_security import test_security, test_validation
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
 from tests.cases.test_backend_indexer import test_indexer, test_tx_index
+from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 
 ALL_CATEGORIES = {
     "params": test_params,
@@ -95,6 +96,9 @@ ALL_CATEGORIES = {
     "image_impressions": test_image_impressions,
     "upload_media": test_upload_media,
     "recent_content": test_recent_content,
+    "stats_admin_auth": test_stats_admin_auth,
+    "stats_attribution": test_stats_attribution,
+    "stats_pure": test_stats_pure,
 }
 
 STATELESS_CATEGORIES = {
@@ -104,6 +108,9 @@ STATELESS_CATEGORIES = {
     "tier_config_api",
     "image_impressions",
     "upload_media",
+    "stats_admin_auth",
+    "stats_attribution",
+    "stats_pure",
 }
 
 

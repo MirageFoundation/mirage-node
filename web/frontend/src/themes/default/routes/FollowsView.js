@@ -12,7 +12,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { useFollows, shortenAddress } from "../../../logic/useFollows";
 import UserAvatar from "../components/UserAvatar.js";
 
@@ -368,7 +367,6 @@ export default function FollowsView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );

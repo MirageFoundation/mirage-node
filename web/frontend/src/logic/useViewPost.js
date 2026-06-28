@@ -15,6 +15,7 @@ import { sortComments } from "../utils/SortComments";
 import { getCollapseThreshold, shouldAutoCollapse } from "../utils/Comments";
 import { updateNotification } from "../utils/notifications";
 import { requireThemeColor } from "../utils/themeColor";
+import { requireAccount } from "../utils/openBrowsing";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
 export const pickCard = requireThemeColor;
@@ -134,6 +135,13 @@ export function useViewPost({
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
         window.addEventListener('nodeConfigUpdated', handler);
+        // Cold-load race: /api/bootstrap can dispatch 'nodeConfigUpdated' before
+        // this listener attaches (passive effects are deferred while the bundle
+        // parses). If the config already landed in storage, force a re-read so
+        // openBrowsingEnabled doesn't stay stuck false on a first visit.
+        try {
+            if (localStorage.getItem('nodeConfig') != null) setNodeConfigTick(prev => prev + 1);
+        } catch (_) { }
         return () => window.removeEventListener('nodeConfigUpdated', handler);
     }, []);
     const nodeConfig = useMemo(() => {
@@ -146,6 +154,7 @@ export function useViewPost({
         }
     }, [nodeConfigTick]);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled);
+    const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
     // reliably return to the originating feed route (including /t/:topic).
@@ -392,6 +401,7 @@ export function useViewPost({
     const handleFollowToggle = async authorAddr => {
         const author = String(authorAddr || '').trim().toLowerCase();
         if (!author || isUserPending(author)) return;
+        if (!requireAccount('follow users')) return;
         const wasFollowing = isFollowingAuthor(author);
         try {
             if (wasFollowing) {
@@ -419,6 +429,7 @@ export function useViewPost({
     const handleTopicFollowToggle = async topic => {
         const t = String(topic || '').trim().toLowerCase();
         if (!t || isTopicPending(t)) return;
+        if (!requireAccount('follow topics')) return;
         const wasSubscribed = isSubscribedTopic(topic);
         // Optimistic update
         if (wasSubscribed) {
@@ -527,25 +538,24 @@ export function useViewPost({
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
             const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
+            // Admins (>=100) map to the agent tier on-chain (see LevelToTierIndex
+            // in params.go); they are NOT uncapped — the chain enforces the agent
+            // tier's max_content_length. Show that real cap.
             const isAdmin = userLevel >= 100;
             const tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxContent = parseInt(tier.max_content_length) || 0;
-            if (isAdmin) {
-                maxContent = Number.MAX_SAFE_INTEGER;
-            } else if (!maxContent) {
-                maxContent = 1000;
-            }
+            if (!maxContent) maxContent = 1000;
             return {
                 maxContent,
                 willPayFee: userLevel >= 1,
-                unlimited: isAdmin
+                isAdmin
             };
         } catch (e) {
             console.error('[ViewPostView] Error calculating limits:', e);
             return {
                 maxContent: 1000,
                 willPayFee: false,
-                unlimited: false
+                isAdmin: false
             };
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1887,6 +1897,7 @@ export function useViewPost({
 
     const handleSubmit = commentId => async event => {
         event.preventDefault();
+        if (!requireAccount('comment')) return;
         const replyStringRaw = state.posts[commentId]?.replyText || "";
         let replyString = replyStringRaw.trim();
         // Prepend attached media URL if present (same behavior as create_post)
@@ -2682,6 +2693,8 @@ export function useViewPost({
         location,
         navigate,
         questsEnabled,
+        openBrowsingEnabled,
+        nodeConfigLoaded: Boolean(nodeConfig),
         isMobile,
         goBackToFeed,
         viewerAddress,

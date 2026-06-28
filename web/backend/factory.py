@@ -94,6 +94,11 @@ def create_app(init_runtime: bool = True) -> Flask:
     def _track_last_seen_from_query():
         if not request.path.startswith("/api/"):
             return
+        # Mirage-owned analytics: record visit/engagement for every client
+        # (web + mobile) from the one place every request passes through.
+        from stats import record_request_event
+
+        record_request_event(request.path)
         addr = request.args.get("address") or request.args.get("admin_address") or ""
         if not addr:
             return

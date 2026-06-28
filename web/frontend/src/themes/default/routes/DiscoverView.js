@@ -15,7 +15,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { useDiscover } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
 import ContentTagBadge from "../components/ContentTagBadge";
@@ -380,7 +379,6 @@ export default function DiscoverView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );

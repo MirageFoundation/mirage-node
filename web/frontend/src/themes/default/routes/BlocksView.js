@@ -17,7 +17,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { useBlocks, shortenAddress } from "../../../logic/useBlocks";
 import UserAvatar from "../components/UserAvatar.js";
 
@@ -339,7 +338,6 @@ export default function BlocksView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );

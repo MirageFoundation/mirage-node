@@ -42,8 +42,11 @@ from settings import (
     IGNORE_AGENT_BLOCKED_USERS,
     REGISTRATION_ENABLED,
     REGISTRATION_INVITE_CODE_REQUIRED,
+    OPEN_BROWSING_ENABLED,
+    MEDIA_UPLOADS_ENABLED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
+    AUTO_ENABLED_AGENTS,
     NEW_USER_HIGHLIGHT_DAYS,
     PUSH_NOTIFICATIONS_ENABLED,
     ANDROID_BANNER_ENABLED,
@@ -52,11 +55,10 @@ from settings import (
 import time
 import calendar
 from datetime import datetime as dt
-import hashlib
-import hmac
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urljoin, urlparse
+from auto_agents import merge_auto_enabled_agents
 from chain import (
     classify_reject as _classify_reject,
     get_block_time_seconds as _get_block_time_seconds,
@@ -599,14 +601,14 @@ def reload_params():
 
 
 def _get_enabled_agents(cur, address: str) -> list[str]:
-    """Get list of agent addresses enabled by the viewer."""
+    """Get list of agent addresses served as enabled for the viewer."""
     if not address:
         return []
     cur.execute(
         "SELECT agent FROM enabled_agents WHERE LOWER(owner) = LOWER(%s) ORDER BY position ASC",
         (address.lower(),),
     )
-    return [row[0].lower() for row in cur.fetchall()]
+    return merge_auto_enabled_agents(cur, [row[0].lower() for row in cur.fetchall()])
 
 
 def _get_blocked_posts(cur, address: str) -> set[str]:
@@ -3992,12 +3994,14 @@ def _build_node_config() -> dict:
         "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
         "registration_enabled": REGISTRATION_ENABLED,
         "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
+        "open_browsing_enabled": OPEN_BROWSING_ENABLED,
         "quests_enabled": QUESTS_ENABLED,
         "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
         "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
         "android_banner_enabled": ANDROID_BANNER_ENABLED,
         "ios_banner_enabled": IOS_BANNER_ENABLED,
+        "auto_enabled_agents": list(AUTO_ENABLED_AGENTS),
     }
 
     _NODE_CONFIG_CACHE = dict(resp)
@@ -7590,6 +7594,189 @@ def mark_inbox_viewed():
         return safe_error(e)
 
 
+# ── Admin stats (signed, admin-only, fleet-aggregated) ───────────────────────
+
+# One signed payload type for every stats surface: `stats:{addr}:{ts}:{nonce}`.
+# The aggregate endpoint forwards the admin's identical proof to peer export
+# endpoints, so a single signature authorizes the whole fan-out.
+STATS_ADMIN_ACTION = "stats"
+STATS_ADMIN_MIN_LEVEL = 100
+
+
+def _verify_admin_stats_request(data: dict):
+    """Verify a signed admin stats request. Returns (address, None) or
+    (None, (response, code)). Mirrors the inbox signing pattern and additionally
+    requires the caller to be an admin (profiles.level >= 100)."""
+    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request, get_user_level
+
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
+    address = (data.get("address") or "").strip()
+    if "timestamp" not in data:
+        return None, (jsonify({"error": "timestamp required"}), 400)
+    try:
+        timestamp = int(data.get("timestamp"))
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": "invalid timestamp"}), 400)
+
+    nonce, err = _parse_envelope_nonce(data)
+    if err is not None:
+        return None, (err[0], err[1])
+    if not (pub_b64 and sig_b64):
+        return None, (jsonify({"error": "missing required fields"}), 400)
+
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return None, (jsonify({"error": "invalid relay fields"}), 400)
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return None, (jsonify({"error": "invalid relay fields"}), 400)
+
+    user_addr = _derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, (jsonify({"error": "invalid pubkey"}), 400)
+    if address and address.lower() != user_addr.lower():
+        return None, (jsonify({"error": "address does not match pubkey"}), 400)
+
+    signed_payload = f"{STATS_ADMIN_ACTION}:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return None, (jsonify({"error": "invalid signature"}), 400)
+
+    ok, gerr = _guard_push_request(user_addr, STATS_ADMIN_ACTION, timestamp, nonce)
+    if not ok:
+        return None, (gerr[0], gerr[1])
+
+    if get_user_level(user_addr) < STATS_ADMIN_MIN_LEVEL:
+        return None, (jsonify({"error": "forbidden"}), 403)
+
+    return user_addr.lower(), None
+
+
+def _parse_stats_window(data: dict):
+    """Parse [start, end] unix-second window. Defaults to the last 30 days."""
+    now_ts = int(time.time())
+    try:
+        end = int(data.get("end")) if data.get("end") not in (None, "") else now_ts
+    except (TypeError, ValueError):
+        end = now_ts
+    try:
+        start = int(data.get("start")) if data.get("start") not in (None, "") else (end - 30 * 86400)
+    except (TypeError, ValueError):
+        start = end - 30 * 86400
+    if start > end:
+        start, end = end, start
+    return start, end
+
+
+@public_bp.route("/api/admin/stats/export", methods=["POST"])
+def admin_stats_export():
+    """Return this server's local stats for the signed window. Admin-only."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    addr, err = _verify_admin_stats_request(data)
+    if err is not None:
+        return err[0], err[1]
+    start, end = _parse_stats_window(data)
+    try:
+        import stats as _stats
+
+        payload = _stats.compute_local_stats(start, end)
+        log_event(rid, "admin_stats_export.ok", address=addr, start=start, end=end)
+        return jsonify(payload)
+    except Exception as e:
+        log_event(rid, "admin_stats_export.err", error=str(e))
+        return safe_error(e)
+
+
+@public_bp.route("/api/admin/stats/aggregate", methods=["POST"])
+def admin_stats_aggregate():
+    """Verify the admin signature, compute local stats, fan out the identical
+    signed proof to peer export endpoints, and return {aggregate, servers}.
+    Failed peers are reported explicitly; never zero-filled."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    addr, err = _verify_admin_stats_request(data)
+    if err is not None:
+        return err[0], err[1]
+    start, end = _parse_stats_window(data)
+
+    import stats as _stats
+
+    servers: List[Dict[str, Any]] = []
+
+    # Local server, computed in-process (never HTTP self-call).
+    local_label = _stats.local_server_label()
+    try:
+        local_stats = _stats.compute_local_stats(start, end)
+        servers.append({"server": local_label, "status": "ok", "stats": local_stats})
+    except Exception as e:
+        log_event(rid, "admin_stats_aggregate.local_err", error=str(e))
+        servers.append({"server": local_label, "status": "bad_response", "error": str(e)})
+
+    # Forward the admin's identical proof to remote peers.
+    proof = {
+        "pubkey": data.get("pubkey"),
+        "signature": data.get("signature"),
+        "address": data.get("address"),
+        "timestamp": data.get("timestamp"),
+        "envelope_nonce": data.get("envelope_nonce"),
+        "start": start,
+        "end": end,
+    }
+    local_norm = local_label.rstrip("/")
+    for base_url in _stats.discover_servers():
+        if base_url.rstrip("/") == local_norm:
+            continue
+        entry: Dict[str, Any] = {"server": base_url}
+        try:
+            resp = requests.post(
+                urljoin(base_url + "/", "api/admin/stats/export"),
+                json=proof,
+                timeout=6,
+            )
+            if resp.status_code == 200:
+                entry["status"] = "ok"
+                entry["stats"] = resp.json()
+            elif resp.status_code in (401, 403):
+                entry["status"] = "unauthorized"
+            else:
+                entry["status"] = "bad_response"
+                entry["http_status"] = resp.status_code
+        except requests.RequestException:
+            entry["status"] = "unreachable"
+        except Exception as e:  # noqa: BLE001
+            entry["status"] = "bad_response"
+            entry["error"] = str(e)
+        servers.append(entry)
+
+    aggregate = _stats.aggregate_server_stats([s for s in servers if s.get("status") == "ok"], start, end)
+    log_event(rid, "admin_stats_aggregate.ok", address=addr, servers=len(servers))
+    return jsonify({"aggregate": aggregate, "servers": servers, "window": {"start": start, "end": end}})
+
+
+@public_bp.route("/api/stats/visitor_attribution", methods=["POST"])
+def stats_visitor_attribution():
+    """Public analytics ingest: record first-touch UTM for a visitor id.
+    Idempotent; first-touch is never overwritten. No signature required (it is
+    anonymous analytics), but it writes only attribution, never reads."""
+    data = request.get_json(silent=True) or {}
+    visitor_id = str(data.get("visitor_id", "")).strip()
+    if not visitor_id:
+        return jsonify({"error": "visitor_id required"}), 400
+    platform = str(data.get("platform", "")).strip().lower() or None
+    utm = {
+        k: str(data.get(k, "")).strip() for k in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+    }
+    ref = str(data.get("ref", "")).strip()
+    import stats as _stats
+
+    _stats.record_attribution(visitor_id, platform, utm, ref)
+    return jsonify({"ok": True})
+
+
 def _parse_int_field(raw) -> Optional[int]:
     """Parse a non-negative int from a form field; None if missing/invalid."""
     if raw is None:
@@ -7615,6 +7802,11 @@ def upload_media():
     """
     rid = next_request_id()
     log_event(rid, "upload_media.begin")
+    # Uploads are only accepted where a scanning edge (Bunny Shield) fronts them.
+    # A node not behind such an edge sets MEDIA_UPLOADS_ENABLED=false (migration).
+    if not MEDIA_UPLOADS_ENABLED:
+        log_event(rid, "upload_media.disabled")
+        return api_error_code("uploads_disabled", 403)
     try:
         from media import (
             MediaError,
@@ -7665,72 +7857,45 @@ def upload_media():
         return safe_error(e)
 
 
-@public_bp.route("/api/media_edge_register", methods=["POST"])
-def media_edge_register():
-    """Asset-registration callback for edge-offload deployments (e.g. bunny_edge).
-
-    When an edge handler stores an upload itself (bytes never reach the node), it
-    calls this endpoint so the node still tracks the image for garbage collection.
-    Authenticated with an HMAC-SHA256 over the raw body keyed by
-    BUNNY_EDGE_CALLBACK_SECRET. Disabled (503) when no secret is configured.
-    """
-    rid = next_request_id()
-    try:
-        secret = os.environ.get("BUNNY_EDGE_CALLBACK_SECRET", "").strip()
-        if not secret:
-            return api_error_code("not_configured", 503)
-
-        raw = request.get_data() or b""
-        provided = request.headers.get("X-Mirage-Edge-Signature", "")
-        expected = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(provided, expected):
-            log_event(rid, "media_edge_register.bad_sig")
-            return api_error_code("media_edge_unauthorized", 403)
-
-        data = json.loads(raw or b"{}")
-        asset_id = str(data.get("asset_id", "")).strip()
-        kind = str(data.get("kind", "image")).strip().lower()
-        provider_id = str(data.get("provider", "bunny")).strip().lower()
-        # Only images are GC-tracked (videos are not), matching upload_media.
-        if asset_id and kind == "image":
-            with connect_backend_db() as bconn:
-                with bconn.cursor() as bcur:
-                    bcur.execute(
-                        "INSERT INTO image_catalog (image_id, created_at, provider) "
-                        "VALUES (%s, %s, %s) ON CONFLICT (image_id) DO NOTHING",
-                        (asset_id, int(time.time()), provider_id),
-                    )
-            log_event(rid, "media_edge_register.ok", image_id=asset_id, provider=provider_id)
-        return jsonify({"ok": True})
-    except Exception as e:
-        log_event(rid, "media_edge_register.err", error=str(e))
-        return safe_error(e)
-
-
 # =============================================================================
 # ===== DEPRECATED LEGACY SHIM - REMOVE AFTER 2026-08 - DO NOT BUILD ON THIS =====
 # get_upload_url returns the OLD Cloudflare browser-direct upload shape, kept ONLY
 # so old mobile builds keep working during the dual-provider cutover. New clients
-# (web + updated app) MUST use POST /api/upload_media instead. This endpoint is
-# intentionally limited to the cloudflare provider and MUST be deleted after
-# ~August 2026, after which mirage.talk's Cloudflare credentials can be retired.
-# See docs/guides/media_providers.md ("Legacy get_upload_url shim").
+# (web + updated app) MUST use POST /api/upload_media instead.
+#
+# SMOOTH CUTOVER: this shim is gated on Cloudflare CREDENTIALS being present, NOT
+# on the node's active MEDIA_PROVIDER. That is deliberate: it lets a node move new
+# uploads to bunny/local while old mobile builds keep
+# uploading to Cloudflare through here until the app ships /api/upload_media. The
+# uploaded media still renders everywhere via dual-read.
+#
+# MUST be deleted after ~August 2026 together with mirage.talk's Cloudflare
+# credentials. See docs/guides/media_providers.md ("Legacy get_upload_url shim").
 # =============================================================================
 @public_bp.route("/api/get_upload_url", methods=["POST"])
 def get_upload_url():
     """DEPRECATED legacy Cloudflare direct-upload shim. Use /api/upload_media.
 
-    REMOVE AFTER 2026-08. Only active when MEDIA_PROVIDER=cloudflare.
+    REMOVE AFTER 2026-08. Active whenever Cloudflare credentials are configured,
+    independent of MEDIA_PROVIDER, so old mobile builds keep working after the node
+    switches its active provider to bunny/local.
     """
     rid = next_request_id()
     # Loud per-call deprecation warning so lingering callers show up in logs and
     # we can tell exactly when it is safe to delete this shim.
     logger.warning("DEPRECATED get_upload_url called - remove after 2026-08")
     log_event(rid, "get_upload_url.begin", deprecated=True)
+    # Same upload gate as /api/upload_media: a node not behind a scanning edge
+    # accepts no uploads through any path.
+    if not MEDIA_UPLOADS_ENABLED:
+        log_event(rid, "get_upload_url.disabled")
+        return api_error_code("uploads_disabled", 403)
     try:
-        from media import active_provider_id
-
-        if active_provider_id() != "cloudflare":
+        # Gate on Cloudflare credentials, NOT the active provider, so this keeps
+        # serving old mobile builds even when MEDIA_PROVIDER is bunny/local.
+        cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+        cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+        if not (cf_account and cf_token):
             log_event(rid, "get_upload_url.unsupported_provider")
             return api_error_code("legacy_upload_unsupported", 410)
 
@@ -8591,6 +8756,14 @@ def get_stats():
     rid = next_request_id()
     tab = request.args.get("tab", "overview").lower()
     log_event(rid, "get_stats.begin", tab=tab)
+
+    # Admin-only: this endpoint exposes sensitive financial/subscriber data and is
+    # superseded by the signed /api/admin/stats/* fleet API. Require the same signed
+    # admin proof. Signing fields may arrive via query string (GET) or JSON body.
+    auth_data = {**request.args.to_dict(), **(request.get_json(silent=True) or {})}
+    _addr, _err = _verify_admin_stats_request(auth_data)
+    if _err is not None:
+        return _err[0], _err[1]
 
     # Route to tab-specific handlers
     if tab == "signups":

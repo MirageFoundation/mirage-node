@@ -6,6 +6,7 @@ import {
     HiExclamationTriangle,
     HiUserGroup,
     HiArrowsUpDown,
+    HiLockClosed,
 } from "react-icons/hi2";
 import Button from "../components/Button.js";
 import { ListRowSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
@@ -16,7 +17,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { useAgents, formatTimeAgo } from "../../../logic/useAgents";
 import UserAvatar from "../components/UserAvatar.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -105,6 +105,39 @@ const IntroParagraph = styled.p`
         color: ${({ theme }) => theme.colors.text};
         font-style: normal;
         font-weight: 500;
+    }
+`;
+
+const EnforcedHint = styled.p`
+    margin: 0 1rem 0.5rem;
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.65rem;
+    font-weight: 500;
+    line-height: 1.4;
+
+    @media (max-width: 600px) {
+        margin: 0 0 0.5rem;
+    }
+`;
+
+const EnforcedTag = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.surface2};
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+
+    svg {
+        width: 12px;
+        height: 12px;
     }
 `;
 
@@ -427,6 +460,7 @@ export default function AgentsView({ state }) {
         displayOrder,
         sortedAgents,
         enabledCount,
+        autoEnabledAgents,
     } = useAgents({ state });
 
     const renderShell = (body) => (
@@ -444,7 +478,6 @@ export default function AgentsView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );
@@ -486,7 +519,7 @@ export default function AgentsView({ state }) {
         );
     }
 
-    if (sortedAgents.length === 0) {
+    if (sortedAgents.length === 0 && autoEnabledAgents.length === 0) {
         return renderShell(
             <>
                 {headerBlock}
@@ -506,6 +539,42 @@ export default function AgentsView({ state }) {
     const enabledAgents = sortedAgents.slice(0, enabledCount);
     const availableAgents = sortedAgents.slice(enabledCount);
     const showReorderBar = enabledCount > 1;
+
+    const renderEnforcedRow = (agent) => {
+        const addrLower = (agent.address || '').toLowerCase();
+        const displayName = agent.displayName || (agent.address ? `${agent.address.slice(0, 12)}…` : 'Unknown');
+        const avatarSeed = agent.address || addrLower;
+        const profileUrl = `/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`;
+        const agentLevel = Number(agent.level) || 10;
+        const agentTierColor = getAuthorColor(agentLevel);
+        const agentTierTooltip = getAuthorTooltip(agentLevel);
+
+        return (
+            <Row key={`enforced-${agent.address}`}>
+                <AvatarImg seed={avatarSeed} alt="" />
+                <RowHeader>
+                    <Identity>
+                        <NameRow>
+                            <NameLink
+                                to={profileUrl}
+                                $tierColor={agentTierColor}
+                                title={agentTierTooltip || undefined}
+                            >{displayName}</NameLink>
+                            <AgentBadge>Agent</AgentBadge>
+                            {agent.last_active != null && <LastActive>{formatActive(agent.last_active)}</LastActive>}
+                        </NameRow>
+                        {agent.biography && <Bio>{agent.biography}</Bio>}
+                    </Identity>
+                    <Actions>
+                        <EnforcedTag title="Enabled for everyone on this server">
+                            <HiLockClosed aria-hidden="true" />
+                            Enforced
+                        </EnforcedTag>
+                    </Actions>
+                </RowHeader>
+            </Row>
+        );
+    };
 
     const renderRow = (agent) => {
         const addrLower = (agent.address || '').toLowerCase();
@@ -610,6 +679,19 @@ export default function AgentsView({ state }) {
                     <HiExclamationTriangle />
                     <span>{errorMessage}</span>
                 </ErrorBanner>
+            )}
+
+            {autoEnabledAgents.length > 0 && (
+                <>
+                    <SectionHeader>
+                        <SectionLabel>Enforced by this server</SectionLabel>
+                        <CountBadge>{autoEnabledAgents.length}</CountBadge>
+                    </SectionHeader>
+                    <EnforcedHint>
+                        These agents are enabled for everyone on this server. You can’t disable them.
+                    </EnforcedHint>
+                    <List>{autoEnabledAgents.map(renderEnforcedRow)}</List>
+                </>
             )}
 
             {enabledCount > 0 && (

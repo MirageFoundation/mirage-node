@@ -1936,6 +1936,28 @@ class MessageProcessor:
         return None
 
     @staticmethod
+    def _bunny_stream_thumbnail(url: str) -> str | None:
+        """Derive the Bunny Stream poster URL from a playlist URL, else None.
+
+        Bunny Stream delivers HLS at https://{host}.b-cdn.net/{guid}/playlist.m3u8
+        and the auto-generated poster at /{guid}/thumbnail.jpg on the same host.
+        Mirrors the frontend getVideoThumbnailUrl() so feed/card previews match.
+        Image pull zones are also *.b-cdn.net but are handled earlier as direct
+        raster URLs, so only the /{guid}/playlist.m3u8 shape reaches here.
+        """
+        try:
+            u = urlparse(url or "")
+            host = (u.hostname or "").lower()
+            if not host.endswith(".b-cdn.net"):
+                return None
+            m = re.match(r"^/([^/]+)/playlist\.m3u8$", u.path or "")
+            if not m:
+                return None
+            return f"{u.scheme}://{u.hostname}/{m.group(1)}/thumbnail.jpg"
+        except Exception:
+            return None
+
+    @staticmethod
     def _extract_youtube_video_id(url: str) -> str | None:
         try:
             if not url:
@@ -2082,6 +2104,14 @@ class MessageProcessor:
                     return DatabaseManager._sanitize_wh(dims[0], dims[1])
                 return {}
 
+            # Bunny Stream → probe the auto-generated thumbnail
+            bunny_thumb = self._bunny_stream_thumbnail(url)
+            if bunny_thumb:
+                dims = self._probe_dimensions(bunny_thumb)
+                if dims:
+                    return DatabaseManager._sanitize_wh(dims[0], dims[1])
+                return {}
+
             # Direct image → probe directly
             if self._is_raster_image_url(url):
                 dims = self._probe_dimensions(url)
@@ -2151,6 +2181,11 @@ class MessageProcessor:
             # Use 1-second mark; the service accepts time param
             logger.debug("[thumb] derived cloudflare stream thumb for uid=%s", uid)
             return f"https://videodelivery.net/{uid}/thumbnails/thumbnail.jpg?time=1s"
+        # Bunny Stream video -> derive thumbnail
+        bunny_thumb = self._bunny_stream_thumbnail(first)
+        if bunny_thumb:
+            logger.debug("[thumb] derived bunny stream thumb: %s", bunny_thumb)
+            return bunny_thumb
         # YouTube video -> derive thumbnail
         yt_id = self._extract_youtube_video_id(first)
         if yt_id:

@@ -79,8 +79,30 @@ class Storage {
     }
 
     static clear() {
-        if (typeof window !== 'undefined' && window.localStorage) {
-            window.localStorage.clear();
+        // Preserve the Mirage analytics visitor id across auth cleanup: it is a
+        // device identity, not auth state, and must survive logout/account reset
+        // so a returning lurker-turned-user stays one analytics identity.
+        Storage._clearPreservingAnalytics(window.localStorage);
+    }
+
+    // Keys in the analytics namespace that must outlive any storage reset.
+    // Mirrors VISITOR_ID_KEY in utils/visitorId.js (identity wire contract).
+    static _ANALYTICS_KEYS = ['mirage_analytics_visitor_id'];
+
+    static _clearPreservingAnalytics(store) {
+        if (typeof window === 'undefined' || !store) return;
+        try {
+            const preserved = {};
+            for (const k of Storage._ANALYTICS_KEYS) {
+                const v = store.getItem(k);
+                if (v !== null) preserved[k] = v;
+            }
+            store.clear();
+            for (const [k, v] of Object.entries(preserved)) {
+                store.setItem(k, v);
+            }
+        } catch (_) {
+            try { store.clear(); } catch (__) { /* noop */ }
         }
     }
 
@@ -102,10 +124,11 @@ class Storage {
 
     static hardResetAllStorage() {
         // Requirement: clear the entire local storage. We also clear sessionStorage to
-        // avoid restoring stale UI state after a forced logout.
+        // avoid restoring stale UI state after a forced logout. The analytics visitor
+        // id is preserved (device identity, not auth state) per the identity contract.
         try {
             if (typeof window !== 'undefined' && window.localStorage) {
-                window.localStorage.clear();
+                Storage._clearPreservingAnalytics(window.localStorage);
             }
         } catch (_) { /* noop */ }
         try {

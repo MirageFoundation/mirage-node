@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import styled from "styled-components";
 import { uploadImageWithCancel } from "../../../utils/ImageUpload";
+import { captureVideoPoster, registerLocalVideoPoster } from "../../../utils/media";
 import Api from "../../../utils/api";
 
 // Lazy import to keep initial bundle small
@@ -797,6 +798,14 @@ export default function MarkdownEditor({
                         onUploadProgress(p);
                     }
                 }, uploadXhrRef);
+            }
+            // Attach a locally-captured first frame as an instant preview poster
+            // (video only) so previews don't wait for provider transcoding.
+            if (isVid) {
+                try {
+                    const poster = await captureVideoPoster(file);
+                    if (poster) registerLocalVideoPoster(mediaUrl, poster);
+                } catch (_) { }
             }
             // Notify parent that media was uploaded (don't modify content here)
             if (typeof onMediaUploaded === 'function') {

@@ -397,6 +397,7 @@ function Sidebar({ state }) {
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
                 <SidebarItem to="/agents" icon={icons.agents} label="Agents" pathname={pathname} />
+                <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
                 <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
             </Section>
 
@@ -475,12 +476,6 @@ function Sidebar({ state }) {
                     </Section>
                 </>
             )}
-
-            <SectionDivider />
-
-            <Section>
-                <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
-            </Section>
 
         </Aside>
     );

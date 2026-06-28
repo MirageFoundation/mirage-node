@@ -6,6 +6,8 @@
  * deploy/templates/env/frontend.env to point at a remote node instead.
  */
 
+import { getVisitorId, VISITOR_HEADER } from './visitorId';
+
 /**
  * @returns {string}
  */
@@ -26,6 +28,21 @@ function getBaseUrl() {
 }
 
 const API_BASE = getBaseUrl();
+
+/**
+ * Merge the analytics visitor header into a request's headers. Sent on every
+ * call (anonymous and authenticated) so the backend can track browsing and bind
+ * this browser's activity to the address once the user authenticates.
+ * @param {Record<string,string>=} headers
+ * @returns {Record<string,string>}
+ */
+function withVisitorHeader(headers) {
+    const out = { ...(headers || {}) };
+    try {
+        out[VISITOR_HEADER] = getVisitorId();
+    } catch (_) { /* best-effort */ }
+    return out;
+}
 
 /**
  * Build a URL with query params
@@ -215,7 +232,7 @@ async function get(path, params, options) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {
-        const resp = await fetch(url, { signal: controller.signal, headers: (options && options.headers) || {} });
+        const resp = await fetch(url, { signal: controller.signal, headers: withVisitorHeader(options && options.headers) });
         if (resp.ok) {
             const ct = resp.headers.get('content-type') || '';
             // If HTML came back, likely misroute: attempt remote fallback
@@ -249,7 +266,7 @@ async function post(path, body, options) {
         const resp = await fetch(url, {
             method: 'POST',
             signal: controller.signal,
-            headers: { 'Content-Type': 'application/json', ...(options && options.headers) },
+            headers: withVisitorHeader({ 'Content-Type': 'application/json', ...(options && options.headers) }),
             body: JSON.stringify(body == null ? {} : body),
         });
         if (resp.ok) {

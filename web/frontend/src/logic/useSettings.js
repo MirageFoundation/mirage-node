@@ -134,7 +134,7 @@ export function useSettings({
     });
     const [themeMode, setThemeMode] = useState(() => {
         try {
-            return Storage.load('theme_mode', 'time');
+            return Storage.load('theme_mode', 'system');
         } catch (_) {
             return 'system';
         }

@@ -14,7 +14,7 @@ import ContentTagBadge from "./components/ContentTagBadge";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { normalizeTag } from "../../utils/ContentTags";
-import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../../utils/media";
+import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl, getVideoThumbnailUrl } from "../../utils/media";
 import Storage from "../../utils/Storage";
 import { formatTimeStamp } from "../../logic/useViewPost";
 import { AWARD_TYPES } from "../../logic/usePostGifts";
@@ -953,12 +953,28 @@ function getCompactThumb(post) {
             try { return buildPhotonUrl(first, { w: 144, h: 144 }); }
             catch (_) { /* noop */ }
         }
+        // Hosted video (Bunny/Cloudflare HLS) — derive the provider poster so
+        // video posts get a preview even before the indexer backfills thumbnail.
+        if (typeof first === 'string' && isLikelyVideoUrl(first)) {
+            const poster = getVideoThumbnailUrl(first);
+            if (poster) {
+                try { return buildPhotonUrl(poster, { w: 144, h: 144 }); }
+                catch (_) { return poster; }
+            }
+        }
     }
     const rawBody = String(post?.content || '');
     const firstUrl = extractFirstUrl(rawBody);
     if (firstUrl && isLikelyImageUrl(firstUrl)) {
         try { return buildPhotonUrl(firstUrl, { w: 144, h: 144 }); }
         catch (_) { /* noop */ }
+    }
+    if (firstUrl && isLikelyVideoUrl(firstUrl)) {
+        const poster = getVideoThumbnailUrl(firstUrl);
+        if (poster) {
+            try { return buildPhotonUrl(poster, { w: 144, h: 144 }); }
+            catch (_) { return poster; }
+        }
     }
     // YouTube poster — works for plain links, /shorts, /embed, youtu.be.
     if (firstUrl) {

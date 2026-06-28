@@ -760,10 +760,10 @@ function GuestMenu() {
     });
     const [themeMode, setThemeMode] = useState(() => {
         try {
-            const v = Storage.load('theme_mode', 'time');
-            return v === 'light' || v === 'dark' || v === 'time' ? v : 'time';
+            const v = Storage.load('theme_mode', 'system');
+            return v === 'light' || v === 'dark' || v === 'system' || v === 'time' ? v : 'system';
         } catch (_) {
-            return 'time';
+            return 'system';
         }
     });
 
@@ -881,6 +881,19 @@ function GuestMenu() {
                         </ModeIconButton>
                         <ModeIconButton
                             type="button"
+                            $active={themeMode === 'system'}
+                            onClick={() => handleModePick('system')}
+                            aria-pressed={themeMode === 'system'}
+                            aria-label="System mode"
+                            title="System"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
+                            </svg>
+                        </ModeIconButton>
+                        <ModeIconButton
+                            type="button"
                             $active={themeMode === 'time'}
                             onClick={() => handleModePick('time')}
                             aria-pressed={themeMode === 'time'}
@@ -953,6 +966,7 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
             <MenuItem to="/follows" onClick={() => handleItemClick('/follows')}>Follows</MenuItem>
             <MenuItem to="/blocks" onClick={() => handleItemClick('/blocks')}>Blocks</MenuItem>
             <MenuItem to="/agents" onClick={() => handleItemClick('/agents')}>Agents</MenuItem>
+            <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuItem to="/network" onClick={() => handleItemClick('/network')}>Network</MenuItem>
             {referralsEnabled && (
                 <MenuItem to="/referrals" onClick={() => handleItemClick('/referrals')}>Referrals</MenuItem>
@@ -966,7 +980,6 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
                 </>
             )}
             <MenuDivider />
-            <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuButton type="button" onClick={handleSignOutClick}>Sign out</MenuButton>
         </>
     );

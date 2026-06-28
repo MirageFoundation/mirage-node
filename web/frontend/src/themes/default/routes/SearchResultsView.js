@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { css } from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
+import { requireAccount } from "../../../utils/openBrowsing";
 import {
     HiOutlineDocumentText,
     HiOutlineHashtag,
@@ -23,7 +24,6 @@ import {
     ContainerBody,
 } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import {
     FeedViewToggle,
     MemoCompactRow,
@@ -619,6 +619,8 @@ export default function SearchResultsView({ state }) {
         formatDate,
         hasResults,
         isLoggedIn,
+        openBrowsingEnabled,
+        nodeConfigLoaded,
     } = useSearchResults({ state });
 
     const [activeTab, setActiveTab] = useState("posts");
@@ -702,7 +704,9 @@ export default function SearchResultsView({ state }) {
                 if (typeof e.stopPropagation === "function") e.stopPropagation();
             }
             const t = String(topic || "").trim();
-            if (!t || !isLoggedIn || !viewerAddressLower) return;
+            if (!t) return;
+            if (!requireAccount('follow topics')) return;
+            if (!viewerAddressLower) return;
             const lower = t.toLowerCase();
             if (isFollowTopicPending(lower)) return;
             const wasFollowing = isTopicFollowed(t);
@@ -735,8 +739,9 @@ export default function SearchResultsView({ state }) {
                 if (typeof e.stopPropagation === "function") e.stopPropagation();
             }
             const addr = String(userAddr || "").trim().toLowerCase();
-            if (!addr || !isLoggedIn || !viewerAddressLower) return;
-            if (addr === viewerAddressLower) return;
+            if (!addr) return;
+            if (!requireAccount('follow users')) return;
+            if (!viewerAddressLower || addr === viewerAddressLower) return;
             if (isFollowUserPending(addr)) return;
             const wasFollowing = isUserFollowed(addr);
             try {
@@ -954,12 +959,11 @@ export default function SearchResultsView({ state }) {
                         </TabbedContainer>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
         </ContentGrid>
     );
 
-    if (!isLoggedIn) {
+    if (!isLoggedIn && !openBrowsingEnabled && nodeConfigLoaded) {
         return (
             <ContentGrid>
                 <Helmet>

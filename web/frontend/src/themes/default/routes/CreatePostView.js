@@ -10,9 +10,9 @@ import ConfirmDialog from "../components/ConfirmDialog.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
-import FeedRightRail from "../components/FeedRightRail.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
+import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
 import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost";
 
@@ -1148,7 +1148,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         handleTopicChange(e);
     };
 
-    const tierLabel = limits.unlimited ? 'admin' : (limits.willPayFee ? 'paid tier' : 'free tier');
+    const tierLabel = limits.isAdmin ? 'admin' : (limits.willPayFee ? 'paid tier' : 'free tier');
 
     const submitLabel = isSubmitting
         ? submitStatus === 'verifying'
@@ -1490,8 +1490,8 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                 </svg>
                                             </ValidCheck>
                                         )}
-                                        <Counter $warn={!limits.unlimited && getByteLength(titleValue) >= limits.maxTitle}>
-                                            ({tierLabel}) {limits.unlimited ? `${getByteLength(titleValue)} / unlimited` : `${getByteLength(titleValue)} / ${limits.maxTitle}`}
+                                        <Counter $warn={getByteLength(titleValue) >= limits.maxTitle}>
+                                            ({tierLabel}) {`${getByteLength(titleValue)} / ${limits.maxTitle}`}
                                         </Counter>
                                     </InputShell>
                                 </Field>
@@ -1741,6 +1741,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                                         });
                                                                     }}
                                                                 />
+                                                                {activeMedia?.type === 'video' && !activeLoading && <VideoPlayBadge size={52} />}
                                                                 {canPrev && (
                                                                     <NavPrev
                                                                         type="button"
@@ -1898,8 +1899,8 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                         </EditorShell>
                                     </Field>
                                     <ContentCounterRow>
-                                        <ContentCounter $warn={!limits.unlimited && contentValue.length >= limits.maxContent}>
-                                            ({tierLabel}) {limits.unlimited ? `${contentValue.length} / unlimited` : `${contentValue.length} / ${limits.maxContent}`}
+                                        <ContentCounter $warn={contentValue.length >= limits.maxContent}>
+                                            ({tierLabel}) {`${contentValue.length} / ${limits.maxContent}`}
                                         </ContentCounter>
                                     </ContentCounterRow>
                                 </EditorMount>
@@ -1922,7 +1923,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                         </ComposerColumn>
                     </ModernPostFeed>
                 </FeedCol>
-                <FeedRightRail />
             </FeedRailRow>
             <ConfirmDialog
                 open={!!pendingNavHref}

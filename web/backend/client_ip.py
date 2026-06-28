@@ -70,3 +70,17 @@ def hash_client_ip(ip: str | None) -> str | None:
     if not ip:
         return None
     return hashlib.sha256(_CLIENT_HASH_SALT + ip.encode()).hexdigest()[:32]
+
+
+def hash_visitor_id(raw: str | None) -> str | None:
+    """One-way salted hash of a raw analytics visitor id.
+
+    The raw id is the trackable, Mirage-private browser/device key and must
+    never be stored in the clear. Same stable salt as the IP hash; distinct
+    prefix domain-separates the two so an IP hash can never collide with a
+    visitor hash.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    return hashlib.sha256(_CLIENT_HASH_SALT + b"visitor:" + s.encode()).hexdigest()

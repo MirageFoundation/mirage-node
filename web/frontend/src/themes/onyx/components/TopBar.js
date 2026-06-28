@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SearchContainer, SearchRow, SearchInput } from "../Layout";
 import Storage from "../../../utils/Storage";
 import Button from "./Button";
+import GuestThemeMenu from "../../../components/GuestThemeMenu";
 import { formatMirageBalance } from "../../../utils/formatters";
 import useBalance from "../../../logic/useBalance";
 
@@ -480,6 +481,7 @@ function TopBar({ state }) {
                 {showAuthButton && (
                     <Button to="/signup" variant="secondary" size="pill">Sign in / Sign up</Button>
                 )}
+                {!hasPublicKey && <GuestThemeMenu />}
                 {hasPublicKey && (
                     <UserControls>
                         <CreateButtonHideMobile>

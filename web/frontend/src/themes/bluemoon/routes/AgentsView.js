@@ -10,7 +10,7 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBo
 import { useAgents, MOBILE_ACTION_HEIGHT, formatTimeAgo } from "../../../logic/useAgents";
 const SectionSubtitle = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.7rem;
     margin-bottom: 0.75rem;
@@ -23,10 +23,10 @@ const AgentsList = styled.div`
 `;
 const AgentCard = styled.div`
     border: 1px solid ${({
-  theme
+    theme
 }) => theme.colors.border};
     background-color: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
     border-radius: 8px;
     padding: 0.75rem 1rem;
@@ -34,10 +34,10 @@ const AgentCard = styled.div`
 
     &:hover {
         background-color: ${({
-  theme
+    theme
 }) => theme.colors.accent};
         border-color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     }
 `;
@@ -77,26 +77,26 @@ const AgentNameRow = styled.div`
 `;
 const AgentName = styled(Link)`
     color: ${({
-  theme
+    theme
 }) => theme.colors.text};
     text-decoration: none;
     font-weight: 600;
     font-size: 0.85rem;
     white-space: nowrap;
     &:hover { color: ${({
-  theme
+    theme
 }) => theme.colors.link}; }
 `;
 const AgentLastActive = styled.span`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.65rem;
     white-space: nowrap;
 `;
 const AgentBio = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.7rem;
     line-height: 1.4;
@@ -104,7 +104,7 @@ const AgentBio = styled.div`
 `;
 const EmptyMessage = styled.div`
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     font-size: 0.8rem;
     padding: 1rem 0;
@@ -118,14 +118,10 @@ const ErrorMessage = styled.div`
     border: 1px solid rgba(248, 113, 113, 0.25);
     border-radius: 6px;
 `;
-const OrderControls = styled.div`
+const EnforcedTag = styled.span`
     display: inline-flex;
-    gap: 0.25rem;
-    margin-right: 0.5rem;
-`;
-const OrderButton = styled.button`
-    width: 1.6rem;
-    height: 1.6rem;
+    align-items: center;
+    padding: 0.3rem 0.6rem;
     border-radius: 6px;
     border: 1px solid ${({
   theme
@@ -137,6 +133,28 @@ const OrderButton = styled.button`
   theme
 }) => theme.colors.subtleText};
     font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+`;
+const OrderControls = styled.div`
+    display: inline-flex;
+    gap: 0.25rem;
+    margin-right: 0.5rem;
+`;
+const OrderButton = styled.button`
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 6px;
+    border: 1px solid ${({
+    theme
+}) => theme.colors.border};
+    background: ${({
+    theme
+}) => theme.colors.panel};
+    color: ${({
+    theme
+}) => theme.colors.subtleText};
+    font-size: 0.7rem;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -145,13 +163,13 @@ const OrderButton = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({
-  theme
+    theme
 }) => theme.colors.panelAlt};
         color: ${({
-  theme
+    theme
 }) => theme.colors.text};
         border-color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
     }
 
@@ -179,7 +197,7 @@ const Divider = styled.div`
     margin: 0.25rem 0;
     font-size: 0.7rem;
     color: ${({
-  theme
+    theme
 }) => theme.colors.subtleText};
 
     &::before, &::after {
@@ -187,7 +205,7 @@ const Divider = styled.div`
         flex: 1;
         height: 1px;
         background: ${({
-  theme
+    theme
 }) => theme.colors.border};
     }
 `;
@@ -198,119 +216,148 @@ const ActionRow = styled.div`
     margin-top: 0.75rem;
 `;
 export default function AgentsView({
-  state
-}) {
-  const {
-    viewerAddress,
-    loadingAgents,
-    loadingEnabled,
-    errorMessage,
-    isApplyingOrder,
-    hoverAgent,
-    setHoverAgent,
-    isPending,
-    formatStatus,
-    location,
-    isEnabled,
-    handleToggle,
-    hasDraftChanges,
-    moveAgent,
-    applyOrder,
-    displayOrder,
-    sortedAgents,
-    enabledCount
-  } = useAgents({
     state
-  });
-  return <ContentGrid>
-            <Helmet>
-                <title>Agents | Mirage</title>
-            </Helmet>
-            <Sidebar currentPath={location.pathname} state={state} />
-            <div>
-                <TopBar state={state} />
-                <ModernPostFeed>
-                    <MobileHeader />
-                    <TabbedContainer>
-                        <ContainerTab>Agents</ContainerTab>
-                        <ContainerBody>
-                            <SectionSubtitle>
-                                <strong>Mirage has no built-in moderation</strong> — all content lives on-chain unaltered.
+}) {
+    const {
+        viewerAddress,
+        loadingAgents,
+        loadingEnabled,
+        errorMessage,
+        isApplyingOrder,
+        hoverAgent,
+        setHoverAgent,
+        isPending,
+        formatStatus,
+        location,
+        isEnabled,
+        handleToggle,
+        hasDraftChanges,
+        moveAgent,
+        applyOrder,
+        displayOrder,
+        sortedAgents,
+        enabledCount,
+        autoEnabledAgents
+    } = useAgents({
+        state
+    });
+    return <ContentGrid>
+        <Helmet>
+            <title>Agents | Mirage</title>
+        </Helmet>
+        <Sidebar currentPath={location.pathname} state={state} />
+        <div>
+            <TopBar state={state} />
+            <ModernPostFeed>
+                <MobileHeader />
+                <TabbedContainer>
+                    <ContainerTab>Agents</ContainerTab>
+                    <ContainerBody>
+                        <SectionSubtitle>
+                            <strong>Mirage has no built-in moderation</strong> — all content lives on-chain unaltered.
+                        </SectionSubtitle>
+                        <SectionSubtitle>
+                            <strong>Anyone</strong> can create an agent that filters spam, fixes tags, translates posts, or curates however they see fit. You choose which ones to trust, and your feed reflects their work while the originals stay untouched.
+                        </SectionSubtitle>
+                        <SectionSubtitle>
+                            The result is an <em>open marketplace of moderation</em> where quality rises through competition, not central authority.
+                        </SectionSubtitle>
+                        {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
+                        {autoEnabledAgents.length > 0 && <>
+                            <Divider>enforced by this server</Divider>
+                            <SectionSubtitle style={{
+                                marginBottom: '0.25rem'
+                            }}>
+                                These agents are enabled for everyone on this server. You can't disable them.
                             </SectionSubtitle>
-                            <SectionSubtitle>
-                                <strong>Anyone</strong> can create an agent that filters spam, fixes tags, translates posts, or curates however they see fit. You choose which ones to trust, and your feed reflects their work while the originals stay untouched.
-                            </SectionSubtitle>
-                            <SectionSubtitle>
-                                The result is an <em>open marketplace of moderation</em> where quality rises through competition, not central authority.
-                            </SectionSubtitle>
-                            {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
-                            {loadingAgents || loadingEnabled ? <EmptyMessage>Loading agents...</EmptyMessage> : sortedAgents.length === 0 ? <EmptyMessage>No agents available yet.</EmptyMessage> : <AgentsList>
-                                    {sortedAgents.map((agent, idx) => {
-                const addrLower = (agent.address || '').toLowerCase();
-                const enabled = isEnabled(agent.address);
-                const pending = isPending(addrLower);
-                const displayName = agent.username || (agent.address ? `${agent.address.slice(0, 12)}...` : 'Unknown');
-                const orderIdx = displayOrder.indexOf(addrLower);
-                const canMoveUp = enabled && orderIdx > 0;
-                const canMoveDown = enabled && orderIdx >= 0 && orderIdx < displayOrder.length - 1;
-                const showEnabledLabel = idx === 0 && enabledCount > 0;
-                const showAvailableLabel = idx === enabledCount && enabledCount > 0;
-                return <React.Fragment key={agent.address}>
-                                                {showEnabledLabel && <>
-                                                    <Divider>enabled agents</Divider>
-                                                    <SectionSubtitle style={{
-                      marginBottom: '0.25rem'
-                    }}>
-                                                        Order matters. When two agents edit the same field, the one higher in your list wins.
-                                                    </SectionSubtitle>
-                                                </>}
-                                                {showAvailableLabel && <>
-                                                    {hasDraftChanges && <ActionRow>
-                                                            <Button variant="primary" size="sm" disabled={isApplyingOrder || !viewerAddress} loading={isApplyingOrder} onClick={applyOrder}>
-                                                                Apply order
-                                                            </Button>
-                                                        </ActionRow>}
-                                                    <Divider>available agents</Divider>
-                                                </>}
-                                                <AgentCard>
-                                                    <AgentRow>
-                                                        <AgentInfo>
-                                                            <AgentNameRow>
-                                                                <AgentName to={`/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`}>
-                                                                    @{displayName}
-                                                                </AgentName>
-                                                                <AgentLastActive>
-                                                                    {agent.last_active ? `(active ${formatTimeAgo(agent.last_active)})` : '(no activity yet)'}
-                                                                </AgentLastActive>
-                                                            </AgentNameRow>
-                                                            {agent.biography && <AgentBio>{agent.biography}</AgentBio>}
-                                                        </AgentInfo>
-                                                        <AgentActions>
-                                                            {enabled && <OrderControls>
-                                                                    <OrderButton type="button" onClick={() => moveAgent(addrLower, -1)} disabled={!canMoveUp || pending || isApplyingOrder} aria-label="Move agent up">
-                                                                        ↑
-                                                                    </OrderButton>
-                                                                    <OrderButton type="button" onClick={() => moveAgent(addrLower, 1)} disabled={!canMoveDown || pending || isApplyingOrder} aria-label="Move agent down">
-                                                                        ↓
-                                                                    </OrderButton>
-                                                                </OrderControls>}
-                                                            <AgentActionButton variant={enabled && hoverAgent === addrLower ? 'primaryDanger' : enabled ? 'subtle' : 'primary'} size="sm" minWidth="8.0rem" disabled={pending || !viewerAddress || loadingEnabled} loading={pending} onMouseEnter={() => setHoverAgent(addrLower)} onMouseLeave={() => setHoverAgent(null)} onClick={() => handleToggle(agent.address)}>
-                                                                {pending ? formatStatus(addrLower) : enabled ? hoverAgent === addrLower ? 'Disable' : 'Enabled' : 'Enable'}
-                                                            </AgentActionButton>
-                                                        </AgentActions>
-                                                    </AgentRow>
-                                                </AgentCard>
-                                            </React.Fragment>;
-              })}
-                                </AgentsList>}
-                            {hasDraftChanges && enabledCount === sortedAgents.length && <ActionRow>
-                                    <Button variant="primary" size="sm" disabled={isApplyingOrder || !viewerAddress} loading={isApplyingOrder} onClick={applyOrder}>
-                                        Apply order
-                                    </Button>
-                                </ActionRow>}
-                        </ContainerBody>
-                    </TabbedContainer>
-                </ModernPostFeed>
-            </div>
-        </ContentGrid>;
+                            <AgentsList>
+                                {autoEnabledAgents.map(agent => <AgentCard key={`enforced-${agent.address}`}>
+                                    <AgentRow>
+                                        <AgentInfo>
+                                            <AgentNameRow>
+                                                <AgentName to={`/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`}>
+                                                    {agent.displayName}
+                                                </AgentName>
+                                                <AgentLastActive>
+                                                    {agent.last_active ? `(active ${formatTimeAgo(agent.last_active)})` : '(no activity yet)'}
+                                                </AgentLastActive>
+                                            </AgentNameRow>
+                                            {agent.biography && <AgentBio>{agent.biography}</AgentBio>}
+                                        </AgentInfo>
+                                        <AgentActions>
+                                            <EnforcedTag title="Enabled for everyone on this server">Enforced</EnforcedTag>
+                                        </AgentActions>
+                                    </AgentRow>
+                                </AgentCard>)}
+                            </AgentsList>
+                        </>}
+                        {loadingAgents || loadingEnabled ? <EmptyMessage>Loading agents...</EmptyMessage> : sortedAgents.length === 0 ? (autoEnabledAgents.length === 0 ? <EmptyMessage>No agents available yet.</EmptyMessage> : null) : <AgentsList>
+                            {sortedAgents.map((agent, idx) => {
+                                const addrLower = (agent.address || '').toLowerCase();
+                                const enabled = isEnabled(agent.address);
+                                const pending = isPending(addrLower);
+                                const displayName = agent.username || (agent.address ? `${agent.address.slice(0, 12)}...` : 'Unknown');
+                                const orderIdx = displayOrder.indexOf(addrLower);
+                                const canMoveUp = enabled && orderIdx > 0;
+                                const canMoveDown = enabled && orderIdx >= 0 && orderIdx < displayOrder.length - 1;
+                                const showEnabledLabel = idx === 0 && enabledCount > 0;
+                                const showAvailableLabel = idx === enabledCount && enabledCount > 0;
+                                return <React.Fragment key={agent.address}>
+                                    {showEnabledLabel && <>
+                                        <Divider>enabled agents</Divider>
+                                        <SectionSubtitle style={{
+                                            marginBottom: '0.25rem'
+                                        }}>
+                                            Order matters. When two agents edit the same field, the one higher in your list wins.
+                                        </SectionSubtitle>
+                                    </>}
+                                    {showAvailableLabel && <>
+                                        {hasDraftChanges && <ActionRow>
+                                            <Button variant="primary" size="sm" disabled={isApplyingOrder || !viewerAddress} loading={isApplyingOrder} onClick={applyOrder}>
+                                                Apply order
+                                            </Button>
+                                        </ActionRow>}
+                                        <Divider>available agents</Divider>
+                                    </>}
+                                    <AgentCard>
+                                        <AgentRow>
+                                            <AgentInfo>
+                                                <AgentNameRow>
+                                                    <AgentName to={`/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`}>
+                                                        @{displayName}
+                                                    </AgentName>
+                                                    <AgentLastActive>
+                                                        {agent.last_active ? `(active ${formatTimeAgo(agent.last_active)})` : '(no activity yet)'}
+                                                    </AgentLastActive>
+                                                </AgentNameRow>
+                                                {agent.biography && <AgentBio>{agent.biography}</AgentBio>}
+                                            </AgentInfo>
+                                            <AgentActions>
+                                                {enabled && <OrderControls>
+                                                    <OrderButton type="button" onClick={() => moveAgent(addrLower, -1)} disabled={!canMoveUp || pending || isApplyingOrder} aria-label="Move agent up">
+                                                        ↑
+                                                    </OrderButton>
+                                                    <OrderButton type="button" onClick={() => moveAgent(addrLower, 1)} disabled={!canMoveDown || pending || isApplyingOrder} aria-label="Move agent down">
+                                                        ↓
+                                                    </OrderButton>
+                                                </OrderControls>}
+                                                <AgentActionButton variant={enabled && hoverAgent === addrLower ? 'primaryDanger' : enabled ? 'subtle' : 'primary'} size="sm" minWidth="8.0rem" disabled={pending || !viewerAddress || loadingEnabled} loading={pending} onMouseEnter={() => setHoverAgent(addrLower)} onMouseLeave={() => setHoverAgent(null)} onClick={() => handleToggle(agent.address)}>
+                                                    {pending ? formatStatus(addrLower) : enabled ? hoverAgent === addrLower ? 'Disable' : 'Enabled' : 'Enable'}
+                                                </AgentActionButton>
+                                            </AgentActions>
+                                        </AgentRow>
+                                    </AgentCard>
+                                </React.Fragment>;
+                            })}
+                        </AgentsList>}
+                        {hasDraftChanges && enabledCount === sortedAgents.length && <ActionRow>
+                            <Button variant="primary" size="sm" disabled={isApplyingOrder || !viewerAddress} loading={isApplyingOrder} onClick={applyOrder}>
+                                Apply order
+                            </Button>
+                        </ActionRow>}
+                    </ContainerBody>
+                </TabbedContainer>
+            </ModernPostFeed>
+        </div>
+    </ContentGrid>;
 }

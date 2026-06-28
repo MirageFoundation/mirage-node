@@ -64,6 +64,12 @@ module.exports = function override(config) {
                 },
             ],
         },
+        // Allow extensionless ESM imports (e.g. 'process/browser') that webpack 5
+        // otherwise rejects under fullySpecified resolution.
+        {
+            test: /\.m?js$/,
+            resolve: { fullySpecified: false },
+        },
     ]);
     // Ignore uvu (test runner) that gets pulled in by remark-gfm dependencies
     // Replace process/browser imports to use the fallback resolution

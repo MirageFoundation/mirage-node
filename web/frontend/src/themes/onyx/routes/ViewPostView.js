@@ -13,8 +13,10 @@ import { ContentGrid, ModernPostFeed } from "../Layout";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
+import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
+import { getVideoThumbnailUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -959,6 +961,8 @@ function ViewPostView({
         location,
         navigate,
         questsEnabled,
+        openBrowsingEnabled,
+        nodeConfigLoaded,
         isMobile,
         goBackToFeed,
         viewerAddress,
@@ -1786,6 +1790,13 @@ function ViewPostView({
         const userLevel = Number(Storage.load('user_level', '0')) || 0;
         const isAdmin = hasValidAccount && userLevel >= 100;
         const isOpen = openMenuId === post.post_id;
+        const mediaDownloads = getDownloadableMedia((() => {
+            if (Array.isArray(post.media) && post.media.length > 0) return post.media;
+            const raw = String(post.content || '');
+            const idx = raw.indexOf('\n');
+            const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+            return /^https?:\/\//i.test(first) ? [first] : [];
+        })());
         const authorAddr = String(post.user_id || '').trim().toLowerCase();
         const isFollowingThisAuthor = isFollowingAuthor(authorAddr);
         const userSuspendedStatus = post.user_id ? userSuspendedMap[post.user_id] : undefined;
@@ -1818,6 +1829,11 @@ function ViewPostView({
                 top: menuPosition.top,
                 left: menuPosition.left
             }} onClick={e => e.stopPropagation()}>
+                {mediaDownloads.map((d, i) => (
+                    <MenuItem key={`dl-${i}`} onClick={() => { setOpenMenuId(null); triggerMediaDownload(d); }}>
+                        {mediaDownloadLabel(d.kind, i, mediaDownloads.length)}
+                    </MenuItem>
+                ))}
                 {isOwnPost && <>
                     <MenuItem onClick={() => {
                         setOpenMenuId(null);
@@ -1932,21 +1948,6 @@ function ViewPostView({
             </ActionButton>
         </MetaRow>;
     };
-    const getVideoThumbnailUrl = url => {
-        try {
-            if (!url) return null;
-            const u = new URL(url);
-            const host = u.hostname.toLowerCase();
-            const isStream = host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
-            if (!isStream) return null;
-            const parts = u.pathname.split('/').filter(Boolean);
-            const uid = parts[0];
-            if (!uid) return null;
-            return `${u.origin}/${uid}/thumbnails/thumbnail.jpg`;
-        } catch (_) {
-            return null;
-        }
-    };
     const displayReplyBox = (post, forMobileOverlay = false) => {
         if (!state.posts[post.post_id]?.replyOpen) return <div></div>;
         const isEdit = state.posts[post.post_id]?.replyMode === 'edit';
@@ -2048,6 +2049,7 @@ function ViewPostView({
                                     });
                                 }} />
                                 {replyThumbLoading[post.post_id] && <MediaSpinner />}
+                                {replyAttachedType[post.post_id] === 'video' && !replyThumbLoading[post.post_id] && <VideoPlayBadge size={26} />}
                                 <MediaRemoveButton type="button" tabIndex={-1} disabled={isBusy} onClick={() => {
                                     if (isBusy) return;
                                     setReplyAttachedType(prev => {
@@ -2379,8 +2381,9 @@ function ViewPostView({
     // Check if user is logged in
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
-    // Redirect non-logged-in users to home (shows welcome banner)
-    if (!isLoggedIn) {
+    // Redirect non-logged-in users to home (shows welcome banner), unless open
+    // browsing is on, in which case guests may read the post.
+    if (!isLoggedIn && !openBrowsingEnabled && nodeConfigLoaded) {
         return <Navigate to="/home" replace />;
     }
     if (root) {
