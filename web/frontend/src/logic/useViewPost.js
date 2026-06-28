@@ -2195,6 +2195,83 @@ export function useViewPost({
         if (postId) markPostOpened(postId);
     }, [postId]);
 
+    useEffect(() => {
+        if (!postId) return;
+        const normalizedPostId = String(postId).toLowerCase();
+        let cancelled = false;
+        const viewerAddress = Storage.load("publicKey", "");
+        const applyIndexedPost = (rootPost, childPosts) => {
+            if (cancelled || !rootPost || !rootPost.post_id) return;
+            const rootId = String(rootPost.post_id).toLowerCase();
+            if (rootId !== normalizedPostId) return;
+            Storage.removeOptimisticPost(normalizedPostId);
+            setRoot(rootPost);
+            setChildren(Array.isArray(childPosts) ? childPosts : []);
+            setError(null);
+            setLoading(false);
+        };
+        const handleIndexed = e => {
+            const detail = e?.detail || {};
+            const eventPostId = String(detail.postId || detail.root?.post_id || '').toLowerCase();
+            if (eventPostId !== normalizedPostId) return;
+            applyIndexedPost(detail.root, detail.children || []);
+        };
+        const handleRejected = e => {
+            const detail = e?.detail || {};
+            const eventPostId = String(detail.postId || '').toLowerCase();
+            if (eventPostId !== normalizedPostId) return;
+            Storage.removeOptimisticPost(normalizedPostId);
+            setChildren([]);
+            setLoading(false);
+            setError(`Post transaction rejected: ${detail.error || 'unknown error'}`);
+        };
+        window.addEventListener('postCreatedIndexed', handleIndexed);
+        window.addEventListener('postCreatedRejected', handleRejected);
+
+        const optimistic = Storage.getOptimisticPost(normalizedPostId);
+        if (optimistic) {
+            console.debug('[ViewPostView] Rendering optimistic post while indexer catches up', { postId: normalizedPostId });
+            setRoot(optimistic);
+            setChildren([]);
+            setError(null);
+            setLoading(false);
+
+            const retryDelays = [800, 1200, 2000, 3000, 5000, 8000];
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            (async () => {
+                for (let attempt = 0; attempt < retryDelays.length + 1; attempt += 1) {
+                    if (cancelled) return;
+                    if (attempt > 0) {
+                        await sleep(retryDelays[attempt - 1]);
+                        if (cancelled) return;
+                    }
+                    try {
+                        const data = await Api.get('get_comments', {
+                            post_id: normalizedPostId,
+                            address: viewerAddress
+                        });
+                        if (data && data.root && data.root.post_id) {
+                            applyIndexedPost(data.root, data.children || []);
+                            return;
+                        }
+                    } catch (err) {
+                        console.debug('[ViewPostView] Optimistic post not indexed yet', {
+                            postId: normalizedPostId,
+                            attempt: attempt + 1,
+                            error: err?.message || String(err)
+                        });
+                    }
+                }
+            })();
+        }
+
+        return () => {
+            cancelled = true;
+            window.removeEventListener('postCreatedIndexed', handleIndexed);
+            window.removeEventListener('postCreatedRejected', handleRejected);
+        };
+    }, [postId]);
+
     // Detect if loaded post is a comment (has non-empty target)
     const isViewingComment = React.useMemo(() => {
         if (!root) return false;

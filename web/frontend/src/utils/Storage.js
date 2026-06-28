@@ -192,6 +192,60 @@ class Storage {
         }
         return null;
     }
+
+    static setOptimisticPost(post, maxEntries = 20) {
+        try {
+            const postId = String(post?.post_id || '').trim().toLowerCase();
+            if (!postId) return;
+            const posts = this.load('optimistic_posts', {}) || {};
+            posts[postId] = {
+                ...post,
+                post_id: postId,
+                _optimistic: true,
+                optimistic_cached_at_ms: Date.now(),
+            };
+            const entries = Object.entries(posts).sort((a, b) => {
+                const av = Number(a[1]?.optimistic_cached_at_ms || 0);
+                const bv = Number(b[1]?.optimistic_cached_at_ms || 0);
+                return av - bv;
+            });
+            while (entries.length > maxEntries) {
+                const [oldestId] = entries.shift();
+                delete posts[oldestId];
+            }
+            this.save('optimistic_posts', posts);
+        } catch (_) { /* noop */ }
+    }
+
+    static getOptimisticPost(postId, maxAgeMs = 10 * 60 * 1000) {
+        try {
+            const normalized = String(postId || '').trim().toLowerCase();
+            if (!normalized) return null;
+            const posts = this.load('optimistic_posts', {}) || {};
+            const post = posts[normalized];
+            if (!post) return null;
+            const cachedAt = Number(post.optimistic_cached_at_ms || 0);
+            if (!Number.isFinite(cachedAt) || cachedAt <= 0 || Date.now() - cachedAt > maxAgeMs) {
+                delete posts[normalized];
+                this.save('optimistic_posts', posts);
+                return null;
+            }
+            return post;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    static removeOptimisticPost(postId) {
+        try {
+            const normalized = String(postId || '').trim().toLowerCase();
+            if (!normalized) return;
+            const posts = this.load('optimistic_posts', {}) || {};
+            if (!Object.prototype.hasOwnProperty.call(posts, normalized)) return;
+            delete posts[normalized];
+            this.save('optimistic_posts', posts);
+        } catch (_) { /* noop */ }
+    }
 }
 
 export default Storage;

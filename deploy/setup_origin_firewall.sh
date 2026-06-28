@@ -94,8 +94,8 @@ table inet ${TABLE} {
     }
 
     chain input {
-        # Sits alongside UFW. We ONLY make a decision for tcp/443; everything
-        # else falls through (return) to UFW's chains.
+        # Guards :443 that terminates on the host itself. Sits alongside UFW: we
+        # ONLY make a decision for tcp/443; everything else falls through to UFW.
         type filter hook input priority -1; policy accept;
 
         # Allow established/related and loopback so we never break local/return traffic.
@@ -103,6 +103,22 @@ table inet ${TABLE} {
         iif "lo" accept
 
         # Only Bunny may reach :443.
+        tcp dport 443 ip  saddr @bunny4 accept
+        tcp dport 443 ip6 saddr @bunny6 accept
+        tcp dport 443 drop
+    }
+
+    chain forward {
+        # The app runs in a Docker container with a published port, so external
+        # traffic to :443 is DNAT'd to the container and traverses the *forward*
+        # path (Docker's DOCKER-USER/FORWARD rules), never 'input'. This nft hook
+        # at priority -1 runs before Docker's iptables FORWARD (priority 0), so it
+        # is what actually blocks direct-to-origin hits that bypass Bunny.
+        type filter hook forward priority -1; policy accept;
+
+        ct state established,related accept
+
+        # Only Bunny may reach the container's :443.
         tcp dport 443 ip  saddr @bunny4 accept
         tcp dport 443 ip6 saddr @bunny6 accept
         tcp dport 443 drop
