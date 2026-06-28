@@ -36,10 +36,14 @@ script verifies — is:
   6. The chain is live after the rolling restart (indexer freshness).
   7. The shipped frontend reports the release version.
 
-Config is read from the process environment (os.environ) because that is exactly
-what the backend runs with: deploy.sh starts the container with --env-file for
-each ~/.mirage/env/*.env, and `docker exec` inherits that same environment. So a
-value here is the value the live backend sees, not just what's on disk.
+Config is read from the RUNNING backend process's environment (gunicorn, via
+/proc/<pid>/environ) because that is the ground truth for what the app actually
+serves with. We deliberately do NOT use os.environ: a `docker exec` inherits the
+container's create-time --env-file, which misses any value a migration changed on
+this same deploy. We also do NOT read the env files: a file can be ahead of the
+running process when a restart did not pick the change up — which is exactly the
+class of failure this check must catch (file says fail-closed, process still
+serving). If the backend process isn't found, the config checks fail hard.
 
 Not verified here (no point-in-time deploy signature):
   - The origin nftables firewall (deploy/setup_origin_firewall.sh) and Bunny
@@ -122,14 +126,58 @@ def section(title: str) -> None:
 
 
 def require_env(key: str) -> str:
+    # DB URLs for THIS script's own connections come from os.environ (create-time
+    # --env-file), which is correct and present — they are not migration-managed.
     val = os.environ.get(key, "").strip()
     if not val:
         raise RuntimeError(f"{key} not set")
     return val
 
 
+_BACKEND_ENV = None
+_BACKEND_ENV_LOADED = False
+
+
+def _load_backend_env():
+    """Read the environment of the running backend (gunicorn) from /proc — the
+    ground truth for what the app serves with. Returns a dict, or None if no
+    gunicorn process is running."""
+    import glob
+
+    for proc in glob.glob("/proc/[0-9]*"):
+        try:
+            cmd = (Path(proc) / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+        except (OSError, ValueError):
+            continue
+        if "gunicorn" not in cmd:
+            continue
+        try:
+            raw = (Path(proc) / "environ").read_bytes()
+        except (OSError, ValueError):
+            continue
+        env = {}
+        for kv in raw.split(b"\x00"):
+            if b"=" in kv:
+                k, _, v = kv.partition(b"=")
+                env[k.decode("utf-8", "ignore")] = v.decode("utf-8", "ignore")
+        return env
+    return None
+
+
+def backend_env():
+    """Cached accessor for the running backend's environment (or None)."""
+    global _BACKEND_ENV, _BACKEND_ENV_LOADED
+    if not _BACKEND_ENV_LOADED:
+        _BACKEND_ENV = _load_backend_env()
+        _BACKEND_ENV_LOADED = True
+    return _BACKEND_ENV
+
+
 def env_value(key: str) -> str:
-    return os.environ.get(key, "").strip()
+    env = backend_env()
+    if env is None:
+        return ""
+    return env.get(key, "").strip()
 
 
 # ─── v1.29.0 checks ───────────────────────────────────────────────────────────
@@ -142,6 +190,9 @@ def check_media_uploads_gate() -> None:
     settings.py disables uploads only when the value is literally "false", so we
     derive the *effective* state the same way and compare it to what this domain
     should be (true behind Bunny, false everywhere else)."""
+    if backend_env() is None:
+        fail("backend (gunicorn) process not found; cannot read runtime env")
+        return
     domain = env_value("DOMAIN").lower()
     behind_edge = domain in UPLOAD_DOMAINS
     expected = "true" if behind_edge else "false"
@@ -166,6 +217,9 @@ def check_video_caps() -> None:
     """30-minute video caps. The migration only bumps nodes still on the old
     default, so a deliberate operator override is a warning (not a failure); the
     OLD default or a missing value means the cap was not applied (failure)."""
+    if backend_env() is None:
+        fail("backend (gunicorn) process not found; cannot read runtime env")
+        return
     for key, old_default, new_value in VIDEO_CAPS:
         val = env_value(key)
         if not val:
@@ -181,6 +235,9 @@ def check_video_caps() -> None:
 def check_antispam_agent() -> None:
     """AntiSpamBot is a default agent on mirage.talk ONLY. On every other node
     this is a no-op, so we skip with an informational note."""
+    if backend_env() is None:
+        fail("backend (gunicorn) process not found; cannot read runtime env")
+        return
     domain = env_value("DOMAIN").lower()
     if domain != ANTISPAM_DOMAIN:
         info(f"AntiSpamBot check skipped (domain={domain or '(none)'}; only applies to {ANTISPAM_DOMAIN})")

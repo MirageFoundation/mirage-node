@@ -486,9 +486,23 @@ python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/c
 python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/app.toml" "$NODE_HOME/config/app.toml"
 python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/client.toml" "$NODE_HOME/config/client.toml"
 
-# Sync critical env vars to the tmux session (the session was created before
-# migrations may have updated env files, so new windows need the latest values)
+# Sync env vars into the tmux session BEFORE the service windows
+# (node/indexer/backend) are created below. The session was created earlier (so
+# Caddy/Postgres could come up for ACME + schema init), which means it captured
+# the create-time env from docker --env-file — i.e. PRE-migration values. Without
+# re-syncing, any value a migration changed (MEDIA_UPLOADS_ENABLED, video caps,
+# quests, open-browsing, AUTO_ENABLED_AGENTS, …) would be silently ignored until a
+# second deploy, leaving e.g. uploads enabled on a node that should fail closed.
+# Always-required infra vars first (these may be generated, not file-backed):
 for _evar in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL CLIENT_HASH_SALT; do
+  if [ -n "${!_evar:-}" ]; then
+    tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
+  fi
+done
+# Then EVERY var defined in the env files, using the current (post-migration,
+# post-reload) shell value so migration changes and DB/role URL rewrites both
+# reach the service windows on the first deploy.
+for _evar in $(grep -hoE '^[A-Za-z_][A-Za-z0-9_]*=' "${ENV_DIR}"/*.env 2>/dev/null | sed 's/=$//' | sort -u); do
   if [ -n "${!_evar:-}" ]; then
     tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
   fi
