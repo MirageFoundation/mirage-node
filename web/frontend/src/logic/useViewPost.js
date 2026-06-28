@@ -135,6 +135,13 @@ export function useViewPost({
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
         window.addEventListener('nodeConfigUpdated', handler);
+        // Cold-load race: /api/bootstrap can dispatch 'nodeConfigUpdated' before
+        // this listener attaches (passive effects are deferred while the bundle
+        // parses). If the config already landed in storage, force a re-read so
+        // openBrowsingEnabled doesn't stay stuck false on a first visit.
+        try {
+            if (localStorage.getItem('nodeConfig') != null) setNodeConfigTick(prev => prev + 1);
+        } catch (_) { }
         return () => window.removeEventListener('nodeConfigUpdated', handler);
     }, []);
     const nodeConfig = useMemo(() => {

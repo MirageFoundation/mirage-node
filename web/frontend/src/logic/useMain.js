@@ -581,6 +581,16 @@ export function useMain({
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
         window.addEventListener('nodeConfigUpdated', handler);
+        // Cold-load race: on a first visit, /api/bootstrap can resolve and
+        // dispatch 'nodeConfigUpdated' before this listener attaches (passive
+        // effects are deferred while the main thread parses the ~1MB bundle).
+        // If the config already landed in storage, force a re-read here so we
+        // don't stay stuck on the null we read at first render — otherwise
+        // openBrowsingEnabled never flips true and the gated feed/topics
+        // fetches never fire (the feed renders an endless skeleton).
+        try {
+            if (localStorage.getItem('nodeConfig') != null) setNodeConfigTick(prev => prev + 1);
+        } catch (_) { }
         return () => window.removeEventListener('nodeConfigUpdated', handler);
     }, []);
     const nodeConfig = useMemo(() => {
