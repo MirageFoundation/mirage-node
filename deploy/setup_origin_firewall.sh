@@ -14,8 +14,10 @@
 #   - tcp/80   : left to UFW (open) so Caddy can still answer ACME HTTP-01 for the
 #                origin subdomain's TLS cert (origin.<domain> still resolves here).
 #   - 22 / 26656 / everything else : untouched (UFW still governs them).
-#   - Installs a daily systemd timer that re-fetches Bunny ranges and reloads the
-#     set, because Bunny's edge IP list changes over time.
+#   - Installs a systemd service (runs at boot — nft rules are NOT persistent
+#     across reboots, so without this a reboot would silently reopen :443) plus a
+#     daily timer, both re-fetching Bunny's ranges and rebuilding the set, because
+#     Bunny's edge IP list changes over time.
 #
 # Bunny does NOT publish CIDR blocks, only ~1000 individual edge IPs, so UFW
 # (one rule per IP) is impractical; an nftables named set handles this cleanly.
@@ -64,7 +66,7 @@ fetch_ipv6() { curl -fsS --max-time 20 "$BUNNY_IPV6_URL" | jq -r '.[]' | grep -E
 # Join lines into a comma-separated nft set element list.
 join_set() { paste -sd, - ; }
 
-apply() {
+build_table() {
     say "Fetching Bunny edge IPs"
     local v4 v6 n4 n6
     v4="$(fetch_ipv4)"; v6="$(fetch_ipv6)"
@@ -78,9 +80,12 @@ apply() {
     elems6="$(printf '%s\n' "$v6" | join_set)"
 
     say "Installing nftables table '$TABLE' (guards tcp/443)"
-    # Build the whole table atomically. Replacing the table is the clean way to
-    # make this idempotent (re-running fully redefines it).
+    # Build the whole table atomically: create-if-missing, delete, then recreate
+    # fresh in a single transaction. This fully replaces any prior table (no
+    # duplicate chains/rules) with zero open window during the swap.
     nft -f - <<NFT
+table inet ${TABLE} { }
+delete table inet ${TABLE}
 table inet ${TABLE} {
     set bunny4 {
         type ipv4_addr
@@ -126,7 +131,10 @@ table inet ${TABLE} {
 }
 NFT
     echo "    table installed."
+}
 
+apply() {
+    build_table
     install_self_and_timer
     say "Done. :443 is now restricted to Bunny edge IPs."
     echo "    Verify Bunny->origin still serves the site, then check: $0 --status"
@@ -134,21 +142,10 @@ NFT
 }
 
 refresh() {
-    # Re-fetch and atomically swap the set contents only (table must exist).
-    nft list table inet "${TABLE}" >/dev/null 2>&1 || die "table ${TABLE} not present; run --apply first"
-    local v4 v6 n4 elems4 elems6
-    v4="$(fetch_ipv4)"; v6="$(fetch_ipv6)"
-    n4="$(printf '%s\n' "$v4" | grep -c . || true)"
-    [[ "$n4" -gt 0 ]] || { echo "WARN: fetched 0 Bunny IPv4; keeping existing set" >&2; exit 0; }
-    elems4="$(printf '%s\n' "$v4" | join_set)"
-    elems6="$(printf '%s\n' "$v6" | join_set)"
-    nft -f - <<NFT
-flush set inet ${TABLE} bunny4
-flush set inet ${TABLE} bunny6
-add element inet ${TABLE} bunny4 { ${elems4} }
-${elems6:+add element inet ${TABLE} bunny6 { ${elems6} }}
-NFT
-    echo "refreshed Bunny set ($n4 IPv4)"
+    # Full atomic rebuild of the table. Used by the systemd service at boot (nft
+    # rules don't survive reboots) and by the daily timer (Bunny's edge IP list
+    # changes over time). Robust whether or not the table already exists.
+    build_table
 }
 
 install_self_and_timer() {
@@ -156,13 +153,16 @@ install_self_and_timer() {
     install -m 0755 "$0" "$SELF_PATH"
     cat > /etc/systemd/system/mirage-origin-fw.service <<UNIT
 [Unit]
-Description=Refresh Bunny edge IP allowlist for origin :443 firewall
+Description=(Re)build Bunny edge IP allowlist for origin :443 firewall
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 ExecStart=${SELF_PATH} --refresh
+
+[Install]
+WantedBy=multi-user.target
 UNIT
     cat > /etc/systemd/system/mirage-origin-fw.timer <<UNIT
 [Unit]
@@ -177,8 +177,11 @@ Persistent=true
 WantedBy=timers.target
 UNIT
     systemctl daemon-reload
+    # Service enabled (runs at boot to rebuild the table, since nft isn't
+    # persistent); timer enabled for the daily IP refresh.
+    systemctl enable mirage-origin-fw.service >/dev/null
     systemctl enable --now mirage-origin-fw.timer >/dev/null
-    echo "    mirage-origin-fw.timer enabled."
+    echo "    mirage-origin-fw.service (boot) + mirage-origin-fw.timer (daily) enabled."
 }
 
 status() {
@@ -199,6 +202,7 @@ unlock() {
     say "Removing origin lockdown"
     nft delete table inet "${TABLE}" 2>/dev/null && echo "    table removed" || echo "    table not present"
     systemctl disable --now mirage-origin-fw.timer >/dev/null 2>&1 || true
+    systemctl disable mirage-origin-fw.service >/dev/null 2>&1 || true
     rm -f /etc/systemd/system/mirage-origin-fw.service /etc/systemd/system/mirage-origin-fw.timer "$SELF_PATH"
     systemctl daemon-reload || true
     echo "    :443 is governed by UFW again (open per UFW rules)."
