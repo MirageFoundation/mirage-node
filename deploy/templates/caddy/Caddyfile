@@ -1,15 +1,21 @@
 {
 	order rate_limit before basicauth
 	servers {
-		trusted_proxies cloudflare {
-			interval 12h
-			timeout 15s
-		}
-		client_ip_headers CF-Connecting-IP
+		# Real client IP from the edge in front of this node. The trusted-proxy
+		# ranges + header are generated at startup into trusted-proxies.caddy by
+		# deploy/refresh_bunny_ips.py based on EDGE_PROVIDER (cloudflare | bunny |
+		# both), so {client_ip} stays correct whether this node is behind
+		# Cloudflare or Bunny. Default (cloudflare) preserves prior behavior.
+		import trusted-proxies.caddy
 	}
 }
 
-${DOMAIN:-:80} {
+# Site address. ORIGIN_DOMAIN (e.g. origin.mirage.vote) is added at cutover so
+# Caddy serves + auto-renews TLS for the origin hostname Bunny connects to. That
+# hostname keeps pointing at this server's IP (HTTP-01 keeps working) even after
+# the public domain's DNS moves to Bunny. Empty for non-edge nodes (renders as a
+# harmless trailing token). Both names share the same handlers below.
+${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 	encode zstd gzip
 
 	log {
@@ -72,6 +78,11 @@ ${DOMAIN:-:80} {
 		path /api/*
 	}
 	handle @api {
+		# Dynamic API responses must never be cached by an edge/CDN (Bunny). Edge
+		# Rules also bypass cache for /api/*, but set it at origin too (defense in
+		# depth). The "?" only sets a default, so endpoints that intentionally
+		# cache (e.g. the image proxy: public, max-age=600) keep their own value.
+		header ?Cache-Control "no-store"
 		rate_limit {
 			zone api_limit {
 				key {client_ip}
@@ -100,6 +111,7 @@ ${DOMAIN:-:80} {
 
 	# Chain RPC (CometBFT) - includes WebSocket at /chain/rpc/websocket
 	handle /chain/rpc/* {
+		header ?Cache-Control "no-store"
 		rate_limit {
 			zone chain_rpc_limit {
 				key {client_ip}
@@ -113,6 +125,7 @@ ${DOMAIN:-:80} {
 
 	# Chain REST (Cosmos SDK)
 	handle /chain/rest/* {
+		header ?Cache-Control "no-store"
 		rate_limit {
 			zone chain_rest_limit {
 				key {client_ip}

@@ -54,6 +54,13 @@ QUESTS_ENABLED = require_bool_env("QUESTS_ENABLED")
 QUESTS_PAYOUTS_ENABLED = require_bool_env("QUESTS_PAYOUTS_ENABLED")
 PUSH_NOTIFICATIONS_ENABLED = require_bool_env("PUSH_NOTIFICATIONS_ENABLED")
 
+# Public media uploads. Must only be true where a scanning edge (Bunny Shield
+# upload scanning) fronts uploads, so no unscanned media can reach the node.
+# Default-true preserves existing behavior; only an explicit "false" disables it
+# (set per-node by migration on any node not behind a scanning edge). When false,
+# /api/upload_media and the legacy /api/get_upload_url return 403.
+MEDIA_UPLOADS_ENABLED = os.environ.get("MEDIA_UPLOADS_ENABLED", "true").strip().lower() != "false"
+
 EXPO_ACCESS_TOKEN = os.environ.get("EXPO_ACCESS_TOKEN", "")
 
 # Trending post push notifications. When false, the trending poller does nothing.

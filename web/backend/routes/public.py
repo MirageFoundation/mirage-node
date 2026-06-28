@@ -43,6 +43,7 @@ from settings import (
     REGISTRATION_ENABLED,
     REGISTRATION_INVITE_CODE_REQUIRED,
     OPEN_BROWSING_ENABLED,
+    MEDIA_UPLOADS_ENABLED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
     AUTO_ENABLED_AGENTS,
@@ -7801,6 +7802,11 @@ def upload_media():
     """
     rid = next_request_id()
     log_event(rid, "upload_media.begin")
+    # Uploads are only accepted where a scanning edge (Bunny Shield) fronts them.
+    # A node not behind such an edge sets MEDIA_UPLOADS_ENABLED=false (migration).
+    if not MEDIA_UPLOADS_ENABLED:
+        log_event(rid, "upload_media.disabled")
+        return api_error_code("uploads_disabled", 403)
     try:
         from media import (
             MediaError,
@@ -7879,6 +7885,11 @@ def get_upload_url():
     # we can tell exactly when it is safe to delete this shim.
     logger.warning("DEPRECATED get_upload_url called - remove after 2026-08")
     log_event(rid, "get_upload_url.begin", deprecated=True)
+    # Same upload gate as /api/upload_media: a node not behind a scanning edge
+    # accepts no uploads through any path.
+    if not MEDIA_UPLOADS_ENABLED:
+        log_event(rid, "get_upload_url.disabled")
+        return api_error_code("uploads_disabled", 403)
     try:
         # Gate on Cloudflare credentials, NOT the active provider, so this keeps
         # serving old mobile builds even when MEDIA_PROVIDER is bunny/local.

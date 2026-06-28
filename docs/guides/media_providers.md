@@ -207,8 +207,38 @@ surprised:
   are access-gated and cannot be shipped inside open-source software, so scanning
   can only ever be an operator/edge concern.
 
-For mirage.talk, the canonical option for scanning is to front uploads through a
-scanning edge (e.g. Bunny Shield on the upload path).
+#### `MEDIA_UPLOADS_ENABLED` — fail-closed upload gate
+
+Because scanning lives at the edge, a node that is NOT behind a scanning edge
+must not accept public uploads at all. That is enforced by a single backend flag
+`MEDIA_UPLOADS_ENABLED` (`backend.env`):
+
+- `true` — the node accepts uploads. Only set this where a scanning edge fronts
+  the upload path (Bunny Shield upload scanning).
+- `false` — both `POST /api/upload_media` and the legacy `POST /api/get_upload_url`
+  return `403 uploads_disabled`. Media already stored elsewhere still renders
+  (reads are unaffected); only new uploads to this node are refused.
+
+The default is `true` for fresh installs (preserves prior behavior), but the
+per-node migration `v1.28.6-media-uploads-enabled` pins it explicitly on existing
+nodes: `true` only on the domains that run a scanning edge
+(`mirage.vote`, `mirage.talk`) and `false` on every other node (e.g. the IP-only
+nodes). This is the same per-node gatekeeper pattern as `OPEN_BROWSING_ENABLED`.
+
+#### Mirage's deployment: two independent scanning edges
+
+Mirage runs uploads on two independent nodes, each behind its own Bunny edge with
+Shield upload scanning, each writing to the shared `mirage` storage zone:
+
+- `mirage.vote` and `mirage.talk`: `MEDIA_UPLOADS_ENABLED=true`, behind Bunny.
+- `n3` / `n4` (IP-only): `MEDIA_UPLOADS_ENABLED=false`. They never accept uploads,
+  so they need no scanning edge. Media uploaded on vote/talk still renders on them
+  (the `mirage-img` / `mirage-video` pull-zone URLs are global).
+
+They are deliberately independent (no central upload node): if one edge is down,
+the other still accepts uploads. The full per-node procedure (DNS, Bunny Shield,
+client-IP, origin firewall, origin TLS) lives in
+[bunny_cutover_runbook.md](bunny_cutover_runbook.md).
 
 ### Garbage collection (the "easy delete")
 
@@ -256,30 +286,49 @@ it then returns `410 legacy_upload_unsupported`). The app-side switch to
 `/api/upload_media` (shipped via EAS OTA) is tracked separately; the node only
 guarantees backward compatibility so the app is never the thing that breaks.
 
-### Recommended Bunny cutover for mirage.talk (zero app breakage)
+### Recommended Bunny cutover (zero app breakage)
+
+Storage and edge are separate steps. Switching `MEDIA_PROVIDER=bunny` only changes
+where new bytes are stored; it does NOT put scanning in front of uploads. Fronting
+a node with the Bunny scanning edge (and the client-IP / firewall / TLS that go
+with it) is the full cutover, documented step-by-step in
+[bunny_cutover_runbook.md](bunny_cutover_runbook.md). The short version:
 
 1. Create the Bunny resources and set `BUNNY_*` in `~/.mirage/env/secrets.env`.
 2. Set `MEDIA_PROVIDER=bunny` in `~/.mirage/env/backend.env`. New uploads now go
    server-side into Bunny Storage / Stream.
-3. (Optional) Front `/api/upload_media` with a scanning edge (e.g. Bunny Shield)
-   for upload safety scanning — see "Upload safety scanning" above.
+3. Put the node behind Bunny with Shield upload scanning, set `EDGE_PROVIDER=bunny`
+   and `MEDIA_UPLOADS_ENABLED=true`, point DNS at Bunny, and lock the origin to
+   Bunny IPs — see the runbook.
 4. KEEP the existing `CLOUDFLARE_*` credentials in place. This is what keeps the
    legacy `get_upload_url` shim alive for old mobile builds.
 
-Result: new web + updated-app uploads go into Bunny; old mobile builds keep
-uploading to Cloudflare via the shim; all previously stored Cloudflare media keeps
-rendering (dual-read). When old app versions die out, drop the `CLOUDFLARE_*` creds
-and delete the shim.
+Result: new web + updated-app uploads go into Bunny (scanned at the edge); old
+mobile builds keep uploading to Cloudflare via the shim; all previously stored
+Cloudflare media keeps rendering (dual-read). When old app versions die out, drop
+the `CLOUDFLARE_*` creds and delete the shim.
 
 ### Configuration
 
 Backend env (`deploy/templates/env/backend.env`):
 
 - `MEDIA_PROVIDER=local` (default)
+- `MEDIA_UPLOADS_ENABLED=true` — fail-closed upload gate; set `false` on any node
+  not behind a scanning edge (see "Upload safety scanning" above).
 - `MEDIA_LOCAL_DIR`, `MEDIA_PUBLIC_BASE_URL`
 - `MEDIA_MAX_IMAGE_MB`, `MEDIA_MAX_VIDEO_MB`
 - Video policy: `MEDIA_SHORT_CLIP_SEC=60`, `MEDIA_LONGFORM_MAX_HEIGHT=1080`,
   `MEDIA_VIDEO_MAX_DURATION_SEC`
+
+Edge / node env (`deploy/templates/env/node.env`) — only relevant when a node is
+fronted by a CDN edge:
+
+- `EDGE_PROVIDER=cloudflare|bunny|both` — which edge sits in front of the node, so
+  Caddy derives the real client IP correctly. `deploy/refresh_bunny_ips.py` turns
+  this into `/etc/caddy/trusted-proxies.caddy` at startup.
+- `ORIGIN_DOMAIN` — origin hostname Bunny connects to (e.g. `origin.mirage.vote`),
+  kept pointing at the server IP so Caddy can renew TLS via HTTP-01 after the
+  public domain moves to Bunny.
 
 Secrets env (`deploy/templates/env/secrets.env`), all optional and
 provider-specific:

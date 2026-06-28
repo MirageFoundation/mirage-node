@@ -163,6 +163,14 @@ if ! grep -q "reverse_proxy.*127.0.0.1:5000" "$CADDYFILE"; then
 fi
 echo "✓ Caddyfile verified"
 
+# Generate /etc/caddy/trusted-proxies.caddy BEFORE Caddy starts. The Caddyfile
+# imports it inside the global servers{} block, so the file must exist or Caddy
+# fails to parse. Driven by EDGE_PROVIDER (default cloudflare = prior behavior).
+# Non-fatal: in cloudflare mode this is a local write; in bunny/both it keeps the
+# last-known file on a transient fetch failure.
+echo "==> Generating Caddy trusted-proxy config (EDGE_PROVIDER=${EDGE_PROVIDER:-cloudflare})..."
+python3 "$ROOT_DIR/deploy/refresh_bunny_ips.py" || echo "WARN: refresh_bunny_ips.py failed; using existing trusted-proxies.caddy if present"
+
 # Kill any existing tmux session
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux kill-session -t "$SESSION" 2>/dev/null
