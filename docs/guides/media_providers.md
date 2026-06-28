@@ -73,6 +73,43 @@ by hardcoded vendor names:
   deps" goal, so non-transcoding providers enforce by validation rather than
   downscaling.
 
+### Video posters / thumbnails (client guidance — read this for mobile)
+
+When a video upload returns, `url` is the playable stream (an HLS playlist for
+transcoding providers), e.g. Bunny `https://{host}/{guid}/playlist.m3u8`. A still
+poster is derived from that URL, and the path differs per provider:
+
+- Bunny Stream:     `https://{host}/{guid}/thumbnail.jpg`  (note: NO `thumbnails/`)
+- Cloudflare Stream: `https://{host}/{uid}/thumbnails/thumbnail.jpg`
+
+**CRITICAL timing caveat.** The provider generates that server-side thumbnail
+during transcoding, which is NOT instant — Bunny Stream returns **HTTP 404** for
+`/{guid}/thumbnail.jpg` until processing finishes (seconds to minutes). A client
+that fetches the poster immediately after upload and never retries will show a
+permanently blank tile, even after the video is ready (the failed `<img>`/request
+is never retried). This is the single most common "video preview is blank" bug.
+
+Two correct ways to handle it:
+
+1. **Instant local poster (recommended for the composer / just-uploaded preview).**
+   The uploader already has the source file, so capture the first frame on the
+   client and show THAT immediately — zero dependence on the provider finishing.
+   - Web: `captureVideoPoster()` in `web/frontend/src/utils/media.js` decodes the
+     file into a hidden `<video>`, draws a frame to a canvas, and registers the
+     resulting object URL against the returned video URL so every preview
+     (`getVideoThumbnailUrl`) uses it instantly.
+   - Mobile: do the equivalent with the platform thumbnailer on the local file you
+     just uploaded — iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`,
+     or `expo-video-thumbnails` — and show that until the post is published.
+2. **Server thumbnail with retry.** If you must use the server poster (e.g. an
+   existing post in the feed where there is no local file), that is fine: by the
+   time a post is viewed the video is already processed. Only for the brief
+   just-uploaded window, retry the poster on error (with a cache-busting query)
+   until it loads instead of giving up on the first 404.
+
+For already-published posts (feed / detail views) the server thumbnail is the
+right source and is reliably available — no special handling needed.
+
 ### Architecture
 
 The client is uniform; storage is a pluggable knob hidden behind the one endpoint.

@@ -11,6 +11,7 @@ import {
 } from "react-icons/lu";
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import { uploadImageWithCancel } from "../../../utils/ImageUpload";
+import { captureVideoPoster, registerLocalVideoPoster } from "../../../utils/media";
 import Api from "../../../utils/api";
 import UserAvatar from "./UserAvatar.js";
 
@@ -959,6 +960,14 @@ export default function MarkdownEditor({
                         onUploadProgress(p);
                     }
                 }, uploadXhrRef);
+            }
+            // Attach a locally-captured first frame as an instant preview poster
+            // (video only) so previews don't wait for provider transcoding.
+            if (isVid) {
+                try {
+                    const poster = await captureVideoPoster(file);
+                    if (poster) registerLocalVideoPoster(mediaUrl, poster);
+                } catch (_) { }
             }
             // Notify parent that media was uploaded (don't modify content here)
             if (typeof onMediaUploaded === 'function') {

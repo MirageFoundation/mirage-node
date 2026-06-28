@@ -75,7 +75,7 @@ ${DOMAIN:-:80} {
 		rate_limit {
 			zone api_limit {
 				key {client_ip}
-				events 10
+				events 50
 				window 1s
 			}
 		}
@@ -103,7 +103,7 @@ ${DOMAIN:-:80} {
 		rate_limit {
 			zone chain_rpc_limit {
 				key {client_ip}
-				events 10
+				events 30
 				window 1s
 			}
 		}
@@ -116,7 +116,7 @@ ${DOMAIN:-:80} {
 		rate_limit {
 			zone chain_rest_limit {
 				key {client_ip}
-				events 10
+				events 30
 				window 1s
 			}
 		}

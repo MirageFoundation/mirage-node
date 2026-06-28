@@ -131,6 +131,69 @@ export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
     };
 };
 
+// Ephemeral client-side video posters. Maps a freshly-uploaded video URL to a
+// local object-URL poster captured from the source file, so the composer can
+// show a preview instantly instead of waiting for the provider to transcode and
+// generate a server-side thumbnail (Bunny Stream 404s its thumbnail until then).
+// In-memory only; lost on reload — by which point the server thumbnail exists.
+const _localVideoPosters = new Map();
+
+export const registerLocalVideoPoster = (videoUrl, posterUrl) => {
+    if (videoUrl && posterUrl) _localVideoPosters.set(videoUrl, posterUrl);
+};
+
+// Capture a poster frame from a local video File/Blob and return an object URL
+// for a JPEG, or null if the browser can't decode the file. Uses a short safety
+// timeout so a problematic file never hangs the upload flow.
+export const captureVideoPoster = (file) =>
+    new Promise((resolve) => {
+        let settled = false;
+        let srcUrl = null;
+        const video = document.createElement('video');
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            try { if (srcUrl) window.URL.revokeObjectURL(srcUrl); } catch (_) { }
+            resolve(result);
+        };
+        const grab = () => {
+            try {
+                const w = video.videoWidth;
+                const h = video.videoHeight;
+                if (!w || !h) { finish(null); return; }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) { finish(null); return; }
+                ctx.drawImage(video, 0, 0, w, h);
+                canvas.toBlob(
+                    (blob) => finish(blob ? window.URL.createObjectURL(blob) : null),
+                    'image/jpeg',
+                    0.85,
+                );
+            } catch (_) {
+                finish(null);
+            }
+        };
+        try {
+            video.muted = true;
+            video.preload = 'auto';
+            video.playsInline = true;
+            video.onloadeddata = () => {
+                video.onseeked = () => { video.onseeked = null; grab(); };
+                // Nudge past 0 to dodge an all-black first frame.
+                try { video.currentTime = Math.min(0.1, (video.duration || 1) / 2); } catch (_) { grab(); }
+            };
+            video.onerror = () => finish(null);
+            setTimeout(() => finish(null), 8000);
+            srcUrl = window.URL.createObjectURL(file);
+            video.src = srcUrl;
+        } catch (_) {
+            finish(null);
+        }
+    });
+
 // Build a poster/thumbnail image URL for a hosted (transcoded) video URL.
 //   Bunny Stream: https://{host}/{guid}/playlist.m3u8 -> https://{host}/{guid}/thumbnail.jpg
 //   Cloudflare:   https://{host}/{uid}/...            -> https://{host}/{uid}/thumbnails/thumbnail.jpg
@@ -139,6 +202,8 @@ export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
 export const getVideoThumbnailUrl = (rawUrl) => {
     try {
         if (!rawUrl) return null;
+        const local = _localVideoPosters.get(rawUrl);
+        if (local) return local;
         const u = _parseUrl(rawUrl);
         if (!u) return null;
         const host = (u.hostname || '').toLowerCase();
