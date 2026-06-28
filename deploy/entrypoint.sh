@@ -32,6 +32,18 @@ ROOT_DIR="/opt/mirage"
 SESSION="mirage"
 export PYTHONPATH="/opt/mirage"
 
+# Prefer IPv4 in name resolution. These nodes have no working IPv6 egress, but
+# public hostnames in front of the node (e.g. the Bunny edge) return AAAA records
+# intermittently. glibc defaults to trying IPv6 first, which then hangs until
+# timeout on a v6-less host — silently breaking the node's own outbound calls and
+# self-probes (status dashboard chain/rpc/rest/api, edge IP refresh, etc.). This
+# makes getaddrinfo return IPv4 first so connections succeed immediately; IPv6 is
+# still attempted as a fallback if v6 connectivity ever exists. Idempotent.
+if [ -f /etc/gai.conf ] && ! grep -qE '^[[:space:]]*precedence[[:space:]]+::ffff:0:0/96' /etc/gai.conf; then
+  echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf
+  echo "==> gai.conf: set IPv4 precedence (host has no IPv6 egress)"
+fi
+
 # Load persistent env files if present
 ENV_DIR="${HOME}/.mirage/env"
 export ENV_DIR
