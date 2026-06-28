@@ -8,6 +8,7 @@ import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
+import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost";
@@ -479,6 +480,7 @@ function CreatePostView({
                                             });
                                         }} />
                                         {thumbsLoading.has(item.url) && <MediaSpinner />}
+                                        {item.type === 'video' && !thumbsLoading.has(item.url) && <VideoPlayBadge size={26} />}
                                         <MediaRemoveButton type="button" tabIndex={-1} disabled={isSubmitting} onClick={() => {
                                             if (isSubmitting) return;
                                             setAttachedMedia(prev => prev.filter((_, i) => i !== idx));

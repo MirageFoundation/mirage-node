@@ -12,6 +12,7 @@ import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
+import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
 import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost";
 
@@ -1740,6 +1741,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                                         });
                                                                     }}
                                                                 />
+                                                                {activeMedia?.type === 'video' && !activeLoading && <VideoPlayBadge size={52} />}
                                                                 {canPrev && (
                                                                     <NavPrev
                                                                         type="button"

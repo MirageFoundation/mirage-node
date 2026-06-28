@@ -11,6 +11,7 @@ import { ContentGrid, ModernPostFeed } from "../Layout";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
+import VideoPlayBadge from "../../../components/VideoPlayBadge";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
 import { getVideoThumbnailUrl } from "../../../utils/media";
@@ -2029,6 +2030,7 @@ function ViewPostView({
                                     });
                                 }} />
                                 {replyThumbLoading[post.post_id] && <MediaSpinner />}
+                                {replyAttachedType[post.post_id] === 'video' && !replyThumbLoading[post.post_id] && <VideoPlayBadge size={26} />}
                                 <MediaRemoveButton type="button" tabIndex={-1} disabled={isBusy} onClick={() => {
                                     if (isBusy) return;
                                     setReplyAttachedType(prev => {
