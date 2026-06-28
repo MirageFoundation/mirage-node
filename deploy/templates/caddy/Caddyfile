@@ -60,7 +60,9 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 	}
 	handle @upload {
 		request_body {
-			max_size 350MB
+			# Kept above backend MEDIA_MAX_VIDEO_MB (1500MB) so the backend returns a
+			# clean error instead of Caddy hard-cutting the stream. ~30-min 1080p video.
+			max_size 1600MB
 		}
 		rate_limit {
 			zone upload_limit {

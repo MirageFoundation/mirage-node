@@ -220,7 +220,7 @@ must not accept public uploads at all. That is enforced by a single backend flag
   (reads are unaffected); only new uploads to this node are refused.
 
 The default is `true` for fresh installs (preserves prior behavior), but the
-per-node migration `v1.28.6-media-uploads-enabled` pins it explicitly on existing
+per-node migration `v1.29.0-media-uploads-enabled` pins it explicitly on existing
 nodes: `true` only on the domains that run a scanning edge
 (`mirage.vote`, `mirage.talk`) and `false` on every other node (e.g. the IP-only
 nodes). This is the same per-node gatekeeper pattern as `OPEN_BROWSING_ENABLED`.

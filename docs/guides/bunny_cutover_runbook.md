@@ -23,7 +23,7 @@ down, the other still accepts uploads.
 Do the nodes **one at a time**, `mirage.vote` first (lower traffic), then
 `mirage.talk`. Each node is independently reversible.
 
-`n3` / `n4` need no edge work — the `v1.28.6-media-uploads-enabled` migration
+`n3` / `n4` need no edge work — the `v1.29.0-media-uploads-enabled` migration
 pins their `MEDIA_UPLOADS_ENABLED=false` automatically (no `DOMAIN` ->
 not in the upload allowlist). Media uploaded on vote/talk still renders on them
 because the `mirage-img` / `mirage-video` pull-zone URLs are global.

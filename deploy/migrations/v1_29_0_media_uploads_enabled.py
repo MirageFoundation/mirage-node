@@ -7,7 +7,7 @@ from deploy.migrations._helpers import (
     update_env_value,
 )
 
-MIGRATION_KEY = "v1.28.6-media-uploads-enabled"
+MIGRATION_KEY = "v1.29.0-media-uploads-enabled"
 DESCRIPTION = (
     "Per-node media uploads: enable on mirage.vote/mirage.talk (behind Bunny Shield "
     "upload scanning), disable on every other existing node so no node accepts "
