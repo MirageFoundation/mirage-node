@@ -23,6 +23,19 @@ export function isOpenBrowsingEnabled() {
     }
 }
 
+/**
+ * Whether the node config has loaded yet. Until it has, open-browsing state is
+ * unknown, so callers must NOT render the logged-out gate (it would flash on the
+ * first visit before the async config fetch resolves).
+ */
+export function isNodeConfigLoaded() {
+    try {
+        return localStorage.getItem('nodeConfig') != null;
+    } catch (_) {
+        return false;
+    }
+}
+
 /** Whether a real account is present (not the anonymous "guest"). */
 export function isLoggedIn() {
     try {

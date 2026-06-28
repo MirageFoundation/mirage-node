@@ -2688,6 +2688,7 @@ export function useViewPost({
         navigate,
         questsEnabled,
         openBrowsingEnabled,
+        nodeConfigLoaded: Boolean(nodeConfig),
         isMobile,
         goBackToFeed,
         viewerAddress,

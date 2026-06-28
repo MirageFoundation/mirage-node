@@ -240,13 +240,14 @@ export default function SearchResultsView({
         formatDate,
         hasResults,
         isLoggedIn,
-        openBrowsingEnabled
+        openBrowsingEnabled,
+        nodeConfigLoaded
     } = useSearchResults({
         state
     });
     // Redirect non-logged-in users to home (shows welcome banner), unless open
     // browsing is on, in which case guests may search.
-    if (!isLoggedIn && !openBrowsingEnabled) {
+    if (!isLoggedIn && !openBrowsingEnabled && nodeConfigLoaded) {
         return <Navigate to="/home" replace />;
     }
     return <ContentGrid>

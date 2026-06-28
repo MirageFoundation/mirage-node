@@ -1990,6 +1990,7 @@ function ViewPostView({
         navigate,
         questsEnabled,
         openBrowsingEnabled,
+        nodeConfigLoaded,
         isMobile,
         goBackToFeed,
         viewerAddress,
@@ -3447,8 +3448,9 @@ function ViewPostView({
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
     // Open browsing: guests may read the post; the signup prompt fires only when
-    // they try to vote/comment/follow. Otherwise keep the logged-out gate.
-    if (!isLoggedIn && !openBrowsingEnabled) {
+    // they try to vote/comment/follow. Otherwise keep the logged-out gate. Wait for
+    // node config before gating so a shared link doesn't flash the sign-in card.
+    if (!isLoggedIn && !openBrowsingEnabled && nodeConfigLoaded) {
         return <ContentGrid>
             <FeedRailRow $feedViewMode="card">
                 <FeedCol>

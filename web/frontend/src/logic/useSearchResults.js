@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
-import { isOpenBrowsingEnabled } from "../utils/openBrowsing";
+import { isOpenBrowsingEnabled, isNodeConfigLoaded } from "../utils/openBrowsing";
 export const tagColors = {
     adult: {
         bg: 'rgba(236, 72, 153, 0.18)',
@@ -220,6 +220,7 @@ export function useSearchResults({
     const hasResults = topics.length > 0 || users.length > 0 || posts.length > 0;
     const isLoggedIn = !!viewerAddress;
     const openBrowsingEnabled = isOpenBrowsingEnabled();
+    const nodeConfigLoaded = isNodeConfigLoaded();
 
     return {
         location,
@@ -242,6 +243,7 @@ export function useSearchResults({
         formatDate,
         hasResults,
         isLoggedIn,
-        openBrowsingEnabled
+        openBrowsingEnabled,
+        nodeConfigLoaded
     };
 }

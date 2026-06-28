@@ -620,6 +620,7 @@ export default function SearchResultsView({ state }) {
         hasResults,
         isLoggedIn,
         openBrowsingEnabled,
+        nodeConfigLoaded,
     } = useSearchResults({ state });
 
     const [activeTab, setActiveTab] = useState("posts");
@@ -962,7 +963,7 @@ export default function SearchResultsView({ state }) {
         </ContentGrid>
     );
 
-    if (!isLoggedIn && !openBrowsingEnabled) {
+    if (!isLoggedIn && !openBrowsingEnabled && nodeConfigLoaded) {
         return (
             <ContentGrid>
                 <Helmet>
