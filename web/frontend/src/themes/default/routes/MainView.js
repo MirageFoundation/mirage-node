@@ -1423,6 +1423,7 @@ const MainView = ({
         snoozeModerationReminder,
         isLoggedIn,
         openBrowsingEnabled,
+        nodeConfigLoaded,
         inviteCodesEnabled,
         questsEnabled,
         showAndroidBanner,
@@ -1456,7 +1457,10 @@ const MainView = ({
     });
     // Open browsing: guests may read the feed too. Content-rendering branches use
     // canBrowse; logged-in-only chrome (heroes, banners) keeps using isLoggedIn.
-    const canBrowse = isLoggedIn || openBrowsingEnabled;
+    // Until the node config has loaded we don't yet know if open browsing is on,
+    // so treat browsing as allowed (show a loading skeleton, never flash the
+    // logged-out splash) and let the gated splash render only once we know.
+    const canBrowse = isLoggedIn || openBrowsingEnabled || !nodeConfigLoaded;
     const [feedViewMode, setFeedViewMode] = useState(() => loadViewMode());
     useEffect(() => {
         const syncFeedViewMode = () => setFeedViewMode(loadViewMode());
@@ -1894,8 +1898,9 @@ const MainView = ({
                                 </BlockedTopicActions>
                             </BlockedTopicState>}
 
-                            {/* Loading state */}
-                            {canBrowse && !isUrlTopicBlocked && showLoadingPosts && (
+                            {/* Loading state (also covers the window before node config
+                                has loaded, so guests never flash an empty/splash state) */}
+                            {canBrowse && !isUrlTopicBlocked && (showLoadingPosts || !nodeConfigLoaded) && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                     <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
                                     <FeedCardSkeletonList count={5} />
@@ -1903,10 +1908,10 @@ const MainView = ({
                             )}
 
                             {/* Empty home feed */}
-                            {canBrowse && !isUrlTopicBlocked && showEmptyHome && <EmptyHomeMessage />}
+                            {canBrowse && !isUrlTopicBlocked && nodeConfigLoaded && showEmptyHome && <EmptyHomeMessage />}
 
                             {/* No posts available */}
-                            {canBrowse && !isUrlTopicBlocked && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                            {canBrowse && !isUrlTopicBlocked && nodeConfigLoaded && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                                 <LoadingText>{noPostsMessage}</LoadingText>
                             </LoadingCard>}
 

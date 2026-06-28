@@ -1181,6 +1181,7 @@ const MainView = ({
         showNsfwHero,
         isLoggedIn,
         openBrowsingEnabled,
+        nodeConfigLoaded,
         inviteCodesEnabled,
         questsEnabled,
         showAndroidBanner,
@@ -1213,7 +1214,9 @@ const MainView = ({
         routeTopic
     });
     // Open browsing: guests read the feed too; logged-in-only chrome keeps isLoggedIn.
-    const canBrowse = isLoggedIn || openBrowsingEnabled;
+    // Before node config loads we don't know if open browsing is on, so allow
+    // browsing (skeleton) and only let the gated splash show once config is known.
+    const canBrowse = isLoggedIn || openBrowsingEnabled || !nodeConfigLoaded;
     if (error) {
         return <StyledError>{error}</StyledError>;
     }
@@ -1543,17 +1546,17 @@ const MainView = ({
                             </HomeFeedInfoDescription>
                         </HomeFeedInfoCard>}
 
-                        {/* Loading state */}
-                        {canBrowse && showLoadingPosts && <LoadingCard $size={cardSize}>
+                        {/* Loading state (also covers the pre-node-config window) */}
+                        {canBrowse && (showLoadingPosts || !nodeConfigLoaded) && <LoadingCard $size={cardSize}>
                             <LoadingSpinner />
                             <LoadingText>Loading posts...</LoadingText>
                         </LoadingCard>}
 
                         {/* Empty home feed */}
-                        {canBrowse && showEmptyHome && <EmptyHomeMessage />}
+                        {canBrowse && nodeConfigLoaded && showEmptyHome && <EmptyHomeMessage />}
 
                         {/* No posts available */}
-                        {canBrowse && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                        {canBrowse && nodeConfigLoaded && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                             <LoadingText>{noPostsMessage}</LoadingText>
                         </LoadingCard>}
 

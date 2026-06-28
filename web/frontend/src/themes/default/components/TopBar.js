@@ -760,10 +760,10 @@ function GuestMenu() {
     });
     const [themeMode, setThemeMode] = useState(() => {
         try {
-            const v = Storage.load('theme_mode', 'time');
-            return v === 'light' || v === 'dark' || v === 'system' || v === 'time' ? v : 'time';
+            const v = Storage.load('theme_mode', 'system');
+            return v === 'light' || v === 'dark' || v === 'system' || v === 'time' ? v : 'system';
         } catch (_) {
-            return 'time';
+            return 'system';
         }
     });
 

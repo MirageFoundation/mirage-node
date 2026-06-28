@@ -1767,6 +1767,7 @@ export function useMain({
         inviteCodesEnabled,
         questsEnabled,
         openBrowsingEnabled,
+        nodeConfigLoaded: Boolean(nodeConfig),
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,

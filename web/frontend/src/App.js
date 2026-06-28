@@ -226,7 +226,7 @@ class App extends Component {
             if (themeId !== raw) Storage.save('theme_id', themeId);
             this.state.themeId = themeId;
         }
-        this.state.themeMode = Storage.load('theme_mode', 'time');
+        this.state.themeMode = Storage.load('theme_mode', 'system');
         this.state.theme = this.calculateTheme(this.state.themeMode);
     }
 
@@ -383,7 +383,7 @@ class App extends Component {
 
         // Listen for theme mode changes from SettingsView
         this._onThemeModeChange = (e) => {
-            const newMode = e.detail?.mode || 'time';
+            const newMode = e.detail?.mode || 'system';
             // Clear existing interval if any
             if (this._timeThemeInterval) {
                 clearInterval(this._timeThemeInterval);
