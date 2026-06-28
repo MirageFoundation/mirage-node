@@ -39,7 +39,6 @@ from pathlib import Path
 
 CADDY_DIR = Path(os.environ.get("CADDY_DIR", "/etc/caddy"))
 OUT_FILE = CADDY_DIR / "trusted-proxies.caddy"
-BUNNY_IPS_FILE = CADDY_DIR / "bunny-ips.txt"  # plain list, also used by the host firewall
 
 BUNNY_IPV4_URL = "https://api.bunny.net/system/edgeserverlist"
 BUNNY_IPV6_URL = "https://api.bunny.net/system/edgeserverlist/ipv6"
@@ -120,7 +119,9 @@ def _reload_caddy() -> None:
     try:
         r = subprocess.run(
             ["caddy", "reload", "--config", str(caddyfile), "--adapter", "caddyfile"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if r.returncode == 0:
             _log("caddy reloaded")
@@ -150,10 +151,6 @@ def main() -> int:
         headers = "CF-Connecting-IP X-Real-IP"
     bunny = _fetch_bunny()
     ranges.extend(bunny)
-
-    if bunny:
-        # Persist a plain list for the host-side origin firewall to consume.
-        _write_if_changed(BUNNY_IPS_FILE, "\n".join(bunny) + "\n")
 
     if not ranges:
         if OUT_FILE.exists():

@@ -32,6 +32,18 @@ ROOT_DIR="/opt/mirage"
 SESSION="mirage"
 export PYTHONPATH="/opt/mirage"
 
+# Prefer IPv4 in name resolution. These nodes have no working IPv6 egress, but
+# public hostnames in front of the node (e.g. the Bunny edge) return AAAA records
+# intermittently. glibc defaults to trying IPv6 first, which then hangs until
+# timeout on a v6-less host — silently breaking the node's own outbound calls and
+# self-probes (status dashboard chain/rpc/rest/api, edge IP refresh, etc.). This
+# makes getaddrinfo return IPv4 first so connections succeed immediately; IPv6 is
+# still attempted as a fallback if v6 connectivity ever exists. Idempotent.
+if [ -f /etc/gai.conf ] && ! grep -qE '^[[:space:]]*precedence[[:space:]]+::ffff:0:0/96' /etc/gai.conf; then
+  echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf
+  echo "==> gai.conf: set IPv4 precedence (host has no IPv6 egress)"
+fi
+
 # Load persistent env files if present
 ENV_DIR="${HOME}/.mirage/env"
 export ENV_DIR
@@ -474,9 +486,23 @@ python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/c
 python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/app.toml" "$NODE_HOME/config/app.toml"
 python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/client.toml" "$NODE_HOME/config/client.toml"
 
-# Sync critical env vars to the tmux session (the session was created before
-# migrations may have updated env files, so new windows need the latest values)
+# Sync env vars into the tmux session BEFORE the service windows
+# (node/indexer/backend) are created below. The session was created earlier (so
+# Caddy/Postgres could come up for ACME + schema init), which means it captured
+# the create-time env from docker --env-file — i.e. PRE-migration values. Without
+# re-syncing, any value a migration changed (MEDIA_UPLOADS_ENABLED, video caps,
+# quests, open-browsing, AUTO_ENABLED_AGENTS, …) would be silently ignored until a
+# second deploy, leaving e.g. uploads enabled on a node that should fail closed.
+# Always-required infra vars first (these may be generated, not file-backed):
 for _evar in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL CLIENT_HASH_SALT; do
+  if [ -n "${!_evar:-}" ]; then
+    tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
+  fi
+done
+# Then EVERY var defined in the env files, using the current (post-migration,
+# post-reload) shell value so migration changes and DB/role URL rewrites both
+# reach the service windows on the first deploy.
+for _evar in $(grep -hoE '^[A-Za-z_][A-Za-z0-9_]*=' "${ENV_DIR}"/*.env 2>/dev/null | sed 's/=$//' | sort -u); do
   if [ -n "${!_evar:-}" ]; then
     tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
   fi
@@ -640,6 +666,13 @@ while true; do
         SECONDS_SINCE_CLEANUP=0
         find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
         find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+        # Refresh the edge trusted-proxy ranges. Bunny rotates its ~1000 edge IPs
+        # over time; without this, {client_ip} would degrade for traffic arriving
+        # via new Bunny edges (rate limiting/logging would see the edge, not the
+        # user). No-op for EDGE_PROVIDER=cloudflare (the plugin self-updates; this
+        # just rewrites an unchanged snippet). Hot-reloads Caddy only on a change.
+        python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" \
+            2>&1 | tee -a "$LOGS_DIR/deploy/refresh-edge-ips-$(date -u +%Y-%m-%d).log" || true
         # Image GC: delete unused Cloudflare Images (off by default)
         if [ "${IMAGE_GC_ENABLED:-false}" = "true" ]; then
             python3 "$ROOT_DIR/scripts/image_gc.py" --days 7 --limit 100 \

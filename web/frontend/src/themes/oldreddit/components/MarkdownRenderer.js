@@ -48,6 +48,31 @@ const Container = styled.div`
 		border: none;
 		border-top: 1px solid ${({ theme }) => theme.colors.border};
 	}
+	/* Code blocks must stay within the post/comment width, not overflow */
+	& code {
+		font-family: monospace;
+		font-size: 0.9em;
+		background: ${({ theme }) => theme.colors.panelAlt};
+		padding: 0.1em 0.3em;
+		border-radius: 3px;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+	& pre {
+		background: ${({ theme }) => theme.colors.panelAlt};
+		padding: 0.6rem 0.75rem;
+		border-radius: 6px;
+		margin: 0.5rem 0 0.75rem 0;
+		max-width: 100%;
+		overflow-x: auto;
+	}
+	& pre code {
+		background: none;
+		padding: 0;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
 	& a {
 		color: ${({ theme }) => theme.colors.link};
 		&:hover {

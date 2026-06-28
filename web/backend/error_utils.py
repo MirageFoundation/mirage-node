@@ -198,6 +198,7 @@ ERRORS = {
     "image_type_only": "only 'image' type is supported",
     "invalid_video_uid": "invalid video uid",
     # Pluggable media providers (POST /api/upload_media)
+    "uploads_disabled": "media uploads are disabled on this node",
     "media_invalid_kind": "kind must be 'image' or 'video'",
     "media_file_required": "no file uploaded",
     "media_too_large": "uploaded file is too large",

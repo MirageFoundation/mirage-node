@@ -7,6 +7,7 @@ import Storage from "../utils/Storage";
 import { formatError } from "../utils/errorMessages";
 import { requireAccount } from "../utils/openBrowsing";
 import { getVideoThumbnailUrl } from "../utils/media";
+import { updateNotification } from "../utils/notifications";
 export const TAG_OPTIONS = [{
     value: '',
     label: 'No tag (safe)'
@@ -593,24 +594,6 @@ export function useCreatePost({
                     const txHash = res && res.tx_hash ? String(res.tx_hash).toLowerCase() : "";
                     if (!txHash) throw new Error("missing tx hash");
 
-                    // Stage 2: Submitting (show for 1-1.5 seconds)
-                    setSubmitStatus('submitting');
-                    setSubmitStartTime(Date.now());
-                    const submittingDuration = 1000 + Math.random() * 500; // 1.0 to 1.5 seconds
-                    await new Promise(r => setTimeout(r, submittingDuration));
-
-                    // Stage 3: Verifying (4s initial, then 2s intervals, max 5 attempts)
-                    setSubmitStatus('verifying');
-                    setSubmitStartTime(Date.now());
-                    const result = await tx.pollTxStatus(txHash);
-                    if (!result) throw new Error('confirmation timeout');
-                    if (!result.success) {
-                        throw new Error(result.error_details?.message || 'transaction rejected');
-                    }
-
-                    // Set the pending highlight so the post flashes when viewed
-                    Storage.setPendingPostHighlight(txHash);
-                    // Emit event for immediate flash in any listening view
                     const deriveYoutubeThumb = rawUrl => {
                         try {
                             const u = new URL(String(rawUrl || ''));
@@ -642,6 +625,38 @@ export function useCreatePost({
                         }
                     })();
                     const thumb = deriveYoutubeThumb(firstLineUrl) || (media.length > 0 ? media[0] : '');
+                    const viewer = String(Storage.load("publicKey", "") || '').trim().toLowerCase();
+                    const optimisticPost = {
+                        post_id: txHash,
+                        tx_hash: txHash,
+                        author: viewer,
+                        user_id: viewer,
+                        username: Storage.load("username", ""),
+                        timestamp: Math.floor(Date.now() / 1000),
+                        topic,
+                        title,
+                        content,
+                        target: '',
+                        root_post_id: txHash,
+                        tag,
+                        media,
+                        thumbnail: thumb,
+                        direction: 1,
+                        user_vote: 1,
+                        user_weight: 1,
+                        points: 1,
+                        comments: 0,
+                        deleted: false,
+                    };
+
+                    Storage.setPendingPostHighlight(txHash);
+                    Storage.setOptimisticPost(optimisticPost);
+                    try {
+                        if (typeof setPosts === 'function') {
+                            setPosts({ [txHash]: optimisticPost }, Date.now());
+                        }
+                    } catch (_) { }
+                    console.debug('[CreatePostView] Optimistically showing post after broadcast', { txHash });
                     window.dispatchEvent(new CustomEvent('postCreated', {
                         detail: {
                             postId: txHash,
@@ -650,13 +665,62 @@ export function useCreatePost({
                             content,
                             tag,
                             media,
-                            thumbnail: thumb
+                            thumbnail: thumb,
+                            post: optimisticPost
                         }
                     }));
                     // Only navigate if user is still on this page
                     if (mountedRef.current) {
                         navigate(`/p/${txHash}`);
                     }
+                    (async () => {
+                        try {
+                            const result = await tx.pollTxStatus(txHash);
+                            if (!result) {
+                                console.debug('[CreatePostView] Optimistic post still waiting for indexer', { txHash });
+                                return;
+                            }
+                            if (!result.success) {
+                                Storage.removeOptimisticPost(txHash);
+                                const errorMessage = result.error_details?.message || 'transaction rejected';
+                                console.error('[CreatePostView] Optimistic post transaction rejected', {
+                                    txHash,
+                                    error: errorMessage
+                                });
+                                updateNotification(`Post failed: ${errorMessage}`, 5, true);
+                                window.dispatchEvent(new CustomEvent('postCreatedRejected', {
+                                    detail: {
+                                        postId: txHash,
+                                        error: errorMessage
+                                    }
+                                }));
+                                return;
+                            }
+                            const viewerAddress = Storage.load('publicKey', '');
+                            const data = await Api.get('get_comments', {
+                                post_id: txHash,
+                                address: viewerAddress
+                            });
+                            if (data && data.root) {
+                                Storage.removeOptimisticPost(txHash);
+                                if (typeof setPosts === 'function') {
+                                    setPosts({ [txHash]: data.root }, Date.now());
+                                }
+                                window.dispatchEvent(new CustomEvent('postCreatedIndexed', {
+                                    detail: {
+                                        postId: txHash,
+                                        root: data.root,
+                                        children: data.children || []
+                                    }
+                                }));
+                            }
+                        } catch (e) {
+                            console.debug('[CreatePostView] Background post reconciliation pending', {
+                                txHash,
+                                error: e?.message || String(e)
+                            });
+                        }
+                    })();
                 } catch (e) {
                     setSubmitError(String(e && e.message ? e.message : 'Failed to confirm transaction'));
                     setIsSubmitting(false);

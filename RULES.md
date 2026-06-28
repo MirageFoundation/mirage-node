@@ -17,6 +17,13 @@
 - For testing, ONLY use local docker (127.0.0.1)
 - It is OK to interact with servers in a purely informative way, e.g. getting logs, but not changing anything on the server.
 
+**EXCEPTION — UAT server only (`64.23.136.132` / `mirage.vote`):** the agent MAY SSH
+into and make changes on the UAT server when a task explicitly requires it (e.g.
+the Bunny edge cutover). This carve-out is scoped to UAT ONLY. The PROD server
+(`159.203.114.27` / `mirage.talk`) and the other validators (`146.190.108.140`,
+`139.59.9.96`) remain strictly no-change / informative-only — never SSH to change
+anything there without separate, explicit per-task approval.
+
 
 ### Terminology Consistency
 

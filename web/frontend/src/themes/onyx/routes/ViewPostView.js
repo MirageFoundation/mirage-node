@@ -1083,6 +1083,7 @@ function ViewPostView({
                 setLoading(false);
                 setRoot(data.root);
                 setChildren(data.children);
+                Storage.removeOptimisticPost(post_id);
                 try {
                     const f = tx && tx['reconcileAfterCommentsFetch'];
                     if (typeof f === 'function') f(post_id, data.root, data.children);
@@ -1138,6 +1139,15 @@ function ViewPostView({
                 setLoading(false);
                 let errorMessage = "An unknown error occurred";
                 const msg = error && error.message ? String(error.message) : "";
+                if (/HTTP\s*404/i.test(msg)) {
+                    const optimistic = Storage.getOptimisticPost(post_id);
+                    if (optimistic) {
+                        setError(null);
+                        setRoot(optimistic);
+                        setChildren([]);
+                        return;
+                    }
+                }
                 if (/HTTP\s*404/i.test(msg)) {
                     errorMessage = <span>
                         <br />&nbsp;
