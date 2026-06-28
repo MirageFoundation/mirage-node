@@ -131,6 +131,34 @@ export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
     };
 };
 
+// Build a poster/thumbnail image URL for a hosted (transcoded) video URL.
+//   Bunny Stream: https://{host}/{guid}/playlist.m3u8 -> https://{host}/{guid}/thumbnail.jpg
+//   Cloudflare:   https://{host}/{uid}/...            -> https://{host}/{uid}/thumbnails/thumbnail.jpg
+// Returns null when the URL isn't a recognized hosted-video URL so callers can
+// fall back (e.g. to the raw URL).
+export const getVideoThumbnailUrl = (rawUrl) => {
+    try {
+        if (!rawUrl) return null;
+        const u = _parseUrl(rawUrl);
+        if (!u) return null;
+        const host = (u.hostname || '').toLowerCase();
+        const parts = (u.pathname || '').split('/').filter(Boolean);
+        const uid = parts[0];
+        if (!uid) return null;
+        // Bunny Stream serves the thumbnail at /{guid}/thumbnail.jpg (no "thumbnails/").
+        if (host.endsWith('.b-cdn.net')) {
+            return `${u.origin}/${uid}/thumbnail.jpg`;
+        }
+        const isCloudflareStream = host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
+        if (isCloudflareStream) {
+            return `${u.origin}/${uid}/thumbnails/thumbnail.jpg`;
+        }
+        return null;
+    } catch (_) {
+        return null;
+    }
+};
+
 // Photon (WordPress.com CDN) - works with redgifs and other domains wsrv blocks
 export const buildPhotonUrl = (src, { w, h } = {}) => {
     try {

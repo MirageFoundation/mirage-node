@@ -6,6 +6,7 @@ import Api from "../utils/api";
 import Storage from "../utils/Storage";
 import { formatError } from "../utils/errorMessages";
 import { requireAccount } from "../utils/openBrowsing";
+import { getVideoThumbnailUrl } from "../utils/media";
 export const TAG_OPTIONS = [{
     value: '',
     label: 'No tag (safe)'
@@ -455,19 +456,6 @@ export function useCreatePost({
         setTitleValue(value);
         if (submitError) setSubmitError('');
     };
-    const getVideoThumbnailUrl = url => {
-        try {
-            if (!url) return null;
-            const u = new URL(url);
-            const parts = u.pathname.split('/').filter(Boolean);
-            const uid = parts[0];
-            if (!uid) return null;
-            return `${u.origin}/${uid}/thumbnails/thumbnail.jpg`;
-        } catch (_) {
-            return null;
-        }
-    };
-
     // Helper: add a media item and mark its URL as loading a thumbnail
     const addMediaItem = (type, url) => {
         setAttachedMedia(prev => {

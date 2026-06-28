@@ -15,6 +15,7 @@ import MarkdownEditor from "../components/MarkdownEditor.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
+import { getVideoThumbnailUrl } from "../../../utils/media";
 import StickerPicker from "../components/StickerPicker.js";
 import GifPicker from "../components/GifPicker.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
@@ -1922,21 +1923,6 @@ function ViewPostView({
                 <span className="share-text">share</span>
             </ActionButton>
         </MetaRow>;
-    };
-    const getVideoThumbnailUrl = url => {
-        try {
-            if (!url) return null;
-            const u = new URL(url);
-            const host = u.hostname.toLowerCase();
-            const isStream = host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
-            if (!isStream) return null;
-            const parts = u.pathname.split('/').filter(Boolean);
-            const uid = parts[0];
-            if (!uid) return null;
-            return `${u.origin}/${uid}/thumbnails/thumbnail.jpg`;
-        } catch (_) {
-            return null;
-        }
     };
     const displayReplyBox = (post, forMobileOverlay = false) => {
         if (!state.posts[post.post_id]?.replyOpen) return <div></div>;
