@@ -113,7 +113,47 @@ Long-form clips (over 60s) above 1080p may be rejected on non-transcoding nodes,
 Sticker packs are now served from the Bunny CDN instead of Cloudflare Images. The base path is:
 
 ```
-https://mirage-img.b-cdn.net/stickers/<pack>/<NN>.png
+https://mirage-img.b-cdn.net/stickers/<pack>/<NN>.webp
 ```
 
-for example `https://mirage-img.b-cdn.net/stickers/meme/01.png`. If your app embeds the sticker list, mirror this new base path and drop any hard-coded `imagedelivery.net` URLs.
+for example `https://mirage-img.b-cdn.net/stickers/meme/01.webp`. If your app embeds the sticker list, mirror this new base path (note the `.webp` extension — the web client uses WebP, not PNG) and drop any hard-coded `imagedelivery.net` URLs.
+
+## Open Browsing (v1.29.0)
+
+Logged-out visitors can now read everything — feeds, posts, profiles, search — and are only prompted to create an account when they attempt a write/social action (post, vote, follow, reply). This is controlled per-node by the `open_browsing_enabled` boolean in `get_node_config`.
+
+Mobile guidance:
+
+- Read `open_browsing_enabled` from `get_node_config`. When `true`, render the feed/post/search views for visitors with no account instead of an up-front login wall.
+- Gate only write/social actions. On tap, if there is no account, show the signup flow instead of performing the action.
+- Until `get_node_config` has loaded, treat open-browsing state as unknown and do NOT render either gate — otherwise the logged-out wall flashes on cold start before the config resolves.
+- When `open_browsing_enabled` is `false` (invite-only nodes), keep the existing behavior: those actions are unreachable without an account anyway.
+
+## Server-enforced Agents (`auto_enabled_agents`)
+
+`get_node_config` now returns `auto_enabled_agents`: a list of agent `mirage1` addresses the node injects as enabled for every user (e.g. AntiSpamBot on mirage.talk). These are merged on top of the user's own enabled agents.
+
+Mobile guidance:
+
+- Read `auto_enabled_agents` (array of lowercase addresses) from `get_node_config` and merge it into the viewer's enabled-agent set for feed filtering, deduping by address.
+- Treat them as enabled for filtering purposes even though they are not in the user's own on-chain enabled list. The list may be empty on most nodes.
+
+## Video Posters / Thumbnails
+
+A returned video `url` is a stream (HLS playlist for transcoding providers), and the still poster is derived from it per provider. The critical caveat: the provider generates the server-side thumbnail during transcoding, so Bunny Stream returns **HTTP 404** for `/{guid}/thumbnail.jpg` until processing finishes. A client that fetches the poster right after upload and never retries shows a permanently blank tile.
+
+For the just-uploaded composer preview, capture the first frame from the local file you already have (iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`, or `expo-video-thumbnails`) and show that immediately. For already-published posts in the feed the server thumbnail is reliably available. Full per-provider poster paths and the retry alternative are documented in [media_providers.md](media_providers.md) under "Video posters / thumbnails".
+
+## Media Downloads
+
+Downloads are resolved entirely client-side from the post's media URL — there is no backend download endpoint. The web logic lives in `web/frontend/src/utils/media.js` (`getMediaDownloadInfo`); mirror this resolution on mobile:
+
+- Bunny Stream (`https://{host}/{guid}/playlist.m3u8`) → `https://{host}/{guid}/play_1080p.mp4`.
+- Cloudflare Stream (`cloudflarestream.com` / `videodelivery.net`) → `https://videodelivery.net/{uid}/downloads/default.mp4`.
+- `.gifv` → swap the extension to `.mp4`.
+- Direct image/video files (including `imagedelivery.net` images) → download the URL as-is.
+- YouTube, bare HLS `.m3u8` manifests, and other non-direct sources have no download and should be skipped (no download affordance).
+
+## Referral rewards removed (v1.29.0)
+
+Quests are unchanged and still pay out. Only the referral reward (the recruit/welcome payout for bringing in new accounts) has been turned off fleet-wide — referral bounties are too easy to farm with unlimited accounts. If the app surfaces referral earnings, expect those payouts to be zero; invite sharing itself still works.
