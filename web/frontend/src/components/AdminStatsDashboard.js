@@ -478,7 +478,7 @@ export default function AdminStatsDashboard() {
                             <Dot $c={CHART_COLORS.active} />
                             <span>
                                 <strong>Visitor tracking</strong> (Mirage-owned) — logged-out visitors,
-                                logged-in active users, signups and campaigns.{" "}
+                                logged-in active users, signed-in users and campaigns.{" "}
                                 {trackingSinceLabel
                                     ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
                                     : <>No tracked events recorded yet, so these are still empty.</>}
@@ -509,8 +509,8 @@ export default function AdminStatsDashboard() {
                     <TileGrid>
                         <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active users</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (logged out)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(g.signups)}</TileValue><TileLabel>Tracked signed-in users</TileLabel></Tile>
-                        <Tile $accent="#f59e0b"><TileValue>{(g.visitors || g.signups) ? formatPercent(g.signup_conversion) : "—"}</TileValue><TileLabel>Signed-in share</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(g.signed_in)}</TileValue><TileLabel>Tracked signed-in users</TileLabel></Tile>
+                        <Tile $accent="#f59e0b"><TileValue>{(g.visitors || g.signed_in) ? formatPercent(g.signed_in_share) : "—"}</TileValue><TileLabel>Signed-in share</TileLabel></Tile>
                     </TileGrid>
 
                     <SectionHeader>Trends</SectionHeader>

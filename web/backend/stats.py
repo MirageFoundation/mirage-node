@@ -303,11 +303,11 @@ def _resolved_event_cte() -> str:
 
 
 def _growth_visitors(start: int, end: int) -> Tuple[int, int, int]:
-    """(visitors, active, signups) for the tracked population in the window.
+    """(visitors, active, signed_in) for the tracked population in the window.
 
     visitors are logged-out identities with any event. active are logged-in
     identities with an engagement event but no post/comment in the same window.
-    signups are tracked identities with a logged-in event.
+    signed_in are tracked identities with a logged-in event.
     """
     contributor_addresses = _contributor_addresses(start, end)
     with connect_backend_db() as conn:
@@ -326,16 +326,16 @@ def _growth_visitors(start: int, end: int) -> Tuple[int, int, int]:
                 (start, end),
             )
             rows = cur.fetchall()
-    visitors = active = signups = 0
+    visitors = active = signed_in = 0
     for ident, has_addr, has_engagement in rows:
         ident_lc = str(ident or "").lower()
         if has_addr:
-            signups += 1
+            signed_in += 1
             if has_engagement and ident_lc not in contributor_addresses:
                 active += 1
         else:
             visitors += 1
-    return visitors, active, signups
+    return visitors, active, signed_in
 
 
 def _contributor_addresses(start: int, end: int) -> set[str]:
@@ -651,7 +651,7 @@ def _tracking_since() -> Optional[int]:
     """Unix ts of the earliest recorded event on this node — i.e. when Mirage
     visitor tracking effectively began here. None if nothing is recorded yet.
 
-    Everything in the "tracked" bucket (visitors/active/signups/campaigns and the
+    Everything in the "tracked" bucket (visitors/active/signed-in/campaigns and the
     tracked-engagement half of retention) is necessarily blank before this instant. On-chain
     metrics are unaffected: the chain has full history regardless.
     """
@@ -679,10 +679,10 @@ def local_server_label() -> str:
 def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
     """Full metric bundle for this server over [start, end]."""
     now_ts = int(time.time())
-    visitors, active, signups = _growth_visitors(start, end)
+    visitors, active, signed_in = _growth_visitors(start, end)
     new_users = _new_users(start, end)
     contributors, posts, comments = _contributors(start, end)
-    tracked_identities = visitors + signups
+    tracked_identities = visitors + signed_in
     return {
         "server": local_server_label(),
         "generated_at": now_ts,
@@ -694,8 +694,8 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
         "growth": {
             "visitors": visitors,
             "active": active,
-            "signups": signups,
-            "signup_conversion": round(signups / tracked_identities, 4) if tracked_identities else 0.0,
+            "signed_in": signed_in,
+            "signed_in_share": round(signed_in / tracked_identities, 4) if tracked_identities else 0.0,
         },
         # On-chain facts over the window (full history, independent of visitor tracking).
         "onchain": {
@@ -750,7 +750,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
 
     Two different combine rules, because the data has two natures:
 
-    - Tracked metrics (visitors/active/signups, daily ``active``) are per-node:
+    - Tracked metrics (visitors/active/signed_in, daily ``active``) are per-node:
       a visitor hits exactly one server, so these are SUMMED.
     - On-chain metrics (new_users/contributors/posts/comments, the retention
       cohort, daily new_users/posts/comments) are global chain facts that every
@@ -759,7 +759,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
       not first, so a node that is behind/catching up can't drag the fleet view
       below the most-synced node's complete count.
     """
-    visitors = active = signups = new_users = 0
+    visitors = active = signed_in = new_users = 0
     contributors = posts = comments = 0
     cohort_size = 0
     ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained] (max)
@@ -772,7 +772,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         # tracked → sum
         visitors += int(g.get("visitors") or 0)
         active += int(g.get("active") or 0)
-        signups += int(g.get("signups") or 0)
+        signed_in += int(g.get("signed_in") or 0)
         # on-chain → max (identical across nodes; never sum)
         new_users = max(new_users, int(o.get("new_users") or 0))
         contributors = max(contributors, int(o.get("contributors") or 0))
@@ -817,7 +817,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         if (s.get("stats") or {}).get("tracking_since")
     ]
     tracking_since = min(since_vals) if since_vals else None
-    tracked_identities = visitors + signups
+    tracked_identities = visitors + signed_in
     return {
         "window": {"start": start, "end": end},
         "servers_counted": len(ok_servers),
@@ -825,8 +825,8 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         "growth": {
             "visitors": visitors,
             "active": active,
-            "signups": signups,
-            "signup_conversion": round(signups / tracked_identities, 4) if tracked_identities else 0.0,
+            "signed_in": signed_in,
+            "signed_in_share": round(signed_in / tracked_identities, 4) if tracked_identities else 0.0,
         },
         "onchain": {
             "new_users": new_users,
