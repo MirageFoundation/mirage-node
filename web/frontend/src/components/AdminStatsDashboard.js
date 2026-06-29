@@ -478,7 +478,7 @@ export default function AdminStatsDashboard() {
                             <Dot $c={CHART_COLORS.active} />
                             <span>
                                 <strong>Visitor tracking</strong> (Mirage-owned) — logged-out visitors,
-                                logged-in active users, signed-in users and campaigns.{" "}
+                                logged-in active users and campaigns.{" "}
                                 {trackingSinceLabel
                                     ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
                                     : <>No tracked events recorded yet, so these are still empty.</>}
@@ -486,31 +486,34 @@ export default function AdminStatsDashboard() {
                         </LegendItem>
                     </SourceLegend>
 
-                    <SectionHeader>On-chain — full history (retroactive)</SectionHeader>
+                    <SectionHeader>Audience — three categories</SectionHeader>
+                    <Note>
+                        Everyone who used Mirage in this window, split three ways with no overlap:{" "}
+                        <strong>Contributors</strong> are logged-in users who posted or commented.{" "}
+                        <strong>Active users</strong> are logged-in users who browsed, read, searched, viewed
+                        profiles/topics or voted but did <em>not</em> post or comment.{" "}
+                        <strong>Visitors</strong> are not logged in.
+                    </Note>
+                    <SubNote>
+                        Contributors come from the chain (full history, any window). Active users and visitors are
+                        Mirage-tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}, so before that
+                        date they read 0 — not because nobody was there, but because tracking hadn't started.
+                    </SubNote>
+                    {windowEndsBeforeTracking && (
+                        <Warn>This window ends before tracking began, so Active users and Visitors are 0 by definition — not a real reading. Contributors is still accurate.</Warn>
+                    )}
+                    <TileGrid>
+                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (logged in, posted/commented)</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active users (logged in, no post/comment)</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (not logged in)</TileLabel></Tile>
+                    </TileGrid>
+
+                    <SectionHeader>On-chain volume — full history (retroactive)</SectionHeader>
                     <Note>Counts every signup / post / comment in the window straight from the chain. Reliable for past windows.</Note>
                     <TileGrid>
                         <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users (signups)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (posted/commented)</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.posts}><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.comments}><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
-                    </TileGrid>
-
-                    <SectionHeader>
-                        Visitor tracking{trackingSinceLabel ? ` — only since ${trackingSinceLabel}` : ""}
-                    </SectionHeader>
-                    <Note>
-                        <strong>Contributors</strong> post or comment. <strong>Active users</strong> are logged-in
-                        users who read, browse, search, view profiles/topics or vote without posting/commenting.
-                        <strong>Visitors</strong> are logged-out users.
-                    </Note>
-                    {windowEndsBeforeTracking && (
-                        <Warn>This window ends before tracking began, so every number below is 0 by definition — not a real reading.</Warn>
-                    )}
-                    <TileGrid>
-                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active users</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (logged out)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(g.signed_in)}</TileValue><TileLabel>Tracked signed-in users</TileLabel></Tile>
-                        <Tile $accent="#f59e0b"><TileValue>{(g.visitors || g.signed_in) ? formatPercent(g.signed_in_share) : "—"}</TileValue><TileLabel>Signed-in share</TileLabel></Tile>
                     </TileGrid>
 
                     <SectionHeader>Trends</SectionHeader>

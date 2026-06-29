@@ -191,10 +191,10 @@ def test_stats_pure(backend):
     finally:
         st.connect_backend_db = orig_backend_db
         st._contributor_addresses = orig_contributors
-    if buckets == (2, 1, 3):
+    if buckets == (2, 1):
         _pass("stats.growth_buckets")
     else:
-        _fail("stats.growth_buckets", f"expected (2, 1, 3), got {buckets}")
+        _fail("stats.growth_buckets", f"expected (2, 1), got {buckets}")
 
     # Visitor hashing: deterministic, salted, None on empty.
     h1 = hash_visitor_id("abc")
@@ -209,7 +209,7 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 100, "active": 40, "signed_in": 10},
+                "growth": {"visitors": 100, "active": 40},
                 "onchain": {"new_users": 80, "contributors": 5, "posts": 20, "comments": 30},
                 "retention": {
                     "cohort_size": 10,
@@ -222,7 +222,7 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 50, "active": 10, "signed_in": 5},
+                "growth": {"visitors": 50, "active": 10},
                 "onchain": {"new_users": 20, "contributors": 5, "posts": 0, "comments": 10},
                 "retention": {
                     "cohort_size": 5,
@@ -246,8 +246,6 @@ def test_stats_pure(backend):
         # tracked metrics SUM across nodes
         agg["growth"]["visitors"] == 150,
         agg["growth"]["active"] == 50,
-        agg["growth"]["signed_in"] == 15,
-        agg["growth"]["signed_in_share"] == round(15 / 165, 4),
         # on-chain metrics are identical per node -> MAX, never summed
         agg["onchain"]["new_users"] == 80,
         agg["onchain"]["contributors"] == 5,
