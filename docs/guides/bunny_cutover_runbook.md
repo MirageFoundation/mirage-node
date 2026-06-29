@@ -218,3 +218,37 @@ Each step reverses independently:
 
 Storage is never migrated, so none of these touch existing media — reads keep
 working throughout.
+
+## Status — cutover complete (2026-06-28)
+
+`mirage.vote` and `mirage.talk` are fully behind Bunny end to end:
+
+- DNS for both domains is on **Bunny DNS** (`kiki.bunny.net` / `coco.bunny.net`);
+  apex + `www` resolve to the pull zone, `origin.<domain>` -> node IP.
+- Edge + Bunny Shield upload scanning (block mode) in front of both.
+- `MEDIA_PROVIDER=bunny`, `MEDIA_UPLOADS_ENABLED=true`, `EDGE_PROVIDER=bunny`.
+- Origin `:443` firewalled to Bunny edge IPs on both hosts (boot + daily timer).
+- `n3` / `n4` keep `MEDIA_UPLOADS_ENABLED=false` (no scanning edge).
+
+## To retire later (do NOT remove yet)
+
+These are intentionally still in place to avoid breaking users on old app builds.
+Removing any of them early breaks legacy mobile uploads.
+
+- **Legacy `get_upload_url` shim** (`web/backend/routes/public.py`) — **hard deadline
+  ~Aug 2026.** Returns the old Cloudflare browser-direct upload shape so pre-
+  `/api/upload_media` app builds keep working. Gated on Cloudflare creds, not on
+  `MEDIA_PROVIDER`. Loud per-call `logger.warning("DEPRECATED get_upload_url …")` —
+  watch the logs; when callers drop to ~zero it is safe to delete.
+- **`CLOUDFLARE_*` secrets** on `mirage.talk` (and `mirage.vote`) — keep ONLY while
+  the shim must serve old builds. Deleting the creds alone disables the shim (it
+  then returns `410 legacy_upload_unsupported`). Trigger: app builds using
+  `/api/upload_media` dominate (shipped via EAS OTA).
+- **Old Cloudflare DNS zones** for both domains — now dormant (NS point to Bunny).
+  Safe to delete in the Cloudflare dashboard once NS propagation is confirmed
+  stable. Purely housekeeping; no functional impact.
+
+> Known temporary gap until the shim is gone: legacy mobile uploads go browser-
+> direct to Cloudflare and therefore **bypass Bunny Shield CSAM scanning**. Only
+> `/api/upload_media` (web + updated app) is scanned at the edge. This ends when
+> the shim + Cloudflare creds are retired.
