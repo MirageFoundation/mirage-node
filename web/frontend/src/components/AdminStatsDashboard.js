@@ -60,18 +60,18 @@ const Header = styled.div`
     align-items: flex-end;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2.5rem;
 `;
 
 const Title = styled.h1`
-    font-size: 1.6rem;
-    font-weight: 750;
+    font-size: 1.8rem;
+    font-weight: 800;
     letter-spacing: -0.02em;
-    margin: 0 0 0.3rem;
+    margin: 0 0 0.4rem;
 `;
 
 const Subtitle = styled.div`
-    font-size: 0.82rem;
+    font-size: 0.85rem;
     opacity: 0.6;
 `;
 
@@ -135,77 +135,60 @@ const DateInput = styled.input`
 `;
 
 const SectionHeader = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    margin: 2.1rem 0 0.7rem;
-    &::after {
-        content: "";
-        flex: 1;
-        height: 1px;
-        background: ${BORDER_SOFT};
-    }
-`;
-
-// The muted label text lives in its own span so the section's low opacity does
-// not bleed into the (full-opacity) info tooltip rendered beside it.
-const SectionLabel = styled.span`
     text-transform: uppercase;
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    font-weight: 700;
-    opacity: 0.55;
-    white-space: nowrap;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    font-weight: 750;
+    opacity: 0.8;
+    margin: 3.5rem 0 0.6rem;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
 `;
 
 const TileGrid = styled.div`
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1rem;
 `;
 
 const Tile = styled.div`
-    position: relative;
-    overflow: hidden;
     background: ${SURFACE};
-    border: 1px solid ${BORDER};
-    border-radius: 14px;
-    padding: 1rem 1.1rem 0.95rem 1.2rem;
-    transition: background 0.12s ease, transform 0.12s ease;
-    &::before {
-        content: "";
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background: ${({ $accent }) => $accent || "transparent"};
-    }
+    border: 1px solid ${BORDER_SOFT};
+    border-top: 3px solid ${({ $accent }) => $accent || "transparent"};
+    border-radius: 12px;
+    padding: 1.4rem 1.4rem;
+    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
     &:hover {
         background: ${SURFACE_HOVER};
+        border-color: ${BORDER};
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
 `;
 
 const TileValue = styled.div`
-    font-size: 1.85rem;
-    font-weight: 750;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    margin-bottom: 0.5rem;
 `;
 
 const TileLabel = styled.div`
-    font-size: 0.72rem;
-    opacity: 0.6;
-    margin-top: 0.4rem;
-    line-height: 1.3;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    line-height: 1.4;
+    font-weight: 500;
 `;
 
 const Card = styled.div`
     background: ${SURFACE};
-    border: 1px solid ${BORDER};
-    border-radius: 16px;
-    padding: 1.1rem 1.2rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    border: 1px solid ${BORDER_SOFT};
+    border-radius: 14px;
+    padding: 1.4rem 1.4rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 `;
 
 const Table = styled.table`
@@ -265,39 +248,41 @@ const Message = styled.div`
     font-size: 0.9rem;
 `;
 
-const SourceLegend = styled(Card)`
+const SourceLegend = styled.div`
     display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    margin-bottom: 0.5rem;
-    font-size: 0.78rem;
-    line-height: 1.5;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.4rem;
+    margin: -1rem 0 2rem;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    opacity: 0.65;
 `;
 
 const LegendItem = styled.div`
     display: flex;
     align-items: baseline;
-    gap: 0.6rem;
+    gap: 0.45rem;
 `;
 
 const Dot = styled.span`
     flex: 0 0 auto;
-    width: 0.6rem;
-    height: 0.6rem;
+    width: 0.5rem;
+    height: 0.5rem;
     border-radius: 50%;
     background: ${({ $c }) => $c};
     box-shadow: 0 0 0 3px ${({ $c }) => $c}22;
     transform: translateY(1px);
 `;
 
-// Base caveat style. Metric definitions now live in hover tooltips (Info), so
-// this is only extended by Warn for conditional, state-dependent alerts.
+// Concise, always-visible explanation under a section header (data source,
+// window, tracking-since caveat). Also the base style for Warn.
 const Note = styled.div`
-    font-size: 0.74rem;
-    line-height: 1.5;
-    opacity: 0.65;
-    margin: 0 0 0.8rem;
-    max-width: 760px;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    opacity: 0.6;
+    margin: 0 0 1.2rem;
+    max-width: 860px;
+    font-weight: 400;
 `;
 
 const Warn = styled(Note)`
@@ -317,89 +302,20 @@ const ChartGrid = styled.div`
 `;
 
 const ChartCard = styled(Card)`
-    padding: 1.1rem 1.1rem 0.7rem;
+    padding: 1.4rem 1.4rem 1rem;
 `;
 
 const ChartTitle = styled.div`
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    margin-bottom: 0.9rem;
+    margin-bottom: 1.2rem;
+    opacity: 0.85;
 `;
 
 const ChartHeight = styled.div`
     width: 100%;
     height: 240px;
 `;
-
-// Hover-tooltip primitives. The "i" badge reveals a bubble explaining, in full,
-// how a metric is computed (data source, window, per-node vs fleet, the
-// tracking-since caveat). Pure CSS hover — no JS state, no new dependencies.
-const InfoWrap = styled.span`
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    vertical-align: middle;
-`;
-
-const InfoIcon = styled.span`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 0.95rem;
-    height: 0.95rem;
-    border-radius: 50%;
-    border: 1px solid ${BORDER};
-    background: ${SURFACE};
-    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
-    font-size: 0.6rem;
-    font-weight: 700;
-    font-style: normal;
-    line-height: 1;
-    opacity: 0.65;
-    cursor: help;
-    text-transform: none;
-    letter-spacing: normal;
-`;
-
-const InfoBubble = styled.span`
-    position: absolute;
-    bottom: calc(100% + 0.55rem);
-    left: 50%;
-    width: 300px;
-    max-width: 78vw;
-    background: ${({ theme }) => tok(theme, "background", "#15171c")};
-    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
-    border: 1px solid ${BORDER};
-    border-radius: 10px;
-    padding: 0.7rem 0.8rem;
-    font-size: 0.72rem;
-    font-weight: 400;
-    line-height: 1.55;
-    text-transform: none;
-    letter-spacing: normal;
-    text-align: left;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-    opacity: 0;
-    visibility: hidden;
-    transform: translateX(-50%) translateY(4px);
-    transition: opacity 0.12s ease, transform 0.12s ease;
-    z-index: 50;
-    pointer-events: none;
-    ${InfoWrap}:hover & {
-        opacity: 1;
-        visibility: visible;
-        transform: translateX(-50%) translateY(0);
-    }
-`;
-
-function Info({ children }) {
-    return (
-        <InfoWrap>
-            <InfoIcon>i</InfoIcon>
-            <InfoBubble>{children}</InfoBubble>
-        </InfoWrap>
-    );
-}
 
 function isAdmin() {
     try {
@@ -465,9 +381,10 @@ export default function AdminStatsDashboard() {
     // i.e. Lurkers (tracked) + Contributors (chain fact). Computed in-render.
     const activeUsers = (g ? g.lurkers || 0 : 0) + (o ? o.contributors || 0 : 0);
     // Shared tracking-since caveat reused across the metric tooltips.
-    const trackedCaveat = trackingSinceLabel
-        ? `Mirage-tracked, only since ${trackingSinceLabel} — blank before that date because tracking hadn't started, not because nobody was there.`
-        : "Mirage-tracked, but no tracked events are recorded yet, so this reads 0.";
+    // Short tracking-since phrase for the inline section notes.
+    const trackedSince = trackingSinceLabel
+        ? `Mirage-tracked since ${trackingSinceLabel} (blank before)`
+        : "Mirage-tracked (nothing recorded yet)";
     // Whether the selected window predates visitor tracking. If so, the tracked
     // metrics are empty and the tracked-engagement half of retention can't be seen.
     const windowEndsBeforeTracking = !!(trackingSince && win && win.end < trackingSince);
@@ -545,37 +462,23 @@ export default function AdminStatsDashboard() {
                     <SourceLegend>
                         <LegendItem>
                             <Dot $c={CHART_COLORS.posts} />
-                            <span>
-                                <strong>On-chain</strong> — recorded by the blockchain since genesis.
-                                Accurate for <strong>any</strong> historical window: new users, contributors,
-                                posts, comments.
-                            </span>
+                            <span>On-chain — full history</span>
                         </LegendItem>
                         <LegendItem>
                             <Dot $c={CHART_COLORS.lurkers} />
                             <span>
-                                <strong>Visitor tracking</strong> (Mirage-owned) — logged-out visitors,
-                                logged-in lurkers and campaigns.{" "}
-                                {trackingSinceLabel
-                                    ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
-                                    : <>No tracked events recorded yet, so these are still empty.</>}
+                                Visitor tracking{trackingSinceLabel ? ` — since ${trackingSinceLabel}` : " — none yet"}
                             </span>
                         </LegendItem>
                     </SourceLegend>
 
-                    <SectionHeader>
-                        <SectionLabel>Audience</SectionLabel>
-                        <Info>
-                            Everyone who used Mirage in this window, split with no overlap. Fleet-wide
-                            (tracked metrics summed across nodes; chain facts are global).{" "}
-                            <strong>Active users</strong> = Lurkers + Contributors — every signed-in identity.{" "}
-                            <strong>Contributors</strong>: signed in and posted or commented — a chain fact from
-                            the indexer, full history, accurate for any window.{" "}
-                            <strong>Lurkers</strong>: signed in and browsed, read, searched, viewed
-                            profiles/topics or voted but did <em>not</em> post or comment — {trackedCaveat}{" "}
-                            <strong>Visitors</strong>: not signed in — {trackedCaveat}
-                        </Info>
-                    </SectionHeader>
+                    <SectionHeader>Audience</SectionHeader>
+                    <Note>
+                        Fleet-wide, no overlap. <strong>Active users</strong> = lurkers + contributors (everyone
+                        signed in). <strong>Contributors</strong> posted or commented — a chain fact (full history,
+                        any window). <strong>Lurkers</strong> are signed in but only browsed/voted, and{" "}
+                        <strong>Visitors</strong> aren't signed in — both {trackedSince}.
+                    </Note>
                     {windowEndsBeforeTracking && (
                         <Warn>This window ends before tracking began, so Lurkers and Visitors are 0 by definition — not a real reading. Contributors (and therefore the chain half of Active users) is still accurate.</Warn>
                     )}
@@ -586,33 +489,24 @@ export default function AdminStatsDashboard() {
                         <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (not logged in)</TileLabel></Tile>
                     </TileGrid>
 
-                    <SectionHeader>
-                        <SectionLabel>On-chain volume — full history (retroactive)</SectionLabel>
-                        <Info>
-                            New users (signups), Posts and Comments counted straight from the blockchain over
-                            the selected window. The chain has full history since genesis, so these are accurate
-                            for any past window regardless of when Mirage tracking began. Global chain facts —
-                            identical on every node — so the fleet view takes the max across nodes, never a sum.
-                        </Info>
-                    </SectionHeader>
+                    <SectionHeader>On-chain volume — full history (retroactive)</SectionHeader>
+                    <Note>
+                        Signups, posts and comments straight from the blockchain — accurate for any past window,
+                        independent of when tracking began. Global chain facts (max across nodes, never summed).
+                    </Note>
                     <TileGrid>
                         <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users (signups)</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.posts}><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.comments}><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
                     </TileGrid>
 
-                    <SectionHeader>
-                        <SectionLabel>Trends</SectionLabel>
-                        <Info>
-                            Per-day buckets over the window (UTC days; the current still-building day is dropped).{" "}
-                            <strong>Lurkers &amp; contributors per day</strong>: lurkers are tracked (summed across
-                            nodes, {trackedCaveat.charAt(0).toLowerCase() + trackedCaveat.slice(1)}) and shown with a
-                            dashed "tracking start" marker; contributors are a chain fact. <strong>D7 outcome</strong>{" "}
-                            splits each day's signups by what happened 7 days later: green = still active at/after
-                            signup+7d, red = churned, grey = too recent to judge. <strong>Posts &amp; comments per
-                            day</strong> are chain facts (full history).
-                        </Info>
-                    </SectionHeader>
+                    <SectionHeader>Trends</SectionHeader>
+                    <Note>
+                        Per UTC day (today's partial day dropped). Lurkers are tracked (dashed marker = tracking
+                        start); contributors, posts/comments and the D7 outcome come from the chain.{" "}
+                        <strong>D7 outcome</strong> splits each day's signups 7 days later: green = still active,
+                        red = churned, grey = too recent to judge.
+                    </Note>
                     <ChartGrid>
                         <ChartCard>
                             <ChartTitle>Lurkers &amp; contributors per day (stacked)</ChartTitle>
@@ -683,18 +577,12 @@ export default function AdminStatsDashboard() {
                         </ChartCard>
                     </ChartGrid>
 
-                    <SectionHeader>
-                        <SectionLabel>Date-range cohort &amp; retention</SectionLabel>
-                        <Info>
-                            Forward retention for the {formatNumber(r.cohort_size)} users who signed up in this
-                            window (signups are a chain fact). <strong>Still active</strong> at horizon N
-                            (D7/D14/D30) = at or after signup + N days the user either <strong>posted or
-                            commented</strong> (on-chain, full history) <strong>or browsed/voted</strong>{" "}
-                            ({trackedCaveat}). Each horizon counts only users who signed up early enough that N
-                            days have already elapsed, shown as retained/eligible. The cohort and on-chain
-                            activity are global chain facts (max across nodes); the tracked half is per-node.
-                        </Info>
-                    </SectionHeader>
+                    <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
+                    <Note>
+                        Of the {formatNumber(r.cohort_size)} users who signed up this window, how many were still
+                        active N days later — they posted/commented (on-chain) or browsed/voted ({trackedSince}).
+                        Each horizon counts only signups old enough to judge, shown as retained/eligible.
+                    </Note>
                     {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
                         <Warn>
                             {windowEndsBeforeTracking
@@ -729,7 +617,7 @@ export default function AdminStatsDashboard() {
 
                     {campaigns.length > 0 && (
                         <>
-                            <SectionHeader><SectionLabel>Attribution (first-touch campaigns)</SectionLabel></SectionHeader>
+                            <SectionHeader>Attribution (first-touch campaigns)</SectionHeader>
                             <Card style={{ padding: "0.4rem 0.6rem" }}>
                                 <Table>
                                     <thead>
@@ -758,16 +646,12 @@ export default function AdminStatsDashboard() {
                         </>
                     )}
 
-                    <SectionHeader>
-                        <SectionLabel>Servers ({servers.length})</SectionLabel>
-                        <Info>
-                            Per-node tracked counts. A visitor hits exactly one server, so logged-out visitors
-                            and lurkers are genuine per-server figures — the fleet tiles above are their sum.
-                            The global on-chain totals (new users, contributors, D7 retention) are deliberately
-                            <em> not</em> shown per row: every node indexes the same chain, so they'd read
-                            identically on every row and mislead. Those live only in the fleet tiles above.
-                        </Info>
-                    </SectionHeader>
+                    <SectionHeader>Servers ({servers.length})</SectionHeader>
+                    <Note>
+                        Per-node tracked counts — a visitor hits exactly one server, so these sum to the fleet
+                        tiles above. Global chain totals (new users, contributors, retention) are omitted here:
+                        every node indexes the same chain, so they'd read identically on every row.
+                    </Note>
                     <Card style={{ padding: "0.4rem 0.6rem" }}>
                         <Table>
                             <thead>
