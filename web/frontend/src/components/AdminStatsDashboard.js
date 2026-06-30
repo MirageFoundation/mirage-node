@@ -248,20 +248,48 @@ const Message = styled.div`
     font-size: 0.9rem;
 `;
 
-const SourceLegend = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem 1.4rem;
-    margin: -1rem 0 2rem;
-    font-size: 0.8rem;
-    line-height: 1.45;
-    opacity: 0.65;
+const HoverBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.5rem;
+    cursor: help;
+    position: relative;
+    opacity: 0.7;
+    &:hover {
+        opacity: 1;
+    }
 `;
 
-const LegendItem = styled.div`
+const HoverPopup = styled.div`
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.5rem;
+    width: max-content;
+    min-width: 240px;
+    background: ${({ theme }) => tok(theme, "background", "#15171c")};
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    border: 1px solid ${BORDER};
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    visibility: hidden;
+    z-index: 100;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    transition: opacity 0.12s ease;
+    ${HoverBadge}:hover & {
+        opacity: 1;
+        visibility: visible;
+    }
+`;
+
+const LegendRow = styled.div`
     display: flex;
     align-items: baseline;
-    gap: 0.45rem;
+    gap: 0.5rem;
+    margin-bottom: ${({ $last }) => ($last ? "0" : "0.4rem")};
 `;
 
 const Dot = styled.span`
@@ -432,6 +460,19 @@ export default function AdminStatsDashboard() {
                     <Subtitle>
                         Fleet-wide, admin-only. {aggregate ? `${aggregate.servers_counted} server(s) reporting` : ""}
                         {win ? ` · ${formatDate(win.start)} – ${formatDate(win.end)}` : ""}
+                        <HoverBadge>
+                            (Data sources ⓘ)
+                            <HoverPopup>
+                                <LegendRow>
+                                    <Dot $c={CHART_COLORS.posts} />
+                                    <span><strong>On-chain</strong> — full history</span>
+                                </LegendRow>
+                                <LegendRow $last>
+                                    <Dot $c={CHART_COLORS.lurkers} />
+                                    <span><strong>Visitor tracking</strong> — {trackingSinceLabel ? `since ${trackingSinceLabel}` : "none yet"}</span>
+                                </LegendRow>
+                            </HoverPopup>
+                        </HoverBadge>
                     </Subtitle>
                 </div>
                 <Controls>
@@ -459,19 +500,6 @@ export default function AdminStatsDashboard() {
 
             {!loading && !error && aggregate && (
                 <>
-                    <SourceLegend>
-                        <LegendItem>
-                            <Dot $c={CHART_COLORS.posts} />
-                            <span>On-chain — full history</span>
-                        </LegendItem>
-                        <LegendItem>
-                            <Dot $c={CHART_COLORS.lurkers} />
-                            <span>
-                                Visitor tracking{trackingSinceLabel ? ` — since ${trackingSinceLabel}` : " — none yet"}
-                            </span>
-                        </LegendItem>
-                    </SourceLegend>
-
                     <SectionHeader>Audience</SectionHeader>
                     <Note>
                         Fleet-wide, no overlap. <strong>Active users</strong> = lurkers + contributors (everyone
