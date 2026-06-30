@@ -926,7 +926,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) {
             setFollowOverride(!next);
         }
-    }, [closeAllMenus, isLoggedIn, authorAddress, followingUser, viewerAddress]);
+    }, [closeAllMenus, authorAddress, followingUser, viewerAddress]);
 
     const handleFollowTopic = useCallback(async () => {
         closeAllMenus();
@@ -940,7 +940,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) {
             setTopicFollowOverride(!next);
         }
-    }, [closeAllMenus, isLoggedIn, topic, followingTopic, viewerAddress]);
+    }, [closeAllMenus, topic, followingTopic, viewerAddress]);
 
     /**
      * Confirmation dialogs (06.3 polish round).
