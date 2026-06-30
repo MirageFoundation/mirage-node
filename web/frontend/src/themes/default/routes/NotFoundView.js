@@ -28,7 +28,7 @@ import { useNotFound } from "../../../logic/useNotFound";
 const NotFoundWrap = styled.div`
     width: 100%;
     max-width: 820px;
-    margin: -0.75rem 0 0;
+    margin: -0.75rem auto 0;
 
     @media (max-width: 1000px) {
         margin-top: -0.5rem;

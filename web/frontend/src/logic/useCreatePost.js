@@ -6,7 +6,7 @@ import Api from "../utils/api";
 import Storage from "../utils/Storage";
 import { formatError } from "../utils/errorMessages";
 import { requireAccount } from "../utils/openBrowsing";
-import { getVideoThumbnailUrl } from "../utils/media";
+import { getVideoThumbnailUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../utils/media";
 import { updateNotification } from "../utils/notifications";
 export const TAG_OPTIONS = [{
     value: '',
@@ -108,30 +108,6 @@ export function useCreatePost({
             mountedRef.current = false;
         };
     }, []);
-    const isSafeImageUrl = url => {
-        try {
-            const u = new URL(url);
-            const host = u.hostname.toLowerCase();
-            const p = u.pathname.toLowerCase();
-            const isCloudflareImage = host.endsWith('imagedelivery.net');
-            const isRasterExt = p.endsWith('.png') || p.endsWith('.jpg') || p.endsWith('.jpeg') || p.endsWith('.gif') || p.endsWith('.webp') || p.endsWith('.bmp') || p.endsWith('.avif');
-            return isCloudflareImage || isRasterExt;
-        } catch (_) {
-            return false;
-        }
-    };
-    const isSafeVideoUrl = url => {
-        try {
-            const u = new URL(url);
-            const p = u.pathname.toLowerCase();
-            const host = u.hostname.toLowerCase();
-            const isStream = host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
-            const isVidExt = p.endsWith('.mp4') || p.endsWith('.webm') || p.endsWith('.ogv') || p.endsWith('.mov') || p.endsWith('.mkv') || p.endsWith('.gifv');
-            return isStream || isVidExt;
-        } catch (_) {
-            return false;
-        }
-    };
     useEffect(() => {
         if (!isEditMode || !overrideId) return;
         const load = async () => {
@@ -153,12 +129,13 @@ export function useCreatePost({
                     const mediaArr = Array.isArray(data.root.media) ? data.root.media : [];
                     if (mediaArr.length > 0) {
                         const items = mediaArr.slice(0, MAX_MEDIA).map(url => {
-                            const type = isSafeVideoUrl(url) ? 'video' : 'image';
+                            const type = isLikelyVideoUrl(url) ? 'video' : 'image';
                             return {
                                 type,
                                 url
                             };
                         });
+                        console.debug('[CreatePostView] edit preload media[]:', items.map(m => `${m.type}:${m.url}`));
                         setAttachedMedia(items);
                         setThumbsLoading(new Set(items.map(m => m.url)));
                         setContentValue(content);
@@ -167,8 +144,8 @@ export function useCreatePost({
                         const lines = content.split('\n');
                         const firstLine = lines[0]?.trim() || '';
                         if (/^https?:\/\//i.test(firstLine)) {
-                            const isImage = isSafeImageUrl(firstLine);
-                            const isVideo = isSafeVideoUrl(firstLine);
+                            const isImage = isLikelyImageUrl(firstLine);
+                            const isVideo = isLikelyVideoUrl(firstLine);
                             if (isImage || isVideo) {
                                 setAttachedMedia([{
                                     type: isImage ? 'image' : 'video',

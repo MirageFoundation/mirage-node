@@ -342,7 +342,7 @@ export function MoreMenuChip({
     const handleEdit = useCallback(e => {
         stop(e); setOpen(false);
         if (!postId) return;
-        navigate(`/edit_post/${postId}`);
+        navigate(`/create_post?post_id=${postId}&edit=true`);
     }, [navigate, postId]);
 
     const handleDelete = useCallback(e => {
