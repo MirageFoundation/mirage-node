@@ -251,10 +251,12 @@ const Message = styled.div`
 const HoverBadge = styled.span`
     display: inline-flex;
     align-items: center;
-    margin-left: 0.5rem;
+    margin-left: 0.25rem;
     cursor: help;
     position: relative;
-    opacity: 0.7;
+    opacity: 0.6;
+    font-size: 0.9em;
+    transform: translateY(-0.2em);
     &:hover {
         opacity: 1;
     }
@@ -264,15 +266,15 @@ const HoverPopup = styled.div`
     position: absolute;
     top: 100%;
     left: 0;
-    margin-top: 0.5rem;
+    margin-top: 0.4rem;
     width: max-content;
     min-width: 240px;
-    background: ${({ theme }) => tok(theme, "background", "#15171c")};
-    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    background: ${({ theme }) => tok(theme, "panel", "#ffffff")};
+    color: ${({ theme }) => tok(theme, "text", "#1a1a1b")};
     border: 1px solid ${BORDER};
     border-radius: 8px;
-    padding: 0.7rem 0.9rem;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    padding: 0.75rem 0.9rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     opacity: 0;
     visibility: hidden;
     z-index: 100;
@@ -461,7 +463,7 @@ export default function AdminStatsDashboard() {
                         Fleet-wide, admin-only. {aggregate ? `${aggregate.servers_counted} server(s) reporting` : ""}
                         {win ? ` · ${formatDate(win.start)} – ${formatDate(win.end)}` : ""}
                         <HoverBadge>
-                            (Data sources ⓘ)
+                            <sup style={{ padding: "0.2rem" }}>ⓘ</sup>
                             <HoverPopup>
                                 <LegendRow>
                                     <Dot $c={CHART_COLORS.posts} />
