@@ -8,8 +8,8 @@ Core model (see the Server Stats Redesign plan):
   client in the ``X-Mirage-Visitor`` header) and is bound to a Mirage address on
   authentication. The address always wins and is the only durable merge key.
   IP is never identity.
-- ``stats_events`` stores only the signals the chain lacks: ``visit`` and
-  ``engagement`` (active browsing, including logged-out lurkers).
+- ``stats_events`` stores request activity signals: ``visit`` and
+  ``engagement`` (active logged-in use such as browsing or voting).
 - ``stats_visitors`` maps a (hashed) visitor id to its bound address plus
   first/last-touch UTM attribution.
 - On-chain facts (signups, posts, comments) stay authoritative in the indexer
@@ -17,6 +17,8 @@ Core model (see the Server Stats Redesign plan):
 - Every metric is a query over an arbitrary ``[start, end]`` window.
 """
 
+import base64
+import binascii
 import re
 import threading
 import time
@@ -33,16 +35,16 @@ VISITOR_HEADER = "X-Mirage-Visitor"
 
 DAY = 86400
 
-# Active-browsing signals: a request to one of these means the person is
-# actually reading Mirage content, not just loading a shell or polling config.
-# Anything else under /api/ is a bare "visit". The implementer's discretion per
-# the plan -- these are the sensible content-fetch endpoints.
+# Active-use signals: a request to one of these means the user is reading or
+# interacting with Mirage content, not just loading a shell or polling config.
+# Anything else under /api/ is a bare "visit".
 _ENGAGEMENT_PREFIXES = (
     "/api/get_posts",
     "/api/get_comments",
     "/api/get_profile",
     "/api/get_topics",
     "/api/search",
+    "/api/core/vote",
 )
 
 # Paths that are never browsing (our own analytics/admin plumbing, health).
@@ -71,6 +73,26 @@ def _clean_addr(addr: Optional[str]) -> Optional[str]:
     return a
 
 
+def _signed_body_address(path: str) -> Optional[str]:
+    if path != "/api/core/vote":
+        return None
+    data = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(data, dict):
+        return None
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    if not pub_b64:
+        return None
+    try:
+        pub_dec = base64.b64decode(pub_b64, validate=True)
+    except binascii.Error:
+        return None
+    if len(pub_dec) != 33:
+        return None
+    from node import derive_address_from_pubkey
+
+    return _clean_addr(derive_address_from_pubkey(pub_dec))
+
+
 def extract_identity() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Return (visitor_hash, address, platform) for the current request.
 
@@ -83,6 +105,8 @@ def extract_identity() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     raw_visitor = request.headers.get(VISITOR_HEADER, "") if request else ""
     visitor_hash = hash_visitor_id(raw_visitor)
     address = _clean_addr(request.args.get("address") or request.args.get("admin_address"))
+    if address is None:
+        address = _signed_body_address(request.path)
     platform = _platform_from_request()
     return visitor_hash, address, platform
 
@@ -267,37 +291,67 @@ def _resolved_event_cte() -> str:
     """SQL CTE that resolves each event to its canonical identity.
 
     identity = event address, else the address the visitor is now bound to,
-    else the raw visitor hash. This dedupes an anonymous lurker and their later
-    logged-in self into one identity.
+    else the raw visitor hash. ``has_addr`` means this event itself was logged-in,
+    so old anonymous events do not become active users after later signup.
     """
     return (
         "SELECT COALESCE(e.address, v.address, e.visitor_hash) AS ident, e.event_type, e.created_at, "
-        "(e.address IS NOT NULL OR v.address IS NOT NULL) AS has_addr "
+        "(e.address IS NOT NULL) AS has_addr "
         "FROM stats_events e LEFT JOIN stats_visitors v ON v.visitor_hash = e.visitor_hash "
         "WHERE e.created_at BETWEEN %s AND %s"
     )
 
 
-def _growth_visitors(start: int, end: int) -> Tuple[int, int, int]:
-    """(visitors, active, signups) for the tracked-visitor population in the window:
-    distinct identities with any event; with an engagement event (DAU-style); and
-    that are bound to a Mirage address (i.e. signed up / authenticated). All three
-    come from the same population so signups/visitors is a real conversion <= 100%."""
+def _growth_visitors(start: int, end: int) -> Tuple[int, int]:
+    """(visitors, active) for the tracked population in the window.
+
+    Two of the three audience categories (the third, contributors, is a chain
+    fact from the indexer):
+    - visitors: logged-out identities with any tracked event.
+    - active: logged-in identities with an engagement event who did NOT
+      post/comment in the same window (contributors are excluded so the three
+      categories never overlap).
+    """
+    contributor_addresses = _contributor_addresses(start, end)
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 WITH ev AS ({_resolved_event_cte()})
                 SELECT
-                    COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL),
-                    COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL AND event_type = 'engagement'),
-                    COUNT(DISTINCT ident) FILTER (WHERE ident IS NOT NULL AND has_addr)
+                    ident,
+                    BOOL_OR(has_addr),
+                    BOOL_OR(event_type = 'engagement' AND has_addr)
                 FROM ev
+                WHERE ident IS NOT NULL
+                GROUP BY ident
                 """,
                 (start, end),
             )
-            row = cur.fetchone()
-            return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+            rows = cur.fetchall()
+    visitors = active = 0
+    for ident, has_addr, has_engagement in rows:
+        ident_lc = str(ident or "").lower()
+        if has_addr:
+            if has_engagement and ident_lc not in contributor_addresses:
+                active += 1
+        else:
+            visitors += 1
+    return visitors, active
+
+
+def _contributor_addresses(start: int, end: int) -> set[str]:
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT LOWER(owner)
+                FROM posts
+                WHERE created_at BETWEEN %s AND %s
+                """,
+                (start, end),
+            )
+            return {str(r[0]).lower() for r in cur.fetchall() if r and r[0]}
 
 
 def _new_users(start: int, end: int) -> int:
@@ -315,7 +369,7 @@ def _new_users(start: int, end: int) -> int:
 
 def _contributors(start: int, end: int) -> Tuple[int, int, int]:
     """(contributors, posts, comments) in window from the indexer. Posts with a
-    target are comments; votes live in a separate table and never count."""
+    target are comments; votes are active usage, not contribution."""
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -373,8 +427,10 @@ def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT address, MAX(created_at) FROM stats_events "
-                "WHERE event_type = 'engagement' AND address = ANY(%s) GROUP BY 1",
+                "SELECT COALESCE(e.address, v.address) AS address, MAX(e.created_at) "
+                "FROM stats_events e LEFT JOIN stats_visitors v ON v.visitor_hash = e.visitor_hash "
+                "WHERE e.event_type = 'engagement' AND COALESCE(e.address, v.address) = ANY(%s) "
+                "GROUP BY 1",
                 (addrs,),
             )
             for r in cur.fetchall():
@@ -484,6 +540,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
     signup+7d. Always returns one point per day so charts are dense."""
     new_users_by_day: Dict[int, int] = {}
     posts_by_day: Dict[int, Tuple[int, int, int]] = {}
+    contributors_by_day: Dict[int, set[str]] = {}
     cohort: Dict[str, int] = {}
     with connect_db() as conn:
         with conn.cursor() as cur:
@@ -503,6 +560,13 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
             )
             posts_by_day = {int(d): (int(p), int(c), int(ctrb)) for d, p, c, ctrb in cur.fetchall()}
             cur.execute(
+                "SELECT (created_at/%s)*%s AS d, LOWER(owner) "
+                "FROM posts WHERE created_at BETWEEN %s AND %s GROUP BY d, LOWER(owner)",
+                (DAY, DAY, start, end),
+            )
+            for d, owner in cur.fetchall():
+                contributors_by_day.setdefault(int(d), set()).add(str(owner).lower())
+            cur.execute(
                 "SELECT LOWER(owner), created_at FROM profiles "
                 "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0)",
                 (start, end),
@@ -515,11 +579,17 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
             cur.execute(
                 f"WITH ev AS ({_resolved_event_cte()}) "
                 "SELECT (created_at/%s)*%s AS d, "
-                "COUNT(DISTINCT ident) FILTER (WHERE event_type = 'engagement') "
-                "FROM ev GROUP BY d",
+                "ident, "
+                "BOOL_OR(has_addr), "
+                "BOOL_OR(event_type = 'engagement' AND has_addr) "
+                "FROM ev WHERE ident IS NOT NULL GROUP BY d, ident",
                 (start, end, DAY, DAY),
             )
-            active_by_day = {int(d): int(a) for d, a in cur.fetchall()}
+            for d, ident, has_addr, has_engagement in cur.fetchall():
+                day_key = int(d)
+                ident_lc = str(ident or "").lower()
+                if has_addr and has_engagement and ident_lc not in contributors_by_day.get(day_key, set()):
+                    active_by_day[day_key] = active_by_day.get(day_key, 0) + 1
 
     # Last-active timestamp per cohort member (on-chain post/comment OR tracked
     # engagement), used to judge whether each signup was retained at D7.
@@ -537,8 +607,10 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
         with connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT address, MAX(created_at) FROM stats_events "
-                    "WHERE event_type = 'engagement' AND address = ANY(%s) GROUP BY 1",
+                    "SELECT COALESCE(e.address, v.address) AS address, MAX(e.created_at) "
+                    "FROM stats_events e LEFT JOIN stats_visitors v ON v.visitor_hash = e.visitor_hash "
+                    "WHERE e.event_type = 'engagement' AND COALESCE(e.address, v.address) = ANY(%s) "
+                    "GROUP BY 1",
                     (addrs,),
                 )
                 for a, mx in cur.fetchall():
@@ -581,8 +653,8 @@ def _tracking_since() -> Optional[int]:
     """Unix ts of the earliest recorded event on this node — i.e. when Mirage
     visitor tracking effectively began here. None if nothing is recorded yet.
 
-    Everything in the "tracked" bucket (visitors/active/signups/campaigns and the
-    browsing half of retention) is necessarily blank before this instant. On-chain
+    Everything in the "tracked" bucket (visitors/active/campaigns and the
+    tracked-engagement half of retention) is necessarily blank before this instant. On-chain
     metrics are unaffected: the chain has full history regardless.
     """
     with connect_backend_db() as conn:
@@ -609,7 +681,7 @@ def local_server_label() -> str:
 def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
     """Full metric bundle for this server over [start, end]."""
     now_ts = int(time.time())
-    visitors, active, signups = _growth_visitors(start, end)
+    visitors, active = _growth_visitors(start, end)
     new_users = _new_users(start, end)
     contributors, posts, comments = _contributors(start, end)
     return {
@@ -619,12 +691,11 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
         # blank before this; on-chain metrics have full history regardless.
         "tracking_since": _tracking_since(),
         "window": {"start": start, "end": end},
-        # Tracked-visitor funnel (only counts activity since visitor tracking began).
+        # Tracked audience (only counts activity since visitor tracking began).
+        # contributors is a chain fact and lives in "onchain" below.
         "growth": {
             "visitors": visitors,
             "active": active,
-            "signups": signups,
-            "signup_conversion": round(signups / visitors, 4) if visitors else 0.0,
         },
         # On-chain facts over the window (full history, independent of visitor tracking).
         "onchain": {
@@ -679,7 +750,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
 
     Two different combine rules, because the data has two natures:
 
-    - Tracked metrics (visitors/active/signups, daily ``active``) are per-node:
+    - Tracked metrics (visitors/active, daily ``active``) are per-node:
       a visitor hits exactly one server, so these are SUMMED.
     - On-chain metrics (new_users/contributors/posts/comments, the retention
       cohort, daily new_users/posts/comments) are global chain facts that every
@@ -688,7 +759,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
       not first, so a node that is behind/catching up can't drag the fleet view
       below the most-synced node's complete count.
     """
-    visitors = active = signups = new_users = 0
+    visitors = active = new_users = 0
     contributors = posts = comments = 0
     cohort_size = 0
     ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained] (max)
@@ -701,7 +772,6 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         # tracked → sum
         visitors += int(g.get("visitors") or 0)
         active += int(g.get("active") or 0)
-        signups += int(g.get("signups") or 0)
         # on-chain → max (identical across nodes; never sum)
         new_users = max(new_users, int(o.get("new_users") or 0))
         contributors = max(contributors, int(o.get("contributors") or 0))
@@ -753,8 +823,6 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         "growth": {
             "visitors": visitors,
             "active": active,
-            "signups": signups,
-            "signup_conversion": round(signups / visitors, 4) if visitors else 0.0,
         },
         "onchain": {
             "new_users": new_users,

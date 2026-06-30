@@ -140,6 +140,7 @@ def test_stats_pure(backend):
         "/api/get_comments": "engagement",
         "/api/get_profile": "engagement",
         "/api/search": "engagement",
+        "/api/core/vote": "engagement",
         "/api/get_node_config": "visit",
         "/api/admin/stats/export": None,
         "/static/app.js": None,
@@ -149,6 +150,51 @@ def test_stats_pure(backend):
         _pass("stats.event_classification")
     else:
         _fail("stats.event_classification", f"mismatches: {cbad}")
+
+    # Growth buckets: visitors are logged-out identities; active users are
+    # logged-in engagement identities that did not post/comment in-window.
+    class _FakeCursor:
+        def execute(self, *_args, **_kwargs):
+            return None
+
+        def fetchall(self):
+            return [
+                ("visitor_hash", False, False),
+                ("later_bound_addr", False, False),
+                ("addr_active", True, True),
+                ("addr_contrib", True, True),
+                ("addr_config_only", True, False),
+            ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    orig_backend_db = st.connect_backend_db
+    orig_contributors = st._contributor_addresses
+    try:
+        st.connect_backend_db = lambda: _FakeConn()
+        st._contributor_addresses = lambda _start, _end: {"addr_contrib"}
+        buckets = st._growth_visitors(0, 100)
+    finally:
+        st.connect_backend_db = orig_backend_db
+        st._contributor_addresses = orig_contributors
+    if buckets == (2, 1):
+        _pass("stats.growth_buckets")
+    else:
+        _fail("stats.growth_buckets", f"expected (2, 1), got {buckets}")
 
     # Visitor hashing: deterministic, salted, None on empty.
     h1 = hash_visitor_id("abc")
@@ -163,7 +209,7 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 100, "active": 40, "signups": 10},
+                "growth": {"visitors": 100, "active": 40},
                 "onchain": {"new_users": 80, "contributors": 5, "posts": 20, "comments": 30},
                 "retention": {
                     "cohort_size": 10,
@@ -176,7 +222,7 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 50, "active": 10, "signups": 5},
+                "growth": {"visitors": 50, "active": 10},
                 "onchain": {"new_users": 20, "contributors": 5, "posts": 0, "comments": 10},
                 "retention": {
                     "cohort_size": 5,
@@ -200,8 +246,6 @@ def test_stats_pure(backend):
         # tracked metrics SUM across nodes
         agg["growth"]["visitors"] == 150,
         agg["growth"]["active"] == 50,
-        agg["growth"]["signups"] == 15,
-        agg["growth"]["signup_conversion"] == round(15 / 150, 4),
         # on-chain metrics are identical per node -> MAX, never summed
         agg["onchain"]["new_users"] == 80,
         agg["onchain"]["contributors"] == 5,

@@ -392,7 +392,7 @@ export default function AdminStatsDashboard() {
     const trackingSince = (aggregate && aggregate.tracking_since) || null;
     const trackingSinceLabel = trackingSince ? formatDate(trackingSince) : null;
     // Whether the selected window predates visitor tracking. If so, the tracked
-    // metrics are empty and the browsing half of retention can't be seen.
+    // metrics are empty and the tracked-engagement half of retention can't be seen.
     const windowEndsBeforeTracking = !!(trackingSince && win && win.end < trackingSince);
     const windowStartsBeforeTracking = !!(trackingSince && win && win.start < trackingSince);
     // Day bucket tracking began. Tracked lines (Active) are nulled before this so
@@ -477,8 +477,8 @@ export default function AdminStatsDashboard() {
                         <LegendItem>
                             <Dot $c={CHART_COLORS.active} />
                             <span>
-                                <strong>Visitor tracking</strong> (Mirage-owned) — visitors, active browsing,
-                                signups and campaigns.{" "}
+                                <strong>Visitor tracking</strong> (Mirage-owned) — logged-out visitors,
+                                logged-in active users and campaigns.{" "}
                                 {trackingSinceLabel
                                     ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
                                     : <>No tracked events recorded yet, so these are still empty.</>}
@@ -486,31 +486,34 @@ export default function AdminStatsDashboard() {
                         </LegendItem>
                     </SourceLegend>
 
-                    <SectionHeader>On-chain — full history (retroactive)</SectionHeader>
+                    <SectionHeader>Audience — three categories</SectionHeader>
+                    <Note>
+                        Everyone who used Mirage in this window, split three ways with no overlap:{" "}
+                        <strong>Contributors</strong> are logged-in users who posted or commented.{" "}
+                        <strong>Active users</strong> are logged-in users who browsed, read, searched, viewed
+                        profiles/topics or voted but did <em>not</em> post or comment.{" "}
+                        <strong>Visitors</strong> are not logged in.
+                    </Note>
+                    <SubNote>
+                        Contributors come from the chain (full history, any window). Active users and visitors are
+                        Mirage-tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}, so before that
+                        date they read 0 — not because nobody was there, but because tracking hadn't started.
+                    </SubNote>
+                    {windowEndsBeforeTracking && (
+                        <Warn>This window ends before tracking began, so Active users and Visitors are 0 by definition — not a real reading. Contributors is still accurate.</Warn>
+                    )}
+                    <TileGrid>
+                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (logged in, posted/commented)</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active users (logged in, no post/comment)</TileLabel></Tile>
+                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (not logged in)</TileLabel></Tile>
+                    </TileGrid>
+
+                    <SectionHeader>On-chain volume — full history (retroactive)</SectionHeader>
                     <Note>Counts every signup / post / comment in the window straight from the chain. Reliable for past windows.</Note>
                     <TileGrid>
                         <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users (signups)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (posted/commented)</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.posts}><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
                         <Tile $accent={CHART_COLORS.comments}><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
-                    </TileGrid>
-
-                    <SectionHeader>
-                        Visitor tracking{trackingSinceLabel ? ` — only since ${trackingSinceLabel}` : ""}
-                    </SectionHeader>
-                    <Note>
-                        <strong>Active</strong> = made ≥1 content request (posts, comments, profiles, topics or search)
-                        in the window — i.e. actually browsing, logged in or a logged-out lurker. Votes, config polls
-                        and bare page loads don't count.
-                    </Note>
-                    {windowEndsBeforeTracking && (
-                        <Warn>This window ends before tracking began, so every number below is 0 by definition — not a real reading.</Warn>
-                    )}
-                    <TileGrid>
-                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active (browsing, incl. lurkers)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(g.signups)}</TileValue><TileLabel>Signups (visitor → account)</TileLabel></Tile>
-                        <Tile $accent="#f59e0b"><TileValue>{g.visitors ? formatPercent(g.signup_conversion) : "—"}</TileValue><TileLabel>Signup conversion</TileLabel></Tile>
                     </TileGrid>
 
                     <SectionHeader>Trends</SectionHeader>
@@ -595,7 +598,7 @@ export default function AdminStatsDashboard() {
                     </SubNote>
                     <Note>
                         <strong>Still active</strong> at horizon N (D7/D14/D30) = at or after their signup + N days they
-                        either <strong>posted/commented</strong> (on-chain, retroactive) <strong>or browsed</strong>
+                        either <strong>posted/commented</strong> (on-chain, retroactive) <strong>or browsed/voted</strong>
                         {" "}(tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}). Each horizon only
                         counts users who signed up early enough that N days have already elapsed (shown as retained/eligible).
                     </Note>
@@ -668,7 +671,7 @@ export default function AdminStatsDashboard() {
                             <thead>
                                 <tr>
                                     <Th>Server</Th><Th>Status</Th>
-                                    <Th $right>Visitors</Th><Th $right>Active</Th>
+                                    <Th $right>Logged-out visitors</Th><Th $right>Active users</Th>
                                     <Th $right>New users</Th><Th $right>Contributors</Th><Th $right>D7</Th>
                                 </tr>
                             </thead>
@@ -695,7 +698,8 @@ export default function AdminStatsDashboard() {
                         </Table>
                     </Card>
                 </>
-            )}
-        </Page>
+            )
+            }
+        </Page >
     );
 }
