@@ -140,7 +140,7 @@ const SectionHeader = styled.div`
     letter-spacing: 0.1em;
     font-weight: 750;
     opacity: 0.8;
-    margin: 3.5rem 0 0.6rem;
+    margin: 3.5rem 0 0.9rem;
     color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
 `;
 
@@ -151,6 +151,7 @@ const TileGrid = styled.div`
 `;
 
 const Tile = styled.div`
+    position: relative;
     background: ${SURFACE};
     border: 1px solid ${BORDER_SOFT};
     border-top: 3px solid ${({ $accent }) => $accent || "transparent"};
@@ -184,6 +185,7 @@ const TileLabel = styled.div`
 `;
 
 const Card = styled.div`
+    position: relative;
     background: ${SURFACE};
     border: 1px solid ${BORDER_SOFT};
     border-radius: 14px;
@@ -269,6 +271,7 @@ const HoverPopup = styled.div`
     margin-top: 0.4rem;
     width: max-content;
     min-width: 240px;
+    max-width: 380px;
     background: ${({ theme }) => tok(theme, "panel", "#ffffff")};
     color: ${({ theme }) => tok(theme, "text", "#1a1a1b")};
     border: 1px solid ${BORDER};
@@ -280,7 +283,10 @@ const HoverPopup = styled.div`
     z-index: 100;
     font-size: 0.75rem;
     line-height: 1.5;
-    transition: opacity 0.12s ease;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
     ${HoverBadge}:hover & {
         opacity: 1;
         visibility: visible;
@@ -292,6 +298,76 @@ const LegendRow = styled.div`
     align-items: baseline;
     gap: 0.5rem;
     margin-bottom: ${({ $last }) => ($last ? "0" : "0.4rem")};
+`;
+
+// Small circular "?" affordance pinned to a box's top-right corner. Hovering
+// reveals InfoPopup with a detailed, box-specific explanation. Kept separate
+// from HoverBadge (which is the inline superscript used by the page subtitle).
+const InfoBadge = styled.span`
+    position: absolute;
+    top: 0.7rem;
+    right: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 50%;
+    border: 1px solid ${BORDER};
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    opacity: 0.45;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    &:hover {
+        opacity: 1;
+        border-color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    }
+`;
+
+// Opaque, right-anchored popup so it never clips the viewport's right edge.
+const InfoPopup = styled.div`
+    position: absolute;
+    top: calc(100% + 0.45rem);
+    right: 0;
+    width: max-content;
+    min-width: 220px;
+    max-width: 300px;
+    background: ${({ theme }) => tok(theme, "panel", "#ffffff")};
+    color: ${({ theme }) => tok(theme, "text", "#1a1a1b")};
+    border: 1px solid ${BORDER};
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    visibility: hidden;
+    z-index: 200;
+    font-size: 0.75rem;
+    line-height: 1.55;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+    text-align: left;
+    ${InfoBadge}:hover & {
+        opacity: 1;
+        visibility: visible;
+    }
+`;
+
+const InfoTitle = styled.div`
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    color: ${({ $c }) => $c || "inherit"};
+`;
+
+const InfoNote = styled.div`
+    margin-top: 0.45rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid ${BORDER};
+    opacity: 0.65;
+    font-size: 0.68rem;
 `;
 
 const Dot = styled.span`
@@ -340,12 +416,33 @@ const ChartTitle = styled.div`
     font-weight: 700;
     margin-bottom: 1.2rem;
     opacity: 0.85;
+    padding-right: 1.6rem;
 `;
 
 const ChartHeight = styled.div`
     width: 100%;
     height: 240px;
 `;
+
+// A single stat box with a corner "?" that explains, in detail, exactly what
+// this one number means — its data source (chain vs Mirage tracking), the
+// window, and any caveat. This is the page's primary explanation surface.
+function MetricTile({ accent, value, label, title, children, note }) {
+    return (
+        <Tile $accent={accent}>
+            <InfoBadge>
+                ?
+                <InfoPopup>
+                    <InfoTitle $c={accent}>{title}</InfoTitle>
+                    <div>{children}</div>
+                    {note ? <InfoNote>{note}</InfoNote> : null}
+                </InfoPopup>
+            </InfoBadge>
+            <TileValue>{value}</TileValue>
+            <TileLabel>{label}</TileLabel>
+        </Tile>
+    );
+}
 
 function isAdmin() {
     try {
@@ -503,42 +600,100 @@ export default function AdminStatsDashboard() {
             {!loading && !error && aggregate && (
                 <>
                     <SectionHeader>Audience</SectionHeader>
-                    <Note>
-                        Fleet-wide, no overlap. <strong>Active users</strong> = lurkers + contributors (everyone
-                        signed in). <strong>Contributors</strong> posted or commented — a chain fact (full history,
-                        any window). <strong>Lurkers</strong> are signed in but only browsed/voted, and{" "}
-                        <strong>Visitors</strong> aren't signed in — both {trackedSince}.
-                    </Note>
                     {windowEndsBeforeTracking && (
                         <Warn>This window ends before tracking began, so Lurkers and Visitors are 0 by definition — not a real reading. Contributors (and therefore the chain half of Active users) is still accurate.</Warn>
                     )}
                     <TileGrid>
-                        <Tile $accent={ACCENT}><TileValue>{formatNumber(activeUsers)}</TileValue><TileLabel>Active users (logged in = lurkers + contributors)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.lurkers}><TileValue>{formatNumber(g.lurkers)}</TileValue><TileLabel>Lurkers (logged in, no post/comment)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (logged in, posted/commented)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (not logged in)</TileLabel></Tile>
+                        <MetricTile
+                            accent={ACCENT}
+                            value={formatNumber(activeUsers)}
+                            label="Active users (logged in)"
+                            title="Active users"
+                            note={`Lurkers ${trackedSince}.`}
+                        >
+                            Everyone who was <strong>signed in</strong> this window — the sum of
+                            {" "}<strong>Lurkers</strong> + <strong>Contributors</strong>. Visitors (not signed in)
+                            are not included here.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.lurkers}
+                            value={formatNumber(g.lurkers)}
+                            label="Lurkers (logged in, no post/comment)"
+                            title="Lurkers"
+                            note={trackedSince}
+                        >
+                            Signed-in users who only <strong>browsed, searched, read or voted</strong> — they never
+                            posted or commented. Counted from Mirage page activity (not the chain).
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.contributors}
+                            value={formatNumber(o.contributors)}
+                            label="Contributors (logged in, posted/commented)"
+                            title="Contributors"
+                            note="On-chain fact — accurate for any past window."
+                        >
+                            Signed-in users who <strong>posted or commented</strong> in this window. Read straight
+                            from the blockchain, independent of when Mirage tracking began.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.newUsers}
+                            value={formatNumber(g.visitors)}
+                            label="Visitors (not logged in)"
+                            title="Visitors"
+                            note={trackedSince}
+                        >
+                            People who hit the site <strong>without signing in</strong> (logged-out browsers and
+                            crawlers). Counted from Mirage page activity, per node.
+                        </MetricTile>
                     </TileGrid>
 
-                    <SectionHeader>On-chain volume — full history (retroactive)</SectionHeader>
-                    <Note>
-                        Signups, posts and comments straight from the blockchain — accurate for any past window,
-                        independent of when tracking began. Global chain facts (max across nodes, never summed).
-                    </Note>
+                    <SectionHeader>On-chain volume</SectionHeader>
                     <TileGrid>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users (signups)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.posts}><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.comments}><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
+                        <MetricTile
+                            accent={CHART_COLORS.newUsers}
+                            value={formatNumber(o.new_users)}
+                            label="New users (signups)"
+                            title="New users"
+                            note="Global chain fact — same on every node."
+                        >
+                            Wallets that <strong>created an account</strong> in this window, counted on-chain.
+                            Accurate for any past window, regardless of when tracking began.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.posts}
+                            value={formatNumber(o.posts)}
+                            label="Posts"
+                            title="Posts"
+                            note="Global chain fact — same on every node."
+                        >
+                            <strong>Top-level posts</strong> created in this window, counted directly from the
+                            blockchain.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.comments}
+                            value={formatNumber(o.comments)}
+                            label="Comments"
+                            title="Comments"
+                            note="Global chain fact — same on every node."
+                        >
+                            <strong>Comments and replies</strong> created in this window, counted directly from the
+                            blockchain.
+                        </MetricTile>
                     </TileGrid>
 
                     <SectionHeader>Trends</SectionHeader>
-                    <Note>
-                        Per UTC day (today's partial day dropped). Lurkers are tracked (dashed marker = tracking
-                        start); contributors, posts/comments and the D7 outcome come from the chain.{" "}
-                        <strong>D7 outcome</strong> splits each day's signups 7 days later: green = still active,
-                        red = churned, grey = too recent to judge.
-                    </Note>
                     <ChartGrid>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>Lurkers &amp; contributors per day</InfoTitle>
+                                    Signed-in activity stacked by UTC day (today's partial day dropped).
+                                    <strong> Lurkers</strong> are Mirage-tracked — the dashed marker is the tracking
+                                    start, and there's a gap before it. <strong>Contributors</strong> come from the chain.
+                                    <InfoNote>{trackedSince}</InfoNote>
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>Lurkers &amp; contributors per day (stacked)</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -573,6 +728,16 @@ export default function AdminStatsDashboard() {
                             </ChartHeight>
                         </ChartCard>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>New signups by day — D7 outcome</InfoTitle>
+                                    Each day's signups (from the chain), split by what happened 7 days later:
+                                    {" "}<strong style={{ color: CHART_COLORS.retained }}>green</strong> = still active,
+                                    {" "}<strong style={{ color: CHART_COLORS.churned }}>red</strong> = churned,
+                                    {" "}<strong>grey</strong> = signed up &lt;7 days ago, too recent to judge.
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>New signups by day — D7 outcome</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -590,6 +755,14 @@ export default function AdminStatsDashboard() {
                             </ChartHeight>
                         </ChartCard>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>Posts &amp; comments per day</InfoTitle>
+                                    Content created per UTC day, counted on-chain: <strong>posts</strong> stacked with
+                                    {" "}<strong>comments</strong>. Accurate for any past window.
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>Posts &amp; comments per day</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -608,11 +781,6 @@ export default function AdminStatsDashboard() {
                     </ChartGrid>
 
                     <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
-                    <Note>
-                        Of the {formatNumber(r.cohort_size)} users who signed up this window, how many were still
-                        active N days later — they posted/commented (on-chain) or browsed/voted ({trackedSince}).
-                        Each horizon counts only signups old enough to judge, shown as retained/eligible.
-                    </Note>
                     {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
                         <Warn>
                             {windowEndsBeforeTracking
@@ -622,6 +790,16 @@ export default function AdminStatsDashboard() {
                     )}
                     <ChartGrid>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>Retention by horizon</InfoTitle>
+                                    Of the {formatNumber(r.cohort_size)} users who signed up in this window, the share
+                                    still active 7 / 14 / 30 days later — either posted/commented (chain) or
+                                    browsed/voted (tracked). Only signups old enough to judge are counted.
+                                    <InfoNote>{trackedSince}</InfoNote>
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>Retention by horizon</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -636,12 +814,24 @@ export default function AdminStatsDashboard() {
                             </ChartHeight>
                         </ChartCard>
                         <TileGrid style={{ alignContent: "start" }}>
-                            {["d7", "d14", "d30"].map(k => (
-                                <Tile key={k} $accent={CHART_COLORS.retention}>
-                                    <TileValue>{r[k].eligible ? formatPercent(r[k].rate) : "—"}</TileValue>
-                                    <TileLabel>{k.toUpperCase()} retention ({formatNumber(r[k].retained)}/{formatNumber(r[k].eligible)})</TileLabel>
-                                </Tile>
-                            ))}
+                            {["d7", "d14", "d30"].map(k => {
+                                const days = k.slice(1);
+                                return (
+                                    <MetricTile
+                                        key={k}
+                                        accent={CHART_COLORS.retention}
+                                        value={r[k].eligible ? formatPercent(r[k].rate) : "—"}
+                                        label={`${k.toUpperCase()} retention (${formatNumber(r[k].retained)}/${formatNumber(r[k].eligible)})`}
+                                        title={`Day-${days} retention`}
+                                        note="Shown as retained / eligible."
+                                    >
+                                        Of this window's signups that are at least {days} days old
+                                        ({formatNumber(r[k].eligible)} eligible), {formatNumber(r[k].retained)} were
+                                        still active {days} days after signing up. Too-recent signups are excluded, so
+                                        the rate isn't dragged down by people who haven't had {days} days yet.
+                                    </MetricTile>
+                                );
+                            })}
                         </TileGrid>
                     </ChartGrid>
 
@@ -649,6 +839,15 @@ export default function AdminStatsDashboard() {
                         <>
                             <SectionHeader>Attribution (first-touch campaigns)</SectionHeader>
                             <Card style={{ padding: "0.4rem 0.6rem" }}>
+                                <InfoBadge>
+                                    ?
+                                    <InfoPopup>
+                                        <InfoTitle>First-touch attribution</InfoTitle>
+                                        Visitors grouped by the <strong>source / campaign</strong> they first arrived
+                                        from (UTM tags). <strong>Signup conv.</strong> = signups ÷ visitors;
+                                        {" "}<strong>Contrib. conv.</strong> = contributors ÷ visitors.
+                                    </InfoPopup>
+                                </InfoBadge>
                                 <Table>
                                     <thead>
                                         <tr>
@@ -677,12 +876,17 @@ export default function AdminStatsDashboard() {
                     )}
 
                     <SectionHeader>Servers ({servers.length})</SectionHeader>
-                    <Note>
-                        Per-node tracked counts — a visitor hits exactly one server, so these sum to the fleet
-                        tiles above. Global chain totals (new users, contributors, retention) are omitted here:
-                        every node indexes the same chain, so they'd read identically on every row.
-                    </Note>
                     <Card style={{ padding: "0.4rem 0.6rem" }}>
+                        <InfoBadge>
+                            ?
+                            <InfoPopup>
+                                <InfoTitle>Per-node tracked counts</InfoTitle>
+                                Mirage-tracked visitors &amp; lurkers, broken out per server. A visitor hits exactly
+                                one node, so these rows sum to the fleet tiles up top. Chain totals (new users,
+                                contributors, retention) are omitted — every node indexes the same chain, so they'd be
+                                identical on every row.
+                            </InfoPopup>
+                        </InfoBadge>
                         <Table>
                             <thead>
                                 <tr>
