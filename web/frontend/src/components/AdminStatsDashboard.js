@@ -880,11 +880,12 @@ export default function AdminStatsDashboard() {
                         <InfoBadge>
                             ?
                             <InfoPopup>
-                                <InfoTitle>Per-node tracked counts</InfoTitle>
-                                Mirage-tracked visitors &amp; lurkers, broken out per server. A visitor hits exactly
-                                one node, so these rows sum to the fleet tiles up top. Chain totals (new users,
-                                contributors, retention) are omitted — every node indexes the same chain, so they'd be
-                                identical on every row.
+                                <InfoTitle>Per-server breakdown</InfoTitle>
+                                <strong>Visitors</strong> &amp; <strong>Lurkers</strong> are Mirage-tracked per node — a
+                                visitor hits exactly one node, so those columns sum to the fleet tiles up top.
+                                <strong> Contributors</strong> is a global chain fact, so it reads the same on every node
+                                (shown for context). New users and retention (also global) are omitted to avoid
+                                identical columns.
                             </InfoPopup>
                         </InfoBadge>
                         <Table>
@@ -892,6 +893,7 @@ export default function AdminStatsDashboard() {
                                 <tr>
                                     <Th>Server</Th><Th>Status</Th>
                                     <Th $right>Logged-out visitors</Th><Th $right>Lurkers</Th>
+                                    <Th $right>Contributors</Th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -899,12 +901,14 @@ export default function AdminStatsDashboard() {
                                     const ok = s.status === "ok";
                                     const st = s.stats || {};
                                     const sg = st.growth || {};
+                                    const so = st.onchain || {};
                                     return (
                                         <Tr key={i}>
                                             <Td>{s.server}</Td>
                                             <Td><StatusPill $ok={ok}>{s.status}</StatusPill></Td>
                                             <Td $right>{ok ? formatNumber(sg.visitors) : "—"}</Td>
                                             <Td $right>{ok ? formatNumber(sg.lurkers) : "—"}</Td>
+                                            <Td $right>{ok ? formatNumber(so.contributors) : "—"}</Td>
                                         </Tr>
                                     );
                                 })}
