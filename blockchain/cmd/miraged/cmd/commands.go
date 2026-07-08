@@ -15,6 +15,7 @@ import (
 	"cosmossdk.io/log/v2"
 	confixcmd "cosmossdk.io/tools/confix/cmd"
 	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/debug"
 	"github.com/cosmos/cosmos-sdk/client/flags"
@@ -353,6 +354,23 @@ func newApp(
 	appOpts servertypes.AppOptions,
 ) servertypes.Application {
 	baseappOptions := server.DefaultBaseappOptions(appOpts)
+
+	// Force SYNCHRONOUS IAVL pruning (overrides the iavl-sync-pruning flag that
+	// DefaultBaseappOptions wires from config, which defaults to async). This is
+	// the fix for the recurring CONSENSUS_FATAL:PRUNE_HOLE crashes on the fleet.
+	//
+	// With async pruning, IAVL deletes run in a background goroutine that (a) is
+	// never drained on shutdown — rootmulti.Store has no Close(), so nodeDB.Close's
+	// `<-ndb.done` drain never runs — and (b) writes partial progress via a
+	// byte-flusher. On shutdown baseapp closes app.db out from under that goroutine
+	// mid-pass, leaving a non-atomic reference-root reformat half-applied: an
+	// isolated missing rootkey (a "prune hole") that the fail-fast guard later
+	// halts on. Synchronous pruning removes the goroutine entirely — deletes run
+	// inside Commit, in the consensus loop, which stops BEFORE app.db closes — so
+	// no prune can be in flight at shutdown and no hole can form. Cost is a little
+	// inline latency on prune-interval blocks, bounded by keep-recent.
+	// See docs/troubleshooting/divergence-recovery.md §0.3.1.
+	baseappOptions = append(baseappOptions, baseapp.SetIAVLSyncPruning(true))
 
 	// app.(*App).Close is idempotent (see app.App.Close): cosmos-sdk calls
 	// app.Close() twice on shutdown, which would otherwise double-close PebbleDB

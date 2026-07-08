@@ -323,6 +323,91 @@ copied off-host and scanned with `analyze-db`:
   (`ALERT_WEBHOOK_URL` unset) — none of the above paged anyone; it was found only
   by manual log scan.
 
+### 0.3.1 Root cause of the recurring PRUNE_HOLE — pinned (2026-07-08)
+
+Analysis of the two captured PRUNE_HOLE events on mirage.talk
+(`/root/.mirage/.divergence_forensics/`, val1 `159.203.114.27`):
+
+| when | guard log |
+|------|-----------|
+| 2026-06-28 06:18 | `missing_version=5656103 first=5650500 prune_to=5658299 latest=5659300` |
+| 2026-07-05 20:03 | `missing_version=5841942 first=5832000 prune_to=5845499 latest=5846500` |
+
+Both are a **single missing rootkey in the middle of otherwise-present, unpruned
+history** (not a contiguous state-sync gap), `keep-recent≈1000`
+(`latest − prune_to ≈ 1001` both times). The 8:03PM pass had already deleted
+`5832000..5841941` successfully and then walked into an *already-missing* `5841942`
+— i.e. the hole pre-existed the pass that reported it.
+
+**Mechanism (code-level, `blockchain/patches/iavl/nodedb.go` + `patches/cosmos-sdk-store-v2/rootmulti/store.go`):**
+
+1. **Async pruning is ON** (`rootmulti` L1123 `AsyncPruningOption(!iavlSyncPruning)`;
+   `iavlSyncPruning` defaults false). Deletes run in a background goroutine
+   (`startPruning`, nodedb L651) that only checks the shutdown ctx **between whole
+   passes** (L653–657), never mid-pass, and writes through a byte-threshold
+   **batch flusher** (`NewBatchWithFlusher`, L111) that persists partial progress
+   to disk mid-pass.
+2. **Reference roots.** mirage produces almost entirely **empty blocks**
+   (`num_txs=0` throughout the logs), so most versions store their root as a
+   *reference* to an earlier version's unchanged state root. Pruning the owning
+   version therefore has to **reformat/relocate that shared root** (nodedb
+   `deleteVersion` L510–525) — a non-atomic multi-write that touches a *different*
+   version's key. A crash between those writes orphans exactly one version's
+   rootkey while its neighbors (which own independent roots) survive → an
+   **isolated hole**, not a contiguous prefix.
+3. **Nothing drains the pruner on shutdown.** `nodeDB.Close()` cancels the ctx and
+   waits `<-ndb.done` (nodedb L1265–1270) — but **`rootmulti.Store` has no
+   `Close()` method at all**, so it is never called. `BaseApp.Close()` closes the
+   raw `app.db` (PebbleDB) directly and the process exits while the prune goroutine
+   may still be mid-pass. The DB is yanked out from under it → the in-flight
+   reference-root reformat is left half-applied (this is also a second source of
+   `pebble: closed`, independent of the double-close in item 13).
+4. **`firstVersion` is never persisted.** `resetFirstVersion` (nodedb L891) sets
+   only the in-memory field; on restart `getFirstVersion` (L847) **binary-searches
+   `hasVersion` assuming contiguity**, so it silently mislocates the floor and
+   cannot detect or repair a hole. The node runs happily until a later prune pass
+   climbs up to the orphaned version and (post-v1.28.2) the guard halts.
+
+**Why weekly, why mirage.talk:** every node bounces on its weekly OS-upgrade
+docker restart (item 14), and until v1.29.x every shutdown exited via the
+`pebble: closed` panic (item 13) — an abrupt exit that maximised the odds of
+catching the pruner mid-pass. mirage.talk also carries the local query/tx load,
+so it prunes/reads the most.
+
+**Consequence, pre- vs post-guard:** pre-v1.28.2 upstream IAVL *silently skipped*
+the missing version and kept serving reads off inconsistent state — the plausible
+seed of the original app-hash divergences. Post-guard it is a loud, recoverable
+halt: both events auto-recovered via peer-pull and **no app-hash divergence or
+supply break accompanied either** (7-day scan). The guard + watchdog are
+containing it exactly as designed; this is now a reliability/noise issue, not a
+consensus-safety one.
+
+**Fix SHIPPED — synchronous pruning (option A), 2026-07-08:** `newApp`
+(`blockchain/cmd/miraged/cmd/commands.go`) now appends
+`baseapp.SetIAVLSyncPruning(true)` after `DefaultBaseappOptions` (overriding the
+default-async `iavl-sync-pruning` flag). With async pruning off, the background
+prune goroutine is **never started** (`nodedb.go` L124 gates `go startPruning()`
+on `opts.AsyncPruning`) and `DeleteVersionsTo` runs **inline inside `Commit`**, in
+the consensus loop — which CometBFT stops *before* `app.Close()`/`app.db.Close()`.
+So no prune can ever be in flight at shutdown, the DB can't be closed under a
+running pass, and the non-atomic reference-root reformat can't be interrupted → no
+new holes. Cost: a little inline latency on prune-interval blocks, bounded by
+`keep-recent`. The fail-fast guard is **kept** as a safety net (and to drain any
+pre-existing latent hole into one last recoverable halt). Combined with the
+idempotent `app.Close` (item 13), both crash sources — the `pebble: closed`
+shutdown panic and the `PRUNE_HOLE` halt — are addressed at the root.
+
+Considered but not needed given (A): **(B)** a real `rootmulti.Store.Close()` that
+drains each nodeDB before `app.db.Close()`; **(C)** persisting `firstVersion` so
+restart doesn't rely on the contiguity-assuming binary search. Both remain valid
+defence-in-depth / upstream candidates but are unnecessary once the goroutine is
+gone.
+
+**To definitively prove the interleaving:** the Jul 5 diverged DB is preserved
+(`20260705T200500Z-h5846523/application.db`). A read-only `analyze-db` / rootkey
+probe on it can confirm the hole is exactly `{5841942}` and that `5841942` was a
+reference-root (empty-block) version. Not yet done.
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
