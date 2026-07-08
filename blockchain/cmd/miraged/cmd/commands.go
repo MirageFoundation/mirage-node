@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -347,27 +346,6 @@ func dumpConfigCommand() *cobra.Command {
 	}
 }
 
-// idempotentCloseDB wraps a dbm.DB so Close() is safe to call more than once.
-// cosmos-sdk v0.54 server.startInProcess registers TWO deferred cleanups that
-// both call app.Close() (startCmtNode's cleanupFn and startApp's appCleanupFn),
-// and baseapp.(*BaseApp).Close() closes app.db unconditionally — so on every
-// (otherwise graceful) shutdown the second close hits an already-closed PebbleDB
-// handle and panics "pebble: closed", exiting miraged non-zero and polluting the
-// crash/divergence monitoring. Collapsing repeat Close() calls into a no-op lets
-// shutdown exit cleanly. All other methods pass straight through via the embedded
-// interface. Remove once the upstream double-close is fixed (reported upstream;
-// see docs/troubleshooting/postmortems/2026-06-16-mirage-talk-divergence.md AI#13).
-type idempotentCloseDB struct {
-	dbm.DB
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (d *idempotentCloseDB) Close() error {
-	d.closeOnce.Do(func() { d.closeErr = d.DB.Close() })
-	return d.closeErr
-}
-
 // newApp creates the application
 func newApp(
 	logger log.Logger,
@@ -376,8 +354,11 @@ func newApp(
 ) servertypes.Application {
 	baseappOptions := server.DefaultBaseappOptions(appOpts)
 
+	// app.(*App).Close is idempotent (see app.App.Close): cosmos-sdk calls
+	// app.Close() twice on shutdown, which would otherwise double-close PebbleDB
+	// and panic "pebble: closed".
 	return app.New(
-		logger, &idempotentCloseDB{DB: db}, true,
+		logger, db, true,
 		appOpts,
 		baseappOptions...,
 	)

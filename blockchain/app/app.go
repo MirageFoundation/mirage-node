@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/core/appmodule"
@@ -105,6 +106,26 @@ type App struct {
 
 	// simulation manager
 	sm *module.SimulationManager
+
+	// closeOnce guards Close so shutdown runs exactly once (see Close).
+	closeOnce sync.Once
+}
+
+// Close makes application shutdown idempotent.
+//
+// cosmos-sdk's server.startInProcess registers two deferred cleanup paths that
+// BOTH call app.Close() on shutdown (startCmtNode's cleanupFn after tmNode.Stop
+// and startApp's appCleanupFn). The embedded baseapp.(*BaseApp).Close() closes
+// application.db AND snapshots/metadata.db unconditionally, so the second call
+// re-closes already-closed PebbleDB handles and panics "pebble: closed", crashing
+// every otherwise-graceful shutdown with a non-zero exit (postmortem AI#13). Run
+// the underlying close exactly once so repeat calls are a no-op. This shadows the
+// promoted BaseApp.Close and covers every DB it touches (unlike a per-DB wrapper).
+// Remove once the upstream fix lands (cosmos-sdk PR #26559).
+func (app *App) Close() error {
+	var err error
+	app.closeOnce.Do(func() { err = app.App.Close() })
+	return err
 }
 
 func init() {

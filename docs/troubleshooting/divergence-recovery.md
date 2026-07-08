@@ -305,9 +305,19 @@ copied off-host and scanned with `analyze-db`:
   orderly shutdown. (Also: the one observed PRUNE_HOLE on mirage.vote fired ~14 h
   *after* that node's restart, not at shutdown.) The real cost is signal/noise:
   every weekly restart logs a `FATAL: panic` + non-zero exit, polluting the
-  crash/forensic monitoring and able to mask a real `Close()` error. Fix (06-16
-  postmortem item 13): wrap the `db` passed to `newApp` in an idempotent-`Close`
-  shim so the second close is a no-op (no SDK fork; optionally report upstream).
+  crash/forensic monitoring and able to mask a real `Close()` error.
+
+  **Fix (06-16 postmortem item 13):** the first attempt (v1.28.2) wrapped only the
+  `db` passed to `newApp` in an idempotent-`Close` shim — but the 07-08 soak showed
+  panics **still occurring**, because `BaseApp.Close()` closes **both**
+  `application.db` *and* `snapshots/metadata.db` and the db-shim covered only the
+  former. The complete fix moves the guard up a level: `app.(*App).Close()`
+  (`blockchain/app/app.go`) now runs the embedded `BaseApp.Close()` exactly once via
+  `sync.Once`, so *every* handle it touches is closed once regardless of how many
+  times the server calls `app.Close()`. The partial db-shim was removed; regression
+  test `TestAppCloseIsIdempotent` fails without the guard. Reported upstream as
+  cosmos-sdk PR [#26559](https://github.com/cosmos/cosmos-sdk/pull/26559)
+  (`BaseApp.Close` nils its handles after closing).
 
 - **Caveats:** only ~2.5 days of soak, and the external pager is still disabled
   (`ALERT_WEBHOOK_URL` unset) — none of the above paged anyone; it was found only
