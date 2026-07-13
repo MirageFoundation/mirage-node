@@ -408,6 +408,48 @@ gone.
 probe on it can confirm the hole is exactly `{5841942}` and that `5841942` was a
 reference-root (empty-block) version. Not yet done.
 
+### 0.3.2 SUPERSEDED by the 2026-07-12 chain halt — the real mechanism (2026-07-13)
+
+**The §0.3.1 diagnosis was wrong (or at most a secondary path): synchronous
+pruning did NOT stop the holes.** On 2026-07-12 both pruning validators
+(mirage.talk and mirage.vote) hit `PRUNE_HOLE` within 9 minutes under v1.29.3
+sync pruning — the panic stacks run inline through `rootmulti.Commit →
+PruneStores → deleteVersionsTo` on the consensus goroutine, and the missing
+versions were created after the 07-08 deploy with no restart in between.
+CometBFT's `receiveRoutine` recovers the panic by killing the consensus reactor
+while leaving RPC/p2p alive (a "consensus zombie"), so with 2 of 4 validators
+zombied the chain lost quorum and halted ~3h47m at h6019400.
+
+**Actual root cause (pinned with a deterministic repro):** the fail-fast guard
+itself, interacting with the `BatchWithFlusher`. The reference-root reformat in
+`deleteVersion` stages `Delete((v,1))` then `Set((v,0))` on the shared
+auto-flushing batch; a size-threshold flush landing between the pair leaves the
+disk transiently inconsistent (referenced root gone, replacement pending), and
+`GetRoot` reads the DB directly — it can never see pending batch writes. The
+guard probed the next referencing version, saw a phantom
+`ErrVersionDoesNotExist`, and panicked — **and the panic dropped the pending
+batch, converting the self-healing transient window into a real persistent
+hole** that later passes crashed on. Under-load reader aborts made passes huge
+(13k versions), maximizing mid-pass flushes. The pre-v1.29.3 "async shutdown"
+holes were most likely the same split persisted by a shutdown mid-pass.
+
+**Fix (2026-07-13, `blockchain/patches/iavl/nodedb.go`, two independent
+layers):** (a) reformat order swapped to Set-then-Delete so every intermediate
+flush state stays resolvable; (b) the guard flushes the batch and re-probes
+from disk before panicking — transient misses heal, staged writes are never
+destroyed, and only a still-missing version is a genuine hole (panic retained).
+Regression test `TestDeleteVersionsToSurvivesReformatFlushSplit` forces the
+flush boundary onto the reformat pair; it panics on the old code and passes on
+the fix. The split window itself is an upstream IAVL bug (silent phantom reads
++ crash-persisted holes there); upstream issue/PR candidate.
+
+**Interim fleet state (set during the 07-12 recovery): `pruning = "nothing"` on
+ALL FOUR validators** — holes can't form and dormant ones are never touched,
+but `application.db` grows unbounded. After this fix ships, restore
+`pruning = "custom"`; on talk+vote first heal the real holes left by the 07-12
+dropped batches (peer-pull from never-pruned n146/n139, or accept one
+guard-triggered auto-recovery each).
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
