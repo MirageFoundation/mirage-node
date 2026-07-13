@@ -355,22 +355,25 @@ func newApp(
 ) servertypes.Application {
 	baseappOptions := server.DefaultBaseappOptions(appOpts)
 
-	// Force SYNCHRONOUS IAVL pruning (overrides the iavl-sync-pruning flag that
-	// DefaultBaseappOptions wires from config, which defaults to async). This is
-	// the fix for the recurring CONSENSUS_FATAL:PRUNE_HOLE crashes on the fleet.
+	// Force ASYNCHRONOUS IAVL pruning (deletes run in a background goroutine, off
+	// the consensus loop). This is the SDK default; we set it explicitly so config
+	// can never flip it and to document why sync is wrong here.
 	//
-	// With async pruning, IAVL deletes run in a background goroutine that (a) is
-	// never drained on shutdown — rootmulti.Store has no Close(), so nodeDB.Close's
-	// `<-ndb.done` drain never runs — and (b) writes partial progress via a
-	// byte-flusher. On shutdown baseapp closes app.db out from under that goroutine
-	// mid-pass, leaving a non-atomic reference-root reformat half-applied: an
-	// isolated missing rootkey (a "prune hole") that the fail-fast guard later
-	// halts on. Synchronous pruning removes the goroutine entirely — deletes run
-	// inside Commit, in the consensus loop, which stops BEFORE app.db closes — so
-	// no prune can be in flight at shutdown and no hole can form. Cost is a little
-	// inline latency on prune-interval blocks, bounded by keep-recent.
-	// See docs/troubleshooting/divergence-recovery.md §0.3.1.
-	baseappOptions = append(baseappOptions, baseapp.SetIAVLSyncPruning(true))
+	// History: v1.29.3 forced SYNCHRONOUS pruning to dodge a "prune goroutine
+	// killed at shutdown → prune hole" theory. That theory was WRONG. The real
+	// hole cause was a batch-flush landing between the Delete/Set of a
+	// reference-root reformat in nodedb.deleteVersion (see the iavl patch), which
+	// is fixed independently of async/sync (v1.29.4: Set-before-Delete + the prune
+	// guard flushes and re-probes before halting; an interrupted async pass now at
+	// worst leaves both keys briefly present, never a hole). With the real fix in,
+	// sync pruning bought nothing and cost liveness: because every validator prunes
+	// the SAME interval height inline in Commit, one slow pass (e.g. a backlog
+	// drain) blocks Commit on ALL validators at once and halts the whole chain in
+	// lockstep until it finishes (2026-07-13: ~6 min cluster-wide stall at
+	// h6033700). Async pruning decouples this — a slow pass makes one node briefly
+	// lag and catch up, never a chain-wide stop.
+	// See docs/troubleshooting/divergence-recovery.md §0.3.2/§0.3.3.
+	baseappOptions = append(baseappOptions, baseapp.SetIAVLSyncPruning(false))
 
 	// app.(*App).Close is idempotent (see app.App.Close): cosmos-sdk calls
 	// app.Close() twice on shutdown, which would otherwise double-close PebbleDB

@@ -450,6 +450,34 @@ but `application.db` grows unbounded. After this fix ships, restore
 dropped batches (peer-pull from never-pruned n146/n139, or accept one
 guard-triggered auto-recovery each).
 
+### 0.3.3 v1.29.4 deployed; lockstep-stall from sync pruning → revert to async (2026-07-13)
+
+v1.29.4 (the §0.3.2 hole fix) rolled out fleet-wide 2026-07-13 ~01:45–02:00 UTC.
+The container restarts during deploy re-rendered `app.toml` from the template, so
+`pruning = "custom"` came back on automatically (the interim `"nothing"` is gone;
+disk is bounded again). No `PRUNE_HOLE`, no crash, no divergence since.
+
+**But a new symptom appeared: a ~6-minute FULL-CHAIN stall at h6033700
+(~14:04–14:09 UTC).** All four validators sat at the same height and resumed
+together; no crash, no restart (`RestartCount=0`, 14h+ miraged uptime), consensus
+pinned at round 0 the whole time (blocked in-process, not failing to agree). Cause:
+**synchronous pruning** (the v1.29.3 `SetIAVLSyncPruning(true)` override). 6033700
+is a multiple of `pruning-interval=100`, so every validator ran the same prune
+pass inline in `Commit` at the same height; that pass was a large backlog drain
+(talk's post-peer-pull base was ~6016143, ~16k versions behind), so `Commit`
+blocked on ALL nodes at once → chain paused until the drain finished. Backlog now
+drained; did not recur.
+
+**Fix SHIPPED (v1.29.5): revert to ASYNCHRONOUS pruning.** `newApp`
+(`blockchain/cmd/miraged/cmd/commands.go`) now sets
+`baseapp.SetIAVLSyncPruning(false)` explicitly. Sync pruning was only ever added
+to dodge the (wrong) shutdown-race theory; with the real hole cause fixed in
+v1.29.4, async is safe again (an interrupted async pass at worst leaves both
+reformat keys briefly present — never a hole — and the prune guard flush+re-probe
+backstops it) and it decouples pruning from consensus: a slow pass makes one node
+briefly lag and catch up instead of halting the whole chain in lockstep. The
+fail-fast guard and idempotent `app.Close` remain.
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
