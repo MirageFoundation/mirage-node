@@ -685,6 +685,7 @@ def _do_set_username_raw(
     username: str,
     skip_pow: bool = False,
     invite_code: str | None = None,
+    referrer_username: str | None = None,
 ) -> dict:
     """Set username via the backend API (raw payload construction)."""
     addr = str(wallet.address())
@@ -715,6 +716,8 @@ def _do_set_username_raw(
         payload["pow"] = int(proof)
     if invite_code:
         payload["invite_code"] = str(invite_code).strip().upper()
+    if referrer_username:
+        payload["referrer_username"] = str(referrer_username).strip()
     code, resp = _post(f"{backend}/api/core/set_username", payload)
     return resp
 

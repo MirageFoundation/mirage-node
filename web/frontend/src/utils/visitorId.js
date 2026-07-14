@@ -15,8 +15,47 @@
 
 export const VISITOR_ID_KEY = 'mirage_analytics_visitor_id';
 export const VISITOR_HEADER = 'X-Mirage-Visitor';
+export const REFERRER_COOKIE = 'mirage_referrer';
 
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+const REFERRER_MAX_AGE_SECONDS = 3 * 24 * 60 * 60;
+const REFERRER_PATTERN = /^[A-Za-z0-9-]+$/;
+
+function normalizeReferrer(value) {
+    const referrer = String(value || '').trim();
+    if (!referrer || referrer.length > 64 || !REFERRER_PATTERN.test(referrer)) return '';
+    return referrer;
+}
+
+function cookieSecureSuffix() {
+    return typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
+}
+
+export function saveReferralAttribution(value) {
+    const referrer = normalizeReferrer(value);
+    if (!referrer || typeof document === 'undefined') return false;
+    document.cookie = `${REFERRER_COOKIE}=${encodeURIComponent(referrer)}; Max-Age=${REFERRER_MAX_AGE_SECONDS}; Path=/; SameSite=Lax${cookieSecureSuffix()}`;
+    console.debug('[ReferralAttribution] saved', { referrer, maxAgeSeconds: REFERRER_MAX_AGE_SECONDS });
+    return true;
+}
+
+export function getReferralAttribution() {
+    if (typeof document === 'undefined') return '';
+    const prefix = `${REFERRER_COOKIE}=`;
+    const raw = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix));
+    if (!raw) return '';
+    try {
+        return normalizeReferrer(decodeURIComponent(raw.slice(prefix.length)));
+    } catch (_) {
+        return '';
+    }
+}
+
+export function clearReferralAttribution() {
+    if (typeof document === 'undefined') return;
+    document.cookie = `${REFERRER_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${cookieSecureSuffix()}`;
+    console.debug('[ReferralAttribution] cleared');
+}
 
 function randomId() {
     try {
@@ -65,6 +104,7 @@ export function captureFirstTouchAttribution() {
             if (v) { utm[k] = v; any = true; }
         }
         const ref = (params.get('ref') || '').trim();
+        if (ref) saveReferralAttribution(ref);
         if (!any && !ref) return;
 
         const body = {

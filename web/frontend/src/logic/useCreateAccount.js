@@ -8,6 +8,7 @@ import * as tx from "../utils/tx";
 import Api from "../utils/api";
 import { getMaxUsernameSize, getMinUsernameSize } from "../utils/chainParams";
 import { formatError } from "../utils/errorMessages";
+import { clearReferralAttribution, getReferralAttribution } from "../utils/visitorId";
 export function useCreateAccount({
     state,
     setCredentials
@@ -83,7 +84,13 @@ export function useCreateAccount({
     // Get invite code and referrer from URL parameters
     const urlParams = new URLSearchParams(location.search);
     const inviteFromUrl = urlParams.get('invite') || '';
-    const refFromUrl = urlParams.get('ref') || '';
+    const inviteChars = inviteFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    const formattedInviteFromUrl = inviteChars.length > 4
+        ? `${inviteChars.slice(0, 4)}-${inviteChars.slice(4)}`
+        : inviteChars;
+    const hasValidInviteFromUrl = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(formattedInviteFromUrl);
+    const explicitReferrer = urlParams.get('ref') || '';
+    const refFromUrl = hasValidInviteFromUrl ? '' : explicitReferrer || getReferralAttribution();
 
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
@@ -97,13 +104,7 @@ export function useCreateAccount({
     // Set up state for seed_phrase and publicKey (privateKey derived from seed)
     const [seedPhrase, setSeedPhrase] = useState("");
     const [publicKey, setPublicKey] = useState("");
-    const [inviteCode, setInviteCode] = useState(() => {
-        if (inviteFromUrl) {
-            const clean = inviteFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-            return clean.length > 4 ? clean.slice(0, 4) + '-' + clean.slice(4) : clean;
-        }
-        return "";
-    });
+    const [inviteCode, setInviteCode] = useState(formattedInviteFromUrl);
     const [usernameInput, setUsernameInput] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
@@ -112,16 +113,23 @@ export function useCreateAccount({
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
 
-    // Referral link state (component-only, no persistence)
+    // Referral attribution survives navigation in a short-lived first-party cookie.
     const [referrerUsername, setReferrerUsername] = useState(refFromUrl);
     const [referrerStatus, setReferrerStatus] = useState(refFromUrl ? "checking" : "none");
     const [referrerAvailable, setReferrerAvailable] = useState(0);
     const [referrerError, setReferrerError] = useState("");
 
-    // Pre-check referrer availability on mount when ?ref= is present
+    // Invite-gated nodes pre-check whether the referrer can supply the invite.
+    // Open-registration nodes still submit the referrer for attribution.
     React.useEffect(() => {
-        if (!refFromUrl || !inviteCodeRequired) {
-            if (refFromUrl) setReferrerStatus("disabled");
+        if (!refFromUrl) return;
+        setReferrerUsername(refFromUrl);
+        if (!inviteCodeRequired) {
+            setReferrerStatus("valid");
+            return;
+        }
+        if (hasValidInviteFromUrl) {
+            setReferrerStatus("none");
             return;
         }
         let cancelled = false;
@@ -135,18 +143,18 @@ export function useCreateAccount({
                 setReferrerStatus("valid");
                 if (typeof data.available === 'number') setReferrerAvailable(data.available);
             } else {
-                setReferrerStatus("invalid");
+                setReferrerStatus("none");
                 setReferrerError(data || "referrer_check_failed");
             }
         }).catch(() => {
             if (cancelled) return;
-            setReferrerStatus("error");
+            setReferrerStatus("none");
             setReferrerError("referrer_check_failed");
         });
         return () => {
             cancelled = true;
         };
-    }, [refFromUrl, inviteCodeRequired]);
+    }, [hasValidInviteFromUrl, inviteCodeRequired, refFromUrl]);
 
     // While submitting/confirming, block all clicks and key navigation globally
     React.useEffect(() => {
@@ -299,7 +307,7 @@ export function useCreateAccount({
         }
 
         // Validate invite code or referrer
-        let codeClean = null;
+        let codeClean = hasValidInviteFromUrl ? formattedInviteFromUrl : "";
         const usingReferrer = inviteCodeRequired && referrerStatus === "valid" && referrerUsername;
         if (inviteCodeRequired && !usingReferrer) {
             codeClean = (inviteCode || "").trim().toUpperCase();
@@ -377,8 +385,8 @@ export function useCreateAccount({
                 // Do not persist publicKey until confirmation
             } catch (_) { }
             // Defer to tx facade for PoW + relay
-            // Pass invite code so backend marks it as used atomically with account creation
-            const result = await tx.createUser(usernameFinal, codeClean, usingReferrer ? referrerUsername : "");
+            const submittedReferrer = codeClean ? "" : referrerUsername;
+            const result = await tx.createUser(usernameFinal, codeClean, submittedReferrer);
             if (!result || !result.success) {
                 const msg = String((result && result.error) || "Submit failed");
                 if (/admin insufficient balance/i.test(msg)) {
@@ -417,6 +425,7 @@ export function useCreateAccount({
             try {
                 localStorage.setItem('user_balance', String(localStorage.getItem('user_balance') || '0'));
             } catch (_) { }
+            clearReferralAttribution();
             navigate('/welcome', {
                 state: {
                     username: finalUsername,

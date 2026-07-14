@@ -1343,31 +1343,23 @@ function ReferralsView({ state }) {
                         <HeroCard>
                             <HeroTopRow>
                                 <HeroEyebrow>Invite users</HeroEyebrow>
-                                {inviteCodesRequired && !referralPrecheckEnabled ? (
-                                    <HeroBadge $tone="danger" title="Your referral link is turned off">
-                                        Link off
+                                {totalReferred > 0 && (
+                                    <HeroBadge>
+                                        <HiUserGroup style={{ width: '0.7rem', height: '0.7rem' }} />
+                                        {totalReferred} invited
                                     </HeroBadge>
-                                ) : (
-                                    totalReferred > 0 && (
-                                        <HeroBadge>
-                                            <HiUserGroup style={{ width: '0.7rem', height: '0.7rem' }} />
-                                            {totalReferred} invited
-                                        </HeroBadge>
-                                    )
                                 )}
                             </HeroTopRow>
 
                             <HeroTextStack>
                                 <HeroTitle>Bring your users to Mirage.</HeroTitle>
                                 <HeroSubtitle>
-                                    {inviteCodesRequired && !referralPrecheckEnabled
-                                        ? "Your referral link is currently off — turn it on below to let users sign up through it."
-                                        : "Share your link — when they sign up, they appear here and you'll see their weekly activity at a glance."}
+                                    Share your link — when they sign up, they appear here and you'll see their weekly activity at a glance.
                                 </HeroSubtitle>
                             </HeroTextStack>
 
                             {username && shareUrl ? (
-                                <ShareLinkPill $disabled={inviteCodesRequired && !referralPrecheckEnabled}>
+                                <ShareLinkPill>
                                     <ShareUrl
                                         value={shareUrl}
                                         readOnly
@@ -1386,19 +1378,17 @@ function ReferralsView({ state }) {
                                 </ShareLinkPill>
                             ) : (
                                 <HeroEmpty>
-                                    {username
-                                        ? 'Your share link will appear here once an invite code is available.'
-                                        : 'Set a username to generate your referral share link.'}
+                                    Set a username to generate your referral share link.
                                 </HeroEmpty>
                             )}
                             {inviteCodesRequired && (
                                 <>
                                     <ToggleRow>
                                         <ToggleText>
-                                            <ToggleLabel>Enable referral links</ToggleLabel>
+                                            <ToggleLabel>Use your profile link as an invite</ToggleLabel>
                                             <ToggleDesc>
-                                                Lets users sign up via your personal link instead of
-                                                sharing invite codes directly.
+                                                When invite codes are required, lets users sign up directly
+                                                through your profile link and consumes one of your codes.
                                             </ToggleDesc>
                                         </ToggleText>
                                         <Toggle
