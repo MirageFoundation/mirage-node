@@ -35,6 +35,10 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		try_files .maintenance
 	}
 	handle @maintenance {
+		header Cache-Control "no-store, max-age=0"
+		header Pragma "no-cache"
+		header Expires "0"
+
 		# API and chain endpoints get JSON 503 during maintenance
 		handle /api/* {
 			header Content-Type "application/json"
@@ -49,7 +53,9 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 			root * /etc/caddy
 			rewrite * /maintenance.html
 			header Content-Type "text/html; charset=utf-8"
-			file_server
+			file_server {
+				status 503
+			}
 		}
 	}
 
@@ -151,6 +157,9 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		@html path /
 		header @html Cache-Control "no-cache"
 
+		@spa_route not file
+		header @spa_route Cache-Control "no-cache"
+
 		try_files {path} /index.html
 		file_server
 	}
@@ -175,6 +184,10 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 
 		@maintenance_err expression {err.status_code} in [502, 503]
 		handle @maintenance_err {
+			header Cache-Control "no-store, max-age=0"
+			header Pragma "no-cache"
+			header Expires "0"
+
 			# API and chain endpoints get JSON error
 			handle /api/* {
 				header Content-Type "application/json"
@@ -189,7 +202,9 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 				root * /etc/caddy
 				rewrite * /maintenance.html
 				header Content-Type "text/html; charset=utf-8"
-				file_server
+				file_server {
+					status 503
+				}
 			}
 		}
 	}
