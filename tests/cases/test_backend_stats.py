@@ -151,7 +151,32 @@ def test_stats_pure(backend):
     else:
         _fail("stats.event_classification", f"mismatches: {cbad}")
 
-    # Growth buckets: visitors are logged-out identities; active users are
+    # The ``address`` arg names the TARGET being viewed only on /api/get_profile;
+    # everywhere else it is the acting viewer. Crediting the target as the viewer
+    # is what inflated the logged-in (lurker) count, so the guard must be exact.
+    target_cases = {
+        "/api/get_profile": True,
+        "/api/get_profile/anything": True,
+        "/api/get_posts": False,
+        "/api/search": False,
+        "/api/core/vote": False,
+    }
+    tbad = {p: st._path_address_is_target(p) for p, exp in target_cases.items() if st._path_address_is_target(p) != exp}
+    if not tbad:
+        _pass("stats.address_is_target")
+    else:
+        _fail("stats.address_is_target", f"mismatches: {tbad}")
+
+    # The query-time CTE must null the profile-view address too, so rows recorded
+    # before the record-time fix self-correct instead of permanently inflating
+    # the logged-in counts with everyone who got viewed.
+    cte = st._resolved_event_cte()
+    if "/api/get_profile" in cte:
+        _pass("stats.resolved_cte_profile_guard")
+    else:
+        _fail("stats.resolved_cte_profile_guard", f"guard missing from CTE: {cte}")
+
+    # Growth buckets: visitors are logged-out identities; lurkers are
     # logged-in engagement identities that did not post/comment in-window.
     class _FakeCursor:
         def execute(self, *_args, **_kwargs):
@@ -161,7 +186,7 @@ def test_stats_pure(backend):
             return [
                 ("visitor_hash", False, False),
                 ("later_bound_addr", False, False),
-                ("addr_active", True, True),
+                ("addr_lurker", True, True),
                 ("addr_contrib", True, True),
                 ("addr_config_only", True, False),
             ]
@@ -209,7 +234,7 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 100, "active": 40},
+                "growth": {"visitors": 100, "lurkers": 40},
                 "onchain": {"new_users": 80, "contributors": 5, "posts": 20, "comments": 30},
                 "retention": {
                     "cohort_size": 10,
@@ -222,7 +247,7 @@ def test_stats_pure(backend):
         {
             "status": "ok",
             "stats": {
-                "growth": {"visitors": 50, "active": 10},
+                "growth": {"visitors": 50, "lurkers": 10},
                 "onchain": {"new_users": 20, "contributors": 5, "posts": 0, "comments": 10},
                 "retention": {
                     "cohort_size": 5,
@@ -234,18 +259,18 @@ def test_stats_pure(backend):
         },
     ]
     # Add per-day series so we can assert series combine rules too: on-chain
-    # fields max, tracked 'active' sums.
+    # fields max, tracked 'lurkers' sums.
     servers[0]["stats"]["series"] = [
-        {"t": 0, "new_users": 80, "posts": 20, "comments": 30, "active": 40, "d7_eligible": 10, "d7_retained": 6}
+        {"t": 0, "new_users": 80, "posts": 20, "comments": 30, "lurkers": 40, "d7_eligible": 10, "d7_retained": 6}
     ]
     servers[1]["stats"]["series"] = [
-        {"t": 0, "new_users": 20, "posts": 0, "comments": 10, "active": 10, "d7_eligible": 3, "d7_retained": 1}
+        {"t": 0, "new_users": 20, "posts": 0, "comments": 10, "lurkers": 10, "d7_eligible": 3, "d7_retained": 1}
     ]
     agg = st.aggregate_server_stats(servers, 0, 100)
     checks = [
         # tracked metrics SUM across nodes
         agg["growth"]["visitors"] == 150,
-        agg["growth"]["active"] == 50,
+        agg["growth"]["lurkers"] == 50,
         # on-chain metrics are identical per node -> MAX, never summed
         agg["onchain"]["new_users"] == 80,
         agg["onchain"]["contributors"] == 5,
@@ -258,11 +283,11 @@ def test_stats_pure(backend):
         agg["retention"]["d7"]["retained"] == 4,
         agg["retention"]["d7"]["rate"] == round(4 / 8, 4),
         agg["servers_counted"] == 2,
-        # series: on-chain max, tracked active summed
+        # series: on-chain max, tracked lurkers summed
         agg["series"][0]["new_users"] == 80,
         agg["series"][0]["posts"] == 20,
         agg["series"][0]["comments"] == 30,
-        agg["series"][0]["active"] == 50,
+        agg["series"][0]["lurkers"] == 50,
         # per-day D7 cohort outcome is chain-derived -> MAX
         agg["series"][0]["d7_eligible"] == 10,
         agg["series"][0]["d7_retained"] == 6,

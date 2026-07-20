@@ -11,7 +11,7 @@ import Storage from "../utils/Storage";
 const CHART_COLORS = {
     newUsers: "#2563eb",
     contributors: "#14b8a6",
-    active: "#22c55e",
+    lurkers: "#22c55e",
     posts: "#8b5cf6",
     comments: "#f59e0b",
     retention: "#2563eb",
@@ -60,18 +60,18 @@ const Header = styled.div`
     align-items: flex-end;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2.5rem;
 `;
 
 const Title = styled.h1`
-    font-size: 1.6rem;
-    font-weight: 750;
+    font-size: 1.8rem;
+    font-weight: 800;
     letter-spacing: -0.02em;
-    margin: 0 0 0.3rem;
+    margin: 0 0 0.4rem;
 `;
 
 const Subtitle = styled.div`
-    font-size: 0.82rem;
+    font-size: 0.85rem;
     opacity: 0.6;
 `;
 
@@ -135,71 +135,62 @@ const DateInput = styled.input`
 `;
 
 const SectionHeader = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
     text-transform: uppercase;
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    font-weight: 700;
-    opacity: 0.55;
-    margin: 2.1rem 0 0.7rem;
-    &::after {
-        content: "";
-        flex: 1;
-        height: 1px;
-        background: ${BORDER_SOFT};
-    }
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    font-weight: 750;
+    opacity: 0.8;
+    margin: 3.5rem 0 0.9rem;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
 `;
 
 const TileGrid = styled.div`
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1rem;
 `;
 
 const Tile = styled.div`
     position: relative;
-    overflow: hidden;
     background: ${SURFACE};
-    border: 1px solid ${BORDER};
-    border-radius: 14px;
-    padding: 1rem 1.1rem 0.95rem 1.2rem;
-    transition: background 0.12s ease, transform 0.12s ease;
-    &::before {
-        content: "";
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background: ${({ $accent }) => $accent || "transparent"};
-    }
+    border: 1px solid ${BORDER_SOFT};
+    border-top: 3px solid ${({ $accent }) => $accent || "transparent"};
+    border-radius: 12px;
+    padding: 1.4rem 1.4rem;
+    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
     &:hover {
         background: ${SURFACE_HOVER};
+        border-color: ${BORDER};
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
 `;
 
 const TileValue = styled.div`
-    font-size: 1.85rem;
-    font-weight: 750;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    margin-bottom: 0.5rem;
 `;
 
 const TileLabel = styled.div`
-    font-size: 0.72rem;
-    opacity: 0.6;
-    margin-top: 0.4rem;
-    line-height: 1.3;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    line-height: 1.4;
+    font-weight: 500;
 `;
 
 const Card = styled.div`
+    position: relative;
     background: ${SURFACE};
-    border: 1px solid ${BORDER};
-    border-radius: 16px;
-    padding: 1.1rem 1.2rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    border: 1px solid ${BORDER_SOFT};
+    border-radius: 14px;
+    padding: 1.4rem 1.4rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 `;
 
 const Table = styled.table`
@@ -259,39 +250,145 @@ const Message = styled.div`
     font-size: 0.9rem;
 `;
 
-const SourceLegend = styled(Card)`
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    margin-bottom: 0.5rem;
-    font-size: 0.78rem;
-    line-height: 1.5;
+const HoverBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.25rem;
+    cursor: help;
+    position: relative;
+    opacity: 0.6;
+    font-size: 0.9em;
+    transform: translateY(-0.2em);
+    &:hover {
+        opacity: 1;
+    }
 `;
 
-const LegendItem = styled.div`
+const HoverPopup = styled.div`
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.4rem;
+    width: max-content;
+    min-width: 240px;
+    max-width: 380px;
+    background: ${({ theme }) => tok(theme, "panel", "#ffffff")};
+    color: ${({ theme }) => tok(theme, "text", "#1a1a1b")};
+    border: 1px solid ${BORDER};
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    opacity: 0;
+    visibility: hidden;
+    z-index: 100;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+    ${HoverBadge}:hover & {
+        opacity: 1;
+        visibility: visible;
+    }
+`;
+
+const LegendRow = styled.div`
     display: flex;
     align-items: baseline;
-    gap: 0.6rem;
+    gap: 0.5rem;
+    margin-bottom: ${({ $last }) => ($last ? "0" : "0.4rem")};
+`;
+
+// Small circular "?" affordance pinned to a box's top-right corner. Hovering
+// reveals InfoPopup with a detailed, box-specific explanation. Kept separate
+// from HoverBadge (which is the inline superscript used by the page subtitle).
+const InfoBadge = styled.span`
+    position: absolute;
+    top: 0.7rem;
+    right: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 50%;
+    border: 1px solid ${BORDER};
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    opacity: 0.45;
+    color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    &:hover {
+        opacity: 1;
+        border-color: ${({ theme }) => tok(theme, "text", "#e6e6e6")};
+    }
+`;
+
+// Opaque, right-anchored popup so it never clips the viewport's right edge.
+const InfoPopup = styled.div`
+    position: absolute;
+    top: calc(100% + 0.45rem);
+    right: 0;
+    width: max-content;
+    min-width: 220px;
+    max-width: 300px;
+    background: ${({ theme }) => tok(theme, "panel", "#ffffff")};
+    color: ${({ theme }) => tok(theme, "text", "#1a1a1b")};
+    border: 1px solid ${BORDER};
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    visibility: hidden;
+    z-index: 200;
+    font-size: 0.75rem;
+    line-height: 1.55;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+    text-align: left;
+    ${InfoBadge}:hover & {
+        opacity: 1;
+        visibility: visible;
+    }
+`;
+
+const InfoTitle = styled.div`
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    color: ${({ $c }) => $c || "inherit"};
+`;
+
+const InfoNote = styled.div`
+    margin-top: 0.45rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid ${BORDER};
+    opacity: 0.65;
+    font-size: 0.68rem;
 `;
 
 const Dot = styled.span`
     flex: 0 0 auto;
-    width: 0.6rem;
-    height: 0.6rem;
+    width: 0.5rem;
+    height: 0.5rem;
     border-radius: 50%;
     background: ${({ $c }) => $c};
     box-shadow: 0 0 0 3px ${({ $c }) => $c}22;
     transform: translateY(1px);
 `;
 
-// Inline caveat under a section, used to spell out exactly what a metric does
-// and does not cover (esp. on-chain-retroactive vs tracked-since-a-date).
+// Concise, always-visible explanation under a section header (data source,
+// window, tracking-since caveat). Also the base style for Warn.
 const Note = styled.div`
-    font-size: 0.74rem;
-    line-height: 1.5;
-    opacity: 0.65;
-    margin: 0 0 0.8rem;
-    max-width: 760px;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    opacity: 0.6;
+    margin: 0 0 1.2rem;
+    max-width: 860px;
+    font-weight: 400;
 `;
 
 const Warn = styled(Note)`
@@ -311,13 +408,15 @@ const ChartGrid = styled.div`
 `;
 
 const ChartCard = styled(Card)`
-    padding: 1.1rem 1.1rem 0.7rem;
+    padding: 1.4rem 1.4rem 1rem;
 `;
 
 const ChartTitle = styled.div`
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    margin-bottom: 0.9rem;
+    margin-bottom: 1.2rem;
+    opacity: 0.85;
+    padding-right: 1.6rem;
 `;
 
 const ChartHeight = styled.div`
@@ -325,11 +424,25 @@ const ChartHeight = styled.div`
     height: 240px;
 `;
 
-const SubNote = styled.div`
-    font-size: 0.82rem;
-    opacity: 0.6;
-    margin: 0 0 0.5rem;
-`;
+// A single stat box with a corner "?" that explains, in detail, exactly what
+// this one number means — its data source (chain vs Mirage tracking), the
+// window, and any caveat. This is the page's primary explanation surface.
+function MetricTile({ accent, value, label, title, children, note }) {
+    return (
+        <Tile $accent={accent}>
+            <InfoBadge>
+                ?
+                <InfoPopup>
+                    <InfoTitle $c={accent}>{title}</InfoTitle>
+                    <div>{children}</div>
+                    {note ? <InfoNote>{note}</InfoNote> : null}
+                </InfoPopup>
+            </InfoBadge>
+            <TileValue>{value}</TileValue>
+            <TileLabel>{label}</TileLabel>
+        </Tile>
+    );
+}
 
 function isAdmin() {
     try {
@@ -391,11 +504,19 @@ export default function AdminStatsDashboard() {
     const series = (aggregate && aggregate.series) || [];
     const trackingSince = (aggregate && aggregate.tracking_since) || null;
     const trackingSinceLabel = trackingSince ? formatDate(trackingSince) : null;
+    // Active users is a derived total: every signed-in identity in the window,
+    // i.e. Lurkers (tracked) + Contributors (chain fact). Computed in-render.
+    const activeUsers = (g ? g.lurkers || 0 : 0) + (o ? o.contributors || 0 : 0);
+    // Shared tracking-since caveat reused across the metric tooltips.
+    // Short tracking-since phrase for the inline section notes.
+    const trackedSince = trackingSinceLabel
+        ? `Mirage-tracked since ${trackingSinceLabel} (blank before)`
+        : "Mirage-tracked (nothing recorded yet)";
     // Whether the selected window predates visitor tracking. If so, the tracked
     // metrics are empty and the tracked-engagement half of retention can't be seen.
     const windowEndsBeforeTracking = !!(trackingSince && win && win.end < trackingSince);
     const windowStartsBeforeTracking = !!(trackingSince && win && win.start < trackingSince);
-    // Day bucket tracking began. Tracked lines (Active) are nulled before this so
+    // Day bucket tracking began. Tracked lines (Lurkers) are nulled before this so
     // the chart shows a gap, not a misleading flat zero, prior to tracking.
     const trackingSinceDay = trackingSince ? Math.floor(trackingSince / 86400) * 86400 : null;
     // Drop the current (still-building) UTC day so charts end at the last complete day.
@@ -409,8 +530,8 @@ export default function AdminStatsDashboard() {
             const retained = pt.d7_retained || 0;
             const churned = Math.max(elig - retained, 0);
             const pending = Math.max((pt.new_users || 0) - elig, 0);
-            const active = trackingSinceDay != null && pt.t < trackingSinceDay ? null : pt.active;
-            return { ...pt, active, d7_churned: churned, d7_pending: pending };
+            const lurkers = trackingSinceDay != null && pt.t < trackingSinceDay ? null : pt.lurkers;
+            return { ...pt, lurkers, d7_churned: churned, d7_pending: pending };
         });
     const retentionData = r ? ["d7", "d14", "d30"].map(k => ({
         name: k.toUpperCase(),
@@ -438,6 +559,19 @@ export default function AdminStatsDashboard() {
                     <Subtitle>
                         Fleet-wide, admin-only. {aggregate ? `${aggregate.servers_counted} server(s) reporting` : ""}
                         {win ? ` · ${formatDate(win.start)} – ${formatDate(win.end)}` : ""}
+                        <HoverBadge>
+                            <sup style={{ padding: "0.2rem" }}>ⓘ</sup>
+                            <HoverPopup>
+                                <LegendRow>
+                                    <Dot $c={CHART_COLORS.posts} />
+                                    <span><strong>On-chain</strong> — full history</span>
+                                </LegendRow>
+                                <LegendRow $last>
+                                    <Dot $c={CHART_COLORS.lurkers} />
+                                    <span><strong>Visitor tracking</strong> — {trackingSinceLabel ? `since ${trackingSinceLabel}` : "none yet"}</span>
+                                </LegendRow>
+                            </HoverPopup>
+                        </HoverBadge>
                     </Subtitle>
                 </div>
                 <Controls>
@@ -465,66 +599,102 @@ export default function AdminStatsDashboard() {
 
             {!loading && !error && aggregate && (
                 <>
-                    <SourceLegend>
-                        <LegendItem>
-                            <Dot $c={CHART_COLORS.posts} />
-                            <span>
-                                <strong>On-chain</strong> — recorded by the blockchain since genesis.
-                                Accurate for <strong>any</strong> historical window: new users, contributors,
-                                posts, comments.
-                            </span>
-                        </LegendItem>
-                        <LegendItem>
-                            <Dot $c={CHART_COLORS.active} />
-                            <span>
-                                <strong>Visitor tracking</strong> (Mirage-owned) — logged-out visitors,
-                                logged-in active users and campaigns.{" "}
-                                {trackingSinceLabel
-                                    ? <>Began <strong>{trackingSinceLabel}</strong>. Anything before that date is blank here — not zero-because-nothing-happened.</>
-                                    : <>No tracked events recorded yet, so these are still empty.</>}
-                            </span>
-                        </LegendItem>
-                    </SourceLegend>
-
-                    <SectionHeader>Audience — three categories</SectionHeader>
-                    <Note>
-                        Everyone who used Mirage in this window, split three ways with no overlap:{" "}
-                        <strong>Contributors</strong> are logged-in users who posted or commented.{" "}
-                        <strong>Active users</strong> are logged-in users who browsed, read, searched, viewed
-                        profiles/topics or voted but did <em>not</em> post or comment.{" "}
-                        <strong>Visitors</strong> are not logged in.
-                    </Note>
-                    <SubNote>
-                        Contributors come from the chain (full history, any window). Active users and visitors are
-                        Mirage-tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}, so before that
-                        date they read 0 — not because nobody was there, but because tracking hadn't started.
-                    </SubNote>
+                    <SectionHeader>Audience</SectionHeader>
                     {windowEndsBeforeTracking && (
-                        <Warn>This window ends before tracking began, so Active users and Visitors are 0 by definition — not a real reading. Contributors is still accurate.</Warn>
+                        <Warn>This window ends before tracking began, so Lurkers and Visitors are 0 by definition — not a real reading. Contributors (and therefore the chain half of Active users) is still accurate.</Warn>
                     )}
                     <TileGrid>
-                        <Tile $accent={CHART_COLORS.contributors}><TileValue>{formatNumber(o.contributors)}</TileValue><TileLabel>Contributors (logged in, posted/commented)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.active}><TileValue>{formatNumber(g.active)}</TileValue><TileLabel>Active users (logged in, no post/comment)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(g.visitors)}</TileValue><TileLabel>Visitors (not logged in)</TileLabel></Tile>
+                        <MetricTile
+                            accent={ACCENT}
+                            value={formatNumber(activeUsers)}
+                            label="Active users (logged in)"
+                            title="Active users"
+                            note={`Lurkers ${trackedSince}.`}
+                        >
+                            Everyone who was <strong>signed in</strong> this window — the sum of
+                            {" "}<strong>Lurkers</strong> + <strong>Contributors</strong>. Visitors (not signed in)
+                            are not included here.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.lurkers}
+                            value={formatNumber(g.lurkers)}
+                            label="Lurkers (logged in, no post/comment)"
+                            title="Lurkers"
+                            note={trackedSince}
+                        >
+                            Signed-in users who only <strong>browsed, searched, read or voted</strong> — they never
+                            posted or commented. Counted from Mirage page activity (not the chain).
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.contributors}
+                            value={formatNumber(o.contributors)}
+                            label="Contributors (logged in, posted/commented)"
+                            title="Contributors"
+                            note="On-chain fact — accurate for any past window."
+                        >
+                            Signed-in users who <strong>posted or commented</strong> in this window. Read straight
+                            from the blockchain, independent of when Mirage tracking began.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.newUsers}
+                            value={formatNumber(g.visitors)}
+                            label="Visitors (not logged in)"
+                            title="Visitors"
+                            note={trackedSince}
+                        >
+                            People who hit the site <strong>without signing in</strong> (logged-out browsers and
+                            crawlers). Counted from Mirage page activity, per node.
+                        </MetricTile>
                     </TileGrid>
 
-                    <SectionHeader>On-chain volume — full history (retroactive)</SectionHeader>
-                    <Note>Counts every signup / post / comment in the window straight from the chain. Reliable for past windows.</Note>
+                    <SectionHeader>On-chain volume</SectionHeader>
                     <TileGrid>
-                        <Tile $accent={CHART_COLORS.newUsers}><TileValue>{formatNumber(o.new_users)}</TileValue><TileLabel>New users (signups)</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.posts}><TileValue>{formatNumber(o.posts)}</TileValue><TileLabel>Posts</TileLabel></Tile>
-                        <Tile $accent={CHART_COLORS.comments}><TileValue>{formatNumber(o.comments)}</TileValue><TileLabel>Comments</TileLabel></Tile>
+                        <MetricTile
+                            accent={CHART_COLORS.newUsers}
+                            value={formatNumber(o.new_users)}
+                            label="New users (signups)"
+                            title="New users"
+                            note="Global chain fact — same on every node."
+                        >
+                            Wallets that <strong>created an account</strong> in this window, counted on-chain.
+                            Accurate for any past window, regardless of when tracking began.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.posts}
+                            value={formatNumber(o.posts)}
+                            label="Posts"
+                            title="Posts"
+                            note="Global chain fact — same on every node."
+                        >
+                            <strong>Top-level posts</strong> created in this window, counted directly from the
+                            blockchain.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.comments}
+                            value={formatNumber(o.comments)}
+                            label="Comments"
+                            title="Comments"
+                            note="Global chain fact — same on every node."
+                        >
+                            <strong>Comments and replies</strong> created in this window, counted directly from the
+                            blockchain.
+                        </MetricTile>
                     </TileGrid>
 
                     <SectionHeader>Trends</SectionHeader>
-                    <Note>
-                        <strong>D7 outcome</strong> splits each day's signups by what happened 7 days later:
-                        green = still active, red = churned, grey = too recent to judge yet. The full bar height
-                        is that day's new users — so the red share is your weekly drop-off.
-                    </Note>
                     <ChartGrid>
                         <ChartCard>
-                            <ChartTitle>Active &amp; contributors per day (stacked)</ChartTitle>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>Lurkers &amp; contributors per day</InfoTitle>
+                                    Signed-in activity stacked by UTC day (today's partial day dropped).
+                                    <strong> Lurkers</strong> are Mirage-tracked — the dashed marker is the tracking
+                                    start, and there's a gap before it. <strong>Contributors</strong> come from the chain.
+                                    <InfoNote>{trackedSince}</InfoNote>
+                                </InfoPopup>
+                            </InfoBadge>
+                            <ChartTitle>Lurkers &amp; contributors per day (stacked)</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <AreaChart data={chartSeries} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
@@ -533,9 +703,9 @@ export default function AdminStatsDashboard() {
                                                 <stop offset="0%" stopColor={CHART_COLORS.contributors} stopOpacity={0.55} />
                                                 <stop offset="100%" stopColor={CHART_COLORS.contributors} stopOpacity={0.05} />
                                             </linearGradient>
-                                            <linearGradient id="gActive" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor={CHART_COLORS.active} stopOpacity={0.55} />
-                                                <stop offset="100%" stopColor={CHART_COLORS.active} stopOpacity={0.05} />
+                                            <linearGradient id="gLurkers" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor={CHART_COLORS.lurkers} stopOpacity={0.55} />
+                                                <stop offset="100%" stopColor={CHART_COLORS.lurkers} stopOpacity={0.05} />
                                             </linearGradient>
                                         </defs>
                                         <CartesianGrid stroke={gridColor} vertical={false} />
@@ -546,18 +716,28 @@ export default function AdminStatsDashboard() {
                                         {trackingSinceDay != null && (
                                             <ReferenceLine
                                                 x={trackingSinceDay}
-                                                stroke={CHART_COLORS.active}
+                                                stroke={CHART_COLORS.lurkers}
                                                 strokeDasharray="4 3"
-                                                label={{ value: "tracking start", position: "insideTopRight", fontSize: 10, fill: CHART_COLORS.active }}
+                                                label={{ value: "tracking start", position: "insideTopRight", fontSize: 10, fill: CHART_COLORS.lurkers }}
                                             />
                                         )}
                                         <Area type="monotone" dataKey="contributors" name="Contributors" stackId="eng" stroke={CHART_COLORS.contributors} fill="url(#gContrib)" strokeWidth={2} />
-                                        <Area type="monotone" dataKey="active" name="Active" stackId="eng" stroke={CHART_COLORS.active} fill="url(#gActive)" strokeWidth={2} connectNulls={false} />
+                                        <Area type="monotone" dataKey="lurkers" name="Lurkers" stackId="eng" stroke={CHART_COLORS.lurkers} fill="url(#gLurkers)" strokeWidth={2} connectNulls={false} />
                                     </AreaChart>
                                 </ResponsiveContainer>
                             </ChartHeight>
                         </ChartCard>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>New signups by day — D7 outcome</InfoTitle>
+                                    Each day's signups (from the chain), split by what happened 7 days later:
+                                    {" "}<strong style={{ color: CHART_COLORS.retained }}>green</strong> = still active,
+                                    {" "}<strong style={{ color: CHART_COLORS.churned }}>red</strong> = churned,
+                                    {" "}<strong>grey</strong> = signed up &lt;7 days ago, too recent to judge.
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>New signups by day — D7 outcome</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -575,6 +755,14 @@ export default function AdminStatsDashboard() {
                             </ChartHeight>
                         </ChartCard>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>Posts &amp; comments per day</InfoTitle>
+                                    Content created per UTC day, counted on-chain: <strong>posts</strong> stacked with
+                                    {" "}<strong>comments</strong>. Accurate for any past window.
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>Posts &amp; comments per day</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -593,15 +781,6 @@ export default function AdminStatsDashboard() {
                     </ChartGrid>
 
                     <SectionHeader>Date-range cohort &amp; retention</SectionHeader>
-                    <SubNote>
-                        Of the {formatNumber(r.cohort_size)} users who signed up in this window, how many were still active later:
-                    </SubNote>
-                    <Note>
-                        <strong>Still active</strong> at horizon N (D7/D14/D30) = at or after their signup + N days they
-                        either <strong>posted/commented</strong> (on-chain, retroactive) <strong>or browsed/voted</strong>
-                        {" "}(tracked{trackingSinceLabel ? `, only since ${trackingSinceLabel}` : ""}). Each horizon only
-                        counts users who signed up early enough that N days have already elapsed (shown as retained/eligible).
-                    </Note>
                     {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
                         <Warn>
                             {windowEndsBeforeTracking
@@ -611,6 +790,16 @@ export default function AdminStatsDashboard() {
                     )}
                     <ChartGrid>
                         <ChartCard>
+                            <InfoBadge>
+                                ?
+                                <InfoPopup>
+                                    <InfoTitle>Retention by horizon</InfoTitle>
+                                    Of the {formatNumber(r.cohort_size)} users who signed up in this window, the share
+                                    still active 7 / 14 / 30 days later — either posted/commented (chain) or
+                                    browsed/voted (tracked). Only signups old enough to judge are counted.
+                                    <InfoNote>{trackedSince}</InfoNote>
+                                </InfoPopup>
+                            </InfoBadge>
                             <ChartTitle>Retention by horizon</ChartTitle>
                             <ChartHeight>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -625,12 +814,24 @@ export default function AdminStatsDashboard() {
                             </ChartHeight>
                         </ChartCard>
                         <TileGrid style={{ alignContent: "start" }}>
-                            {["d7", "d14", "d30"].map(k => (
-                                <Tile key={k} $accent={CHART_COLORS.retention}>
-                                    <TileValue>{r[k].eligible ? formatPercent(r[k].rate) : "—"}</TileValue>
-                                    <TileLabel>{k.toUpperCase()} retention ({formatNumber(r[k].retained)}/{formatNumber(r[k].eligible)})</TileLabel>
-                                </Tile>
-                            ))}
+                            {["d7", "d14", "d30"].map(k => {
+                                const days = k.slice(1);
+                                return (
+                                    <MetricTile
+                                        key={k}
+                                        accent={CHART_COLORS.retention}
+                                        value={r[k].eligible ? formatPercent(r[k].rate) : "—"}
+                                        label={`${k.toUpperCase()} retention (${formatNumber(r[k].retained)}/${formatNumber(r[k].eligible)})`}
+                                        title={`Day-${days} retention`}
+                                        note="Shown as retained / eligible."
+                                    >
+                                        Of this window's signups that are at least {days} days old
+                                        ({formatNumber(r[k].eligible)} eligible), {formatNumber(r[k].retained)} were
+                                        still active {days} days after signing up. Too-recent signups are excluded, so
+                                        the rate isn't dragged down by people who haven't had {days} days yet.
+                                    </MetricTile>
+                                );
+                            })}
                         </TileGrid>
                     </ChartGrid>
 
@@ -638,6 +839,15 @@ export default function AdminStatsDashboard() {
                         <>
                             <SectionHeader>Attribution (first-touch campaigns)</SectionHeader>
                             <Card style={{ padding: "0.4rem 0.6rem" }}>
+                                <InfoBadge>
+                                    ?
+                                    <InfoPopup>
+                                        <InfoTitle>First-touch attribution</InfoTitle>
+                                        Visitors grouped by the <strong>source / campaign</strong> they first arrived
+                                        from (UTM tags). <strong>Signup conv.</strong> = signups ÷ visitors;
+                                        {" "}<strong>Contrib. conv.</strong> = contributors ÷ visitors.
+                                    </InfoPopup>
+                                </InfoBadge>
                                 <Table>
                                     <thead>
                                         <tr>
@@ -667,12 +877,23 @@ export default function AdminStatsDashboard() {
 
                     <SectionHeader>Servers ({servers.length})</SectionHeader>
                     <Card style={{ padding: "0.4rem 0.6rem" }}>
+                        <InfoBadge>
+                            ?
+                            <InfoPopup>
+                                <InfoTitle>Per-server breakdown</InfoTitle>
+                                <strong>Visitors</strong> &amp; <strong>Lurkers</strong> are Mirage-tracked per node — a
+                                visitor hits exactly one node, so those columns sum to the fleet tiles up top.
+                                <strong> Contributors</strong> is a global chain fact, so it reads the same on every node
+                                (shown for context). New users and retention (also global) are omitted to avoid
+                                identical columns.
+                            </InfoPopup>
+                        </InfoBadge>
                         <Table>
                             <thead>
                                 <tr>
                                     <Th>Server</Th><Th>Status</Th>
-                                    <Th $right>Logged-out visitors</Th><Th $right>Active users</Th>
-                                    <Th $right>New users</Th><Th $right>Contributors</Th><Th $right>D7</Th>
+                                    <Th $right>Logged-out visitors</Th><Th $right>Lurkers</Th>
+                                    <Th $right>Contributors</Th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -681,16 +902,13 @@ export default function AdminStatsDashboard() {
                                     const st = s.stats || {};
                                     const sg = st.growth || {};
                                     const so = st.onchain || {};
-                                    const sr = (st.retention && st.retention.d7) || {};
                                     return (
                                         <Tr key={i}>
                                             <Td>{s.server}</Td>
                                             <Td><StatusPill $ok={ok}>{s.status}</StatusPill></Td>
                                             <Td $right>{ok ? formatNumber(sg.visitors) : "—"}</Td>
-                                            <Td $right>{ok ? formatNumber(sg.active) : "—"}</Td>
-                                            <Td $right>{ok ? formatNumber(so.new_users) : "—"}</Td>
+                                            <Td $right>{ok ? formatNumber(sg.lurkers) : "—"}</Td>
                                             <Td $right>{ok ? formatNumber(so.contributors) : "—"}</Td>
-                                            <Td $right>{ok && sr.eligible ? formatPercent(sr.rate) : "—"}</Td>
                                         </Tr>
                                     );
                                 })}

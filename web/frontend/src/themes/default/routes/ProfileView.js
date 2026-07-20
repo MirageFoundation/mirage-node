@@ -1545,36 +1545,6 @@ function ProfileViewAuthenticated({
      * user gets visible confirmation the click worked.
      */
     const [profileShareCopied, setProfileShareCopied] = useState(false);
-    const handleProfileShare = useCallback(async () => {
-        const url = (typeof window !== 'undefined' && window.location && window.location.href)
-            ? window.location.href
-            : '';
-        if (!url) return;
-        let ok = false;
-        try {
-            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(url);
-                ok = true;
-            }
-        } catch (_) { /* fall through to legacy path */ }
-        if (!ok && typeof document !== 'undefined') {
-            try {
-                const ta = document.createElement('textarea');
-                ta.value = url;
-                ta.setAttribute('readonly', '');
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                document.body.appendChild(ta);
-                ta.select();
-                ok = document.execCommand('copy');
-                document.body.removeChild(ta);
-            } catch (_) { ok = false; }
-        }
-        if (ok) {
-            setProfileShareCopied(true);
-            setTimeout(() => setProfileShareCopied(false), 1800);
-        }
-    }, []);
     const {
         navigate,
         theme,
@@ -1681,6 +1651,37 @@ function ProfileViewAuthenticated({
     } = useProfile({
         state
     });
+    const handleProfileShare = useCallback(async () => {
+        const identity = profileUsername || profileAddress;
+        if (!identity || typeof window === 'undefined') return;
+        const encodedIdentity = encodeURIComponent(identity);
+        const url = `${window.location.origin}/u/${encodedIdentity}?ref=${encodedIdentity}`;
+        console.debug('[ProfileView] share.copy', { url });
+        let ok = false;
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(url);
+                ok = true;
+            }
+        } catch (_) { /* fall through to legacy path */ }
+        if (!ok && typeof document !== 'undefined') {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = url;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                ok = document.execCommand('copy');
+                document.body.removeChild(ta);
+            } catch (_) { ok = false; }
+        }
+        if (ok) {
+            setProfileShareCopied(true);
+            setTimeout(() => setProfileShareCopied(false), 1800);
+        }
+    }, [profileAddress, profileUsername]);
     /**
      * Unblock affordance — wired to the same `useBlocks` hook BlocksView
      * uses, so any state mutation in this view is reflected in

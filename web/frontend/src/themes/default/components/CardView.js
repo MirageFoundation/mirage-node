@@ -926,7 +926,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) {
             setFollowOverride(!next);
         }
-    }, [closeAllMenus, isLoggedIn, authorAddress, followingUser, viewerAddress]);
+    }, [closeAllMenus, authorAddress, followingUser, viewerAddress]);
 
     const handleFollowTopic = useCallback(async () => {
         closeAllMenus();
@@ -940,7 +940,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) {
             setTopicFollowOverride(!next);
         }
-    }, [closeAllMenus, isLoggedIn, topic, followingTopic, viewerAddress]);
+    }, [closeAllMenus, topic, followingTopic, viewerAddress]);
 
     /**
      * Confirmation dialogs (06.3 polish round).
@@ -1008,7 +1008,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleEdit = useCallback(() => {
         closeAllMenus();
-        navigate(`/edit_post/${postId}`);
+        navigate(`/create_post?post_id=${postId}&edit=true`);
     }, [closeAllMenus, navigate, postId]);
 
     const handleDelete = useCallback(() => openDialog('delete_post'), [openDialog]);

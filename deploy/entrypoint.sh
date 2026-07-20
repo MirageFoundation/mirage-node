@@ -589,7 +589,23 @@ tmux send-keys -t "$SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 indexer/main.
 tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
 tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
 
-# Disable maintenance mode now that backend is running
+# Keep maintenance mode active until Gunicorn and its dependencies are healthy.
+echo "==> Waiting for backend to become available..."
+BACKEND_READY=0
+for i in $(seq 1 120); do
+  if curl -sf --max-time 1 http://127.0.0.1:5000/api/get_node_config >/dev/null 2>&1; then
+    BACKEND_READY=1
+    echo "✓ Backend is ready"
+    break
+  fi
+  sleep 1
+done
+
+if [ "$BACKEND_READY" -eq 0 ]; then
+  echo "ERROR: Backend not ready after 120 attempts" >&2
+  exit 1
+fi
+
 rm -f /etc/caddy/.maintenance
 echo "✓ Maintenance mode disabled"
 

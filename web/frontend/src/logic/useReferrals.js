@@ -96,30 +96,12 @@ export function useReferrals({ state, targetAddress }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
-    const [inviteCodes, setInviteCodes] = useState([]);
-
-    useEffect(() => {
-        if (!publicKey) return;
-        let cancelled = false;
-        Api.get('get_invite_codes', { address: publicKey }).then(resp => {
-            if (cancelled) return;
-            if (resp && Array.isArray(resp.codes)) setInviteCodes(resp.codes);
-        }).catch(() => { });
-        return () => { cancelled = true; };
-    }, [publicKey]);
-
-    const nextAvailableCode = inviteCodes.find(c => !c.is_used);
 
     const getShareUrl = () => {
         if (!username) return '';
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        if (precheckEnabled) {
-            return `${origin}/signup?ref=${encodeURIComponent(username)}`;
-        }
-        if (nextAvailableCode) {
-            return `${origin}/signup?invite=${nextAvailableCode.code}`;
-        }
-        return '';
+        const identity = encodeURIComponent(username);
+        return `${origin}/u/${identity}?ref=${identity}`;
     };
     const shareUrl = getShareUrl();
 

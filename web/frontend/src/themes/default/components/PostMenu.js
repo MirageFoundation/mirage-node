@@ -342,7 +342,7 @@ export function MoreMenuChip({
     const handleEdit = useCallback(e => {
         stop(e); setOpen(false);
         if (!postId) return;
-        navigate(`/edit_post/${postId}`);
+        navigate(`/create_post?post_id=${postId}&edit=true`);
     }, [navigate, postId]);
 
     const handleDelete = useCallback(e => {
@@ -377,7 +377,7 @@ export function MoreMenuChip({
             if (next) await follow(viewerAddress, authorAddress);
             else await unfollow(viewerAddress, authorAddress);
         } catch (_) { setFollowOverride(!next); }
-    }, [isLoggedIn, authorAddress, followingUser, viewerAddress]);
+    }, [authorAddress, followingUser, viewerAddress]);
 
     const handleFollowTopic = useCallback(async e => {
         stop(e); setOpen(false);
@@ -389,7 +389,7 @@ export function MoreMenuChip({
             if (next) await subscribe(viewerAddress, topic);
             else await unsubscribe(viewerAddress, topic);
         } catch (_) { setTopicFollowOverride(!next); }
-    }, [isLoggedIn, topic, followingTopic, viewerAddress]);
+    }, [topic, followingTopic, viewerAddress]);
 
     /* Gift Mirage / Gift Subscription / Give Award — open in-place via
      * `usePostGifts` so the viewer stays on the current feed (previously

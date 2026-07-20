@@ -214,6 +214,101 @@ def test_account(backend: str):
     else:
         _fail("account.get_user_followed returns 200", f"code={code}")
 
+    # 2.9 Profile-share attribution works with open registration and rewards off.
+    invite_required = bool((_ncfg or {}).get("registration_invite_code_required", False))
+    if invite_required:
+        _skip("account.profile_referral open-registration coverage", "invite codes required on this node")
+        return
+
+    referrer_wallet = _generate_wallet()
+    referrer_addr = str(referrer_wallet.address()).lower()
+    referrer_resp = _do_set_username_raw(backend, referrer_wallet, f"ref-{_rand_str(6)}")
+    if not referrer_resp.get("tx_hash"):
+        _fail("account.profile_referral creates referrer", f"resp={referrer_resp}")
+        return
+    referrer_name = _wait_username(backend, referrer_addr)
+    if not referrer_name:
+        _fail("account.profile_referral indexes referrer", f"address={referrer_addr}")
+        return
+
+    unknown_wallet = _generate_wallet()
+    unknown_resp = _do_set_username_raw(
+        backend,
+        unknown_wallet,
+        f"referred-{_rand_str(6)}",
+        referrer_username=f"missing-{_rand_str(8)}",
+    )
+    if unknown_resp.get("tx_hash"):
+        _pass("account.profile_referral ignores unknown referrer")
+    else:
+        _fail("account.profile_referral ignores unknown referrer", f"resp={unknown_resp}")
+
+    malformed_wallet = _generate_wallet()
+    malformed_resp = _do_set_username_raw(
+        backend,
+        malformed_wallet,
+        f"referred-{_rand_str(6)}",
+        referrer_username="invalid referrer!",
+    )
+    if malformed_resp.get("tx_hash"):
+        _pass("account.profile_referral ignores malformed referrer")
+    else:
+        _fail("account.profile_referral ignores malformed referrer", f"resp={malformed_resp}")
+
+    referred_wallet = _generate_wallet()
+    referred_addr = str(referred_wallet.address()).lower()
+    referred_resp = _do_set_username_raw(
+        backend,
+        referred_wallet,
+        f"referred-{_rand_str(6)}",
+        referrer_username=referrer_name,
+    )
+    if not referred_resp.get("tx_hash"):
+        _fail("account.profile_referral registration succeeds", f"resp={referred_resp}")
+        return
+    _pass("account.profile_referral registration succeeds", referrer=referrer_name)
+
+    summary = None
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        summary_code, candidate = _get(f"{backend}/api/referrals/summary", {"address": referrer_addr})
+        if summary_code == 200 and any(
+            str(item.get("address", "")).lower() == referred_addr for item in (candidate.get("referrals") or [])
+        ):
+            summary = candidate
+            break
+        time.sleep(0.5)
+    if summary:
+        _pass("account.profile_referral appears in referral stats")
+    else:
+        _fail("account.profile_referral appears in referral stats", f"address={referred_addr}")
+
+    duplicate_wallet = _generate_wallet()
+    duplicate_resp = _do_set_username_raw(
+        backend,
+        duplicate_wallet,
+        f"duplicate-{_rand_str(6)}",
+        referrer_username=referrer_name,
+    )
+    if not duplicate_resp.get("tx_hash"):
+        _fail("account.profile_referral client gate allows registration", f"resp={duplicate_resp}")
+        return
+    _pass("account.profile_referral client gate allows registration")
+
+    duplicate_addr = str(duplicate_wallet.address()).lower()
+    summary_code, summary_after_gate = _get(f"{backend}/api/referrals/summary", {"address": referrer_addr})
+    if summary_code != 200:
+        _fail("account.profile_referral client gate suppresses attribution", f"code={summary_code}")
+        return
+    duplicate_attributed = any(
+        str(item.get("address", "")).lower() == duplicate_addr
+        for item in (summary_after_gate.get("referrals") or [])
+    )
+    if not duplicate_attributed:
+        _pass("account.profile_referral client gate suppresses attribution")
+    else:
+        _fail("account.profile_referral client gate suppresses attribution", f"address={duplicate_addr}")
+
 
 # =========================================================================
 # Category 3: Post Lifecycle

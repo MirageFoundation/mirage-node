@@ -729,7 +729,7 @@ export default function SearchResultsView({ state }) {
                 );
             }
         },
-        [isLoggedIn, viewerAddressLower, isFollowTopicPending, isTopicFollowed]
+        [viewerAddressLower, isFollowTopicPending, isTopicFollowed]
     );
 
     const handleUserFollowToggle = useCallback(
@@ -763,7 +763,7 @@ export default function SearchResultsView({ state }) {
                 );
             }
         },
-        [isLoggedIn, viewerAddressLower, isFollowUserPending, isUserFollowed]
+        [viewerAddressLower, isFollowUserPending, isUserFollowed]
     );
 
     // Local input state for the small-screen inline search form (visible

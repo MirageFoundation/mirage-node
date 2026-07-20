@@ -918,21 +918,6 @@ function GuestMenu() {
 export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
     const userLevel = Number(Storage.load('user_level', '0')) || 0;
     const isAdmin = userLevel >= 100;
-    const [referralsEnabled, setReferralsEnabled] = useState(false);
-
-    useEffect(() => {
-        const readConfig = () => {
-            try {
-                const nc = JSON.parse(localStorage.getItem('nodeConfig') || '{}');
-                setReferralsEnabled(!!nc.registration_invite_code_required);
-            } catch (_) {
-                setReferralsEnabled(false);
-            }
-        };
-        readConfig();
-        window.addEventListener('nodeConfigUpdated', readConfig);
-        return () => window.removeEventListener('nodeConfigUpdated', readConfig);
-    }, []);
 
     const handleItemClick = (targetPath) => {
         if (typeof onItemClick === 'function') onItemClick(targetPath);
@@ -968,9 +953,7 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
             <MenuItem to="/agents" onClick={() => handleItemClick('/agents')}>Agents</MenuItem>
             <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuItem to="/network" onClick={() => handleItemClick('/network')}>Network</MenuItem>
-            {referralsEnabled && (
-                <MenuItem to="/referrals" onClick={() => handleItemClick('/referrals')}>Referrals</MenuItem>
-            )}
+            <MenuItem to="/referrals" onClick={() => handleItemClick('/referrals')}>Referrals</MenuItem>
             {isAdmin && (
                 <>
                     <MenuDivider />

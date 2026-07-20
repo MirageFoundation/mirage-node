@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -16,6 +15,7 @@ import (
 	"cosmossdk.io/log/v2"
 	confixcmd "cosmossdk.io/tools/confix/cmd"
 	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/debug"
 	"github.com/cosmos/cosmos-sdk/client/flags"
@@ -347,27 +347,6 @@ func dumpConfigCommand() *cobra.Command {
 	}
 }
 
-// idempotentCloseDB wraps a dbm.DB so Close() is safe to call more than once.
-// cosmos-sdk v0.54 server.startInProcess registers TWO deferred cleanups that
-// both call app.Close() (startCmtNode's cleanupFn and startApp's appCleanupFn),
-// and baseapp.(*BaseApp).Close() closes app.db unconditionally — so on every
-// (otherwise graceful) shutdown the second close hits an already-closed PebbleDB
-// handle and panics "pebble: closed", exiting miraged non-zero and polluting the
-// crash/divergence monitoring. Collapsing repeat Close() calls into a no-op lets
-// shutdown exit cleanly. All other methods pass straight through via the embedded
-// interface. Remove once the upstream double-close is fixed (reported upstream;
-// see docs/troubleshooting/postmortems/2026-06-16-mirage-talk-divergence.md AI#13).
-type idempotentCloseDB struct {
-	dbm.DB
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (d *idempotentCloseDB) Close() error {
-	d.closeOnce.Do(func() { d.closeErr = d.DB.Close() })
-	return d.closeErr
-}
-
 // newApp creates the application
 func newApp(
 	logger log.Logger,
@@ -376,8 +355,31 @@ func newApp(
 ) servertypes.Application {
 	baseappOptions := server.DefaultBaseappOptions(appOpts)
 
+	// Force ASYNCHRONOUS IAVL pruning (deletes run in a background goroutine, off
+	// the consensus loop). This is the SDK default; we set it explicitly so config
+	// can never flip it and to document why sync is wrong here.
+	//
+	// History: v1.29.3 forced SYNCHRONOUS pruning to dodge a "prune goroutine
+	// killed at shutdown → prune hole" theory. That theory was WRONG. The real
+	// hole cause was a batch-flush landing between the Delete/Set of a
+	// reference-root reformat in nodedb.deleteVersion (see the iavl patch), which
+	// is fixed independently of async/sync (v1.29.4: Set-before-Delete + the prune
+	// guard flushes and re-probes before halting; an interrupted async pass now at
+	// worst leaves both keys briefly present, never a hole). With the real fix in,
+	// sync pruning bought nothing and cost liveness: because every validator prunes
+	// the SAME interval height inline in Commit, one slow pass (e.g. a backlog
+	// drain) blocks Commit on ALL validators at once and halts the whole chain in
+	// lockstep until it finishes (2026-07-13: ~6 min cluster-wide stall at
+	// h6033700). Async pruning decouples this — a slow pass makes one node briefly
+	// lag and catch up, never a chain-wide stop.
+	// See docs/troubleshooting/divergence-recovery.md §0.3.2/§0.3.3.
+	baseappOptions = append(baseappOptions, baseapp.SetIAVLSyncPruning(false))
+
+	// app.(*App).Close is idempotent (see app.App.Close): cosmos-sdk calls
+	// app.Close() twice on shutdown, which would otherwise double-close PebbleDB
+	// and panic "pebble: closed".
 	return app.New(
-		logger, &idempotentCloseDB{DB: db}, true,
+		logger, db, true,
 		appOpts,
 		baseappOptions...,
 	)

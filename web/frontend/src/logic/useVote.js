@@ -121,7 +121,7 @@ export function useVoteHandler({ state, updatePost }) {
         } finally {
             localPendingRef.current.delete(key);
         }
-    }, [state.publicKey, state.posts, isPending, updatePost]);
+    }, [state.posts, isPending, updatePost]);
 
     const isLocallyPending = useCallback((postId) => {
         const key = String(postId || '').toLowerCase();

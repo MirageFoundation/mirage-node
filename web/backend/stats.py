@@ -53,6 +53,16 @@ _SKIP_PREFIXES = (
     "/api/stats/",
 )
 
+# Paths where the ``address`` query arg names the TARGET being looked at (e.g.
+# whose profile to load), not the authenticated viewer. Using it as identity
+# would credit the viewer's activity to the person being viewed, so every user
+# who merely got looked at would show up as an active logged-in user.
+_ADDRESS_IS_TARGET_PREFIXES = ("/api/get_profile",)
+
+
+def _path_address_is_target(path: str) -> bool:
+    return bool(path) and path.startswith(_ADDRESS_IS_TARGET_PREFIXES)
+
 # Throttle event/visitor writes per identity+type, like user_last_seen, to keep
 # one write per identity per minute instead of one per request.
 EVENT_THROTTLE_SECONDS = 60
@@ -104,7 +114,9 @@ def extract_identity() -> Tuple[Optional[str], Optional[str], Optional[str]]:
         return None, None, None
     raw_visitor = request.headers.get(VISITOR_HEADER, "") if request else ""
     visitor_hash = hash_visitor_id(raw_visitor)
-    address = _clean_addr(request.args.get("address") or request.args.get("admin_address"))
+    address = None
+    if not _path_address_is_target(request.path):
+        address = _clean_addr(request.args.get("address") or request.args.get("admin_address"))
     if address is None:
         address = _signed_body_address(request.path)
     platform = _platform_from_request()
@@ -293,22 +305,29 @@ def _resolved_event_cte() -> str:
     identity = event address, else the address the visitor is now bound to,
     else the raw visitor hash. ``has_addr`` means this event itself was logged-in,
     so old anonymous events do not become active users after later signup.
+
+    The address on a profile-view event is the profile being looked at, not the
+    viewer (see _ADDRESS_IS_TARGET_PREFIXES), so it is nulled out here too — not
+    just at record time — so already-recorded rows self-correct instead of
+    permanently inflating the logged-in counts with everyone who got viewed.
     """
+    viewer_addr = "(CASE WHEN e.path LIKE '/api/get_profile%%' THEN NULL ELSE e.address END)"
     return (
-        "SELECT COALESCE(e.address, v.address, e.visitor_hash) AS ident, e.event_type, e.created_at, "
-        "(e.address IS NOT NULL) AS has_addr "
+        "SELECT COALESCE(" + viewer_addr + ", v.address, e.visitor_hash) AS ident, "
+        "e.event_type, e.created_at, "
+        "(" + viewer_addr + " IS NOT NULL) AS has_addr "
         "FROM stats_events e LEFT JOIN stats_visitors v ON v.visitor_hash = e.visitor_hash "
         "WHERE e.created_at BETWEEN %s AND %s"
     )
 
 
 def _growth_visitors(start: int, end: int) -> Tuple[int, int]:
-    """(visitors, active) for the tracked population in the window.
+    """(visitors, lurkers) for the tracked population in the window.
 
     Two of the three audience categories (the third, contributors, is a chain
     fact from the indexer):
     - visitors: logged-out identities with any tracked event.
-    - active: logged-in identities with an engagement event who did NOT
+    - lurkers: logged-in identities with an engagement event who did NOT
       post/comment in the same window (contributors are excluded so the three
       categories never overlap).
     """
@@ -329,15 +348,15 @@ def _growth_visitors(start: int, end: int) -> Tuple[int, int]:
                 (start, end),
             )
             rows = cur.fetchall()
-    visitors = active = 0
+    visitors = lurkers = 0
     for ident, has_addr, has_engagement in rows:
         ident_lc = str(ident or "").lower()
         if has_addr:
             if has_engagement and ident_lc not in contributor_addresses:
-                active += 1
+                lurkers += 1
         else:
             visitors += 1
-    return visitors, active
+    return visitors, lurkers
 
 
 def _contributor_addresses(start: int, end: int) -> set[str]:
@@ -533,7 +552,7 @@ def _campaigns(start: int, end: int, limit: int = 50) -> List[Dict[str, Any]]:
 
 def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
     """Per-day buckets across the window for charting. On-chain lines (new_users,
-    contributors, posts, comments) have full history; tracked lines (active) only
+    contributors, posts, comments) have full history; tracked lines (lurkers) only
     populate after visitor tracking began. Each bucket also carries per-signup-day
     D7 cohort retention (d7_retained / d7_eligible_users): of the people who signed
     up that day whose 7-day horizon has elapsed, how many were still active at/after
@@ -573,7 +592,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
             )
             cohort = {r[0]: int(r[1]) for r in cur.fetchall()}
 
-    active_by_day: Dict[int, int] = {}
+    lurkers_by_day: Dict[int, int] = {}
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -589,7 +608,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
                 day_key = int(d)
                 ident_lc = str(ident or "").lower()
                 if has_addr and has_engagement and ident_lc not in contributors_by_day.get(day_key, set()):
-                    active_by_day[day_key] = active_by_day.get(day_key, 0) + 1
+                    lurkers_by_day[day_key] = lurkers_by_day.get(day_key, 0) + 1
 
     # Last-active timestamp per cohort member (on-chain post/comment OR tracked
     # engagement), used to judge whether each signup was retained at D7.
@@ -640,7 +659,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
                 "contributors": contributors,
                 "posts": posts,
                 "comments": comments,
-                "active": active_by_day.get(day, 0),
+                "lurkers": lurkers_by_day.get(day, 0),
                 "d7_eligible": d7_eligible_by_day.get(day, 0),
                 "d7_retained": d7_retained_by_day.get(day, 0),
             }
@@ -653,7 +672,7 @@ def _tracking_since() -> Optional[int]:
     """Unix ts of the earliest recorded event on this node — i.e. when Mirage
     visitor tracking effectively began here. None if nothing is recorded yet.
 
-    Everything in the "tracked" bucket (visitors/active/campaigns and the
+    Everything in the "tracked" bucket (visitors/lurkers/campaigns and the
     tracked-engagement half of retention) is necessarily blank before this instant. On-chain
     metrics are unaffected: the chain has full history regardless.
     """
@@ -681,7 +700,7 @@ def local_server_label() -> str:
 def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
     """Full metric bundle for this server over [start, end]."""
     now_ts = int(time.time())
-    visitors, active = _growth_visitors(start, end)
+    visitors, lurkers = _growth_visitors(start, end)
     new_users = _new_users(start, end)
     contributors, posts, comments = _contributors(start, end)
     return {
@@ -695,7 +714,7 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
         # contributors is a chain fact and lives in "onchain" below.
         "growth": {
             "visitors": visitors,
-            "active": active,
+            "lurkers": lurkers,
         },
         # On-chain facts over the window (full history, independent of visitor tracking).
         "onchain": {
@@ -750,7 +769,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
 
     Two different combine rules, because the data has two natures:
 
-    - Tracked metrics (visitors/active, daily ``active``) are per-node:
+    - Tracked metrics (visitors/lurkers, daily ``lurkers``) are per-node:
       a visitor hits exactly one server, so these are SUMMED.
     - On-chain metrics (new_users/contributors/posts/comments, the retention
       cohort, daily new_users/posts/comments) are global chain facts that every
@@ -759,7 +778,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
       not first, so a node that is behind/catching up can't drag the fleet view
       below the most-synced node's complete count.
     """
-    visitors = active = new_users = 0
+    visitors = lurkers = new_users = 0
     contributors = posts = comments = 0
     cohort_size = 0
     ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained] (max)
@@ -771,7 +790,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         r = st.get("retention") or {}
         # tracked → sum
         visitors += int(g.get("visitors") or 0)
-        active += int(g.get("active") or 0)
+        lurkers += int(g.get("lurkers") or 0)
         # on-chain → max (identical across nodes; never sum)
         new_users = max(new_users, int(o.get("new_users") or 0))
         contributors = max(contributors, int(o.get("contributors") or 0))
@@ -792,12 +811,12 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
                     "contributors": 0,
                     "posts": 0,
                     "comments": 0,
-                    "active": 0,
+                    "lurkers": 0,
                     "d7_eligible": 0,
                     "d7_retained": 0,
                 },
             )
-            agg_pt["active"] += int(pt.get("active") or 0)  # tracked → sum
+            agg_pt["lurkers"] += int(pt.get("lurkers") or 0)  # tracked → sum
             for f in ("new_users", "contributors", "posts", "comments", "d7_eligible", "d7_retained"):  # on-chain → max
                 agg_pt[f] = max(agg_pt[f], int(pt.get(f) or 0))
     retention = {"cohort_size": cohort_size}
@@ -822,7 +841,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         "tracking_since": tracking_since,
         "growth": {
             "visitors": visitors,
-            "active": active,
+            "lurkers": lurkers,
         },
         "onchain": {
             "new_users": new_users,

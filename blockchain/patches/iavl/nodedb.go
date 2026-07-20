@@ -517,13 +517,26 @@ func (ndb *nodeDB) deleteVersion(version int64, cache *rootkeyCache) error {
 		if err != nil {
 			return err
 		}
-		// ensure that the given version is not included in the root search
-		if err := ndb.deleteFromPruning(ndb.nodeKey(literalRootKey)); err != nil {
-			return err
-		}
-		// instead, the root should be reformatted to (version, 0)
+		// Mirage reorder (upstream does Delete-then-Set): save the reformatted
+		// (version, 0) root BEFORE deleting the (version, 1) record it replaces.
+		// Both ops go through the shared BatchWithFlusher, which may flush to
+		// disk BETWEEN them on crossing its size threshold. With upstream's
+		// order, a flush landing between the pair leaves a window where the
+		// referenced root is deleted on disk but its replacement is still
+		// pending in the batch — every later version whose reference root
+		// points at (version, 1) then reads as ErrVersionDoesNotExist
+		// (GetRoot's (version, 0) fallback finds nothing). That phantom
+		// "missing version" is what the PRUNE_HOLE fail-fast guard tripped on
+		// in prod (2026-07-12 chain halt). Set-then-Delete makes every
+		// intermediate flush state consistent: worst case both keys briefly
+		// coexist, which is harmless (GetRoot resolves via (version, 1) until
+		// the delete lands).
 		root.nodeKey.nonce = 0
 		if err := ndb.saveNodeFromPruning(root); err != nil {
+			return err
+		}
+		// ensure that the given version is not included in the root search
+		if err := ndb.deleteFromPruning(ndb.nodeKey(literalRootKey)); err != nil {
 			return err
 		}
 	}
@@ -751,12 +764,18 @@ func (ndb *nodeDB) deleteVersionsTo(toVersion int64) error {
 	// prune range, which is safe to skip. But a version missing ABOVE one we have
 	// already seen is a hole in otherwise-present history — DB corruption or a
 	// pruning-bookkeeping bug, not a state-sync gap. Upstream IAVL silently logs
-	// and "moves on" in both cases; swallowing the second is the prune-race half
-	// of the mirage.talk app-hash divergences: it lets the node keep running and
-	// serving reads off inconsistent state. Halt loudly instead — a deterministic
-	// crash is recoverable by the divergence watchdog (peer-pull restores the DB
-	// from a healthy peer); a silent skip is not. The probe reuses rootkeyCache,
-	// so existing versions cost no extra disk read.
+	// and "moves on" in both cases; swallowing the second lets the node keep
+	// running and serving reads off inconsistent state. Halt loudly instead — a
+	// deterministic crash is recoverable by the divergence watchdog (peer-pull
+	// restores the DB from a healthy peer); a silent skip is not.
+	//
+	// HARD-LEARNED (2026-07-12 chain halt): a probe miss is only trustworthy
+	// AFTER flushing the shared write batch. Mid-pass, the batch holds staged
+	// reference-root reformats that GetRoot (a direct DB read) cannot see, so an
+	// intact version can transiently read as missing — and panicking right there
+	// dropped the pending batch, converting the false alarm into real corruption.
+	// The guard below therefore flushes and re-probes before it ever panics.
+	// The probe reuses rootkeyCache, so existing versions cost no extra disk read.
 	// See docs/troubleshooting/divergence-recovery.md.
 	seenExisting := false
 	for version := first; version <= toVersion; version++ {
@@ -765,17 +784,39 @@ func (ndb *nodeDB) deleteVersionsTo(toVersion int64) error {
 			return rkErr
 		}
 		if errors.Is(rkErr, ErrVersionDoesNotExist) {
-			if seenExisting {
+			if !seenExisting {
+				ndb.logger.Error("pruning: skipping missing version below base (state-sync gap)",
+					"version", version, "prune_to", toVersion)
+				ndb.resetFirstVersion(version + 1)
+				continue
+			}
+			// A miss above existing history is NOT immediately a hole: GetRoot
+			// reads the DB directly and never sees writes still pending in the
+			// shared BatchWithFlusher, so a reference-root reformat staged by an
+			// earlier deleteVersion in THIS pass (and partially flushed by the
+			// batch's size threshold) can make an intact version read as missing.
+			// Panicking on that transient state was catastrophic twice over: the
+			// alarm was false, AND the panic dropped the pending batch — turning
+			// the self-healing window into a real, persistent hole (the
+			// 2026-07-12 chain-halt mechanism). So first make the DB consistent:
+			// flush the batch (never destroy staged writes), then re-probe from
+			// disk. Only a version that is STILL missing after the flush is a
+			// genuine hole worth halting on.
+			if werr := ndb.batch.Write(); werr != nil {
+				return werr
+			}
+			if _, rerr := ndb.GetRoot(version); rerr == nil {
+				ndb.logger.Info("pruning: version miss healed by batch flush (transient reformat window)",
+					"version", version, "prune_to", toVersion)
+			} else if !errors.Is(rerr, ErrVersionDoesNotExist) {
+				return rerr
+			} else {
 				ndb.logger.Error("CONSENSUS_FATAL:PRUNE_HOLE",
 					"missing_version", version, "first", first, "prune_to", toVersion, "latest", latest)
 				panic(fmt.Errorf(
 					"CONSENSUS_FATAL:PRUNE_HOLE version=%d missing above existing history (first=%d prune_to=%d latest=%d); refusing to prune inconsistent state",
 					version, first, toVersion, latest))
 			}
-			ndb.logger.Error("pruning: skipping missing version below base (state-sync gap)",
-				"version", version, "prune_to", toVersion)
-			ndb.resetFirstVersion(version + 1)
-			continue
 		}
 		seenExisting = true
 		if err := ndb.deleteVersion(version, rootkeyCache); err != nil {

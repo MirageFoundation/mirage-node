@@ -166,7 +166,6 @@ const ERROR_MAP = {
     push_invalid_token: "Invalid push notification token format.",
     push_token_length: "Invalid push notification token length.",
     push_invalid_platform: "Push platform must be ios or android.",
-    push_token_other_account: "This push token is registered to another account.",
 
     // Reports / moderation
     reason_too_long: "Report reason is too long (max 200 characters).",

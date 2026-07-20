@@ -40,8 +40,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && rm -rf /var/lib/apt/lists/* \
  && node --version | grep -q '^v20\.' \
  && npm --version
-## Keep npm up to date to avoid update notices
-RUN npm i -g npm@latest --no-audit --no-fund
+## Refresh npm, but pin to the 11.x line: npm@latest is now 12.x, which dropped
+## Node 20 (requires node >=22.22) and hard-fails EBADENGINE on our Node 20 base.
+## npm 11 supports node ^20.17, so this stays current without bumping Node.
+RUN npm i -g npm@11 --no-audit --no-fund
 
 WORKDIR /opt/mirage
 
