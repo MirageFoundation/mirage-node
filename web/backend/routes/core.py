@@ -4890,8 +4890,23 @@ def core_register_push_token():
             with conn.cursor() as cur:
                 cur.execute("SELECT owner FROM push_tokens WHERE token = %s LIMIT 1", (token,))
                 existing = cur.fetchone()
-                if existing and existing[0] and existing[0].strip().lower() != user_addr.lower():
-                    return jsonify({"error": "push token already registered to another account"}), 409
+
+                # Expo push tokens are device-scoped, not wallet-scoped: the same
+                # device keeps its token across logout/reinstall. Registration is
+                # last-writer-wins so the currently signed-in account reclaims the
+                # device token even when a prior logout unregister failed (offline
+                # or network error). Only a signed register from the active wallet
+                # can reassign; unregister remains owner-scoped.
+                is_transfer = bool(existing and existing[0] and existing[0].strip().lower() != user_addr.lower())
+                if is_transfer:
+                    log_event(
+                        rid,
+                        "register_push_token.transfer",
+                        old_owner=existing[0].strip().lower(),
+                        new_owner=user_addr.lower(),
+                        token=token[:30],
+                    )
+
                 cur.execute(
                     """
                     INSERT INTO push_tokens (owner, token, platform, created_at, last_used_at)
@@ -4910,8 +4925,11 @@ def core_register_push_token():
                 # could receive a second lively push the same day from the
                 # newly-connected node. The conditional upsert only seeds users
                 # with no prior lively-push timestamp, so it never resets the
-                # clock for someone already in the rotation.
-                if not existing:
+                # clock for someone already in the rotation. On a token transfer
+                # the row exists but belongs to a different (new) owner, so the
+                # new owner must be seeded too — the WHERE guard still protects
+                # anyone already in the rotation.
+                if not existing or is_transfer:
                     cur.execute(
                         """
                         INSERT INTO user_inbox_state (owner, trending_last_sent_at)

@@ -71,12 +71,32 @@ def _expo_headers() -> dict:
     return headers
 
 
+def _notification_identity(data: dict) -> tuple[str, str]:
+    """Derive (notificationType, notificationId) so Android taps always carry an
+    identifiable payload. Type-aware because this builder serves trending pushes
+    too, not just inbox events."""
+    notif_type = "trending" if data.get("type") == "trending" else "inbox"
+    reply_id = data.get("replyId")
+    root_post_id = data.get("rootPostId")
+    if reply_id:
+        return notif_type, f"{notif_type}-reply:{reply_id}"
+    if root_post_id:
+        return notif_type, f"{notif_type}-root:{root_post_id}"
+    if data.get("type") == "summary":
+        return notif_type, f"inbox-summary:{int(time.time())}"
+    raise RuntimeError(f"cannot derive notificationId for push data: {data!r}")
+
+
 def _build_expo_message(token: str, title: str, body: str, data: dict) -> dict:
+    notif_type, notif_id = _notification_identity(data)
+    enriched = dict(data)
+    enriched["notificationType"] = notif_type
+    enriched["notificationId"] = notif_id
     return {
         "to": token,
         "title": title,
         "body": body,
-        "data": data,
+        "data": enriched,
         "sound": "default",
         "channelId": "inbox",
     }

@@ -150,7 +150,6 @@ ERRORS = {
     "push_invalid_token": "invalid expo push token format",
     "push_token_length": "invalid expo push token length",
     "push_invalid_platform": "platform must be ios or android",
-    "push_token_other_account": "push token already registered to another account",
     # Reports / moderation
     "reason_too_long": "reason too long (max 200 chars)",
     "admin_required": "admin required",

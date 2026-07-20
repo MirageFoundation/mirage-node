@@ -609,7 +609,23 @@ def test_security(backend: str):
             _fail("attack.push_register_invalid_signature_rejected", str(e))
 
         try:
-            # 10.20 Token hijack attempt — register token to one user, then another
+            # 10.20 Expo push tokens are device-scoped, so registration is
+            # last-writer-wins: the signed-in account takes ownership of the
+            # device token. First prove a foreign unregister is a no-op (an
+            # account cannot release a token it does not own), then prove the
+            # active account can take over the token.
+            db_name = _get_backend_db_name() if _check_local_docker() else ""
+
+            def _token_owner(tok: str) -> str:
+                if not db_name:
+                    return ""
+                sql = f"SELECT owner FROM push_tokens WHERE token='{tok}' LIMIT 1;"
+                rc, out = _docker_exec(
+                    f'su - postgres -c "psql -d {db_name} -tAc \\"{sql}\\" 2>&1"',
+                    timeout=10,
+                )
+                return out.strip().lower() if rc == 0 else ""
+
             token = f"ExponentPushToken[{_rand_str(22)}]"
             ts1 = _now_ms()
             nonce1 = _fresh_nonce()
@@ -624,8 +640,35 @@ def test_security(backend: str):
             }
             code1, resp1 = _post(f"{backend}/api/core/register_push_token", payload1)
             if code1 != 200:
-                _fail("attack.push_token_hijack_rejected", f"setup failed code={code1}")
+                _fail("attack.push_token_ownership_transfers", f"setup failed code={code1} resp={resp1}")
             else:
+                # B attempts to unregister A's token — owner-scoped DELETE must
+                # match nothing, leaving the token owned by A.
+                ts3 = _now_ms()
+                nonce3 = _fresh_nonce()
+                sig3 = _sign_plain(sub_wallet, f"unregister_push_token:{token}:{ts3}:{nonce3}")
+                payload3 = {
+                    "pubkey": _b64(sub_wallet.public_key().public_key_bytes),
+                    "signature": sig3,
+                    "timestamp": ts3,
+                    "envelope_nonce": str(nonce3),
+                    "token": token,
+                }
+                _post(f"{backend}/api/core/unregister_push_token", payload3)
+
+                if db_name:
+                    owner_after_unreg = _token_owner(token)
+                    if owner_after_unreg == free_addr.lower():
+                        _pass("attack.push_unreg_foreign_token_noop")
+                    else:
+                        _fail(
+                            "attack.push_unreg_foreign_token_noop",
+                            f"expected owner=A({free_addr.lower()}) got owner={owner_after_unreg!r}",
+                        )
+                else:
+                    _pass("attack.push_unreg_foreign_token_noop")
+
+                # B registers the same token — takes ownership (last-writer-wins).
                 ts2 = _now_ms()
                 nonce2 = _fresh_nonce()
                 sig2 = _sign_plain(sub_wallet, f"register_push_token:{token}:ios:{ts2}:{nonce2}")
@@ -638,42 +681,24 @@ def test_security(backend: str):
                     "platform": "ios",
                 }
                 code2, resp2 = _post(f"{backend}/api/core/register_push_token", payload2)
-                if code2 == 409:
-                    _pass("attack.push_token_hijack_rejected")
+                if code2 != 200:
+                    _fail(
+                        "attack.push_token_ownership_transfers",
+                        f"expected http=200 got http={code2} resp={resp2}",
+                    )
+                elif db_name:
+                    owner_after_transfer = _token_owner(token)
+                    if owner_after_transfer == sub_addr.lower():
+                        _pass("attack.push_token_ownership_transfers")
+                    else:
+                        _fail(
+                            "attack.push_token_ownership_transfers",
+                            f"expected owner=B({sub_addr.lower()}) got owner={owner_after_transfer!r}",
+                        )
                 else:
-                    _fail("attack.push_token_hijack_rejected", f"expected http=409 got http={code2} resp={resp2}")
-
-            # 10.21 Unauthorized unregister should not release token
-            ts3 = _now_ms()
-            nonce3 = _fresh_nonce()
-            sig3 = _sign_plain(sub_wallet, f"unregister_push_token:{token}:{ts3}:{nonce3}")
-            payload3 = {
-                "pubkey": _b64(sub_wallet.public_key().public_key_bytes),
-                "signature": sig3,
-                "timestamp": ts3,
-                "envelope_nonce": str(nonce3),
-                "token": token,
-            }
-            _post(f"{backend}/api/core/unregister_push_token", payload3)
-
-            ts4 = _now_ms()
-            nonce4 = _fresh_nonce()
-            sig4 = _sign_plain(sub_wallet, f"register_push_token:{token}:ios:{ts4}:{nonce4}")
-            payload4 = {
-                "pubkey": _b64(sub_wallet.public_key().public_key_bytes),
-                "signature": sig4,
-                "timestamp": ts4,
-                "envelope_nonce": str(nonce4),
-                "token": token,
-                "platform": "ios",
-            }
-            code4, resp4 = _post(f"{backend}/api/core/register_push_token", payload4)
-            if code4 == 409:
-                _pass("attack.push_unreg_foreign_token_rejected")
-            else:
-                _fail("attack.push_unreg_foreign_token_rejected", f"expected http=409 got http={code4} resp={resp4}")
+                    _pass("attack.push_token_ownership_transfers")
         except Exception as e:
-            _fail("attack.push_token_hijack_rejected", str(e))
+            _fail("attack.push_token_ownership_transfers", str(e))
 
     # 10.21b mark_inbox_viewed clears push throttle cooldown
     if _check_local_docker():

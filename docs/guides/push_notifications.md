@@ -17,7 +17,7 @@ The backend now supports Expo push notifications for inbox events (replies, ment
 
 - Push support is gated by `push_notifications_enabled` in `/api/get_node_config`. If false, skip all push registration and keep local polling only.
 - `register_push_token`, `unregister_push_token`, and `mark_inbox_viewed` are signed endpoints that require `pubkey`, `signature`, `timestamp` (ms), and `envelope_nonce`.
-- A push token can only be registered to one account at a time; attempting to register a token owned by another user returns `409`.
+- A push token belongs to whichever account most recently registered it. Registration is last-writer-wins: the signed-in account takes ownership of the device token (so account switches recover even if the previous logout unregister failed).
 - Push notifications are throttled to **5 per 30 minutes** per user. Suppressed events trigger a summary push after the window expires.
 - `EXPO_ACCESS_TOKEN` is optional and only needed if the node enables "Enhanced Push Security" in the EAS dashboard.
 
@@ -47,7 +47,7 @@ If push registration fails for any reason (permissions denied, token fetch error
 
 After the user logs in (and `push_notifications_enabled` is `true`), get an Expo push token and register it with the backend.
 
-**Note:** a push token can only be registered to one account at a time. If you need to switch accounts, you must unregister first or the backend will return `409`.
+**Note:** a push token is owned by one account at a time, but registration is last-writer-wins — the signed-in account automatically takes ownership of the device token. Unregistering on account switch is still recommended (so the previous account stops receiving pushes promptly), but no longer required: registering under the new account transfers the token.
 
 ### Getting the token
 
@@ -108,6 +108,8 @@ Sign the SHA-256 hash of these bytes with the user's private key (same secp256k1
 
 **Errors:** `404` if push not enabled on this node, `400` for validation failures, `503` if node is catching up.
 
+**Ownership:** Expo push tokens are device-scoped (the same device keeps its token across logout and reinstall). Registration is **last-writer-wins** — the signed-in account takes ownership of the token, transferring it from any previous account on that device. This means a failed logout unregister (offline / network error) is self-healing: the next successful register on the device reassigns the token to the active account.
+
 ### When to call
 
 - After login, once you have the wallet and the node config confirms push support.
@@ -152,7 +154,7 @@ unregister_push_token:{token}:{timestamp}:{nonce}
 
 ### When to call
 
-1. **Logout** — call **before** wiping the wallet from the auth store. Once the wallet is gone you can't sign the request.
+1. **Logout** — call **before** wiping the wallet from the auth store. Once the wallet is gone you can't sign the request. This is best-effort: if it fails (offline / network error), the next account to register on this device automatically takes ownership of the token, so a missed unregister is self-healing.
 2. **Server switch** — unregister from the old server, then register on the new one (if it supports push).
 
 ---
@@ -168,7 +170,9 @@ When the backend sends a push notification, the payload looks like:
   "data": {
     "type": "reply",
     "rootPostId": "abc123...",
-    "replyId": "def456..."
+    "replyId": "def456...",
+    "notificationType": "inbox",
+    "notificationId": "inbox-reply:def456..."
   },
   "sound": "default",
   "channelId": "inbox"
@@ -177,19 +181,28 @@ When the backend sends a push notification, the payload looks like:
 
 The `data.type` field is one of: `"reply"`, `"mention"`, `"award"`, `"summary"`, `"trending"`.
 
+Every payload also carries two fields the server always sets so notification taps (especially on Android) resolve to an identifiable target:
+
+- `notificationType`: `"inbox"` for inbox events (reply / mention / award / follow / donation / subscription_gift / summary) or `"trending"` for trending pushes.
+- `notificationId`: a stable id derived from the payload — `<notificationType>-reply:<replyId>`, else `<notificationType>-root:<rootPostId>`, else `inbox-summary:<unixSeconds>` for summaries.
+
 Summary notifications are sent automatically by the server when the user's 30-minute throttle window expires with suppressed events. They look like:
 
 ```json
 {
   "title": "Mirage",
   "body": "You have 7 unread messages",
-  "data": { "type": "summary" },
+  "data": {
+    "type": "summary",
+    "notificationType": "inbox",
+    "notificationId": "inbox-summary:1700000000"
+  },
   "sound": "default",
   "channelId": "inbox"
 }
 ```
 
-When receiving a `"summary"` type, navigate to the inbox screen rather than a specific post.
+When receiving a `"summary"` type, navigate to the inbox screen rather than a specific post. The `inbox-summary:<unixSeconds>` id is unique per send (a tap identity, not a collapse key).
 
 Create an Android notification channel `"inbox"` at app startup:
 
