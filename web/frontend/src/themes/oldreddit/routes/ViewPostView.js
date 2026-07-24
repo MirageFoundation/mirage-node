@@ -1834,7 +1834,7 @@ function ViewPostView({
             }} onClick={e => e.stopPropagation()}>
                 {mediaDownloads.map((d, i) => (
                     <MenuItem key={`dl-${i}`} onClick={() => { setOpenMenuId(null); triggerMediaDownload(d); }}>
-                        {mediaDownloadLabel(d.kind, i, mediaDownloads.length)}
+                        {mediaDownloadLabel(d.kind, i, mediaDownloads.length, d.format)}
                     </MenuItem>
                 ))}
                 {isOwnPost && <>

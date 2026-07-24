@@ -2821,7 +2821,7 @@ function ViewPostView({
                         {mediaDownloads.map((d, i) => (
                             <MenuItem key={`dl-${i}`} onClick={() => { setOpenMenuId(null); triggerMediaDownload(d); }}>
                                 <HiOutlineArrowDownTray />
-                                <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length)}</span>
+                                <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length, d.format)}</span>
                             </MenuItem>
                         ))}
                         {hasAgentOriginalForPost && (

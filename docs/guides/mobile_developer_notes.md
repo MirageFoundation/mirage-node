@@ -148,7 +148,9 @@ For the just-uploaded composer preview, capture the first frame from the local f
 
 Downloads are resolved entirely client-side from the post's media URL — there is no backend download endpoint. The web logic lives in `web/frontend/src/utils/media.js` (`getMediaDownloadInfo`); mirror this resolution on mobile:
 
-- Bunny Stream (`https://{host}/{guid}/playlist.m3u8`) → `https://{host}/{guid}/play_1080p.mp4`.
+- Bunny Stream (`https://{host}/{guid}/playlist.m3u8`) → `https://{host}/{guid}/original` (uploaded source; may be mp4/mov/webm — sniff magic bytes for the filename extension; do not assume `.mp4`. `play_{N}p.mp4` only exists if the library has MP4 Fallback enabled).
+- Label the affordance "Download video (MP4)" only when the format is known to be mp4 (Cloudflare download URL, `.gifv`→`.mp4`, or a URL whose path already ends in `.mp4`). For Bunny originals leave it as "Download video" until/unless you sniff.
+- On web, cross-origin ignores the HTML `download` attribute (Bunny would save as the path basename `original` with no extension), so the client fetches the file as a blob and saves via an object URL with the sniffed filename. Mobile can write the response body straight to disk with that name.
 - Cloudflare Stream (`cloudflarestream.com` / `videodelivery.net`) → `https://videodelivery.net/{uid}/downloads/default.mp4`.
 - `.gifv` → swap the extension to `.mp4`.
 - Direct image/video files (including `imagedelivery.net` images) → download the URL as-is.

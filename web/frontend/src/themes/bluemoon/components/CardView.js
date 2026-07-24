@@ -2287,7 +2287,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 >
                                     {mediaDownloads.map((d, i) => (
                                         <MenuItem key={`dl-${i}`} onClick={(e) => { e.stopPropagation(); setMenuOpen(false); triggerMediaDownload(d); }}>
-                                            {mediaDownloadLabel(d.kind, i, mediaDownloads.length)}
+                                            {mediaDownloadLabel(d.kind, i, mediaDownloads.length, d.format)}
                                         </MenuItem>
                                     ))}
                                     {isOwnPost && (

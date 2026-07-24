@@ -1363,7 +1363,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onClick={(e) => { stop(e); closeAllMenus(); triggerMediaDownload(d); }}
                                     >
                                         <HiOutlineArrowDownTray />
-                                        <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length)}</span>
+                                        <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length, d.format)}</span>
                                     </MenuItemBtn>
                                 ))}
                                 {hasAgentOriginal && (

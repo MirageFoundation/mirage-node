@@ -68,6 +68,64 @@ const _filenameFromUrl = (u, kind, extOverride = '') => {
     return `mirage-${kind || 'media'}-${_safeFilenamePart(slug)}${ext}`;
 };
 
+// Map a file extension to a short format tag used in download labels/filenames.
+// Only returns values we are willing to show in the UI (e.g. "MP4").
+const _formatFromExt = (ext) => {
+    const e = String(ext || '').toLowerCase();
+    if (e === '.mp4' || e === 'mp4') return 'mp4';
+    if (e === '.mov' || e === 'mov') return 'mov';
+    if (e === '.webm' || e === 'webm') return 'webm';
+    if (e === '.ogv' || e === 'ogv') return 'ogv';
+    return null;
+};
+
+// Mirror web/backend/media/base.py sniff() for video containers — used to pick
+// the right extension for Bunny `/original` downloads (octet-stream, no filename).
+const _sniffVideoExtFromBytes = (buf) => {
+    if (!buf || buf.byteLength < 12) return '';
+    const head = new Uint8Array(buf);
+    if (head[4] === 0x66 && head[5] === 0x74 && head[6] === 0x79 && head[7] === 0x70) {
+        const brand = String.fromCharCode(head[8], head[9], head[10], head[11]);
+        if (brand === 'qt  ') return '.mov';
+        return '.mp4';
+    }
+    if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return '.webm';
+    if (head[0] === 0x4f && head[1] === 0x67 && head[2] === 0x67 && head[3] === 0x53) return '.ogv';
+    return '';
+};
+
+const _clickDownloadLink = (href, filename, { sameOriginBlob = false } = {}) => {
+    const a = document.createElement('a');
+    a.href = href;
+    if (filename) a.download = filename;
+    // blob: URLs honor `download`; cross-origin http(s) ignore it (browser uses the
+    // path basename — hence Bunny saving as "original" with no extension).
+    if (!sameOriginBlob) {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+    }
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+};
+
+const _downloadViaBlob = (blob, filename) => {
+    const objectUrl = window.URL.createObjectURL(blob);
+    console.debug('[media-download] blob save', filename, blob.type, blob.size);
+    _clickDownloadLink(objectUrl, filename, { sameOriginBlob: true });
+    setTimeout(() => {
+        try { window.URL.revokeObjectURL(objectUrl); } catch (_) { /* noop */ }
+    }, 2000);
+};
+
+const _isCrossOrigin = (href) => {
+    try {
+        return new URL(href, window.location.href).origin !== window.location.origin;
+    } catch (_) {
+        return true;
+    }
+};
+
 export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
     if (!rawUrl) return null;
     const resolved = normalizeRedgifsToMp4(rawUrl);
@@ -98,18 +156,25 @@ export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
         return {
             href,
             filename: `mirage-video-${_safeFilenamePart(videoUid)}.mp4`,
+            format: 'mp4',
         };
     }
 
+    // Bunny Stream HLS → original upload. play_{N}p.mp4 only exists when the
+    // library has MP4 Fallback enabled (ours does not — those URLs 404).
+    // Original may be mp4/mov/webm — extension is sniffed on download click.
     const bunnyPlaylistMatch = path.match(/^\/([^/]+)\/playlist\.m3u8$/);
     if (bunnyPlaylistMatch) {
         const videoId = bunnyPlaylistMatch[1];
         const href = new URL(u.toString());
-        href.pathname = `/${videoId}/play_1080p.mp4`;
+        href.pathname = `/${videoId}/original`;
         href.search = '';
+        console.debug('[media-download] bunny playlist → original', videoId);
         return {
             href: href.toString(),
-            filename: `mirage-video-${_safeFilenamePart(videoId)}.mp4`,
+            filename: `mirage-video-${_safeFilenamePart(videoId)}`,
+            format: null,
+            sniffExt: true,
         };
     }
 
@@ -121,13 +186,16 @@ export const getMediaDownloadInfo = (rawUrl, kind = 'media') => {
         return {
             href: mp4Url.toString(),
             filename: _filenameFromUrl(mp4Url, 'video', '.mp4'),
+            format: 'mp4',
         };
     }
 
+    const pathExt = _extensionFromPath(path);
     const filenameExt = kind === 'image' && host.endsWith('imagedelivery.net') ? '.jpg' : '';
     return {
         href: u.toString(),
         filename: _filenameFromUrl(u, kind, filenameExt),
+        format: _formatFromExt(pathExt),
     };
 };
 
@@ -149,23 +217,50 @@ export const getDownloadableMedia = (urls) => {
 };
 
 // Human label for a download menu row. Appends an index when a post has more
-// than one downloadable item so each row is distinguishable.
-export const mediaDownloadLabel = (kind, index, total) => {
-    const base = kind === 'video' ? 'Download video' : kind === 'image' ? 'Download image' : 'Download media';
+// than one downloadable item so each row is distinguishable. Appends " (MP4)"
+// only when format is known to be mp4 — never guess for Bunny originals.
+export const mediaDownloadLabel = (kind, index, total, format = null) => {
+    let base = kind === 'video' ? 'Download video' : kind === 'image' ? 'Download image' : 'Download media';
+    if (kind === 'video' && format === 'mp4') base = `${base} (MP4)`;
     return total > 1 ? `${base} ${index + 1}` : base;
 };
 
 // Trigger a browser download for a resolved `getMediaDownloadInfo` entry.
+// Cross-origin URLs ignore the `download` attribute (Bunny would save as the
+// path basename "original" with no extension), so we fetch as a blob and save
+// via a same-origin object URL. When sniffExt is set, read the first bytes of
+// that blob to pick .mp4/.mov/.webm/.ogv for the filename.
 export const triggerMediaDownload = (info) => {
     if (!info || !info.href || typeof document === 'undefined') return;
-    const a = document.createElement('a');
-    a.href = info.href;
-    if (info.filename) a.download = info.filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    console.debug('[media-download] trigger', info.href, info.filename, info.format, info.sniffExt);
+
+    const useBlob = info.sniffExt || (info.filename && _isCrossOrigin(info.href));
+    if (!useBlob) {
+        _clickDownloadLink(info.href, info.filename);
+        return;
+    }
+
+    fetch(info.href)
+        .then((res) => {
+            if (!res.ok) throw new Error(`download HTTP ${res.status}`);
+            return res.blob();
+        })
+        .then(async (blob) => {
+            let filename = info.filename || 'mirage-media';
+            if (info.sniffExt) {
+                const buf = await blob.slice(0, 32).arrayBuffer();
+                const ext = _sniffVideoExtFromBytes(buf);
+                const format = _formatFromExt(ext);
+                const base = String(filename).replace(/\.(mp4|mov|webm|ogv)$/i, '');
+                filename = `${base}${ext || ''}`;
+                console.debug('[media-download] sniffed', { ext, format, filename, size: blob.size });
+            }
+            _downloadViaBlob(blob, filename);
+        })
+        .catch((err) => {
+            console.error('[media-download] blob download failed', err);
+            throw err;
+        });
 };
 
 // Ephemeral client-side video posters. Maps a freshly-uploaded video URL to a
