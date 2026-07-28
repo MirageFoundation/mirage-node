@@ -520,6 +520,17 @@ action. Tests: `scripts/tests/test_watchdog_disk_alert.py`.
 journald. If Postgres is genuinely the driver, that is real product data and the
 answer is a bigger volume, not pruning.
 
+**Verifying a no-Go release:** v1.29.9 touched only Python/bash/config, so
+`deploy.sh`'s mtime staleness check correctly skipped the Go rebuild and
+`miraged version` still reports **v1.29.8** on the fleet. That is accurate — it
+names the binary you are running, which genuinely did not change — but it means
+`miraged version` is NOT the deploy signal for releases like this. Verify with
+the artifacts the release actually ships: `grep log-retention-14d
+/root/.mirage/env/.migrations`, `grep ^LOG_RETENTION_DAYS
+/root/.mirage/env/node.env` (expect 14), `cat
+/etc/systemd/journald.conf.d/99-mirage.conf`, and `disk_alert_pct=80` in the
+watchdog STARTUP line.
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)
