@@ -140,6 +140,14 @@ ALERT_REPEAT_SECONDS = int(os.environ.get("ALERT_REPEAT_SECONDS", "1800"))  # re
 # log — so a flaky webhook can never wedge or crash the watchdog loop.
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
 ALERT_WEBHOOK_TIMEOUT = float(os.environ.get("ALERT_WEBHOOK_TIMEOUT", "5"))
+# Disk-pressure warning threshold (% used on the NODE_HOME filesystem). The
+# watchdog already samples disk every poll for the [POLL] trail; this turns it
+# into an actual warning so a slow squeeze is noticed early instead of at 100%.
+# ALERT-ONLY by design — see _disk_alert_once. Its own dedup marker and a slow
+# repeat, because disk fills over days, not minutes.
+DISK_ALERT_PCT = int(os.environ.get("DISK_ALERT_PCT", "80"))
+DISK_ALERT_LOCK = Path(os.environ.get("DISK_ALERT_LOCK", "/root/.mirage/.disk_alert_lock"))
+DISK_ALERT_REPEAT_SECONDS = int(os.environ.get("DISK_ALERT_REPEAT_SECONDS", "21600"))  # 6h
 NODE_LABEL = os.environ.get("NODE_LABEL", "") or os.environ.get("MONIKER", "") or socket.gethostname()
 DISABLE_MARKER = Path(os.environ.get("DISABLE_MARKER", "/root/.mirage/.recovery_disabled"))
 RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover.sh"))
@@ -905,6 +913,45 @@ def _alert_once(trigger: str, reason: str) -> None:
         emit("ALERT", kind="loud-suppressed", trigger=trigger, re_alert_in_s=int(ALERT_REPEAT_SECONDS - age))
 
 
+def _disk_alert_once(disk: int) -> None:
+    """Warn when the NODE_HOME filesystem crosses DISK_ALERT_PCT.
+
+    ALERT-ONLY, deliberately: this never prunes, deletes or recovers anything.
+    Disk pressure is a capacity decision for a human, and automating deletion
+    under pressure is actively dangerous here — mass IAVL delete passes are the
+    machinery behind the prune-hole crashes and the lockstep stall, and PebbleDB
+    needs free headroom to compact, so bulk deletes can spike usage before they
+    reclaim it. Firing that at 90% full is the worst possible moment.
+
+    Deduped on its OWN marker: reusing ALERT_LOCK would let a disk warning
+    suppress a genuine divergence alert (the 2026-06-12 shared-lock lesson).
+    """
+    if disk < DISK_ALERT_PCT:
+        return
+    age = marker_age_s(DISK_ALERT_LOCK)
+    if age is not None and age < DISK_ALERT_REPEAT_SECONDS:
+        emit("DISK", kind="warn-suppressed", used_pct=disk, re_alert_in_s=int(DISK_ALERT_REPEAT_SECONDS - age))
+        return
+    log("============================================================")
+    log(f"WARNING: disk {disk}% used on {NODE_HOME} (threshold {DISK_ALERT_PCT}%).")
+    log("  Capacity warning, NOT a divergence. Nothing was deleted.")
+    log("  Triage:  du -sh /root/.mirage/* /var/lib/docker /var/log | sort -rh")
+    log("  Usual suspects are logs and journald, not chain state (application.db")
+    log("  is tens of MB once pruning has caught up). Do NOT reach for more")
+    log("  aggressive pruning; see docs/troubleshooting/divergence-recovery.md.")
+    log("============================================================")
+    emit("DISK", kind="warn", used_pct=disk, threshold_pct=DISK_ALERT_PCT)
+    notify_external(
+        "disk pressure warning",
+        f"{disk}% used on {NODE_HOME} (threshold {DISK_ALERT_PCT}%); nothing deleted, capacity check needed",
+    )
+    try:
+        DISK_ALERT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        DISK_ALERT_LOCK.touch()
+    except OSError:
+        pass
+
+
 # ── Core loop ───────────────────────────────────────────────────────────
 def run(dry_run: bool) -> int:
     import signal
@@ -955,6 +1002,8 @@ def run(dry_run: bool) -> int:
         restart_lock_age_s=marker_age_s(RESTART_LOCK),
         alert_lock=str(ALERT_LOCK),
         alert_lock_age_s=marker_age_s(ALERT_LOCK),
+        disk_alert_pct=DISK_ALERT_PCT,
+        disk_alert_lock_age_s=marker_age_s(DISK_ALERT_LOCK),
         disable_marker=str(DISABLE_MARKER),
         disable_marker_present=DISABLE_MARKER.exists(),
         local_rpc=LOCAL_RPC,
@@ -1036,6 +1085,8 @@ def run(dry_run: bool) -> int:
             pid = miraged_pid()
             rss = proc_rss_mb(pid)
             disk = disk_used_pct(NODE_HOME)
+            if disk is not None:
+                _disk_alert_once(disk)
             step, rnd = read_priv_validator_step()
 
             local = get_status(LOCAL_RPC)

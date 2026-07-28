@@ -478,6 +478,48 @@ backstops it) and it decouples pruning from consensus: a slow pass makes one nod
 briefly lag and catch up instead of halting the whole chain in lockstep. The
 fail-fast guard and idempotent `app.Close` remain.
 
+### 0.3.4 Disk composition — pruning is DONE; the disk is logs (2026-07-28)
+
+**Read this before "fixing" disk usage by pruning harder. It will not help.**
+Measured on mirage.talk (the busiest node, 24 G volume, 15 G used / 65 %):
+
+| What | Size | Bounded by |
+|---|---|---|
+| `/var/lib/docker` | 3.7 G | 1 image, `docker system df` = 0 B reclaimable |
+| `/root/.mirage/logs` | 1.9 G | `LOG_RETENTION_DAYS` (was 30 → now 14) |
+| Postgres (app data) | 1.4 G | nothing — real product data, grows with usage |
+| **All chain data** | **975 M** | config, see below |
+| `/var/log/journal` | 806 M | **was uncapped** → journald's 10 %-of-disk default (2.4 G) |
+
+Chain data breakdown: `blockstore.db` 446 M, `cs.wal` 276 M, `state.db` 198 M,
+**`application.db` 40 M**. That last number is the point — it was **1.84 GB**
+before the commit-info pruning patch (item 12). Every prunable thing is now at
+exactly its configured limit: the blockstore retained 6206151→6407751 =
+**precisely 201,600 blocks**, matching `min-retain-blocks` to the block. So the
+entire chain state is ~4 % of the disk and `application.db` is 0.17 %; pruning
+more aggressively would reclaim single-digit MB.
+
+**A disk-triggered auto-prune would also be actively harmful**: bulk IAVL delete
+passes are the machinery behind the prune-hole crashes (§0.3.2) and the lockstep
+stall (§0.3.3), and PebbleDB needs free headroom to compact, so mass deletes can
+*raise* usage before reclaiming it. Firing that at 90 % full is the worst moment
+to do it. Hence the watchdog's disk check is **alert-only** by design.
+
+**Changes shipped (v1.29.9):** journald capped at 200 M via a deploy-managed
+drop-in (`deploy/cap_journald.sh`, `/etc/systemd/journald.conf.d/99-mirage.conf`,
+vacuumed on install); `LOG_RETENTION_DAYS` 30 → 14 (template + migration
+`v1_29_9_log_retention_14d.py`, since the env sync preserves existing values, so
+a template bump alone never reaches a live node); and a disk-pressure warning in
+`divergence_watchdog.py` at `DISK_ALERT_PCT=80` that logs loudly and pages
+`ALERT_WEBHOOK_URL`, deduped on its **own** marker (`.disk_alert_lock` — never
+`ALERT_LOCK` or `LOCK`, per the 2026-06-12 shared-lock lesson) and never taking
+action. Tests: `scripts/tests/test_watchdog_disk_alert.py`.
+
+**If a disk warning fires**, triage with
+`du -sh /root/.mirage/* /var/lib/docker /var/log | sort -rh`. Expect logs and
+journald. If Postgres is genuinely the driver, that is real product data and the
+answer is a bigger volume, not pruning.
+
 ---
 
 ## 1. WHAT TO CHECK FIRST (read-only, ~3 minutes)

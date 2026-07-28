@@ -857,6 +857,10 @@ if [ "$LOCAL_MODE" -eq 0 ]; then
   echo "==> Running host fail2ban setup..."
   run_scp "$SCRIPT_DIR/enable_fail2ban.sh" "$REMOTE:/tmp/enable_fail2ban.sh"
   run_ssh "chmod +x /tmp/enable_fail2ban.sh && /tmp/enable_fail2ban.sh && rm /tmp/enable_fail2ban.sh"
+
+  echo "==> Running host journald cap..."
+  run_scp "$SCRIPT_DIR/cap_journald.sh" "$REMOTE:/tmp/cap_journald.sh"
+  run_ssh "chmod +x /tmp/cap_journald.sh && /tmp/cap_journald.sh && rm /tmp/cap_journald.sh"
 fi
 
 # Health check: best-effort only. Log status but never block the deploy.
