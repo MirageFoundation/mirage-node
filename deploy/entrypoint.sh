@@ -675,11 +675,32 @@ echo "✓ Started. Attach via: tmux attach -t $SESSION"
 # Keep container alive + periodic cleanup (WAL segments, old logs)
 CLEANUP_INTERVAL=86400
 SECONDS_SINCE_CLEANUP=$CLEANUP_INTERVAL
+# Per-node offset so the daily pass does not land on every validator at once.
+# The schedule is otherwise anchored to container start, and a rolling deploy
+# starts all nodes minutes apart — so without this all four clean within the
+# same few-minute window every day, forever. Decorrelating identical periodic
+# work across validators is the 2026-07-13 lockstep lesson (see
+# docs/troubleshooting/divergence-recovery.md §0.3.3). Precautionary here rather
+# than a fix for an observed stall: this loop runs in the entrypoint shell, not
+# inside miraged, so it cannot block Commit the way synchronous pruning did. But
+# it does delete files and can hot-reload Caddy, and spreading it is free.
+# Re-rolled per start (and logged) instead of derived from node identity: the
+# only stable per-node values in here are key material, and a bad draw cannot
+# persist past the next restart.
+CLEANUP_JITTER=$((RANDOM % 21600))  # spread across a 6h window
+CLEANUP_JITTER_APPLIED=0
+echo "==> Daily cleanup offset: ${CLEANUP_JITTER}s after the first pass (anti-lockstep)"
 while true; do
     sleep 1
     SECONDS_SINCE_CLEANUP=$((SECONDS_SINCE_CLEANUP + 1))
     if [ "$SECONDS_SINCE_CLEANUP" -ge "$CLEANUP_INTERVAL" ]; then
         SECONDS_SINCE_CLEANUP=0
+        # Apply the offset once, after the immediate start-up pass, so every
+        # later pass stays 24h apart but shifted off the other nodes' schedules.
+        if [ "$CLEANUP_JITTER_APPLIED" -eq 0 ]; then
+            CLEANUP_JITTER_APPLIED=1
+            SECONDS_SINCE_CLEANUP=$((-CLEANUP_JITTER))
+        fi
         find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
         find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
         # Refresh the edge trusted-proxy ranges. Bunny rotates its ~1000 edge IPs
