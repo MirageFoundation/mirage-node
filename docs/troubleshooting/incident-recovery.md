@@ -11,7 +11,8 @@ This is the single entry point when a validator is sick. Work top-down: identify
 Before touching anything, capture the state of the cluster. It tells you how much slack you have and whether consensus is already compromised.
 
 ```bash
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   curl -sfm5 "http://$ip:26657/status" \
     | jq -r "\"$ip h=\(.result.sync_info.latest_block_height) \
 catching_up=\(.result.sync_info.catching_up) \
@@ -43,7 +44,7 @@ done
 
 **Background**: this class of incident on the Mirage fleet has always been traced back to host-level memory pressure on an underprovisioned validator (4 GB RAM, no swap) causing a silent IAVL cache corruption — the committed state is correct on disk, but an in-memory read during `BeginBlock` returns a stale value, which produces a different apphash for that one height on that one node. `miraged rollback` cannot fix this; restore-from-peer can.
 
-**Canonical recovery for validator-only hosts** (`mirage.vote`, `146.190.108.140`, `139.59.9.96`): restore a fresh backup from a healthy peer using `scripts/backup_restore.py`.
+**Canonical recovery for validator-only hosts** (`mirage.vote`, `<val3>`, `<val4>`): restore a fresh backup from a healthy peer using `scripts/backup_restore.py`.
 
 ```bash
 # From your workstation
@@ -207,6 +208,8 @@ scp deploy/harden_server.sh root@<host>:/root/ && \
   ssh root@<host> 'bash /root/harden_server.sh --weekly-hour=NN'
 ```
 
+Per-host weekly restart slots live in `.env` (`MIRAGE_WEEKLY_RESTART_SLOTS`), not in this repo. One host per hour, on a day clear of the off-site backup — the backup also stops containers, and only one validator may be down at a time. See [`server_setup.md`](../guides/server_setup.md#weekly-container-restart).
+
 Defaults-on: writes every config, swaps `docker.io` → `docker-ce`, restarts docker if `daemon.json` changed, reboots if a kernel update is pending. Opt out with `--no-migrate-docker`, `--no-restart-docker`, `--no-reboot` if the maintenance window can't absorb one of those right now.
 
 Rolling across the fleet: do one host at a time, verify it is signing after it comes back (a few blocks is enough), then move on. No long soak is required because the hardening does not touch validator identity; worst case you regress one host and recover it the same way.
@@ -238,7 +241,8 @@ Preserve the bad key and the pre-swap state under `/root/val-recovery-YYYYMMDD/`
 ```bash
 # 1. App hash agrees with peers at the latest height.
 H=$(curl -sfm5 http://<healthy-peer>:26657/status | jq -r .result.sync_info.latest_block_height)
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   curl -sfm5 "http://$ip:26657/block?height=$H" \
     | jq -r "\"$ip app=\(.result.block.header.app_hash[0:16])\""
 done

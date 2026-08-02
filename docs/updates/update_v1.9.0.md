@@ -104,7 +104,7 @@ python3 scripts/backup_restore.py restore --target mirage.vote --latest
 
 **Restore (different server / migrate):**
 ```bash
-python3 scripts/backup_restore.py restore --target 139.59.9.96 --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123.tgz --migrate
+python3 scripts/backup_restore.py restore --target <val4> --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123.tgz --migrate
 ```
 
 - Requires mnemonic to derive new identity

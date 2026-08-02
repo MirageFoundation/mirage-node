@@ -17,8 +17,8 @@ down, the other still accepts uploads.
 | --- | --- | --- | --- |
 | vote | `mirage.vote` | `MEDIA_UPLOADS_ENABLED=true` | Bunny + Shield |
 | talk | `mirage.talk` | `MEDIA_UPLOADS_ENABLED=true` | Bunny + Shield |
-| n3 | `146.190.108.140` | `MEDIA_UPLOADS_ENABLED=false` | none (direct) |
-| n4 | `139.59.9.96` | `MEDIA_UPLOADS_ENABLED=false` | none (direct) |
+| n3 | `<val3>` | `MEDIA_UPLOADS_ENABLED=false` | none (direct) |
+| n4 | `<val4>` | `MEDIA_UPLOADS_ENABLED=false` | none (direct) |
 
 Do the nodes **one at a time**, `mirage.vote` first (lower traffic), then
 `mirage.talk`. Each node is independently reversible.

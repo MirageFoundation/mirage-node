@@ -34,7 +34,7 @@ def _decide(**overrides):
         trigger=wd.TRIGGER_STALL,
         local_h=5_329_009,
         local_app_hash=HASH_A,
-        peer_app_hashes={"64.23.136.132": HASH_A, "146.190.108.140": HASH_A},
+        peer_app_hashes={"192.0.2.2": HASH_A, "192.0.2.3": HASH_A},
         autorecover=True,
         restart_cooldown_remaining_s=0,
         pull_cooldown_remaining_s=0,
@@ -52,14 +52,14 @@ def test_stall_with_matching_app_hash_invokes_restart():
 
 
 def test_stall_with_mismatching_app_hash_routes_to_peer_pull_when_authorized():
-    d = _decide(peer_app_hashes={"64.23.136.132": HASH_A, "146.190.108.140": HASH_B})
+    d = _decide(peer_app_hashes={"192.0.2.2": HASH_A, "192.0.2.3": HASH_B})
     assert d.action == "peer-pull"
     assert d.argv == ["bash", SCRIPT, PULL, "--auto"]
 
 
 def test_stall_with_mismatching_app_hash_alerts_when_not_authorized():
     d = _decide(
-        peer_app_hashes={"64.23.136.132": HASH_A, "146.190.108.140": HASH_B},
+        peer_app_hashes={"192.0.2.2": HASH_A, "192.0.2.3": HASH_B},
         autorecover=False,
     )
     assert d.action == "alert"
@@ -69,7 +69,7 @@ def test_stall_with_mismatching_app_hash_alerts_when_not_authorized():
 
 def test_destructive_disabled_reason_is_reported():
     d = _decide(
-        peer_app_hashes={"64.23.136.132": HASH_A, "146.190.108.140": HASH_B},
+        peer_app_hashes={"192.0.2.2": HASH_A, "192.0.2.3": HASH_B},
         autorecover=False,
         destructive_disabled_reason="RECOVERY_KEY missing at /root/.mirage/.ssh/recovery_id",
     )

@@ -21,7 +21,7 @@ Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker 
        deploy/deploy.sh --build-only [--file TARBALL]
 
 Arguments:
-  user@host            SSH connection string (e.g., root@159.203.114.27)
+  user@host            SSH connection string (e.g., root@<val1>)
   --local              Deploy to local Docker container (no SSH)
 
 Modes (exactly one required, except for --build-only):

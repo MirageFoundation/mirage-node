@@ -856,8 +856,8 @@ Production hosts are hard-coded in `deploy_all_prod.sh`:
 ```bash
 HOSTS=(
     "mirage.vote"
-    "146.190.108.140"
-    "139.59.9.96"
+    "<val3>"
+    "<val4>"
     "mirage.talk"
 )
 ```

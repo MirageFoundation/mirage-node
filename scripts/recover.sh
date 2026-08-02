@@ -16,9 +16,9 @@
 #
 #        ./scripts/recover.sh provision \
 #          --cluster=mirage-1 \
-#          --peer=root@146.190.108.140 \
-#          --peer=root@139.59.9.96 \
-#          --container-host=root@64.23.136.132
+#          --peer=root@<val3> \
+#          --peer=root@<val4> \
+#          --container-host=root@<val2>
 #
 #      What this does:
 #        - creates/reuses a local Ed25519 recovery keypair;
@@ -1510,9 +1510,9 @@ Usage: recover.sh provision --cluster=NAME --peer=user@host[:port] [...]
 Example:
   ./scripts/recover.sh provision \\
     --cluster=mirage-1 \\
-    --peer=root@146.190.108.140 \\
-    --peer=root@139.59.9.96 \\
-    --container-host=root@64.23.136.132
+    --peer=root@<val3> \\
+    --peer=root@<val4> \\
+    --container-host=root@<val2>
 
 What --peer means:
   Install recover.sh plus a forced authorized_keys entry on this source peer.

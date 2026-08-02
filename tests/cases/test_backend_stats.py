@@ -125,7 +125,7 @@ def test_stats_pure(backend):
     cases = {
         "mirage.vote": "https://mirage.vote",
         "https://mirage.talk": "https://mirage.talk",
-        "159.203.114.27": None,  # raw IP is never a stats endpoint
+        "192.0.2.1": None,  # raw IP is never a stats endpoint
         "no-dot": None,
     }
     bad = {m: st._normalize_moniker_url(m) for m, exp in cases.items() if st._normalize_moniker_url(m) != exp}

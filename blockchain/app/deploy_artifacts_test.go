@@ -182,3 +182,35 @@ func TestHardenServerHasPerHostWeeklyUpgrade(t *testing.T) {
 		"deploy/harden_server.sh must not re-enable fleet-wide unattended "+
 			"auto-reboot (replaced by per-host mirage-weekly-upgrade timer)")
 }
+
+// TestWeeklyRestartDayIsConfigurable pins the weekly container restart to a
+// per-host schedule rather than a day baked into the script.
+//
+// Three jobs stop these containers: the off-site backup, the weekly restart
+// timer, and the weekly OS upgrade. Voting power is split evenly across the
+// validators, so quorum needs all but one — two down at the same time stalls
+// the chain. Keeping them apart means the operator has to be able to place the
+// restart on a day that is clear of the backup, which a hardcoded day
+// prevents. The concrete slots live in the operator's .env, not in this repo.
+func TestWeeklyRestartDayIsConfigurable(t *testing.T) {
+	harden := readRepoFile(t, "deploy/harden_server.sh")
+
+	require.Contains(t, harden, "--weekly-day=*",
+		"deploy/harden_server.sh must expose --weekly-day so the restart day "+
+			"is configurable per host")
+
+	require.Contains(t, harden, "OnCalendar=${WEEKLY_DAY_NAME} ${WEEKLY_HOUR}:00",
+		"the weekly-restart timer must template both day and hour; a "+
+			"hardcoded day cannot be moved clear of the backup window")
+
+	require.Regexp(t, `(?m)^WEEKLY_DAY="[1-7]"$`, harden,
+		"--weekly-day needs a valid default (1=Mon .. 7=Sun)")
+
+	// The backup stopping the container is why the separation is needed at
+	// all. If that ever changes the constraint can be revisited, so assert the
+	// coupling is real rather than assumed.
+	backup := readRepoFile(t, "scripts/backup_restore.py")
+	require.Contains(t, backup, "docker stop mirage",
+		"backup_restore.py is expected to stop the container mid-backup; if "+
+			"that changed, revisit the restart-day constraint")
+}

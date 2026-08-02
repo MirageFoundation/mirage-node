@@ -73,6 +73,7 @@ mirage-bots
 scripts/*
 !scripts/proposals/
 !scripts/__init__.py
+!scripts/fleet.py
 !scripts/status_dashboard.py
 !scripts/stake.py
 !scripts/unjail_validator.sh

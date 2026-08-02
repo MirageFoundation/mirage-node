@@ -198,13 +198,13 @@ The static half of the above finally ran against **real** snapshots (the 06-16
 diverged DB was gone — that recovery kept only `priv_validator_state.json` — but
 the **06-12** incident's full diverged DB was preserved as
 `data.preheal-20260612T164034Z`, h**5280037**, same divergence class). Both the
-diverged DB and a current **healthy** peer (139.59.9.96, never diverged) were
+diverged DB and a current **healthy** peer (<val4>, never diverged) were
 copied off-host and scanned with `analyze-db`:
 
 | snapshot | commit-info (`s/<version>`) count | version floor |
 |---|---|---|
 | diverged (06-12, h5280037) | 2,133,637 | **3146400** |
-| healthy (139.59.9.96, h5532429) | 2,386,030 | **3146400** |
+| healthy (<val4>, h5532429) | 2,386,030 | **3146400** |
 
 - **Result:** the "PRUNING APPEARS BROKEN" signal (commit-info store far larger
   than `keep-recent`) is present on the **healthy** node too, with the **same
@@ -251,7 +251,7 @@ copied off-host and scanned with `analyze-db`:
 ### 0.3 First post-deploy soak — the guard fired for real + a new lead (2026-06-25)
 
 ~2.5 days after v1.28.2 rolled to the whole mainnet-1 validator set (mirage.talk
-+ mirage.vote + 146.190.108.140 + 139.59.9.96), a fleet-wide log scan
++ mirage.vote + <val3> + <val4>), a fleet-wide log scan
 (forensic captures, watchdog events, AppHash markers, restart cadence) found:
 
 - **Zero state/app-hash divergences.** No `wrong Block.Header.AppHash` on any
@@ -275,7 +275,7 @@ copied off-host and scanned with `analyze-db`:
 
 - **NEW fault — `pebble: closed` panic on shutdown, fleet-wide (root-caused).**
   Every node hits it on its weekly maintenance restart (counts 06-23..06-25:
-  mirage.talk **3**, mirage.vote 2, 146.190.108.140 2, 139.59.9.96 1). The log
+  mirage.talk **3**, mirage.vote 2, <val3> 2, <val4> 1). The log
   shows a **double-close of `application.db` during graceful shutdown**:
 
   ```
@@ -326,7 +326,7 @@ copied off-host and scanned with `analyze-db`:
 ### 0.3.1 Root cause of the recurring PRUNE_HOLE — pinned (2026-07-08)
 
 Analysis of the two captured PRUNE_HOLE events on mirage.talk
-(`/root/.mirage/.divergence_forensics/`, val1 `159.203.114.27`):
+(`/root/.mirage/.divergence_forensics/`, val1 `<val1>`):
 
 | when | guard log |
 |------|-----------|
@@ -553,7 +553,8 @@ curl -s https://mirage.talk/api/get_network_stats | head -c 120; echo
 ### 1b. Cluster triage — who is stuck?
 
 ```bash
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   curl -sfm5 "http://$ip:26657/status" \
     | jq -r "\"$ip h=\(.result.sync_info.latest_block_height) \
 catching_up=\(.result.sync_info.catching_up) \
@@ -585,7 +586,7 @@ ssh root@<sick-host> 'docker exec mirage curl -s http://127.0.0.1:26657/status' 
   comparing the app_hash AT the stuck height against a healthy peer:
 
 ```bash
-SICK=159.203.114.27; PEER=146.190.108.140
+SICK=<val1>; PEER=<val3>
 H=$(curl -sfm5 http://$SICK:26657/status | jq -r .result.sync_info.latest_block_height)
 for ip in $SICK $PEER; do
   curl -sfm5 "http://$ip:26657/block?height=$H" \
@@ -701,8 +702,8 @@ This is what was done on 2026-06-12. It is the same algorithm as
 healthy peer from the §1b triage; SICK = the diverged host.
 
 ```bash
-SOURCE=146.190.108.140
-SICK=159.203.114.27
+SOURCE=<val3>
+SICK=<val1>
 
 # 1. Stream chain DBs from SOURCE to SICK host (~2 min for ~1 GB compressed).
 #    SIGSTOP keeps the source's supervisor from restarting miraged mid-tar;
@@ -783,14 +784,15 @@ fresh (<30 s).
 
 ```bash
 # 1. App hash agreement at one height across all four nodes:
-H=$(curl -sfm5 http://146.190.108.140:26657/status | jq -r .result.sync_info.latest_block_height)
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+H=$(curl -sfm5 http://<val3>:26657/status | jq -r .result.sync_info.latest_block_height)
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   curl -sfm5 "http://$ip:26657/block?height=$H" \
     | jq -r "\"$ip app=\(.result.block.header.app_hash[0:16])\""
 done
 
 # 2. The recovered validator is signing again (flag 2 = signed):
-curl -sfm5 "http://146.190.108.140:26657/block?height=$H" \
+curl -sfm5 "http://<val3>:26657/block?height=$H" \
   | jq '.result.block.last_commit.signatures[] | .block_id_flag'
 
 # 3. User-facing:
@@ -851,7 +853,8 @@ After rolling out the two-tier watchdog, confirm the new entry point and
 supervisor handoff work on each validator without actually restarting anything:
 
 ```bash
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   echo "== $ip =="
   ssh root@$ip 'docker exec mirage bash /opt/mirage/scripts/recover.sh restart --dry-run'
 done
@@ -862,7 +865,8 @@ miraged ... NO DB wipe ..." block, then exit 0. Also confirm the watchdog is
 running and logging on every host:
 
 ```bash
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   ssh root@$ip 'docker exec mirage sh -c "tail -1 /root/.mirage/logs/watchdog/watchdog-$(date -u +%F).log"'
 done
 ```

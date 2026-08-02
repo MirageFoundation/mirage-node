@@ -16,7 +16,7 @@ Usage:
     python3 scripts/backup_restore.py restore --target mirage.vote --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-120000.tgz
 
     # Restore to DIFFERENT server using another server's backup data (requires mnemonic)
-    python3 scripts/backup_restore.py restore --target 139.59.9.96 --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-120000.tgz --migrate
+    python3 scripts/backup_restore.py restore --target <val4> --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-120000.tgz --migrate
 
     # List available backups
     python3 scripts/backup_restore.py list
@@ -27,7 +27,7 @@ Backup storage:
 
     Example:
     ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz
-    ~/.mirage/backups/139.59.9.96/139.59.9.96-20260123-144530.tgz
+    ~/.mirage/backups/<val4>/<val4>-20260123-144530.tgz
 
 What gets backed up:
     - ~/.mirage/node/data/       - Full blockchain data and state
@@ -76,16 +76,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from scripts import fleet  # noqa: E402
+
 BACKUP_DIR = Path.home() / ".mirage" / "backups"
 SSH_USER = "root"
 
-# All production servers (same as deploy_all_prod.sh)
-ALL_SERVERS = [
-    "mirage.vote",
-    "146.190.108.140",
-    "139.59.9.96",
-    "mirage.talk",
-]
+# Which servers --all visits comes from MIRAGE_FLEET_HOSTS in .env, not from
+# this file: the repo is public and the addresses are not. Resolved on use so
+# --help and single-host runs still work without an inventory.
 
 
 def status(msg: str):
@@ -1202,7 +1202,7 @@ Examples:
   %(prog)s restore --target mirage.vote --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz
 
   # Restore DIFFERENT server using another server's backup (requires mnemonic)
-  %(prog)s restore --target 139.59.9.96 --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz --migrate
+  %(prog)s restore --target <val4> --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz --migrate
 
   # List available backups
   %(prog)s list
@@ -1218,7 +1218,7 @@ Examples:
     backup_source.add_argument(
         "--all",
         action="store_true",
-        help=f"Backup all 4 production servers: {', '.join(ALL_SERVERS)}",
+        help="Backup every server listed in MIRAGE_FLEET_HOSTS (.env)",
     )
     backup_parser.add_argument("--user", default=SSH_USER, help=f"SSH user (default: {SSH_USER})")
 
@@ -1265,12 +1265,12 @@ Examples:
 
     if args.command == "backup":
         if args.all:
-            # Backup all 4 servers
-            status(f"Backing up all {len(ALL_SERVERS)} servers: {', '.join(ALL_SERVERS)}")
+            all_servers = fleet.hosts()
+            status(f"Backing up all {len(all_servers)} servers: {', '.join(all_servers)}")
             results = []
-            for i, server in enumerate(ALL_SERVERS, 1):
+            for i, server in enumerate(all_servers, 1):
                 print(f"\n{'='*60}")
-                print(f"[{i}/{len(ALL_SERVERS)}] Backing up {server}")
+                print(f"[{i}/{len(all_servers)}] Backing up {server}")
                 print(f"{'='*60}\n")
                 try:
                     backup_path = backup(server, args.user)
@@ -1281,7 +1281,7 @@ Examples:
                     verify_server_health(server, args.user)
 
                     # Wait 2 minutes between servers to ensure stability
-                    if i < len(ALL_SERVERS):
+                    if i < len(all_servers):
                         status(f"Waiting 60 seconds before next backup...")
                         time.sleep(60)
                 except Exception as e:

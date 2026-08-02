@@ -6,10 +6,15 @@
 - Do NOT auto-commit when follow-up changes occur. Each commit requires fresh approval.
 
 ### SERVERS
-- 159.203.114.27:   PROD SERVER. Domain is mirage.talk
-- 64.23.136.132:    UAT SERVER. mirage.vote is the domain
-- 146.190.108.140:  3rd node
-- 139.59.9.96:      4th Node
+
+Addresses are not in this repo — it is public. They live in `.env` on the
+operator's machine (`MIRAGE_FLEET_HOSTS`); see `.env.example`. Refer to hosts by
+role in code, docs and commit messages.
+
+- **val1**: PROD SERVER. Domain is mirage.talk
+- **val2**: UAT SERVER. mirage.vote is the domain
+- **val3**: 3rd node, no public domain
+- **val4**: 4th node, no public domain
 
 **NEVER INTERACT WITH PRODUCTION SERVERS!**
 - Do NOT run scripts, queries, or any commands against production IPs or domains
@@ -17,12 +22,12 @@
 - For testing, ONLY use local docker (127.0.0.1)
 - It is OK to interact with servers in a purely informative way, e.g. getting logs, but not changing anything on the server.
 
-**EXCEPTION — UAT server only (`64.23.136.132` / `mirage.vote`):** the agent MAY SSH
+**EXCEPTION — UAT server only (val2 / `mirage.vote`):** the agent MAY SSH
 into and make changes on the UAT server when a task explicitly requires it (e.g.
 the Bunny edge cutover). This carve-out is scoped to UAT ONLY. The PROD server
-(`159.203.114.27` / `mirage.talk`) and the other validators (`146.190.108.140`,
-`139.59.9.96`) remain strictly no-change / informative-only — never SSH to change
-anything there without separate, explicit per-task approval.
+(val1 / `mirage.talk`) and the other validators (val3, val4) remain strictly
+no-change / informative-only — never SSH to change anything there without
+separate, explicit per-task approval.
 
 
 ### Terminology Consistency

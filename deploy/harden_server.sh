@@ -17,10 +17,15 @@
 # the cluster can't absorb one of those side-effects right now.
 #
 # Flags:
+#   --weekly-day=N         Day of week (1=Mon .. 7=Sun) for the weekly Mirage
+#                          container restart timer. Default 1 (Mon). Keep it
+#                          clear of the off-site backup window, which also
+#                          stops containers — see MIRAGE_BACKUP_WINDOW in the
+#                          operator's .env.
 #   --weekly-hour=NN       Hour (0-23) for the weekly Mirage container restart
-#                          timer (Sun ${WEEKLY_HOUR}:00 UTC). Default 04.
-#                          Stagger across the fleet so no two validators
-#                          ever restart in the same window.
+#                          timer (${WEEKLY_DAY_NAME} ${WEEKLY_HOUR}:00 UTC).
+#                          Default 08. Stagger across the fleet so no two
+#                          validators ever restart in the same window.
 #   --upgrade-day=N        Day of week (1=Mon .. 7=Sun) for the weekly full
 #                          OS upgrade + reboot. REQUIRED to enroll the host
 #                          in the per-host weekly upgrade policy. Stagger
@@ -48,18 +53,27 @@
 #     not catching up, recent block). Pre-flight failure aborts the run and
 #     surfaces in `journalctl -u mirage-weekly-upgrade`.
 #
-# Typical rollout across a 4-validator cluster (one host at a time, wait
-# for each to come back and confirm it is signing before moving on; no
-# long soak required — hardening does not touch validator identity):
-#   harden_server.sh --weekly-hour=04 --upgrade-day=1   # Mon — val4 (canary)
-#   harden_server.sh --weekly-hour=05 --upgrade-day=2   # Tue — val3
-#   harden_server.sh --weekly-hour=06 --upgrade-day=3   # Wed — UAT (mirage.vote)
-#   harden_server.sh --weekly-hour=07 --upgrade-day=4   # Thu — val1 / PROD (mirage.talk)
-# Fri-Sun deliberately left empty so weekend issues don't trigger reboots.
+# Rollout across a 4-validator cluster: one host at a time, waiting for each
+# to come back and confirm it is signing before moving on. No long soak is
+# required — hardening does not touch validator identity.
+#
+#   harden_server.sh --weekly-hour=NN --upgrade-day=N
+#
+# Give each host its own --upgrade-day and its own --weekly-hour, so only one
+# validator is ever in a maintenance window. Keep the restart hours a few hours
+# clear of the upgrade slot too: an upgrade may reboot, and a container restart
+# firing into a half-finished apt transaction is worse than either alone.
+# Leave part of the week empty so issues that land near a weekend don't
+# immediately trigger reboots.
+#
+# The per-host assignment is not recorded here — this repo is public. See
+# MIRAGE_WEEKLY_RESTART_SLOTS / MIRAGE_WEEKLY_UPGRADE_SLOTS in the operator's
+# .env (docs/guides/server_setup.md explains the constraints they satisfy).
 
 set -euo pipefail
 
-WEEKLY_HOUR="04"
+WEEKLY_DAY="1"
+WEEKLY_HOUR="08"
 UPGRADE_DAY=""
 UPGRADE_HOUR="04"
 MIGRATE_DOCKER=1
@@ -69,6 +83,7 @@ DRY_RUN=0
 
 for arg in "$@"; do
     case "$arg" in
+        --weekly-day=*)       WEEKLY_DAY="${arg#*=}" ;;
         --weekly-hour=*)      WEEKLY_HOUR="${arg#*=}" ;;
         --upgrade-day=*)      UPGRADE_DAY="${arg#*=}" ;;
         --upgrade-hour=*)     UPGRADE_HOUR="${arg#*=}" ;;
@@ -88,6 +103,14 @@ for arg in "$@"; do
     esac
 done
 
+DAY_NAMES=(Mon Tue Wed Thu Fri Sat Sun)
+
+if [[ ! "$WEEKLY_DAY" =~ ^[1-7]$ ]]; then
+    echo "--weekly-day must be 1-7 (1=Mon .. 7=Sun); got: $WEEKLY_DAY" >&2
+    exit 2
+fi
+WEEKLY_DAY_NAME="${DAY_NAMES[$((WEEKLY_DAY-1))]}"
+
 if [[ ! "$WEEKLY_HOUR" =~ ^[0-9]{1,2}$ ]] || (( 10#$WEEKLY_HOUR > 23 )); then
     echo "--weekly-hour must be 0-23 (got: $WEEKLY_HOUR)" >&2
     exit 2
@@ -106,8 +129,7 @@ if [[ -n "$UPGRADE_DAY" ]]; then
         echo "--upgrade-day must be 1-7 (1=Mon .. 7=Sun); got: $UPGRADE_DAY" >&2
         exit 2
     fi
-    UPGRADE_DAY_NAMES=(Mon Tue Wed Thu Fri Sat Sun)
-    UPGRADE_DAY_NAME="${UPGRADE_DAY_NAMES[$((UPGRADE_DAY-1))]}"
+    UPGRADE_DAY_NAME="${DAY_NAMES[$((UPGRADE_DAY-1))]}"
 fi
 
 if [[ $EUID -ne 0 ]]; then
@@ -377,8 +399,17 @@ write_file /etc/docker/daemon.json '{
 
 # -----------------------------------------------------------------------------
 # Step 11 — Weekly container restart timer
+#
+# Two other things bounce these containers on a schedule, and this timer has to
+# stay clear of both: the off-site backup, which stops each container while it
+# streams state, and mirage-weekly-upgrade.timer, which may reboot. Voting
+# power is split evenly across the validators, so quorum needs all but one —
+# two down at the same time stalls the chain.
+#
+# Hence one host per hour, on a day that is not the backup day. The concrete
+# slots live in the operator's .env, not here.
 # -----------------------------------------------------------------------------
-say "Weekly mirage container restart (Sun ${WEEKLY_HOUR}:00 UTC ±30m)"
+say "Weekly mirage container restart (${WEEKLY_DAY_NAME} ${WEEKLY_HOUR}:00 UTC ±30m)"
 write_file /etc/systemd/system/mirage-weekly-restart.service '[Unit]
 Description=Weekly restart of Mirage container
 
@@ -387,10 +418,10 @@ Type=oneshot
 ExecStart=/usr/bin/docker restart mirage
 '
 write_file /etc/systemd/system/mirage-weekly-restart.timer "[Unit]
-Description=Restart Mirage container weekly
+Description=Restart Mirage container weekly (${WEEKLY_DAY_NAME} ${WEEKLY_HOUR}:00 UTC ±30m)
 
 [Timer]
-OnCalendar=Sun ${WEEKLY_HOUR}:00
+OnCalendar=${WEEKLY_DAY_NAME} ${WEEKLY_HOUR}:00
 RandomizedDelaySec=30m
 Persistent=true
 

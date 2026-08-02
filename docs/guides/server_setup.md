@@ -11,7 +11,7 @@ Skip nothing. Each step here addresses a real incident or a real near-miss in pr
 > ssh root@<host> 'bash /root/harden_server.sh --weekly-hour=NN'
 > ```
 >
-> Stagger `--weekly-hour` across the fleet (val4=04, val3=05, val2=06, val1=07) so no two validators ever restart in the same minute. Between hosts, wait for the one you just touched to come back and confirm it is signing again (a few blocks is enough); a long "soak" is not required — the cluster tolerates one host at a time and the hardening does not touch validator identity.
+> Give each host its own `--weekly-hour` so no two validators ever restart in the same window; the per-host assignment lives in `.env` (`MIRAGE_WEEKLY_RESTART_SLOTS`), not in this repo. See [weekly container restart](#weekly-container-restart) for the constraints it has to satisfy. Between hosts, wait for the one you just touched to come back and confirm it is signing again (a few blocks is enough); a long "soak" is not required — the cluster tolerates one host at a time and the hardening does not touch validator identity.
 
 > Companion docs: [`deploy.md`](deploy.md) for the node software, [`troubleshooting/incident-recovery.md`](../troubleshooting/incident-recovery.md) for what to do when a validator goes sick.
 
@@ -273,7 +273,7 @@ cat > /etc/systemd/system/mirage-weekly-restart.timer <<'EOF'
 [Unit]
 Description=Restart Mirage container weekly
 [Timer]
-OnCalendar=Sun 04:00
+OnCalendar=Mon 08:00
 RandomizedDelaySec=30m
 Persistent=true
 [Install]
@@ -285,7 +285,22 @@ systemctl enable --now mirage-weekly-restart.timer
 systemctl list-timers mirage-weekly-restart.timer
 ```
 
-**Stagger the `OnCalendar` hour across the cluster** — do not rely on `RandomizedDelaySec` alone. Current fleet assignment: val4=04, val3=05, val2=06, val1=07 (all UTC). `harden_server.sh --weekly-hour=NN` writes the right value per host.
+**Stagger the `OnCalendar` hour across the cluster** — do not rely on `RandomizedDelaySec` alone. `harden_server.sh --weekly-day=N --weekly-hour=NN` writes the values per host. The concrete assignment is deliberately not in this repo, which is public; it lives in `.env` as `MIRAGE_WEEKLY_RESTART_SLOTS`.
+
+Three separate jobs bounce these containers, and the schedule has to keep them apart:
+
+| Job | Bounces the container? |
+|---|---|
+| Off-site backup (`scripts/backup_restore.py backup --all`, operator's local cron) | Yes — `docker stop` → stream tarball → `docker start`, roughly 60–90 s per host |
+| `mirage-weekly-restart.timer` | Yes — `docker restart`, a few seconds |
+| `mirage-weekly-upgrade.timer` | Yes, plus a reboot if the kernel changed |
+
+The constraints they have to satisfy:
+
+- **One validator down at a time, ever.** Voting power is split evenly across the four, so quorum needs three. Two down simultaneously stalls the chain until one returns.
+- **The restart day must not be the backup day.** The backup sweeps the fleet sequentially and holds each container stopped for over a minute — long enough that a restart timer firing on a *different* host lands inside that window.
+- **Restart hours must clear the upgrade slot by a few hours,** because an upgrade may reboot, and a `docker restart` firing into a half-finished apt transaction is worse than either on its own.
+- **Leave part of the week empty** so problems that land near a weekend don't immediately trigger reboots.
 
 ### Disk monitoring
 
@@ -320,10 +335,11 @@ Every one of those should match. If any doesn't, fix it before deploying the nod
 
 ## Hardening the existing fleet
 
-The four existing validators (`159.203.114.27`, `64.23.136.132`, `146.190.108.140`, `139.59.9.96`) were provisioned before this guide existed. Audit each with:
+The four existing validators (`<val1>`, `<val2>`, `<val3>`, `<val4>`) were provisioned before this guide existed. Audit each with:
 
 ```bash
-for ip in 159.203.114.27 64.23.136.132 146.190.108.140 139.59.9.96; do
+source ./.env   # MIRAGE_FLEET_HOSTS — gitignored, see .env.example
+for ip in $(echo "$MIRAGE_FLEET_HOSTS" | tr , " "); do
   echo "=== $ip ==="
   ssh -o ConnectTimeout=5 root@$ip '
     free -h | grep Swap;
@@ -347,7 +363,9 @@ scripts/fleet_audit.sh
 
 # Rolling hardening — one host at a time. Between hosts, just wait for the one
 # you touched to come back and sign a few blocks; no long soak required.
-for host_hour in "139.59.9.96:04" "146.190.108.140:05" "64.23.136.132:06" "159.203.114.27:07"; do
+# host:hour pairs come from MIRAGE_WEEKLY_RESTART_SLOTS in .env — one host per
+# hour, see "Weekly container restart" above for the constraints.
+for host_hour in <host>:<hour> ...; do
   host=${host_hour%:*}; hour=${host_hour##*:}
   scp deploy/harden_server.sh "root@$host:/root/"
   ssh "root@$host" "bash /root/harden_server.sh --weekly-hour=$hour"

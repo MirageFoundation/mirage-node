@@ -19,6 +19,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
 BLOCKCHAIN_DIR = ROOT / "blockchain"
 
+sys.path.insert(0, str(ROOT))
+
+from scripts import fleet  # noqa: E402
+
 # Cached miraged path (detected at runtime)
 _miraged_path: Path | None = None
 
@@ -91,11 +95,11 @@ def get_submission_account() -> str:
     return VALIDATOR_ACCOUNT if _is_local_mode else FAUCET_ACCOUNT
 
 
-# RPC endpoints
+# RPC endpoints. The remote one comes from MIRAGE_REMOTE_RPC in .env (this repo
+# is public), and must be a direct address: the public hostname is behind
+# Cloudflare, which does not proxy port 26657. Resolved on use so local-mode
+# runs work without an inventory.
 LOCAL_RPC_ENDPOINT = "http://127.0.0.1:26657"
-REMOTE_RPC_ENDPOINT = (
-    "http://159.203.114.27:26657"  # direct IP — mirage.talk goes through Cloudflare which doesn't proxy port 26657
-)
 
 # Create a minimal temp config dir for keyring operations (miraged needs config to start)
 # Keys are stored in OS credential store, not in this directory
@@ -647,7 +651,7 @@ def main():
         rpc_endpoint = LOCAL_RPC_ENDPOINT
         _is_local_mode = True
     else:
-        rpc_endpoint = REMOTE_RPC_ENDPOINT
+        rpc_endpoint = fleet.require("MIRAGE_REMOTE_RPC")
         _is_local_mode = False
 
     log(f"Mode: {mode}, RPC: {rpc_endpoint}")
