@@ -644,6 +644,7 @@ export function useMain({
     // (account prompts only fire on write/social actions). When off, behavior is
     // unchanged: logged-out users get the welcome/invite screen, no content fetch.
     const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
+    const nodeConfigLoaded = Boolean(nodeConfig);
     const nowMs = Date.now();
     const androidBannerCooldownActive = androidBannerDismissedAt > 0 && (nowMs - androidBannerDismissedAt) < APP_BANNER_COOLDOWN_MS;
     const iphoneBannerCooldownActive = iphoneBannerDismissedAt > 0 && (nowMs - iphoneBannerDismissedAt) < APP_BANNER_COOLDOWN_MS;
@@ -1512,6 +1513,15 @@ export function useMain({
                 );
                 if (cancelled || !isMountedRef.current) return;
                 if (bootstrapFeedMatchesTopic(stashed, urlTopic)) {
+                    // The open-browsing gate is only meaningful once node config
+                    // has landed. On a cold load it is still null here, so hold the
+                    // stash and let the re-run (nodeConfigLoaded flips) decide —
+                    // otherwise a valid launch payload is discarded and the guest
+                    // feed falls back to a redundant get_posts.
+                    if (!isLoggedIn && !nodeConfigLoaded) {
+                        console.debug('[Bootstrap] feed stash held (node config pending)');
+                        return;
+                    }
                     // Closed browsing: discard feed stash for guests.
                     if (!isLoggedIn && !openBrowsingEnabled) {
                         readBootstrapStash('bootstrap_view', null);
@@ -1539,7 +1549,9 @@ export function useMain({
             // Skip posts fetch for logged-out users, unless open browsing is on (then
             // they read the feed as a guest; account prompts fire only on write actions).
             if (!isLoggedIn && !openBrowsingEnabled) {
-                try { Storage.remove('bootstrap_view'); } catch (_) { }
+                if (nodeConfigLoaded) {
+                    try { Storage.remove('bootstrap_view'); } catch (_) { }
+                }
                 setIsLoading(false);
                 return;
             }
@@ -1569,7 +1581,7 @@ export function useMain({
             if (timeoutId) clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlTopic, location.pathname, openBrowsingEnabled]);
+    }, [urlTopic, location.pathname, openBrowsingEnabled, nodeConfigLoaded]);
 
     // Refetch when homeSortMode changes (magic/newest toggle)
     const prevHomeSortModeRef = useRef(homeSortMode);
@@ -1843,7 +1855,7 @@ export function useMain({
         inviteCodesEnabled,
         questsEnabled,
         openBrowsingEnabled,
-        nodeConfigLoaded: Boolean(nodeConfig),
+        nodeConfigLoaded,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,
