@@ -218,8 +218,14 @@ function buildHttpError(resp, detail, code) {
 /**
  * @typedef {Object} RequestOptions
  * @property {number=} timeoutMs
+ * @property {number=} cacheMs - TTL for opt-in response cache (0 = disabled)
  * @property {Record<string,string>=} headers
  */
+
+/** @type {Map<string, Promise<any>>} */
+const inflight = new Map();
+/** @type {Map<string, { value: any, expires: number }>} */
+const responseCache = new Map();
 
 /**
  * @param {string} path
@@ -229,27 +235,89 @@ function buildHttpError(resp, detail, code) {
 async function get(path, params, options) {
     const finalParams = withInboxLastViewed(params);
     const url = buildUrl(path, finalParams);
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
-    try {
-        const resp = await fetch(url, { signal: controller.signal, headers: withVisitorHeader(options && options.headers) });
-        if (resp.ok) {
-            const ct = resp.headers.get('content-type') || '';
-            // If HTML came back, likely misroute: attempt remote fallback
-            if (!ct.includes('text/html')) {
-                if (ct.includes('application/json')) {
-                    const json = await resp.json();
-                    maybeSyncBalance(params, undefined, json);
-                    maybeSyncInbox(params, undefined, json);
-                    return json;
+    const cacheMs = Math.max(0, Number((options && options.cacheMs) || 0));
+
+    // Always serve unexpired prefetch/cache entries — callers without cacheMs
+    // still benefit from a prior Api.prefetch (e.g. inbox pointerdown → ViewPost).
+    // maybeSync* must NOT run on cache hits (would reset inbox badge from stale body).
+    const cached = responseCache.get(url);
+    if (cached && cached.expires > Date.now()) {
+        console.debug('[Api] cache hit', url);
+        return cached.value;
+    }
+
+    const existing = inflight.get(url);
+    if (existing) {
+        console.debug('[Api] coalesce', url);
+        return existing;
+    }
+
+    const promise = (async () => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
+        try {
+            const resp = await fetch(url, { signal: controller.signal, headers: withVisitorHeader(options && options.headers) });
+            if (resp.ok) {
+                const ct = resp.headers.get('content-type') || '';
+                // If HTML came back, likely misroute: attempt remote fallback
+                if (!ct.includes('text/html')) {
+                    if (ct.includes('application/json')) {
+                        const json = await resp.json();
+                        maybeSyncBalance(params, undefined, json);
+                        maybeSyncInbox(params, undefined, json);
+                        if (cacheMs > 0) {
+                            responseCache.set(url, { value: json, expires: Date.now() + cacheMs });
+                        }
+                        return json;
+                    }
+                    const text = await resp.text();
+                    if (cacheMs > 0) {
+                        responseCache.set(url, { value: text, expires: Date.now() + cacheMs });
+                    }
+                    return text;
                 }
-                return await resp.text();
             }
+            const { detail, code } = await readErrorDetail(resp);
+            throw buildHttpError(resp, detail, code);
+        } finally {
+            clearTimeout(id);
         }
-        const { detail, code } = await readErrorDetail(resp);
-        throw buildHttpError(resp, detail, code);
-    } finally {
-        clearTimeout(id);
+    })().finally(() => {
+        inflight.delete(url);
+    });
+
+    inflight.set(url, promise);
+    return promise;
+}
+
+let prefetchKey = null;
+
+/**
+ * Prefetch a GET with a short TTL cache. Cap at one outstanding: a new
+ * prefetch supersedes tracking of the previous (previous still settles).
+ * @param {string} path
+ * @param {Record<string, any>=} params
+ * @param {RequestOptions=} options
+ */
+function prefetch(path, params, options) {
+    const finalParams = withInboxLastViewed(params);
+    const key = buildUrl(path, finalParams);
+    if (key === prefetchKey) return Promise.resolve(null);
+    prefetchKey = key;
+    return get(path, params, { cacheMs: 30000, ...options })
+        .catch(() => null)
+        .finally(() => { if (prefetchKey === key) prefetchKey = null; });
+}
+
+/**
+ * Drop cached GET responses whose URL includes pathPrefix.
+ * @param {string} pathPrefix
+ */
+function invalidate(pathPrefix) {
+    const needle = String(pathPrefix || '');
+    if (!needle) return;
+    for (const key of responseCache.keys()) {
+        if (key.includes(needle)) responseCache.delete(key);
     }
 }
 
@@ -288,7 +356,7 @@ async function post(path, body, options) {
     }
 }
 
-export const Api = { get, post, buildUrl, API_BASE };
+export const Api = { get, post, prefetch, invalidate, buildUrl, API_BASE };
 
 export default Api;
 

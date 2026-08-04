@@ -1,11 +1,10 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import ReactDOM from "react-dom";
 import styled, { css } from "styled-components";
 import { Helmet } from "react-helmet-async";
 import Button from "../components/Button.js";
 import { Link, Navigate } from "react-router-dom";
 import VoteSection from "../components/VoteSection.js";
-import * as tx from "../../../utils/tx.js";
 import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import MobileHeader from "../components/MobileHeader.js";
@@ -14,7 +13,6 @@ import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton, MediaIconButton } from "../components/MediaAttachmentLayout.js";
 import VideoPlayBadge from "../../../components/VideoPlayBadge";
-import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
 import { getVideoThumbnailUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import StickerPicker from "../components/StickerPicker.js";
@@ -913,10 +911,7 @@ function ViewPostView({
 }) {
     const {
         root,
-        setRoot,
-        setChildren,
         loading,
-        setLoading,
         blockError,
         blockSuccess,
         isBlocking,
@@ -951,11 +946,9 @@ function ViewPostView({
         isReporting,
         reportMessages,
         error,
-        setError,
         shareMessages,
         setShareMessages,
-        showContext,
-        actualRootPost,
+        ancestorsOmitted,
         cardSize,
         theme,
         location,
@@ -1055,7 +1048,6 @@ function ViewPostView({
         focusedCommentId,
         actualRootPostId,
         lastVisitTs,
-        setLastVisitTs,
         rootFlash,
         normalizedHighlightId,
         annotated,
@@ -1065,121 +1057,6 @@ function ViewPostView({
         updatePost
     });
     resolveCardSize(cardSize);
-    const commentsRequestRef = useRef(0);
-    const commentsAutoOpenTimersRef = useRef(new Set());
-    useEffect(() => {
-        const autoOpenTimeouts = commentsAutoOpenTimersRef.current;
-        const post_id = postId;
-        const requestId = commentsRequestRef.current + 1;
-        commentsRequestRef.current = requestId;
-        let cancelled = false;
-        if (post_id) {
-            const viewerAddress = Storage.load("publicKey", "");
-            Api.get('get_comments', {
-                post_id,
-                address: viewerAddress
-            }).then(data => {
-                if (cancelled || commentsRequestRef.current !== requestId) return;
-                setLoading(false);
-                setRoot(data.root);
-                setChildren(data.children);
-                Storage.removeOptimisticPost(post_id);
-                try {
-                    const f = tx && tx['reconcileAfterCommentsFetch'];
-                    if (typeof f === 'function') f(post_id, data.root, data.children);
-                } catch (_) { }
-                // Mark current comment count as visited
-                if (data.root && data.root.comments !== undefined) {
-                    try {
-                        Storage.setLastVisitCommentCount(post_id, data.root.comments);
-                    } catch (_) { }
-                }
-                // Capture previous visit timestamp for highlight, then set new visit time
-                try {
-                    const prevTs = Storage.getLastVisitTimestamp(post_id);
-                    if (prevTs !== null && !isNaN(Number(prevTs))) setLastVisitTs(Number(prevTs));
-                } catch (_) {
-                    setLastVisitTs(null);
-                }
-                // Mark visit timestamp after capturing previous, for highlighting
-                try {
-                    const nowSec = Math.floor(Date.now() / 1000);
-                    Storage.setLastVisitTimestamp(post_id, nowSec);
-                } catch (_) { }
-                // Auto-open edit if edit query parameter is present and user owns the post
-                const params = new URLSearchParams(location.search);
-                const shouldEdit = params.get('edit') === 'true';
-                if (shouldEdit && data.root) {
-                    const currentUserAddress = state && state.publicKey ? String(state.publicKey).trim().toLowerCase() : Storage.load('publicKey', '').trim().toLowerCase();
-                    const postAuthorAddress = data.root && data.root.user_id ? String(data.root.user_id).trim().toLowerCase() : '';
-                    const isAuthor = currentUserAddress && postAuthorAddress && currentUserAddress === postAuthorAddress;
-                    if (isAuthor) {
-                        // Small delay to ensure state is updated
-                        const timeoutId = setTimeout(() => {
-                            autoOpenTimeouts.delete(timeoutId);
-                            if (cancelled || commentsRequestRef.current !== requestId) return;
-                            openEdit(data.root);
-                        }, 100);
-                        autoOpenTimeouts.add(timeoutId);
-                    }
-                }
-                // Auto-open donate dialog if donate query parameter is present
-                const shouldDonate = params.get('donate') === 'true';
-                if (shouldDonate && data.root && data.root.user_id) {
-                    const timeoutId = setTimeout(() => {
-                        autoOpenTimeouts.delete(timeoutId);
-                        if (cancelled || commentsRequestRef.current !== requestId) return;
-                        setConfirmDonate(data.root.user_id);
-                    }, 100);
-                    autoOpenTimeouts.add(timeoutId);
-                }
-                // Do not auto-open reply; user explicitly opens when needed
-            }).catch(error => {
-                if (cancelled || commentsRequestRef.current !== requestId) return;
-                setLoading(false);
-                let errorMessage = "An unknown error occurred";
-                const msg = error && error.message ? String(error.message) : "";
-                if (/HTTP\s*404/i.test(msg)) {
-                    const optimistic = Storage.getOptimisticPost(post_id);
-                    if (optimistic) {
-                        setError(null);
-                        setRoot(optimistic);
-                        setChildren([]);
-                        return;
-                    }
-                }
-                if (/HTTP\s*404/i.test(msg)) {
-                    errorMessage = <span>
-                        <br />&nbsp;
-                        <strong>No post with id:</strong><br />
-                        <span style={{
-                            fontSize: '0.6rem'
-                        }}>{post_id}</span>
-                        <br />
-                        <br />
-                        <span style={{
-                            fontSize: '0.75rem'
-                        }}>
-                            Try Again in ~10s; it may be still propagating across the network.
-                        </span>
-                        <br />&nbsp;
-                    </span>;
-                } else if (msg) {
-                    errorMessage = msg;
-                }
-                setError(errorMessage);
-            });
-        }
-        return () => {
-            cancelled = true;
-            autoOpenTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
-            autoOpenTimeouts.clear();
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [postId]);
-
-    // When in focused view, fetch the focused comment's children separately
-    // This ensures we get 6 levels of children from the focused comment, not limited by its depth from root
 
     if (loading || error || depthError) {
         return <ContentGrid>
@@ -2424,7 +2301,7 @@ function ViewPostView({
                     <MobileHeader />
                     {/* Topic Hero Card */}
                     {(() => {
-                        const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || actualRootPost?.topic || '';
+                        const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
                         const topicLower = displayTopic.toLowerCase();
                         const isTopicFollowing = isSubscribedTopic(topicLower);
                         const isTopicInProgress = isTopicPending(topicLower);
@@ -2728,19 +2605,12 @@ function ViewPostView({
                             </CardComponent>
                             {isRoot && !!focusedCommentId && <StyledThreadReminder>
                                 You are viewing a single comment's thread.{' '}
-                                {!showContext ? <>
-                                    Click{' '}
-                                    <Link to={`/p/${focusedCommentId}?depth=5`}>
-                                        here
-                                    </Link>
-                                    {' '}to view the recent context, or{' '}
-                                    <Link to={`/p/${actualRootPostId}`}>here</Link>
-                                    {' '}to view the full thread.
-                                </> : <>
-                                    Click{' '}
-                                    <Link to={`/p/${actualRootPostId}`}>here</Link>
-                                    {' '}to view the full thread.
-                                </>}
+                                {ancestorsOmitted > 0 ? <>
+                                    {ancestorsOmitted} older {ancestorsOmitted === 1 ? 'reply' : 'replies'} above.{' '}
+                                </> : null}
+                                Click{' '}
+                                <Link to={`/p/${actualRootPostId}`}>here</Link>
+                                {' '}to view the full thread.
                             </StyledThreadReminder>}
                             {/* Continue thread link for deeply nested comments with unloaded children */}
                             {(() => {

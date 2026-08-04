@@ -486,6 +486,55 @@ def test_comments(backend: str):
         if not ctx_ok:
             _fail("comments.get_comment_context returns 200", f"code={code}")
 
+    # 4.5a get_comments returns ancestors (root-first) for nested comments
+    if c2_txh:
+        data = None
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
+            code, data = _get(f"{backend}/api/get_comments", {"post_id": c2_txh, "address": addr})
+            if code == 200 and isinstance(data, dict) and data.get("root"):
+                break
+            time.sleep(1)
+        if code == 200 and isinstance(data, dict):
+            anc = data.get("ancestors")
+            omitted = data.get("ancestors_omitted")
+            if not isinstance(anc, list):
+                _fail("comments.ancestors is list", f"got={type(anc).__name__}")
+            elif "ancestors_omitted" not in data:
+                _fail("comments.ancestors_omitted present")
+            else:
+                # Nested under parent comment under root post: expect root first, immediate parent last
+                ids = [str(a.get("post_id", "")).lower() for a in anc]
+                if ids and ids[0] == parent_txh.lower() and ids[-1] == c1_txh.lower():
+                    _pass("comments.ancestors root-first ends at parent")
+                elif len(ids) >= 1 and ids[0] == parent_txh.lower():
+                    _pass("comments.ancestors includes root first")
+                else:
+                    _fail("comments.ancestors root-first ends at parent", f"ids={ids[:4]}")
+                if isinstance(omitted, int) and omitted >= 0:
+                    _pass("comments.ancestors_omitted non-negative int")
+                else:
+                    _fail("comments.ancestors_omitted non-negative int", f"got={omitted}")
+                # Ancestors carry awards / user_vote fields
+                if anc and "awards" in anc[0] and "user_vote" in anc[0]:
+                    _pass("comments.ancestors enriched")
+                else:
+                    _fail("comments.ancestors enriched", f"keys={list((anc[0] if anc else {}).keys())[:10]}")
+        else:
+            _fail("comments.ancestors is list", f"code={code}")
+
+    # 4.5b Root post returns empty ancestors
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": parent_txh, "address": addr})
+    if code == 200 and isinstance(data, dict):
+        if data.get("ancestors") == [] and data.get("ancestors_omitted") == 0:
+            _pass("comments.root ancestors empty")
+        else:
+            _fail(
+                "comments.root ancestors empty",
+                f"ancestors={data.get('ancestors')} omitted={data.get('ancestors_omitted')}",
+            )
+    else:
+        _fail("comments.root ancestors empty", f"code={code}")
+
     # 4.6 Edit comment (comment: target=parent, override=comment hash)
     if c1_txh:
         _do_edit(

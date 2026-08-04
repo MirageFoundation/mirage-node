@@ -5,21 +5,24 @@ import Storage from './Storage';
  *
  * Background: /api/bootstrap collapses the cold-load fan-out into one
  * request. App.js writes per-section snapshots into localStorage under
- * keys like `bootstrap_user_blocked`, `bootstrap_invite_codes`, and
- * `bootstrap_rewards_summary` with a `{ data, at, pk }` envelope.
+ * keys like `bootstrap_user_blocked`, `bootstrap_invite_codes`,
+ * `bootstrap_rewards_summary`, and `bootstrap_view` with a
+ * `{ data, at, pk }` envelope.
  *
- * Consumer hooks (useMain blocked topics, invite codes; useQuests fetchAll)
- * read the stash on mount instead of firing their own request — but only
- * once, and only within a short TTL after bootstrap. If the stash is
- * missing, expired, or for a different user, the hook falls through to
- * its existing fetch path. Reads are single-shot: the entry is removed
- * after consumption so refreshes don't reuse stale data.
+ * Consumer hooks (useMain blocked topics / feed, invite codes; useQuests
+ * fetchAll; useViewPost; useInbox) read the stash on mount instead of
+ * firing their own request — but only once, and only within a short TTL
+ * after bootstrap. If the stash is missing, expired, or for a different
+ * user, the hook falls through to its existing fetch path.
+ *
+ * For `bootstrap_view` (multi-kind: feed / thread / inbox), prefer
+ * peek → match → consume so a mismatched consumer does not erase the
+ * payload another hook needs.
  */
 
 const TTL_MS = 30000;
-const WAIT_TIMEOUT_MS = 750;
 
-export function readBootstrapStash(key, expectedPk) {
+function _readEnvelope(key, expectedPk) {
     try {
         const raw = Storage.load(key, null);
         if (!raw || typeof raw !== 'object') return null;
@@ -33,33 +36,61 @@ export function readBootstrapStash(key, expectedPk) {
             Storage.remove(key);
             return null;
         }
-        Storage.remove(key);
-        return data;
+        return { data, key };
     } catch (_) {
         return null;
     }
+}
+
+export function peekBootstrapStash(key, expectedPk) {
+    const env = _readEnvelope(key, expectedPk);
+    return env ? env.data : null;
+}
+
+export function readBootstrapStash(key, expectedPk) {
+    const env = _readEnvelope(key, expectedPk);
+    if (!env) return null;
+    try { Storage.remove(key); } catch (_) { }
+    return env.data;
+}
+
+async function waitForBootstrap(expectedPk) {
+    try {
+        if (typeof window === 'undefined') return;
+        const expected = String(expectedPk || '').toLowerCase();
+
+        let bootstrapPromise = window.__MIRAGE_BOOTSTRAP_PROMISE__;
+        let bootstrapPk = window.__MIRAGE_BOOTSTRAP_PK__;
+        // App installs the promise in componentDidMount; child effects can run
+        // a tick earlier. Brief settle wait, then await the real request.
+        if (!bootstrapPromise || typeof bootstrapPromise.then !== 'function') {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            bootstrapPromise = window.__MIRAGE_BOOTSTRAP_PROMISE__;
+            bootstrapPk = window.__MIRAGE_BOOTSTRAP_PK__;
+        }
+        if (!bootstrapPromise || typeof bootstrapPromise.then !== 'function') return;
+
+        const active = String(bootstrapPk || '').toLowerCase();
+        if (expected && active && active !== expected) return;
+
+        // Await the in-flight bootstrap fully. Racing a short timeout caused
+        // consumers to fall through to their own fetch while bootstrap later
+        // wrote a view stash that could paint launch-time data on a later POP.
+        await bootstrapPromise.catch(() => null);
+    } catch (_) { /* noop */ }
+}
+
+export async function peekBootstrapStashAfterBootstrap(key, expectedPk) {
+    const immediate = peekBootstrapStash(key, expectedPk);
+    if (immediate) return immediate;
+    await waitForBootstrap(expectedPk);
+    return peekBootstrapStash(key, expectedPk);
 }
 
 export async function readBootstrapStashAfterBootstrap(key, expectedPk) {
     const immediate = readBootstrapStash(key, expectedPk);
     if (immediate) return immediate;
 
-    try {
-        if (typeof window === 'undefined') return null;
-        const bootstrapPromise = window.__MIRAGE_BOOTSTRAP_PROMISE__;
-        const bootstrapPk = window.__MIRAGE_BOOTSTRAP_PK__;
-        const expected = String(expectedPk || '').toLowerCase();
-        const active = String(bootstrapPk || '').toLowerCase();
-        if (!bootstrapPromise || typeof bootstrapPromise.then !== 'function') return null;
-        if (expected && active && active !== expected) return null;
-
-        await Promise.race([
-            bootstrapPromise.catch(() => null),
-            new Promise(resolve => setTimeout(resolve, WAIT_TIMEOUT_MS)),
-        ]);
-    } catch (_) {
-        return null;
-    }
-
+    await waitForBootstrap(expectedPk);
     return readBootstrapStash(key, expectedPk);
 }

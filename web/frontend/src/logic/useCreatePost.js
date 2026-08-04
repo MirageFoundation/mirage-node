@@ -678,7 +678,7 @@ export function useCreatePost({
                                 post_id: txHash,
                                 address: viewerAddress
                             });
-                            if (data && data.root) {
+                            if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
                                 Storage.removeOptimisticPost(txHash);
                                 if (typeof setPosts === 'function') {
                                     setPosts({ [txHash]: data.root }, Date.now());
@@ -687,9 +687,16 @@ export function useCreatePost({
                                     detail: {
                                         postId: txHash,
                                         root: data.root,
-                                        children: data.children || []
+                                        children: data.children || [],
+                                        ancestors: data.ancestors,
+                                        ancestors_omitted: data.ancestors_omitted,
                                     }
                                 }));
+                            } else if (data && data.root) {
+                                console.error('[CreatePostView] get_comments missing ancestors', {
+                                    txHash,
+                                    keys: Object.keys(data),
+                                });
                             }
                         } catch (e) {
                             console.debug('[CreatePostView] Background post reconciliation pending', {

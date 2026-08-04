@@ -534,6 +534,7 @@ export default function InboxView({ state }) {
         handleMarkAllAsRead,
         handleMarkOneAsRead,
         handleReplyClick,
+        handleReplyPointerDown,
         shortenAddress,
         viewedReplyIds,
         unreadCount,
@@ -705,6 +706,7 @@ export default function InboxView({ state }) {
                             href={replyUrl}
                             $isUnread={isUnread}
                             $isActive={activeReplyId === reply.reply_id}
+                            onPointerDown={() => handleReplyPointerDown(reply)}
                             onClick={e => {
                                 // Allow right-click / cmd-click / middle-click to work natively.
                                 if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {

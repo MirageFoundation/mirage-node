@@ -229,6 +229,32 @@ def test_stats_pure(backend):
     else:
         _fail("stats.visitor_hash_deterministic", f"h1={h1} h2={h2}")
 
+    # Retention cohort windows: when the selected range is too young for a
+    # horizon (e.g. "last 30d" asked for D30), slide a same-width window back so
+    # the horizon still has a matured cohort instead of 0/0. Historical ranges
+    # that are already old enough stay put (only clipped at now - N days).
+    now = 1_700_000_000
+    day = st.DAY
+    # Last-30d preset vs D30 → slide back to [now-60d, now-30d]
+    w30 = st._matured_cohort_window(now - 30 * day, now, now, 30)
+    # Last-7d preset vs D30 → [now-37d, now-30d]
+    w7 = st._matured_cohort_window(now - 7 * day, now, now, 30)
+    # Historical January-style range already past D30 → keep (clipped only)
+    hist_start, hist_end = now - 90 * day, now - 60 * day
+    wh = st._matured_cohort_window(hist_start, hist_end, now, 30)
+    # Partially young window (last 45d) vs D30 → clip end, keep start
+    wp = st._matured_cohort_window(now - 45 * day, now, now, 30)
+    window_checks = [
+        w30 == (now - 60 * day, now - 30 * day),
+        w7 == (now - 37 * day, now - 30 * day),
+        wh == (hist_start, hist_end),
+        wp == (now - 45 * day, now - 30 * day),
+    ]
+    if all(window_checks):
+        _pass("stats.matured_cohort_window")
+    else:
+        _fail("stats.matured_cohort_window", f"w30={w30} w7={w7} wh={wh} wp={wp} checks={window_checks}")
+
     # Aggregation sums additive metrics and recomputes rates from summed parts.
     servers = [
         {

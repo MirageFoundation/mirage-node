@@ -135,6 +135,8 @@ export function useProfile({
 
     // Biography state
     const [biography, setBiography] = useState('');
+    const [followingCount, setFollowingCount] = useState(null);
+    const [followerCount, setFollowerCount] = useState(null);
     const [bioEditing, setBioEditing] = useState(false);
     const [bioDraft, setBioDraft] = useState('');
     const [bioSaving, setBioSaving] = useState(false);
@@ -285,6 +287,8 @@ export function useProfile({
     useEffect(() => {
         if (!profileAddress) return;
         let cancelled = false;
+        setFollowingCount(null);
+        setFollowerCount(null);
         const fetchUserStatus = async () => {
             try {
                 const data = await Api.get('get_user_status', {
@@ -353,8 +357,29 @@ export function useProfile({
                 });
                 if (!data || cancelled) return;
                 setBiography(data.biography || '');
+                // Web hard-requires follow counts (ships with backend).
+                if (typeof data.following_count !== 'number' || typeof data.follower_count !== 'number') {
+                    console.error('[Profile] get_profile missing follow counts', {
+                        address: profileAddress,
+                        keys: Object.keys(data),
+                    });
+                    setFollowingCount(null);
+                    setFollowerCount(null);
+                } else {
+                    setFollowingCount(data.following_count);
+                    setFollowerCount(data.follower_count);
+                    console.debug('[Profile] follow counts', {
+                        address: profileAddress,
+                        following: data.following_count,
+                        followers: data.follower_count,
+                    });
+                }
             } catch (_) {
-                if (!cancelled) setBiography('');
+                if (!cancelled) {
+                    setBiography('');
+                    setFollowingCount(null);
+                    setFollowerCount(null);
+                }
             }
         };
         fetchUserStatus();
@@ -641,6 +666,11 @@ export function useProfile({
         const wasFollowing = isFollowingProfile;
         setIsUnfollowAction(wasFollowing);
         setIsFollowingProfile(!wasFollowing); // Optimistic update
+        setFollowerCount(prev => {
+            if (typeof prev !== 'number') return prev;
+            const next = wasFollowing ? prev - 1 : prev + 1;
+            return next < 0 ? 0 : next;
+        });
         try {
             if (wasFollowing) {
                 await unfollow(address, profileAddress);
@@ -651,6 +681,11 @@ export function useProfile({
         } catch (e) {
             console.error('[ProfileView] Follow toggle error:', e);
             setIsFollowingProfile(wasFollowing); // Revert on error
+            setFollowerCount(prev => {
+                if (typeof prev !== 'number') return prev;
+                const next = wasFollowing ? prev + 1 : prev - 1;
+                return next < 0 ? 0 : next;
+            });
         } finally {
             setIsFollowInProgress(false);
             setIsUnfollowAction(false);
@@ -990,6 +1025,8 @@ export function useProfile({
         showAllSimilarUsers,
         setShowAllSimilarUsers,
         biography,
+        followingCount,
+        followerCount,
         bioEditing,
         setBioEditing,
         bioDraft,

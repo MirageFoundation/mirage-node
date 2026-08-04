@@ -582,24 +582,6 @@ def _youtube_video_id_from_url(url: str) -> str | None:
 # Note: thumbnail discovery moved to the indexer. No public endpoint is exposed.
 
 
-@public_bp.route("/api/reload_params", methods=["POST"])
-def reload_params():
-    """Force reload chain parameters from live chain state."""
-    rid = next_request_id()
-    try:
-        rt = require_runtime()
-        load_params(force=True)
-        params = expect_params()
-        global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
-        _CHAIN_CONFIG_CACHE = None
-        _CHAIN_CONFIG_CACHE_TIME = 0.0
-        log_event(rid, "reload_params.success", params_keys=list(params.keys()))
-        return jsonify({"status": "ok", "params": params})
-    except Exception as e:
-        log_event(rid, "reload_params.error", error=str(e))
-        return safe_error(e)
-
-
 def _get_enabled_agents(cur, address: str) -> list[str]:
     """Get list of agent addresses served as enabled for the viewer."""
     if not address:
@@ -972,6 +954,8 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         "blocked_users": [],
         "blocked_posts": [],
         "blocked_topics": [],
+        "following_count": 0,
+        "follower_count": 0,
     }
     try:
         conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
@@ -1006,7 +990,24 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
             (addr_lower,),
         )
         lists["blocked_topics"] = [r[0] for r in cur.fetchall()]
+        # Follow graph sizes (indexed on LOWER(owner) / LOWER(target)).
+        cur.execute(
+            "SELECT COUNT(*) FROM followed_users WHERE LOWER(owner) = %s",
+            (addr_lower,),
+        )
+        lists["following_count"] = int(cur.fetchone()[0] or 0)
+        cur.execute(
+            "SELECT COUNT(*) FROM followed_users WHERE LOWER(target) = %s",
+            (addr_lower,),
+        )
+        lists["follower_count"] = int(cur.fetchone()[0] or 0)
         conn.close()
+        logger.debug(
+            "get_profile.follow_counts addr=%s following=%s followers=%s",
+            addr_lower[:12],
+            lists["following_count"],
+            lists["follower_count"],
+        )
     except Exception as e:
         logger.warning("Failed to load profile lists from indexer for %s: %s", addr, e)
     return lists
@@ -3911,6 +3912,36 @@ _CHAIN_CONFIG_CACHE_TIME: float = 0.0
 _CHAIN_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — governance changes are rare
 
 
+def _build_chain_config() -> dict:
+    """Pure helper: build chain governance params (24h server-side memoization)."""
+    global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
+
+    now = time.monotonic()
+    if _CHAIN_CONFIG_CACHE is not None and (now - _CHAIN_CONFIG_CACHE_TIME) < _CHAIN_CONFIG_CACHE_TTL:
+        return dict(_CHAIN_CONFIG_CACHE)
+
+    if _is_catching_up():
+        raise RuntimeError("node_catching_up")
+
+    p = expect_params()
+    resp: Dict[str, Any] = {
+        "max_username_size": p["max_username_size"],
+        "min_username_size": p["min_username_size"],
+        "max_topic_size": p["max_topic_size"],
+        "min_topic_size": p["min_topic_size"],
+        "subscription_period": p["subscription_period"],
+        "subscription_reserve_percent": p["subscription_reserve_percent"],
+        "bridge_attestation_threshold": p["bridge_attestation_threshold"],
+        "mint_interval": p["mint_interval"],
+        "block_time": _get_block_time_seconds(),
+        "tiers": p["tiers"],
+        "award_configs": p["award_configs"],
+    }
+    _CHAIN_CONFIG_CACHE = resp
+    _CHAIN_CONFIG_CACHE_TIME = now
+    return dict(resp)
+
+
 @public_bp.route("/api/get_chain_config")
 def get_chain_config():
     """Chain governance params (tiers, limits, subscription_period, etc.).
@@ -3918,8 +3949,6 @@ def get_chain_config():
     These change only via governance proposals. Cached 24h server-side.
     No difficulty/height — use get_network_stats or get_parameters for those.
     """
-    global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
-
     rid = next_request_id()
     log_event(rid, "get_chain_config.begin")
     try:
@@ -3931,28 +3960,12 @@ def get_chain_config():
         if _is_catching_up():
             return api_error_code("node_catching_up", 503)
 
-        p = expect_params()
-
-        resp: Dict[str, Any] = {
-            "max_username_size": p["max_username_size"],
-            "min_username_size": p["min_username_size"],
-            "max_topic_size": p["max_topic_size"],
-            "min_topic_size": p["min_topic_size"],
-            "subscription_period": p["subscription_period"],
-            "subscription_reserve_percent": p["subscription_reserve_percent"],
-            "bridge_attestation_threshold": p["bridge_attestation_threshold"],
-            "mint_interval": p["mint_interval"],
-            "block_time": _get_block_time_seconds(),
-            "tiers": p["tiers"],
-            "award_configs": p["award_configs"],
-        }
-
-        _CHAIN_CONFIG_CACHE = resp
-        _CHAIN_CONFIG_CACHE_TIME = now
-
+        resp = _build_chain_config()
         log_event(rid, "get_chain_config.ok")
         return jsonify(resp)
     except Exception as e:
+        if str(e) == "node_catching_up":
+            return api_error_code("node_catching_up", 503)
         log_event(rid, "get_chain_config.err", error=str(e))
         return safe_error(e)
 
@@ -4028,22 +4041,207 @@ def get_node_config():
         return safe_error(e)
 
 
+def _build_bootstrap_view(
+    view_raw: str | None,
+    address: str | None,
+    sort_mode: str,
+    allowed_tags: set,
+    limit: int,
+    rid: str,
+) -> dict | None:
+    """Build the optional bootstrap `view` payload. Returns None if absent/unrecognized."""
+    if not view_raw:
+        return None
+    view = (view_raw or "").strip()
+    if not view:
+        return None
+
+    addr = (address or "").strip()
+    sort_mode = sort_mode if sort_mode in ("magic", "newest") else "magic"
+    limit = min(max(1, int(limit or 15)), 100)
+
+    # ── thread:<post_id> ──────────────────────────────────────────────
+    if view.startswith("thread:"):
+        post_id = view[len("thread:") :].strip().lower()
+        if not post_id:
+            return None
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+            blocked_posts = _get_blocked_posts(cur, addr)
+            blocked_users = _get_blocked_users(cur, addr)
+            blocked_topics = _get_blocked_topics(cur, addr)
+            blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+            thread = _build_thread(
+                cur,
+                post_id,
+                addr,
+                blocked_posts,
+                blocked_users,
+                blocked_topics_exact,
+                blocked_topic_prefixes,
+                rid,
+            )
+            if not thread:
+                return {"kind": "thread", "found": False}
+            return {"kind": "thread", "found": True, **thread}
+        finally:
+            conn.close()
+
+    # ── feed:home / feed:following / topic:<name> ─────────────────────
+    feed_name = None
+    topic_name = None
+    if view == "feed:home":
+        feed_name = "home"
+    elif view == "feed:following":
+        feed_name = "following"
+    elif view.startswith("topic:"):
+        topic_name = view[len("topic:") :].strip()
+        if not topic_name:
+            return None
+        # Own connection inside get_posts — do not hold an idle conn here.
+        from flask import current_app
+
+        with current_app.test_request_context(
+            "/api/get_posts",
+            query_string={
+                "topic": topic_name,
+                "limit": str(limit),
+                "page": "1",
+                "by": sort_mode,
+                "allowed_tags": ",".join(sorted(allowed_tags)) if allowed_tags else "sensitive",
+                **({"address": addr} if addr else {}),
+            },
+        ):
+            posts_resp = get_posts()
+            data = posts_resp.get_json(silent=True) if hasattr(posts_resp, "get_json") else None
+            if not isinstance(data, dict) or "posts" not in data:
+                raise RuntimeError("topic_view_failed")
+            return {
+                "kind": "feed",
+                "topic": topic_name,
+                "posts": data.get("posts") or [],
+                "total": data.get("total", 0),
+                "page": data.get("page", 1),
+                "limit": data.get("limit", limit),
+                "has_more": bool(data.get("has_more")),
+            }
+    elif view == "inbox":
+        if not addr:
+            return None
+        # Reuse get_inbox via its own connection by building query args and
+        # calling the route under a request context — keeps pagination logic
+        # in one place.
+        from flask import current_app
+
+        with current_app.test_request_context(
+            "/api/get_inbox",
+            query_string={"address": addr, "page": "1", "limit": str(min(limit, 25))},
+        ):
+            inbox_resp = get_inbox()
+            if hasattr(inbox_resp, "get_json"):
+                data = inbox_resp.get_json(silent=True) or {}
+            else:
+                data = {}
+            if not isinstance(data, dict) or "replies" not in data:
+                raise RuntimeError("inbox_view_failed")
+            return {
+                "kind": "inbox",
+                "replies": data.get("replies") or [],
+                "total": data.get("total", 0),
+                "page": data.get("page", 1),
+                "limit": data.get("limit", 25),
+                "has_more": bool(data.get("has_more")),
+            }
+    else:
+        return None
+
+    # feed:home / feed:following only from here
+    if feed_name not in ("home", "following"):
+        return None
+
+    conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+    try:
+        cur = conn.cursor()
+        blocked_posts = _get_blocked_posts(cur, addr)
+        blocked_users = _get_blocked_users(cur, addr)
+        blocked_topics = _get_blocked_topics(cur, addr)
+        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        persisted_seen: dict[str, int] = {}
+        if addr and addr.lower() != "guest":
+            try:
+                persisted_seen = get_seen_map(addr)
+            except Exception:
+                logger.debug("bootstrap.view.seen_load.err addr=%s", addr[:12])
+
+        if feed_name == "home":
+            resp = _get_home_feed(
+                cur,
+                viewer=addr,
+                limit=limit,
+                page=1,
+                blocked_posts=blocked_posts,
+                blocked_users=blocked_users,
+                allowed_tags=allowed_tags,
+                sort_mode=sort_mode,
+                blocked_topics=blocked_topics_exact,
+                blocked_topic_prefixes=blocked_topic_prefixes,
+                seen_posts=persisted_seen,
+            )
+        else:
+            resp = _get_following_feed(
+                cur,
+                viewer=addr,
+                limit=limit,
+                page=1,
+                blocked_posts=blocked_posts,
+                blocked_users=blocked_users,
+                allowed_tags=allowed_tags,
+                sort_mode=sort_mode,
+                blocked_topics=blocked_topics_exact,
+                blocked_topic_prefixes=blocked_topic_prefixes,
+                seen_posts=persisted_seen,
+            )
+        if resp.get("posts"):
+            _enrich_media_meta(cur, resp["posts"])
+            _apply_agent_edits(cur, resp["posts"], addr)
+            resp["posts"] = _filter_posts_by_allowed_tags(
+                resp["posts"],
+                allowed_tags,
+                rid=rid,
+                context=f"bootstrap.view.feed.{feed_name}",
+                viewer=addr,
+            )
+            _track_image_impressions(resp["posts"], rid, context=f"bootstrap.view.feed.{feed_name}")
+        resp.pop("_timings", None)
+        return {"kind": "feed", "feed": feed_name, **resp}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @public_bp.route("/api/bootstrap")
 def bootstrap():
     """Combined first-paint endpoint.
 
-    Returns node_config (always) plus, when ?address=<addr> is provided,
-    user_status, user_followed, user_blocked, invite_codes, and rewards_summary
-    in a single response. Replaces the home-page cold-load fan-out of 6+
-    /api/* requests with one. Per-section failures degrade gracefully —
-    a failing sub-handler returns null for that key, and the client is
-    expected to fall through to the per-endpoint route.
+    Returns node_config + chain_config (always) plus, when ?address=<addr> is
+    provided, user_status, user_followed, user_blocked, invite_codes, and
+    rewards_summary. Optional `view=` embeds the initial screen payload
+    (feed / thread / inbox) so cold start is a single round trip.
     """
     rid = next_request_id()
     address = (request.args.get("address") or "").strip() or None
-    log_event(rid, "bootstrap.begin", address=address)
+    view_raw = request.args.get("view", default=None, type=str)
+    by_raw = (request.args.get("by", default="", type=str) or "").strip().lower()
+    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
+    limit = request.args.get("limit", 15, type=int)
+    log_event(rid, "bootstrap.begin", address=address, view=view_raw)
 
-    if _is_catching_up() and (address or _NODE_CONFIG_CACHE is None):
+    # 503 while catching up unless both node_config and chain_config are cached
+    # (anonymous warm-cache path must not return chain_config:null).
+    if _is_catching_up() and (address or _NODE_CONFIG_CACHE is None or _CHAIN_CONFIG_CACHE is None):
         return api_error_code("node_catching_up", 503)
 
     def _safe(name: str, builder):
@@ -4053,13 +4251,17 @@ def bootstrap():
             log_event(rid, f"bootstrap.{name}.err", error=str(e))
             return None
 
+    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
+
     resp: Dict[str, Any] = {
         "node_config": _safe("node_config", _build_node_config),
+        "chain_config": _safe("chain_config", _build_chain_config),
         "user_status": None,
         "user_followed": None,
         "user_blocked": None,
         "invite_codes": None,
         "rewards_summary": None,
+        "view": None,
     }
 
     if address:
@@ -4075,10 +4277,16 @@ def bootstrap():
             lambda: _build_rewards_summary(address.lower()),
         )
 
+    resp["view"] = _safe(
+        "view",
+        lambda: _build_bootstrap_view(view_raw, address, by_raw, allowed_tags, limit, rid),
+    )
+
     log_event(
         rid,
         "bootstrap.ok",
         sections=[k for k, v in resp.items() if v is not None],
+        view_kind=(resp["view"] or {}).get("kind") if isinstance(resp.get("view"), dict) else None,
     )
     return jsonify(resp)
 
@@ -6437,6 +6645,66 @@ def _fetch_post(
     }
 
 
+# Column order expected by _post_row_to_dict. Both the subtree CTE outer SELECT
+# and the ancestor CTE must produce rows in exactly this order (depth, when
+# present, is appended as index 19 and is NOT part of this constant).
+_POST_ROW_COLUMNS = """
+    st.txhash, st.owner, st.created_at, st.topic, st.title, st.content,
+    st.tag, st.root_topic, st.root_post_id, st.target, st.thumbnail,
+    st.edited, st.edited_at,
+    COALESCE(pr.username, '') as username,
+    COALESCE(pr.level, 0) as author_level,
+    st.media,
+    COALESCE(pr.created_at, 0) as author_created_at,
+    st.relayer,
+    st.comment_count
+"""
+
+
+def _post_row_to_dict(row) -> dict:
+    """Map a _POST_ROW_COLUMNS row to the API post shape.
+
+    Callers set points / user_vote / user_weight / awards afterwards.
+    Tree builder overwrites comments with the visible descendant count.
+    """
+    import json as _json
+
+    try:
+        media_val = _json.loads(row[15] or "[]")
+        if not isinstance(media_val, list):
+            media_val = []
+    except Exception:
+        media_val = []
+
+    created_at = row[2]
+    return {
+        "post_id": (row[0] or "").lower(),
+        "target": (row[9] or "").strip().lower(),
+        "user_id": (row[1] or "").lower(),
+        "username": row[13] or "",
+        "author_level": int(row[14]) if row[14] else 0,
+        "author_is_new": _is_new_user(int(row[16]) if row[16] else 0),
+        "timestamp": int(created_at) if created_at is not None else None,
+        "topic": row[3],
+        "root_topic": (row[7] or "").strip(),
+        "root_post_id": (row[8] or "").strip().lower(),
+        "title": row[4],
+        "content": row[5],
+        "tag": _normalize_api_tag((row[6] or "").strip()),
+        "edited": bool(row[11]),
+        "edited_at": int(row[12] or 0),
+        "thumbnail": row[10] or "",
+        "media": media_val,
+        "media_meta": [],
+        "relayer": (row[17] or "").strip().lower(),
+        "points": 0,
+        "comments": int(row[18]) if row[18] else 0,
+        "children": [],
+        "user_vote": 0,
+        "user_weight": 0.0,
+    }
+
+
 def _fetch_comment_tree_batch(
     cur,
     root_id: str,
@@ -6471,7 +6739,8 @@ def _fetch_comment_tree_batch(
                    COALESCE(p.edited_at, 0) as edited_at,
                    0 as depth,
                    COALESCE(p.media, '[]') as media,
-                   COALESCE(p.relayer, '') as relayer
+                   COALESCE(p.relayer, '') as relayer,
+                   COALESCE(p.comment_count, 0) as comment_count
             FROM posts p
             WHERE LOWER(p.txhash) = %s {deleted_clause}
             UNION ALL
@@ -6485,19 +6754,13 @@ def _fetch_comment_tree_batch(
                    COALESCE(p.edited_at, 0) as edited_at,
                    s.depth + 1 as depth,
                    COALESCE(p.media, '[]') as media,
-                   COALESCE(p.relayer, '') as relayer
+                   COALESCE(p.relayer, '') as relayer,
+                   COALESCE(p.comment_count, 0) as comment_count
             FROM posts p
             JOIN subtree s ON LOWER(p.target) = LOWER(s.txhash)
             WHERE s.depth < %s {deleted_clause}
         )
-        SELECT st.txhash, st.owner, st.created_at, st.topic, st.title, st.content,
-               st.tag, st.root_topic, st.root_post_id, st.target, st.thumbnail,
-               st.edited, st.edited_at, st.depth,
-               COALESCE(pr.username, '') as username,
-               COALESCE(pr.level, 0) as author_level,
-               st.media,
-               COALESCE(pr.created_at, 0) as author_created_at,
-               st.relayer
+        SELECT {_POST_ROW_COLUMNS}, st.depth
         FROM subtree st
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(st.owner)
         ORDER BY st.depth ASC, st.created_at ASC
@@ -6515,40 +6778,19 @@ def _fetch_comment_tree_batch(
     viewer_lower = (viewer or "").strip().lower()
 
     for row in rows:
-        pid = (row[0] or "").lower()
-        owner = (row[1] or "").lower()
-        created_at = row[2]
-        topic_val = row[3]
-        title_val = row[4]
-        content_val = row[5]
-        tag_val = _normalize_api_tag((row[6] or "").strip())
-        root_topic_val = (row[7] or "").strip()
-        root_post_id_val = (row[8] or "").strip().lower()
-        target_val = (row[9] or "").strip().lower()
-        thumbnail_val = row[10] or ""
-        edited_flag = bool(row[11])
-        edited_at_val = int(row[12] or 0)
-        depth = int(row[13])
-        username_val = row[14] or ""
-        author_level_val = int(row[15]) if row[15] else 0
-        media_raw_val = row[16] if len(row) > 16 else "[]"
-        author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
-        relayer_val = (row[18] or "").strip().lower() if len(row) > 18 else ""
-
-        # Parse media JSON array
-        try:
-            import json as _json
-
-            media_val = _json.loads(media_raw_val or "[]")
-            if not isinstance(media_val, list):
-                media_val = []
-        except Exception:
-            media_val = []
+        post = _post_row_to_dict(row)
+        pid = post["post_id"]
+        owner = post["user_id"]
+        target_val = post["target"]
+        depth = int(row[19])
+        post["_depth"] = depth
+        # Visible descendant count is computed later via count_descendants.
+        post["comments"] = 0
 
         # Skip if this post or its owner is blocked, or topic is blocked
         # Own posts always bypass block filters
         is_own = viewer_lower and owner == viewer_lower
-        topic_lower = (row[3] or "").strip().lower()
+        topic_lower = (post["topic"] or "").strip().lower()
         if not is_own and (
             pid in blocked_posts
             or owner in blocked_users
@@ -6562,33 +6804,7 @@ def _fetch_comment_tree_batch(
             blocked_ids.add(pid)
             continue
 
-        all_posts[pid] = {
-            "post_id": pid,
-            "target": target_val,
-            "user_id": owner,
-            "username": username_val,
-            "author_level": author_level_val,
-            "author_is_new": _is_new_user(author_created_at_val),
-            "timestamp": int(created_at) if created_at is not None else None,
-            "topic": topic_val,
-            "root_topic": root_topic_val,
-            "root_post_id": root_post_id_val,
-            "title": title_val,
-            "content": content_val,
-            "tag": tag_val,
-            "edited": edited_flag,
-            "edited_at": edited_at_val,
-            "thumbnail": thumbnail_val,
-            "media": media_val,
-            "media_meta": [],
-            "relayer": relayer_val,
-            "points": 0,  # Will be populated later
-            "comments": 0,  # Will be computed from tree
-            "children": [],
-            "user_vote": 0,
-            "user_weight": 0.0,
-            "_depth": depth,  # Internal, removed before return
-        }
+        all_posts[pid] = post
 
     # Check if root exists after filtering
     if root_id_lower not in all_posts:
@@ -6708,6 +6924,264 @@ def _fetch_comment_tree_batch(
     return root, top_children
 
 
+def _fetch_ancestor_chain(
+    cur,
+    comment_id: str,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    blocked_topics: set[str] | None = None,
+    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    viewer: str = "",
+    near_limit: int = 5,
+    hard_cap: int = 100,
+) -> tuple[list[dict], int]:
+    """Walk up the target chain from `comment_id` to the root post.
+
+    Returns (ancestors, omitted) where `ancestors` is ordered ROOT FIRST and
+    ends at the immediate parent, and `omitted` counts visible ancestors
+    dropped between the root and the nearest `near_limit`.
+
+    Returns ([], 0) for a root post (no target).
+    """
+    deleted_clause = _deleted_filter()
+    cur.execute(
+        f"""
+        WITH RECURSIVE chain AS (
+            SELECT p.txhash, COALESCE(p.target, '') AS target, 0 AS up,
+                   ARRAY[LOWER(p.txhash)] AS path
+            FROM posts p
+            WHERE LOWER(p.txhash) = %s {deleted_clause}
+            UNION ALL
+            SELECT p.txhash, COALESCE(p.target, '') AS target, c.up + 1,
+                   c.path || LOWER(p.txhash)
+            FROM posts p
+            JOIN chain c ON LOWER(p.txhash) = LOWER(c.target)
+            WHERE c.up < %s
+              AND COALESCE(c.target, '') <> ''
+              AND NOT (LOWER(p.txhash) = ANY (c.path))
+              {deleted_clause}
+        )
+        SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+               COALESCE(p.tag, '') as tag,
+               COALESCE(p.root_topic, p.topic, '') as root_topic,
+               COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
+               COALESCE(p.target, '') as target,
+               COALESCE(p.thumbnail_url, '') as thumbnail,
+               CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
+               COALESCE(p.edited_at, 0) as edited_at,
+               COALESCE(pr.username, '') as username,
+               COALESCE(pr.level, 0) as author_level,
+               COALESCE(p.media, '[]') as media,
+               COALESCE(pr.created_at, 0) as author_created_at,
+               COALESCE(p.relayer, '') as relayer,
+               COALESCE(p.comment_count, 0) as comment_count,
+               c.up
+        FROM chain c
+        JOIN posts p ON LOWER(p.txhash) = LOWER(c.txhash)
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+        WHERE c.up > 0
+        ORDER BY c.up ASC
+        """,
+        (comment_id.lower(), hard_cap),
+    )
+
+    viewer_lower = (viewer or "").strip().lower()
+    # Track the furthest CTE row (by `up`) independent of block filtering so we
+    # can detect hard_cap truncation without mistaking a blocked/skipped root.
+    furthest_up = -1
+    furthest_is_root = False
+    chain: list[dict] = []
+    for row in cur.fetchall():
+        post = _post_row_to_dict(row)
+        up = int(row[19]) if len(row) > 19 and row[19] is not None else 0
+        if up >= furthest_up:
+            furthest_up = up
+            furthest_is_root = not bool((post.get("target") or "").strip())
+        is_own = viewer_lower and post["user_id"] == viewer_lower
+        if not is_own and (
+            post["post_id"] in blocked_posts
+            or post["user_id"] in blocked_users
+            or _topic_is_blocked(
+                (post["topic"] or "").strip().lower(),
+                blocked_topics or set(),
+                blocked_topic_prefixes or tuple(),
+            )
+        ):
+            continue
+        chain.append(post)
+
+    if not chain:
+        return [], 0
+
+    # Batch vote totals (same enrichment the tree path does for descendants).
+    anc_ids = [a["post_id"] for a in chain]
+    if blocked_users:
+        blocked_ph = ",".join(["%s"] * len(blocked_users))
+        ph = ",".join(["%s"] * len(anc_ids))
+        cur.execute(
+            f"""
+            SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
+            FROM votes
+            WHERE LOWER(target) IN ({ph})
+              AND LOWER(owner) NOT IN ({blocked_ph})
+            GROUP BY LOWER(target)
+            """,
+            anc_ids + list(blocked_users),
+        )
+    else:
+        ph = ",".join(["%s"] * len(anc_ids))
+        cur.execute(
+            f"""
+            SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
+            FROM votes
+            WHERE LOWER(target) IN ({ph})
+            GROUP BY LOWER(target)
+            """,
+            anc_ids,
+        )
+    pts_map = {tgt: float(pts or 0) for tgt, pts in cur.fetchall() if tgt}
+    for a in chain:
+        a["points"] = pts_map.get(a["post_id"], 0)
+
+    # chain is parent-first: [parent, grandparent, ..., furthest]
+    # Hit hard_cap mid-chain: furthest is NOT the OP — do not invent a root.
+    truncated = furthest_up >= hard_cap and not furthest_is_root
+    if truncated:
+        near = chain[:near_limit]
+        walked_beyond = max(0, len(chain) - near_limit)
+        # +1 for unknown ancestors past the cap (UI: "N older replies above")
+        omitted = walked_beyond + 1
+        logger.debug(
+            "ancestor_chain.truncated hard_cap=%s furthest_up=%s returned=%s omitted=%s",
+            hard_cap,
+            furthest_up,
+            len(near),
+            omitted,
+        )
+        return list(reversed(near)), omitted
+
+    if len(chain) <= near_limit + 1:
+        return list(reversed(chain)), 0
+    root_node = chain[-1]
+    near = chain[:near_limit]
+    return [root_node] + list(reversed(near)), len(chain) - near_limit - 1
+
+
+def _build_thread(
+    cur,
+    post_id: str,
+    address: str,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    blocked_topics_exact: set[str],
+    blocked_topic_prefixes: tuple[str, ...],
+    rid: str,
+) -> dict | None:
+    """Build the get_comments payload for `post_id`. Returns None if not found/blocked."""
+    root, children = _fetch_comment_tree_batch(
+        cur,
+        post_id,
+        blocked_posts,
+        blocked_users,
+        max_depth=6,
+        blocked_topics=blocked_topics_exact,
+        blocked_topic_prefixes=blocked_topic_prefixes,
+        viewer=address,
+    )
+    if not root:
+        return None
+
+    if (root.get("target") or "").strip():
+        ancestors, ancestors_omitted = _fetch_ancestor_chain(
+            cur,
+            root["post_id"],
+            blocked_posts,
+            blocked_users,
+            blocked_topics=blocked_topics_exact,
+            blocked_topic_prefixes=blocked_topic_prefixes,
+            viewer=address,
+        )
+    else:
+        ancestors, ancestors_omitted = [], 0
+
+    viewer_lower = (address or "").strip().lower()
+    if viewer_lower and viewer_lower != "guest":
+        all_post_ids = [root["post_id"]] + [a["post_id"] for a in ancestors]
+
+        def collect_ids(nodes):
+            for n in nodes:
+                all_post_ids.append(n["post_id"])
+                if n.get("children"):
+                    collect_ids(n["children"])
+
+        collect_ids(children)
+        if all_post_ids:
+            ph = ",".join(["%s"] * len(all_post_ids))
+            cur.execute(
+                f"SELECT LOWER(target), user_vote, user_weight FROM votes WHERE LOWER(owner) = %s AND LOWER(target) IN ({ph})",
+                [viewer_lower] + all_post_ids,
+            )
+            user_votes = {}
+            user_weight_map = {}
+            for tgt, vote, weight in cur.fetchall():
+                if tgt:
+                    user_votes[tgt] = int(vote) if vote else 0
+                    user_weight_map[tgt] = float(weight) if weight else 0.0
+            root["user_vote"] = user_votes.get(root["post_id"], 0)
+            root["user_weight"] = user_weight_map.get(root["post_id"], 0.0)
+
+            def apply_votes(nodes):
+                for n in nodes:
+                    n["user_vote"] = user_votes.get(n["post_id"], 0)
+                    n["user_weight"] = user_weight_map.get(n["post_id"], 0.0)
+                    if n.get("children"):
+                        apply_votes(n["children"])
+
+            apply_votes(children)
+            apply_votes(ancestors)
+
+    all_ids_for_awards = [root["post_id"]] + [a["post_id"] for a in ancestors]
+
+    def collect_ids_for_awards(nodes):
+        for n in nodes:
+            all_ids_for_awards.append(n["post_id"])
+            if n.get("children"):
+                collect_ids_for_awards(n["children"])
+
+    collect_ids_for_awards(children)
+    _, award_details = _load_award_aggregates(cur, all_ids_for_awards, blocked_users)
+    root["awards"] = award_details.get(root["post_id"], [])
+
+    def apply_awards(nodes):
+        for n in nodes:
+            n["awards"] = award_details.get(n["post_id"], [])
+            if n.get("children"):
+                apply_awards(n["children"])
+
+    apply_awards(children)
+    apply_awards(ancestors)
+
+    def _collect_posts(nodes, out):
+        for n in nodes:
+            out.append(n)
+            if n.get("children"):
+                _collect_posts(n["children"], out)
+
+    thread_posts = [root]
+    _collect_posts(children, thread_posts)
+    overlay_posts = thread_posts + ancestors
+    _enrich_media_meta(cur, overlay_posts)
+    _apply_agent_edits(cur, overlay_posts, address)
+    _track_image_impressions(thread_posts, rid, context="get_comments")
+
+    return {
+        "root": root,
+        "children": children,
+        "ancestors": ancestors,
+        "ancestors_omitted": ancestors_omitted,
+    }
+
+
 @public_bp.route("/api/get_comments")
 def get_comments():
     rid = next_request_id()
@@ -6729,24 +7203,25 @@ def get_comments():
         t_blocked_ms = (time.time() - t_blocked) * 1000
 
         t_tree = time.time()
-        root, children = _fetch_comment_tree_batch(
+        resp = _build_thread(
             cur,
             post_id,
+            address,
             blocked_posts,
             blocked_users,
-            max_depth=6,
-            blocked_topics=blocked_topics_exact,
-            blocked_topic_prefixes=blocked_topic_prefixes,
-            viewer=address,
+            blocked_topics_exact,
+            blocked_topic_prefixes,
+            rid,
         )
         t_tree_ms = (time.time() - t_tree) * 1000
 
-        if not root:
+        if not resp:
             conn.close()
             log_event(rid, "get_comments.not_found", post_id=post_id[:16])
             return jsonify({"error": "post not found"}), 404
 
-        # Count total nodes for logging
+        conn.close()
+
         def count_nodes(nodes):
             total = 0
             for n in nodes:
@@ -6755,95 +7230,19 @@ def get_comments():
                     total += count_nodes(n["children"])
             return total
 
-        node_count = 1 + count_nodes(children)  # root + all children
-
-        # Load viewer's votes and user_weight contributions for root and all children
-        viewer_lower = (address or "").strip().lower()
-        t_votes = time.time()
-        if viewer_lower and viewer_lower != "guest":
-            all_post_ids = [root["post_id"]]
-
-            def collect_ids(nodes):
-                for n in nodes:
-                    all_post_ids.append(n["post_id"])
-                    if n.get("children"):
-                        collect_ids(n["children"])
-
-            collect_ids(children)
-            if all_post_ids:
-                ph = ",".join(["%s"] * len(all_post_ids))
-                cur.execute(
-                    f"SELECT LOWER(target), user_vote, user_weight FROM votes WHERE LOWER(owner) = %s AND LOWER(target) IN ({ph})",
-                    [viewer_lower] + all_post_ids,
-                )
-                user_votes = {}
-                user_weight_map = {}
-                for tgt, vote, weight in cur.fetchall():
-                    if tgt:
-                        user_votes[tgt] = int(vote) if vote else 0
-                        user_weight_map[tgt] = float(weight) if weight else 0.0
-                root["user_vote"] = user_votes.get(root["post_id"], 0)
-                root["user_weight"] = user_weight_map.get(root["post_id"], 0.0)
-
-                def apply_votes(nodes):
-                    for n in nodes:
-                        n["user_vote"] = user_votes.get(n["post_id"], 0)
-                        n["user_weight"] = user_weight_map.get(n["post_id"], 0.0)
-                        if n.get("children"):
-                            apply_votes(n["children"])
-
-                apply_votes(children)
-        t_votes_ms = (time.time() - t_votes) * 1000
-
-        # Load awards for root + all children
-        all_ids_for_awards = [root["post_id"]]
-
-        def collect_ids_for_awards(nodes):
-            for n in nodes:
-                all_ids_for_awards.append(n["post_id"])
-                if n.get("children"):
-                    collect_ids_for_awards(n["children"])
-
-        collect_ids_for_awards(children)
-        _, award_details = _load_award_aggregates(cur, all_ids_for_awards, blocked_users)
-        root["awards"] = award_details.get(root["post_id"], [])
-
-        def apply_awards(nodes):
-            for n in nodes:
-                n["awards"] = award_details.get(n["post_id"], [])
-                if n.get("children"):
-                    apply_awards(n["children"])
-
-        apply_awards(children)
-
-        # Apply agent edits to root + all children
-        def _collect_posts(nodes, out):
-            for n in nodes:
-                out.append(n)
-                if n.get("children"):
-                    _collect_posts(n["children"], out)
-
-        all_posts_for_overlay = [root]
-        _collect_posts(children, all_posts_for_overlay)
-        _enrich_media_meta(cur, all_posts_for_overlay)
-        _apply_agent_edits(cur, all_posts_for_overlay, address)
-        _track_image_impressions(all_posts_for_overlay, rid, context="get_comments")
-
-        resp = {"root": root, "children": children}
-
-        conn.close()
-
+        node_count = 1 + count_nodes(resp["children"])
         total_ms = (time.time() - t_start) * 1000
         log_event(
             rid,
             "get_comments.ok",
             post_id=post_id[:16],
             nodes=node_count,
+            ancestors=len(resp["ancestors"]),
+            ancestors_omitted=resp["ancestors_omitted"],
             blocked_posts=len(blocked_posts),
             blocked_users=len(blocked_users),
             blocked_ms=round(t_blocked_ms, 1),
             tree_ms=round(t_tree_ms, 1),
-            votes_ms=round(t_votes_ms, 1),
             total_ms=round(total_ms, 1),
         )
         return jsonify(_inject_balance(resp, address))
@@ -6877,48 +7276,6 @@ def _find_root_post_id(cur, comment_id: str):
         current_id = target
 
     return None
-
-
-def _fetch_parent_chain(
-    cur,
-    comment_id: str,
-    max_depth: int = 3,
-    blocked_posts: set[str] = None,
-    blocked_users: set[str] = None,
-    viewer: str = "",
-):
-    """Fetch up to max_depth parent comments in the chain."""
-    if blocked_posts is None:
-        blocked_posts = set()
-    if blocked_users is None:
-        blocked_users = set()
-    deleted_clause = _deleted_filter_bare()
-    chain = []
-    current_id = comment_id.lower()
-    visited = set()
-
-    for _ in range(max_depth):
-        if current_id in visited:
-            break
-        visited.add(current_id)
-
-        cur.execute(
-            f"SELECT COALESCE(target, '') FROM posts WHERE LOWER(txhash) = LOWER(%s) {deleted_clause} LIMIT 1",
-            (current_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            break
-        target = (row[0] or "").strip().lower()
-        if not target:
-            break
-
-        parent_post = _fetch_post(cur, target, blocked_posts, blocked_users, viewer=viewer)
-        if parent_post:
-            chain.append(parent_post)
-        current_id = target
-
-    return chain
 
 
 @public_bp.route("/api/get_root_post_id")
@@ -6965,8 +7322,23 @@ def get_comment_context():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
-        blocked_topics_set = _get_blocked_topics(cur, address)
-        chain = _fetch_parent_chain(cur, comment_id, max_depth, blocked_posts, blocked_users, viewer=address)
+        blocked_topics = _get_blocked_topics(cur, address)
+        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        # Parent-first order for legacy callers (they reverse on the client).
+        # hard_cap=max_depth matches old _fetch_parent_chain: at most N parents,
+        # no forced root inclusion.
+        ancestors, _omitted = _fetch_ancestor_chain(
+            cur,
+            comment_id,
+            blocked_posts,
+            blocked_users,
+            blocked_topics=blocked_topics_exact,
+            blocked_topic_prefixes=blocked_topic_prefixes,
+            viewer=address,
+            near_limit=max_depth,
+            hard_cap=max_depth,
+        )
+        chain = list(reversed(ancestors))
         conn.close()
         resp = {"context": chain, "comment_id": comment_id}
         return jsonify(_inject_balance(resp, address))
@@ -7857,159 +8229,6 @@ def upload_media():
         return safe_error(e)
 
 
-# =============================================================================
-# ===== DEPRECATED LEGACY SHIM - REMOVE AFTER 2026-08 - DO NOT BUILD ON THIS =====
-# get_upload_url returns the OLD Cloudflare browser-direct upload shape, kept ONLY
-# so old mobile builds keep working during the dual-provider cutover. New clients
-# (web + updated app) MUST use POST /api/upload_media instead.
-#
-# SMOOTH CUTOVER: this shim is gated on Cloudflare CREDENTIALS being present, NOT
-# on the node's active MEDIA_PROVIDER. That is deliberate: it lets a node move new
-# uploads to bunny/local while old mobile builds keep
-# uploading to Cloudflare through here until the app ships /api/upload_media. The
-# uploaded media still renders everywhere via dual-read.
-#
-# MUST be deleted after ~August 2026 together with mirage.talk's Cloudflare
-# credentials. See docs/guides/media_providers.md ("Legacy get_upload_url shim").
-# =============================================================================
-@public_bp.route("/api/get_upload_url", methods=["POST"])
-def get_upload_url():
-    """DEPRECATED legacy Cloudflare direct-upload shim. Use /api/upload_media.
-
-    REMOVE AFTER 2026-08. Active whenever Cloudflare credentials are configured,
-    independent of MEDIA_PROVIDER, so old mobile builds keep working after the node
-    switches its active provider to bunny/local.
-    """
-    rid = next_request_id()
-    # Loud per-call deprecation warning so lingering callers show up in logs and
-    # we can tell exactly when it is safe to delete this shim.
-    logger.warning("DEPRECATED get_upload_url called - remove after 2026-08")
-    log_event(rid, "get_upload_url.begin", deprecated=True)
-    # Same upload gate as /api/upload_media: a node not behind a scanning edge
-    # accepts no uploads through any path.
-    if not MEDIA_UPLOADS_ENABLED:
-        log_event(rid, "get_upload_url.disabled")
-        return api_error_code("uploads_disabled", 403)
-    try:
-        # Gate on Cloudflare credentials, NOT the active provider, so this keeps
-        # serving old mobile builds even when MEDIA_PROVIDER is bunny/local.
-        cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
-        cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
-        if not (cf_account and cf_token):
-            log_event(rid, "get_upload_url.unsupported_provider")
-            return api_error_code("legacy_upload_unsupported", 410)
-
-        data = request.get_json(force=True) or {}
-        upload_type = str(data.get("type", "image")).strip().lower()
-
-        # accept both image and video
-        if False:
-            return jsonify({"error": "only 'image' type is supported"}), 400
-
-        account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
-        api_token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
-
-        if upload_type == "video":
-            # Cloudflare Stream direct upload
-            stream_customer = os.environ.get("CLOUDFLARE_STREAM_CUSTOMER_CODE", "").strip()
-            if not account_id or not api_token:
-                log_event(rid, "get_upload_url.err", error="missing_stream_credentials")
-                return jsonify({"error": "cloudflare stream credentials not configured"}), 500
-
-            url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/stream/direct_upload"
-            headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
-            payload = {"maxDurationSeconds": 60}
-            # IMPORTANT: allowedOrigins required for iframe player on customer domains
-            payload["allowedOrigins"] = ["*"]
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-
-            if response.status_code != 200:
-                try:
-                    cf_body = response.text[:500]
-                except Exception:
-                    cf_body = "<unreadable>"
-                log_event(
-                    rid,
-                    "get_upload_url.err",
-                    error=f"cloudflare_stream_api_error_{response.status_code}",
-                    cf_response=cf_body,
-                )
-                user_msg = "upload service error"
-                try:
-                    cf_errors = response.json().get("errors", [])
-                    for e in cf_errors:
-                        code = e.get("code", 0)
-                        if code == 10005 or "limit" in str(e.get("message", "")).lower():
-                            user_msg = "Video uploads are temporarily unavailable (storage limit reached)"
-                            break
-                except Exception:
-                    pass
-                return jsonify({"error": user_msg}), 500
-
-            result = response.json()
-            # Stream responses typically contain result.uploadURL and sometimes result.uid
-            upload_data = result.get("result", {}) if isinstance(result, dict) else {}
-            upload_url = upload_data.get("uploadURL", "")
-            direct_uid = upload_data.get("uid") or upload_data.get("id") or ""
-
-            if not upload_url:
-                log_event(rid, "get_upload_url.err", error="missing_stream_upload_url")
-                return jsonify({"error": "no stream upload URL received from cloudflare"}), 500
-
-            log_event(rid, "get_upload_url.ok", upload_id=direct_uid)
-            # Return uid so client can embed immediately after upload
-            return jsonify(
-                {"uploadURL": upload_url, "provider": "stream", "streamCustomer": stream_customer, "uid": direct_uid}
-            )
-
-        # Default: image (Cloudflare Images)
-        account_hash = os.environ.get("CLOUDFLARE_ACCOUNT_HASH", "").strip()
-        if not account_id or not api_token or not account_hash:
-            log_event(rid, "get_upload_url.err", error="missing_credentials")
-            return jsonify({"error": "cloudflare credentials not configured"}), 500
-
-        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/images/v2/direct_upload"
-        headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
-        response = requests.post(url, headers=headers, timeout=10)
-
-        if response.status_code != 200:
-            log_event(rid, "get_upload_url.err", error=f"cloudflare_api_error_{response.status_code}")
-            return jsonify({"error": "upload service error"}), 500
-
-        result = response.json()
-        if not result.get("success"):
-            errors = result.get("errors", [])
-            error_msg = errors[0].get("message", "Unknown error") if errors else "Unknown error"
-            log_event(rid, "get_upload_url.err", error=f"cloudflare_error_{error_msg}")
-            return jsonify({"error": "upload service error"}), 500
-
-        upload_data = result.get("result", {})
-        upload_url = upload_data.get("uploadURL", "")
-        upload_id = upload_data.get("id", "")
-
-        if not upload_url:
-            log_event(rid, "get_upload_url.err", error="missing_upload_url")
-            return jsonify({"error": "no upload URL received from cloudflare"}), 500
-
-        # Register image in catalog for GC tracking
-        if upload_id:
-            upload_id_norm = upload_id.lower()
-            with connect_backend_db() as bconn:
-                with bconn.cursor() as bcur:
-                    bcur.execute(
-                        "INSERT INTO image_catalog (image_id, created_at, provider) "
-                        "VALUES (%s, %s, %s) ON CONFLICT (image_id) DO NOTHING",
-                        (upload_id_norm, int(time.time()), "cloudflare"),
-                    )
-            log_event(rid, "image_catalog.registered", image_id=upload_id_norm)
-
-        log_event(rid, "get_upload_url.ok", upload_id=upload_id)
-        return jsonify({"uploadURL": upload_url, "id": upload_id, "accountHash": account_hash})
-    except Exception as e:
-        log_event(rid, "get_upload_url.err", error=str(e))
-        return safe_error(e)
-
-
 @public_bp.route("/api/stream_proxy/<video_uid>", defaults={"path": ""})
 @public_bp.route("/api/stream_proxy/<video_uid>/<path:path>")
 def stream_proxy(video_uid, path):
@@ -8165,14 +8384,6 @@ def stream_proxy(video_uid, path):
     except Exception as e:
         log_event(rid, "stream_proxy.err", error=str(e), video_uid=video_uid[:20], path=path[:50] if path else "")
         return safe_error(e)
-
-
-@public_bp.route("/api/stats/event", methods=["POST"])
-def stats_event():
-    """Stats event tracking disabled (page/visit tracking removed)."""
-    rid = next_request_id()
-    log_event(rid, "stats_event.disabled")
-    return api_error_code("stats_event_disabled", 410)
 
 
 def _get_stats_analytics(rid: int):
@@ -9525,149 +9736,6 @@ def referrals_summary():
         )
     except Exception as e:
         log_event(rid, "referrals.summary.err", error=str(e))
-        return safe_error(e)
-
-
-@public_bp.route("/api/referral/stats", methods=["GET"])
-def get_referral_stats():
-    """Get referral stats for a user (their pending/paid rewards and referral tree)."""
-    rid = next_request_id()
-    address = request.args.get("address", "").strip().lower()
-    if not address:
-        return jsonify({"error": "address required"}), 400
-
-    log_event(rid, "referral.stats.begin", address=address)
-    try:
-        with connect_backend_db() as bconn:
-            with bconn.cursor() as bcur:
-                bcur.execute(
-                    """
-                    SELECT 
-                        COALESCE(SUM(CASE WHEN status = 'pending' THEN total_pending ELSE 0 END), 0) as pending_total,
-                        COALESCE(SUM(CASE WHEN status IN ('approved', 'paid') THEN total_pending ELSE 0 END), 0) as paid_total
-                    FROM referral_pending_rewards
-                    WHERE user_address = %s
-                """,
-                    (address,),
-                )
-                row = bcur.fetchone()
-                pending_total = float(row[0]) if row else 0.0
-                paid_total = float(row[1]) if row else 0.0
-
-                bcur.execute(
-                    "SELECT referrer_address FROM referral_links WHERE user_address = %s",
-                    (address,),
-                )
-                referrer_row = bcur.fetchone()
-                referrer_address = referrer_row[0] if referrer_row else None
-
-                bcur.execute("SELECT user_address, referrer_address FROM referral_links")
-                all_links = {r[0]: r[1] for r in bcur.fetchall()}
-
-                bcur.execute(
-                    """
-                    SELECT referee_address, level, pending, paid, COALESCE(denied, 0)
-                    FROM referral_user_accruals
-                    WHERE beneficiary_address = %s
-                """,
-                    (address,),
-                )
-                accruals = {
-                    r[0]: {"level": r[1], "pending": float(r[2]), "paid": float(r[3]), "denied": float(r[4])}
-                    for r in bcur.fetchall()
-                }
-
-                bcur.execute("SELECT value FROM referral_state WHERE key = %s", ("referral_accrue_last_run",))
-                state_row = bcur.fetchone()
-                last_run_ts = int(state_row[0]) if state_row else None
-                bcur.execute("SELECT value FROM referral_state WHERE key = %s", ("referral_accrue_period",))
-                period_row = bcur.fetchone()
-                period_seconds = int(period_row[0]) if period_row else 86400
-                next_update_ts = (last_run_ts + period_seconds) if last_run_ts else None
-
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT LOWER(owner), username FROM profiles WHERE username IS NOT NULL AND username != ''")
-                usernames = {r[0]: r[1] for r in cur.fetchall()}
-
-        referred_by = None
-        if referrer_address:
-            referred_by = {
-                "address": referrer_address,
-                "username": usernames.get(referrer_address) or None,
-            }
-
-        REWARD_RATES = [0.0, 1.0, 0.5, 0.25, 0.125, 0.0625]
-
-        def build_tree(parent_addr: str, level: int, max_depth: int = 5):
-            if level > max_depth:
-                return []
-
-            direct_referees = [addr for addr, ref in all_links.items() if ref == parent_addr]
-
-            tree = []
-            for ref_addr in direct_referees:
-                rate = REWARD_RATES[level] if level < len(REWARD_RATES) else 0.0
-                accrual = accruals.get(ref_addr, {"pending": 0.0, "paid": 0.0, "denied": 0.0})
-                children = build_tree(ref_addr, level + 1, max_depth)
-
-                def count_descendants(nodes):
-                    total = len(nodes)
-                    for n in nodes:
-                        total += count_descendants(n.get("children", []))
-                    return total
-
-                tree.append(
-                    {
-                        "address": ref_addr,
-                        "username": usernames.get(ref_addr),
-                        "level": level,
-                        "rate": rate,
-                        "pending": accrual["pending"],
-                        "paid": accrual["paid"],
-                        "denied": accrual["denied"],
-                        "children": children,
-                        "descendant_count": count_descendants(children),
-                    }
-                )
-
-            return tree
-
-        referral_tree = build_tree(address, 1, 5)
-
-        def count_all(nodes):
-            total = len(nodes)
-            for n in nodes:
-                total += count_all(n.get("children", []))
-            return total
-
-        def sum_tree_amounts(nodes):
-            pending = 0.0
-            paid = 0.0
-            for n in nodes:
-                pending += n.get("pending", 0.0)
-                paid += n.get("paid", 0.0)
-                child_pending, child_paid = sum_tree_amounts(n.get("children", []))
-                pending += child_pending
-                paid += child_paid
-            return pending, paid
-
-        total_referrals = count_all(referral_tree)
-        tree_pending, tree_paid = sum_tree_amounts(referral_tree)
-
-        result = {
-            "pending_total": tree_pending,
-            "paid_total": tree_paid,
-            "total_referrals": total_referrals,
-            "referral_tree": referral_tree,
-            "referred_by": referred_by,
-            "last_update_ts": last_run_ts,
-            "next_update_ts": next_update_ts,
-        }
-        log_event(rid, "referral.stats.ok", total_referrals=total_referrals)
-        return jsonify(result)
-    except Exception as e:
-        log_event(rid, "referral.stats.err", error=str(e))
         return safe_error(e)
 
 

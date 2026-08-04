@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
 import { signPlainPayload } from "../utils/signPlain";
+import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
 export const AWARD_LABELS = {
     quality_post: 'Quality Post',
     original_content: 'Original Content',
@@ -34,6 +35,7 @@ export function useInbox({
     const [activeReplyId, setActiveReplyId] = useState('');
     const isMountedRef = useRef(true);
     const fetchRequestRef = useRef(0);
+    const bootstrapInboxTriedRef = useRef(false);
     const badgeCountRef = useRef((() => {
         try {
             return Math.max(0, parseInt(localStorage.getItem('inbox_count'), 10) || 0);
@@ -75,6 +77,46 @@ export function useInbox({
             window.removeEventListener('inboxCount', handler);
         };
     }, []);
+
+    const applyInboxPage = useCallback((res, {
+        requestId,
+        requestAddress,
+        append
+    }) => {
+        if (!isMountedRef.current || fetchRequestRef.current !== requestId) return false;
+        if (!res || !Array.isArray(res.replies)) {
+            setError('Invalid response from server');
+            return false;
+        }
+        if (append) {
+            setReplies(prev => [...prev, ...res.replies]);
+        } else {
+            setReplies(res.replies);
+            signPlainPayload((ts, n) => `mark_inbox_viewed:${requestAddress.toLowerCase()}:${ts}:${n}`).then(sig => {
+                console.debug("[Inbox] mark_inbox_viewed send", {
+                    address: requestAddress
+                });
+                if (!isMountedRef.current || fetchRequestRef.current !== requestId) return null;
+                return Api.post('mark_inbox_viewed', {
+                    address: requestAddress,
+                    ...sig
+                });
+            }).then(res => {
+                if (!isMountedRef.current || fetchRequestRef.current !== requestId) return;
+                if (res && typeof res.inbox_last_viewed_at === 'number') {
+                    persistInboxLastViewed(res.inbox_last_viewed_at);
+                }
+            }).catch(err => {
+                console.error("[Inbox] mark_inbox_viewed failed", err);
+            });
+            // Clear badge immediately — don't wait for next API response
+            setBadgeCount(0);
+        }
+        setHasMoreReplies(res.has_more || false);
+        setError('');
+        return true;
+    }, [persistInboxLastViewed, setBadgeCount]);
+
     const fetchInbox = useCallback(async (page = 1, append = false) => {
         if (!viewerAddress) {
             setLoading(false);
@@ -90,42 +132,41 @@ export function useInbox({
             } else {
                 setIsLoadingMore(true);
             }
+
+            // First page cold-start: prefer bootstrap_view inbox stash.
+            if (page === 1 && !append && !bootstrapInboxTriedRef.current) {
+                bootstrapInboxTriedRef.current = true;
+                try {
+                    const stashed = await peekBootstrapStashAfterBootstrap('bootstrap_view', viewerAddress);
+                    if (
+                        stashed
+                        && stashed.kind === 'inbox'
+                        && Array.isArray(stashed.replies)
+                    ) {
+                        readBootstrapStash('bootstrap_view', viewerAddress);
+                        console.debug('[Inbox] bootstrap stash hit', {
+                            replies: stashed.replies.length,
+                            has_more: !!stashed.has_more,
+                        });
+                        if (applyInboxPage(stashed, { requestId, requestAddress, append: false })) {
+                            return;
+                        }
+                    }
+                } catch (_) { /* fall through to get_inbox */ }
+            }
+
+            // Independent fetch: drop late launch stash so it cannot override
+            // a later inbox mount within the stash TTL.
+            if (page === 1 && !append) {
+                try { Storage.remove('bootstrap_view'); } catch (_) { }
+            }
+
             const res = await Api.get('get_inbox', {
                 address: viewerAddress,
                 page,
                 limit: 25
             });
-            if (!isMountedRef.current || fetchRequestRef.current !== requestId) return;
-            if (res && Array.isArray(res.replies)) {
-                if (append) {
-                    setReplies(prev => [...prev, ...res.replies]);
-                } else {
-                    setReplies(res.replies);
-                    signPlainPayload((ts, n) => `mark_inbox_viewed:${requestAddress.toLowerCase()}:${ts}:${n}`).then(sig => {
-                        console.debug("[Inbox] mark_inbox_viewed send", {
-                            address: requestAddress
-                        });
-                        if (!isMountedRef.current || fetchRequestRef.current !== requestId) return null;
-                        return Api.post('mark_inbox_viewed', {
-                            address: requestAddress,
-                            ...sig
-                        });
-                    }).then(res => {
-                        if (!isMountedRef.current || fetchRequestRef.current !== requestId) return;
-                        if (res && typeof res.inbox_last_viewed_at === 'number') {
-                            persistInboxLastViewed(res.inbox_last_viewed_at);
-                        }
-                    }).catch(err => {
-                        console.error("[Inbox] mark_inbox_viewed failed", err);
-                    });
-                    // Clear badge immediately — don't wait for next API response
-                    setBadgeCount(0);
-                }
-                setHasMoreReplies(res.has_more || false);
-                setError('');
-            } else {
-                setError('Invalid response from server');
-            }
+            applyInboxPage(res, { requestId, requestAddress, append });
         } catch (e) {
             if (!isMountedRef.current) return;
             setError(String(e && e.message ? e.message : 'Failed to load inbox'));
@@ -134,7 +175,7 @@ export function useInbox({
             setLoading(false);
             setIsLoadingMore(false);
         }
-    }, [viewerAddress, persistInboxLastViewed, setBadgeCount]);
+    }, [viewerAddress, applyInboxPage]);
     useEffect(() => {
         fetchInbox(1, false);
     }, [fetchInbox]);
@@ -201,6 +242,12 @@ export function useInbox({
         // Use new clean URL with depth=1 to show reply with immediate parent context
         navigate(`/p/${reply.reply_id}?depth=1`);
     };
+    const handleReplyPointerDown = useCallback((reply) => {
+        if (!reply?.reply_id || !viewerAddress) return;
+        if (reply.type === 'follow' || reply.type === 'donation' || reply.type === 'subscription_gift') return;
+        console.debug('[Inbox] prefetch get_comments', { post_id: reply.reply_id });
+        Api.prefetch('get_comments', { post_id: reply.reply_id, address: viewerAddress });
+    }, [viewerAddress]);
     const shortenAddress = addr => {
         if (!addr) return '';
         return `${addr.slice(0, 10)}…${addr.slice(-4)}`;
@@ -224,6 +271,7 @@ export function useInbox({
         handleMarkAllAsRead,
         handleMarkOneAsRead,
         handleReplyClick,
+        handleReplyPointerDown,
         shortenAddress,
         viewedReplyIds,
         unreadCount,

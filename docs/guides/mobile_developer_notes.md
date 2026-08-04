@@ -79,7 +79,10 @@ POST /api/upload_media          (multipart/form-data)
 200 -> { url, asset_id, kind }
 ```
 
-The old `POST /api/get_upload_url` (the Cloudflare browser-direct-upload shape) is a **deprecated legacy shim that will be removed after 2026-08**. It only exists so old app builds keep working during the storage cutover. New mobile builds must use `/api/upload_media`.
+The old `POST /api/get_upload_url` (Cloudflare browser-direct-upload shape) has
+been **removed**. Use `POST /api/upload_media` only. See
+[`mobile_instant_load.md`](./mobile_instant_load.md) for the one-call cold
+start and thread `ancestors` contract.
 
 ### Uploads can be disabled per node
 
@@ -155,6 +158,19 @@ Downloads are resolved entirely client-side from the post's media URL — there 
 - `.gifv` → swap the extension to `.mp4`.
 - Direct image/video files (including `imagedelivery.net` images) → download the URL as-is.
 - YouTube, bare HLS `.m3u8` manifests, and other non-direct sources have no download and should be skipped (no download affordance).
+
+## Profile follow counts (v1.30.0)
+
+When a profile screen opens, `GET /api/get_profile?address=<addr>` returns two
+additive integers alongside the existing profile fields:
+
+- `following_count` — how many users this account follows
+- `follower_count` — how many users follow this account
+
+Show both in the profile header / about section (web already does). Do not
+infer followers from the `followed_users` list — that list is the account's
+outgoing follows only. Counts are always present (including `0` when the
+profile row is missing). Older builds that ignore unknown keys keep working.
 
 ## Referral rewards removed (v1.29.0)
 

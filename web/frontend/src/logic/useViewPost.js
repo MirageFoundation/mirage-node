@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { useTheme } from "styled-components";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as tx from "../utils/tx.js";
@@ -18,6 +18,7 @@ import { requireThemeColor } from "../utils/themeColor";
 import { requireAccount } from "../utils/openBrowsing";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
+import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
 export const pickCard = requireThemeColor;
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
@@ -113,10 +114,10 @@ export function useViewPost({
     const [reportMessages, setReportMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [error, setError] = useState(null);
     const [shareMessages, setShareMessages] = useState({}); // { postId: { type: 'success', message } }
-    const [showContext, setShowContext] = useState(false);
-    const [contextComments, setContextComments] = useState([]);
-    // When viewing a comment, store the actual root post (for display at top)
-    const [actualRootPost, setActualRootPost] = useState(null);
+    // Ancestor chain from get_comments (root-first, ending at immediate parent)
+    const [ancestors, setAncestors] = useState([]);
+    const [ancestorsOmitted, setAncestorsOmitted] = useState(0);
+    const [lastVisitTs, setLastVisitTs] = useState(null);
     // Card size state to match feed view mode (compact or large)
     const [cardSize, setCardSize] = useState(() => {
         try {
@@ -2108,9 +2109,17 @@ export function useViewPost({
                                     post_id: postId,
                                     address: viewerAddress
                                 });
-                                if (data) {
+                                if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
+                                    try { Api.invalidate('get_comments'); } catch (_) { }
                                     setRoot(data.root);
-                                    setChildren(data.children);
+                                    setChildren(data.children || []);
+                                    setAncestors(data.ancestors);
+                                    setAncestorsOmitted(Number(data.ancestors_omitted) || 0);
+                                } else if (data) {
+                                    console.error('[ViewPostView] post-submit get_comments missing ancestors', {
+                                        postId,
+                                        keys: Object.keys(data),
+                                    });
                                 }
                             }
                         } catch (_) { }
@@ -2191,8 +2200,209 @@ export function useViewPost({
     }, [location.search]);
     const postId = routeParams.postId || null;
 
+    // depth is render-only: slice the already-fetched ancestor chain
+    const visibleAncestors = React.useMemo(() => {
+        if (!ancestors.length) return [];
+        if (depthParam === null || depthParam === 'invalid') return ancestors;
+        if (depthParam === 0) return ancestors.slice(0, 1);
+        const [op, ...parents] = ancestors;
+        return [op, ...parents.slice(-depthParam)];
+    }, [ancestors, depthParam]);
+
     useEffect(() => {
         if (postId) markPostOpened(postId);
+    }, [postId]);
+
+    const commentsRequestRef = useRef(0);
+    const commentsAutoOpenTimersRef = useRef(new Set());
+    useEffect(() => {
+        const autoOpenTimeouts = commentsAutoOpenTimersRef.current;
+        const post_id = postId;
+        const requestId = commentsRequestRef.current + 1;
+        commentsRequestRef.current = requestId;
+        let cancelled = false;
+        setLoading(true);
+        setError(null);
+        setRoot({});
+        setChildren([]);
+        setAncestors([]);
+        setAncestorsOmitted(0);
+        setLastVisitTs(null);
+        if (!post_id) {
+            setLoading(false);
+            return () => {
+                cancelled = true;
+                autoOpenTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+                autoOpenTimeouts.clear();
+            };
+        }
+
+        const applyCommentsData = (data) => {
+            if (cancelled || commentsRequestRef.current !== requestId) return;
+            // Web hard-requires ancestors (ships with backend). Soft `|| []`
+            // would hide a missing-field regression as an empty chain.
+            if (!data || !data.root || !Array.isArray(data.children)) {
+                setLoading(false);
+                setError('Thread response is incomplete');
+                console.error('[ViewPostView] get_comments incomplete payload', {
+                    postId: post_id,
+                    hasRoot: !!(data && data.root),
+                    childrenType: data && data.children != null ? typeof data.children : 'missing',
+                });
+                return;
+            }
+            if (!Array.isArray(data.ancestors) || !('ancestors_omitted' in data)) {
+                setLoading(false);
+                setError('Thread response missing ancestors');
+                console.error('[ViewPostView] get_comments missing ancestors fields', {
+                    postId: post_id,
+                    keys: data ? Object.keys(data) : [],
+                });
+                return;
+            }
+            setLoading(false);
+            setRoot(data.root);
+            setChildren(data.children);
+            const nextAncestors = data.ancestors;
+            const nextOmitted = Number(data.ancestors_omitted) || 0;
+            setAncestors(nextAncestors);
+            setAncestorsOmitted(nextOmitted);
+            console.debug('[ViewPostView] Applied ancestors from comments', {
+                postId: post_id,
+                ancestors: nextAncestors.length,
+                ancestors_omitted: nextOmitted,
+                source: data.__bootstrap ? 'bootstrap' : 'get_comments',
+            });
+            Storage.removeOptimisticPost(post_id);
+            try {
+                const f = tx && tx['reconcileAfterCommentsFetch'];
+                if (typeof f === 'function') f(post_id, data.root, data.children);
+            } catch (_) { }
+            // Mark current comment count as visited
+            if (data.root && data.root.comments !== undefined) {
+                try {
+                    Storage.setLastVisitCommentCount(post_id, data.root.comments);
+                } catch (_) { }
+            }
+            // Capture previous visit timestamp for highlight, then set new visit time
+            try {
+                const prevTs = Storage.getLastVisitTimestamp(post_id);
+                if (prevTs !== null && !isNaN(Number(prevTs))) setLastVisitTs(Number(prevTs));
+            } catch (_) {
+                setLastVisitTs(null);
+            }
+            // Mark visit timestamp after capturing previous, for highlighting
+            try {
+                const nowSec = Math.floor(Date.now() / 1000);
+                Storage.setLastVisitTimestamp(post_id, nowSec);
+            } catch (_) { }
+            // Auto-open edit if edit query parameter is present and user owns the post
+            const params = new URLSearchParams(location.search);
+            const shouldEdit = params.get('edit') === 'true';
+            if (shouldEdit && data.root) {
+                const currentUserAddress = state && state.publicKey ? String(state.publicKey).trim().toLowerCase() : Storage.load('publicKey', '').trim().toLowerCase();
+                const postAuthorAddress = data.root && data.root.user_id ? String(data.root.user_id).trim().toLowerCase() : '';
+                const isAuthor = currentUserAddress && postAuthorAddress && currentUserAddress === postAuthorAddress;
+                if (isAuthor) {
+                    // Small delay to ensure state is updated
+                    const timeoutId = setTimeout(() => {
+                        autoOpenTimeouts.delete(timeoutId);
+                        if (cancelled || commentsRequestRef.current !== requestId) return;
+                        openEdit(data.root);
+                    }, 100);
+                    autoOpenTimeouts.add(timeoutId);
+                }
+            }
+            // Auto-open donate dialog if donate query parameter is present
+            const shouldDonate = params.get('donate') === 'true';
+            if (shouldDonate && data.root && data.root.user_id) {
+                const timeoutId = setTimeout(() => {
+                    autoOpenTimeouts.delete(timeoutId);
+                    if (cancelled || commentsRequestRef.current !== requestId) return;
+                    setConfirmDonate(data.root.user_id);
+                }, 100);
+                autoOpenTimeouts.add(timeoutId);
+            }
+            // Do not auto-open reply; user explicitly opens when needed
+        };
+
+        const viewerAddress = Storage.load("publicKey", "");
+        (async () => {
+            try {
+                const stashed = await peekBootstrapStashAfterBootstrap(
+                    'bootstrap_view',
+                    viewerAddress || null,
+                );
+                if (cancelled || commentsRequestRef.current !== requestId) return;
+                const rootId = stashed && stashed.root && stashed.root.post_id
+                    ? String(stashed.root.post_id).toLowerCase()
+                    : '';
+                if (
+                    stashed
+                    && stashed.kind === 'thread'
+                    && stashed.found !== false
+                    && rootId
+                    && rootId === String(post_id).toLowerCase()
+                ) {
+                    readBootstrapStash('bootstrap_view', viewerAddress || null);
+                    console.debug('[Bootstrap] thread stash hit', { postId: post_id });
+                    applyCommentsData({ ...stashed, __bootstrap: true });
+                    return;
+                }
+            } catch (_) { /* fall through */ }
+
+            if (cancelled || commentsRequestRef.current !== requestId) return;
+            // Independent fetch: drop late launch stash so it cannot override
+            // a later navigation to the same route within the stash TTL.
+            try { Storage.remove('bootstrap_view'); } catch (_) { }
+            Api.get('get_comments', {
+                post_id,
+                address: viewerAddress
+            }).then(data => {
+                applyCommentsData(data);
+            }).catch(error => {
+                if (cancelled || commentsRequestRef.current !== requestId) return;
+                setLoading(false);
+                let errorMessage = "An unknown error occurred";
+                const msg = error && error.message ? String(error.message) : "";
+                if (/HTTP\s*404/i.test(msg)) {
+                    const optimistic = Storage.getOptimisticPost(post_id);
+                    if (optimistic) {
+                        setError(null);
+                        setRoot(optimistic);
+                        setChildren([]);
+                        return;
+                    }
+                }
+                if (/HTTP\s*404/i.test(msg)) {
+                    errorMessage = <span>
+                        <br />&nbsp;
+                        <strong>No post with id:</strong><br />
+                        <span style={{
+                            fontSize: '0.6rem'
+                        }}>{post_id}</span>
+                        <br />
+                        <br />
+                        <span style={{
+                            fontSize: '0.75rem'
+                        }}>
+                            Try Again in ~10s; it may be still propagating across the network.
+                        </span>
+                        <br />&nbsp;
+                    </span>;
+                } else if (msg) {
+                    errorMessage = msg;
+                }
+                setError(errorMessage);
+            });
+        })();
+
+        return () => {
+            cancelled = true;
+            autoOpenTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+            autoOpenTimeouts.clear();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [postId]);
 
     useEffect(() => {
@@ -2200,13 +2410,22 @@ export function useViewPost({
         const normalizedPostId = String(postId).toLowerCase();
         let cancelled = false;
         const viewerAddress = Storage.load("publicKey", "");
-        const applyIndexedPost = (rootPost, childPosts) => {
+        const applyIndexedPost = (rootPost, childPosts, nextAncestors, nextOmitted) => {
             if (cancelled || !rootPost || !rootPost.post_id) return;
             const rootId = String(rootPost.post_id).toLowerCase();
             if (rootId !== normalizedPostId) return;
+            if (!Array.isArray(nextAncestors) || nextOmitted === undefined || nextOmitted === null) {
+                console.error('[ViewPostView] indexed post missing ancestors', {
+                    postId: normalizedPostId,
+                    ancestorsType: nextAncestors == null ? 'missing' : typeof nextAncestors,
+                });
+                return;
+            }
             Storage.removeOptimisticPost(normalizedPostId);
             setRoot(rootPost);
             setChildren(Array.isArray(childPosts) ? childPosts : []);
+            setAncestors(nextAncestors);
+            setAncestorsOmitted(Number(nextOmitted) || 0);
             setError(null);
             setLoading(false);
         };
@@ -2214,7 +2433,7 @@ export function useViewPost({
             const detail = e?.detail || {};
             const eventPostId = String(detail.postId || detail.root?.post_id || '').toLowerCase();
             if (eventPostId !== normalizedPostId) return;
-            applyIndexedPost(detail.root, detail.children || []);
+            applyIndexedPost(detail.root, detail.children || [], detail.ancestors, detail.ancestors_omitted);
         };
         const handleRejected = e => {
             const detail = e?.detail || {};
@@ -2251,7 +2470,12 @@ export function useViewPost({
                             address: viewerAddress
                         });
                         if (data && data.root && data.root.post_id) {
-                            applyIndexedPost(data.root, data.children || []);
+                            applyIndexedPost(
+                                data.root,
+                                data.children || [],
+                                data.ancestors,
+                                data.ancestors_omitted,
+                            );
                             return;
                         }
                     } catch (err) {
@@ -2298,7 +2522,6 @@ export function useViewPost({
         }
         return (root.post_id || '').toLowerCase();
     }, [root, isViewingComment]);
-    const [lastVisitTs, setLastVisitTs] = useState(null);
 
     // Consume highlight ID once - use module cache to survive React Strict Mode
     const [highlightPostId] = useState(() => {
@@ -2396,52 +2619,6 @@ export function useViewPost({
             } catch (_) { }
         }, 1500);
     }, [normalizedHighlightId, root, children, updatePost]);
-    // When in focused view, fetch the focused comment's children separately
-    // This ensures we get 6 levels of children from the focused comment, not limited by its depth from root
-    useEffect(() => {
-        if (!focusedCommentId || !root) return;
-        const viewerAddress = Storage.load("publicKey", "");
-        Api.get('get_comments', {
-            post_id: focusedCommentId,
-            address: viewerAddress
-        }).then(data => {
-            if (data && data.root && data.children) {
-                // Store the focused comment's children in state so they can be merged
-                try {
-                    updatePost(focusedCommentId, {
-                        children: data.children
-                    });
-                } catch (_) { }
-            }
-        }).catch(err => {
-            console.error('[ViewPostView] Failed to load focused comment children:', err);
-        });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [focusedCommentId, root]);
-
-    // When viewing a comment via /p/:commentId, also load the actual root post for display
-    useEffect(() => {
-        if (!isViewingComment || !actualRootPostId) {
-            setActualRootPost(null);
-            return;
-        }
-        // Don't reload if we already have it
-        if (actualRootPost && actualRootPost.post_id && actualRootPost.post_id.toLowerCase() === actualRootPostId) {
-            return;
-        }
-        const viewerAddress = Storage.load("publicKey", "");
-        Api.get('get_comments', {
-            post_id: actualRootPostId,
-            address: viewerAddress
-        }).then(data => {
-            if (data && data.root) {
-                setActualRootPost(data.root);
-            }
-        }).catch(err => {
-            console.error('[ViewPostView] Failed to load actual root post:', err);
-        });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isViewingComment, actualRootPostId]);
 
     // Flatten comments: root is level 0; replies increment level
     const flattenedComments = React.useMemo(() => {
@@ -2474,112 +2651,29 @@ export function useViewPost({
             });
         };
 
-        // When viewing a comment via /p/:commentId, always show actual root post at top
+        // When viewing a comment via /p/:commentId, stitch ancestors + focused + children
         if (isViewingComment) {
             const out = [];
             let nextLevel = 0;
-            // Add actual root post if loaded; if not yet loaded, skip it (it will appear once loaded)
-            if (actualRootPost && actualRootPost.post_id) {
-                out.push({
-                    ...actualRootPost,
-                    level: 0
-                });
-                nextLevel = 1;
-            }
-            // Add context comments (parent chain) if loaded
-            if (showContext && contextComments.length > 0) {
-                const rootPostId = actualRootPost?.post_id?.toLowerCase() || '';
-                const filteredContext = contextComments.filter(c => {
-                    const contextPostId = c && c.post_id ? String(c.post_id).toLowerCase() : '';
-                    return contextPostId !== rootPostId;
-                });
-                filteredContext.forEach(c => {
-                    // Mark as context comment so "Continue this thread" doesn't show
-                    out.push({
-                        ...c,
-                        children: [],
-                        level: nextLevel,
-                        isContextComment: true
-                    });
-                    nextLevel++;
-                });
-            }
-            // Add the focused comment (which is `root` in this case - the loaded comment)
-            out.push({
-                ...root,
-                level: nextLevel
+            visibleAncestors.forEach(a => {
+                out.push({ ...a, children: [], level: nextLevel, isContextComment: nextLevel > 0 });
+                nextLevel++;
             });
-            // Add focused comment's children
+            out.push({ ...root, level: nextLevel });
             const focusedChildren = mergeChildren(root, children);
-            if (focusedChildren && focusedChildren.length) {
-                walk(focusedChildren, nextLevel + 1, out);
-            }
+            if (focusedChildren.length) walk(focusedChildren, nextLevel + 1, out);
             return out;
         }
 
-        // Normal view (viewing a root post, or a focused comment flow)
+        // Normal view (root post)
         const out = [{
             ...root,
             level: 0
         }];
         const base = mergeChildren(root, children);
-        if (focusedCommentId && !isViewingComment) {
-            // Focused comment view for non-root comment targets
-            const lcTarget = String(focusedCommentId).toLowerCase();
-            const findInMerged = nodes => {
-                if (!Array.isArray(nodes)) return null;
-                for (const n of nodes) {
-                    if (!n || !n.post_id) continue;
-                    if (String(n.post_id).toLowerCase() === lcTarget) return n;
-                    const next = mergeChildren(n, n.children);
-                    const found = findInMerged(next);
-                    if (found) return found;
-                }
-                return null;
-            };
-            const targetNode = findInMerged(base);
-            if (targetNode) {
-                if (showContext && contextComments.length > 0) {
-                    const rootPostId = root && root.post_id ? String(root.post_id).toLowerCase() : '';
-                    const filteredContext = contextComments.filter(c => {
-                        const contextPostId = c && c.post_id ? String(c.post_id).toLowerCase() : '';
-                        return contextPostId !== rootPostId;
-                    });
-                    const contextDepth = filteredContext.length;
-                    filteredContext.forEach((c, idx) => {
-                        // Mark as context comment so "Continue this thread" doesn't show
-                        const contextNode = {
-                            ...c,
-                            children: [],
-                            isContextComment: true
-                        };
-                        out.push({
-                            ...contextNode,
-                            level: idx + 1
-                        });
-                    });
-                    const focusedWithLevel = {
-                        ...targetNode
-                    };
-                    out.push({
-                        ...focusedWithLevel,
-                        level: contextDepth + 1
-                    });
-                    const focusedChildren = mergeChildren(targetNode, targetNode.children);
-                    if (focusedChildren && focusedChildren.length) {
-                        walk(focusedChildren, contextDepth + 2, out);
-                    }
-                } else {
-                    walk([targetNode], 1, out);
-                }
-                return out;
-            }
-            // If target not found, fall back to showing nothing under root
-            return out;
-        }
         walk(base, 1, out);
         return out;
-    }, [root, children, state.posts, focusedCommentId, showContext, contextComments, viewerAddress, isViewingComment, actualRootPost]);
+    }, [root, children, state.posts, viewerAddress, isViewingComment, visibleAncestors]);
 
     // Compute visibility/collapsed per comment using ancestor stack
     const annotated = React.useMemo(() => {
@@ -2625,29 +2719,18 @@ export function useViewPost({
         return out;
     }, [flattenedComments, state.posts, lastVisitTs]);
 
-    // Scroll to focused comment — debounced so it waits for all context (actualRootPost,
-    // parent chain) to finish loading before firing. Each time `annotated` changes (new data
-    // loads above the target), the timer resets. Once stable for 300ms, we scroll once.
-    const scrollToFocusedTimer = React.useRef(null);
+    // Scroll to focused comment once the thread (including ancestors) is painted
     const scrollToFocusedDone = React.useRef(false);
     useEffect(() => {
-        if (!focusedCommentId || scrollToFocusedDone.current) return;
-        if (scrollToFocusedTimer.current) clearTimeout(scrollToFocusedTimer.current);
-        const targetId = `comment-${focusedCommentId.toLowerCase()}`;
-        scrollToFocusedTimer.current = setTimeout(() => {
-            const el = document.getElementById(targetId);
-            if (el) {
-                el.scrollIntoView({
-                    block: 'start',
-                    behavior: 'instant'
-                });
-                scrollToFocusedDone.current = true;
-            }
-        }, 300);
-        return () => {
-            if (scrollToFocusedTimer.current) clearTimeout(scrollToFocusedTimer.current);
-        };
-    }, [annotated, focusedCommentId]);
+        scrollToFocusedDone.current = false;
+    }, [postId]);
+    useLayoutEffect(() => {
+        if (!focusedCommentId || loading || scrollToFocusedDone.current) return;
+        const el = document.getElementById(`comment-${focusedCommentId.toLowerCase()}`);
+        if (!el) return;
+        el.scrollIntoView({ block: 'start', behavior: 'instant' });
+        scrollToFocusedDone.current = true;
+    }, [loading, focusedCommentId, annotated]);
 
     // Scroll to hash-linked comment (non-focused, e.g. direct #comment-xxx link)
     const hasScrolledToHash = React.useRef(false);
@@ -2669,38 +2752,6 @@ export function useViewPost({
             }
         } catch (_) { }
     }, [annotated, focusedCommentId]);
-    const handleShowContext = async (maxDepth = 5, commentIdOverride = null) => {
-        const targetCommentId = commentIdOverride || focusedCommentId;
-        if (!targetCommentId) return;
-        try {
-            const params = {
-                comment_id: targetCommentId,
-                max_depth: Math.min(maxDepth, 5)
-            };
-            if (state.publicKey) params.address = state.publicKey;
-            const res = await Api.get('get_comment_context', params);
-            if (res && Array.isArray(res.context)) {
-                setContextComments(res.context.reverse());
-                setShowContext(true);
-            }
-        } catch (err) {
-            console.error('[ViewPostView] Failed to load context:', err);
-        }
-    };
-
-    // Auto-load context when depth param is provided via URL
-    const hasAutoLoadedContextRef = useRef(false);
-    useEffect(() => {
-        if (hasAutoLoadedContextRef.current) return;
-        if (!focusedCommentId) return;
-        if (depthParam === null || depthParam === 'invalid') return;
-        if (depthParam > 0) {
-            hasAutoLoadedContextRef.current = true;
-            // Pass focusedCommentId directly to avoid closure issues
-            handleShowContext(depthParam, focusedCommentId);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [focusedCommentId, depthParam]);
 
     // Mark reply as viewed when navigating to it via hash or focusedCommentId
     useEffect(() => {
@@ -2763,8 +2814,9 @@ export function useViewPost({
         setError,
         shareMessages,
         setShareMessages,
-        showContext,
-        actualRootPost,
+        ancestorsOmitted,
+        setAncestors,
+        setAncestorsOmitted,
         cardSize,
         theme,
         location,

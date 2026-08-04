@@ -379,6 +379,8 @@ export default function ProfileView({
         showAllSimilarUsers,
         setShowAllSimilarUsers,
         biography,
+        followingCount,
+        followerCount,
         bioEditing,
         setBioEditing,
         bioDraft,
@@ -681,6 +683,22 @@ export default function ProfileView({
                                 <Label>Registered:</Label>
                                 <ValueBox>
                                     <Mono>{registeredDisplay}</Mono>
+                                </ValueBox>
+                            </Row>
+                            <Row>
+                                <HoverableLabel tabIndex={0} data-tooltip={`How many users this account follows.`}>
+                                    Following:
+                                </HoverableLabel>
+                                <ValueBox>
+                                    <Mono>{followingCount == null ? '—' : followingCount}</Mono>
+                                </ValueBox>
+                            </Row>
+                            <Row>
+                                <HoverableLabel tabIndex={0} data-tooltip={`How many users follow this account.`}>
+                                    Followers:
+                                </HoverableLabel>
+                                <ValueBox>
+                                    <Mono>{followerCount == null ? '—' : followerCount}</Mono>
                                 </ValueBox>
                             </Row>
                             <Row>

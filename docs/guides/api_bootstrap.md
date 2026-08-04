@@ -4,9 +4,11 @@
 
 `GET /api/bootstrap` is a single combined endpoint that returns everything the
 mobile app needs for its first paint. Use it instead of fanning out separate
-calls to `get_node_config`, `get_user_status`, `get_user_followed`,
-`get_user_blocked`, `get_invite_codes`, and `/rewards/summary`. One round-trip
-replaces six.
+calls to `get_node_config`, `get_chain_config`, `get_user_status`,
+`get_user_followed`, `get_user_blocked`, `get_invite_codes`,
+`/rewards/summary`, and (with `view=`) the initial screen payload
+(`get_posts` / `get_comments` / `get_inbox`). One round-trip replaces the
+cold-start fan-out.
 
 **Why this exists:** The web client previously fired ~7 `/api/*` requests in the
 first ~50ms of a cold load and routinely tripped the production node's Caddy
@@ -16,10 +18,9 @@ mobile gives the same wins on cold app launch and after sign-in/sign-up.
 
 **Key rules:**
 
-- Bootstrap is **additive**. Every per-endpoint route (`/api/get_node_config`,
-  `/api/get_user_status`, …) stays live, returns the same shape, and is the
-  source of truth on demand. Bootstrap is just a "warm the caches in one shot"
-  optimization.
+- Bootstrap is **additive**. Every per-endpoint route stays live, returns the
+  same shape, and is the source of truth on demand. Bootstrap is just a
+  "warm the caches in one shot" optimization.
 - Any sub-section may be `null` if its sub-handler errored. Mobile MUST treat
   `null` as "fall through and call the per-endpoint route." Do not surface a
   user-facing error for a partial bootstrap.
@@ -27,64 +28,73 @@ mobile gives the same wins on cold app launch and after sign-in/sign-up.
 - The whole response is `503` if the node is catching up — same semantics as
   `/api/get_user_status` today. Retry with backoff.
 
+For UX rules (layout shift, notification prefetch bounds), see
+[`mobile_instant_load.md`](./mobile_instant_load.md).
+
 ## Endpoint Contract
 
 ```
 GET /api/bootstrap
 GET /api/bootstrap?address=<bech32>
+GET /api/bootstrap?address=<bech32>&view=feed:home&by=magic&allowed_tags=sensitive&limit=15
+GET /api/bootstrap?address=<bech32>&view=thread:<post_id>
+GET /api/bootstrap?address=<bech32>&view=inbox
 ```
 
-| Parameter | Type   | Required | Notes                                                             |
-| --------- | ------ | -------- | ----------------------------------------------------------------- |
-| `address` | string | no       | Active wallet address. Omit for anonymous app launches.           |
+| Parameter | Type | Required | Notes |
+| --------- | ---- | -------- | ----- |
+| `address` | string | no | Active wallet address. Omit for anonymous app launches. |
+| `view` | string | no | Initial screen: `feed:home`, `feed:following`, `topic:<name>`, `thread:<post_id>`, `inbox`. Absent → `"view": null`. |
+| `by` | string | no | Feed sort: `magic` (default) or `newest`. Only used with feed views. |
+| `allowed_tags` | string | no | Comma-separated tag allowlist (default `sensitive`). Only used with feed views. |
+| `limit` | int | no | Feed/inbox page size (default 15, max 100). |
 
-**Status codes:**
+**Status codes:** unchanged from before (200 / 503 / 5xx).
 
-| Code | Meaning                                                                                                  |
-| ---- | -------------------------------------------------------------------------------------------------------- |
-| 200  | Success. Per-section nulls indicate sub-handler failure — fall through to the per-endpoint route.        |
-| 503  | `node_catching_up`. The node hasn't caught up to the chain yet. Retry with the same backoff as today.    |
-| 5xx  | Treat as full failure: skip the optimization and let the per-endpoint hooks fire on their own.            |
-
-The response body always has the **same six top-level keys**, even on the
-anonymous variant. `node_config` is non-null whenever the request succeeds;
-the five `user_*` / `*_summary` keys are non-null only when `address` is
-supplied AND that section's sub-handler succeeded.
+The response body always has these top-level keys:
 
 ```json
 {
   "node_config":     { ... } | null,
+  "chain_config":    { ... } | null,
   "user_status":     { ... } | null,
   "user_followed":   { ... } | null,
   "user_blocked":    { ... } | null,
   "invite_codes":    { ... } | null,
-  "rewards_summary": { ... } | null
+  "rewards_summary": { ... } | null,
+  "view":            { ... } | null
 }
 ```
+
+### `view` shapes
+
+```json
+{ "kind": "feed", "feed": "home", "posts": [...], "total": N, "page": 1, "limit": 15, "has_more": true }
+{ "kind": "feed", "topic": "mirage", "posts": [...], "total": N, "page": 1, "limit": 15, "has_more": true }
+{ "kind": "thread", "found": true, "root": {...}, "children": [...], "ancestors": [...], "ancestors_omitted": 0 }
+{ "kind": "thread", "found": false }
+{ "kind": "inbox", "replies": [...], "total": N, "page": 1, "limit": 25, "has_more": false }
+```
+
+`get_comments` also returns `ancestors` / `ancestors_omitted` on every call
+(root-first, immediate parent last; empty for root posts).
 
 ## When to Call
 
 Call **once** at each of these moments:
 
-1. **Cold app launch** — right after the splash, before the home feed
-   request. If a logged-in `address` is in secure storage, pass it; otherwise
-   omit.
+1. **Cold app launch** — right after the splash, with `view=` set from the
+   launch intent (see [`mobile_instant_load.md`](./mobile_instant_load.md)).
 2. **Sign-in / sign-up / wallet switch** — immediately after the new
-   `address` is persisted, with that address as the query param.
+   `address` is persisted.
 3. **Sign-out** — call once with no `address` so you re-prime `node_config`
    for the now-anonymous session.
 
-Do **NOT** call on:
+Do **NOT** call on background refresh, pull-to-refresh, tab change, or
+foreground-from-background.
 
-- Background refresh
-- Pull-to-refresh on the feed (call `get_posts` directly)
-- Tab/screen change
-- Foreground from background (rely on per-screen refresh instead — bootstrap
-  is for cold starts, not session continuity)
-
-A typical mobile cold launch should issue exactly two `/api/*` requests:
-**`bootstrap` + `get_posts`**. Search trending topics, agents, profile
-detail, etc. all stay lazy and load when their surface mounts.
+A typical mobile cold launch should issue exactly **one** `/api/*` request:
+**`bootstrap` with `view=`**. Search trending, profile detail, etc. stay lazy.
 
 ## What to Do With Each Section
 
@@ -93,6 +103,13 @@ already parse for `/api/get_node_config`, `/api/get_user_status`, etc. The
 only difference is that bootstrap **omits the `balance` field** that the
 per-endpoint routes inject as a convenience (it's already inside
 `user_status.balance`, so duplicating it would be wasted bytes).
+
+### `chain_config`
+
+- **Source of truth:** same as `GET /api/get_chain_config`.
+- **Cache:** 4h. Governance params change rarely.
+- **Drives:** tier limits, award configs, username/topic size bounds,
+  subscription period.
 
 ### `node_config`
 
@@ -168,11 +185,13 @@ between explicit refreshes.
 | Section            | Server cache | Client cache  | Invalidate when                                                 |
 | ------------------ | ------------ | ------------- | --------------------------------------------------------------- |
 | `node_config`      | 24h          | 24h           | Node/validator URL changed                                      |
+| `chain_config`     | 24h          | 4h            | Governance param change (rare)                                  |
 | `user_status`      | none         | session       | Post, vote, claim, gift, subscribe, renew, balance-affecting tx |
 | `user_followed`    | none         | 24h           | Follow / unfollow user or topic, agent enable/disable/reorder   |
 | `user_blocked`     | none         | session       | Block / unblock user, post, or topic                            |
 | `invite_codes`     | none         | session       | Quest claim that granted codes; code redeemed                   |
 | `rewards_summary`  | none         | screen-driven | Rewards screen refresh; quest progress update; claim            |
+| `view`             | none         | first-paint only | Never persist across launches; screen owns refresh after mount |
 
 ## Fallback Rules
 
@@ -218,10 +237,23 @@ by bootstrap:
   minutes within the session. Don't preload on app launch.
 - **Discover topics** (`/topics` route) — already lazy; load on route entry
   and cache.
-- **Feed** (`GET /api/get_posts`) — driven by feed state (sort, page,
-  topic). Bootstrap does NOT include feed posts; keep your existing loader.
-- **Profile detail** (`/api/get_user_profile`) — load when a profile page
-  opens, not at app launch.
+- **Feed / thread / inbox** — prefer `view=` on bootstrap for cold start.
+  After first paint, use `get_posts` / `get_comments` / `get_inbox` for
+  refresh and pagination. `get_comments` now includes `ancestors`.
+- **Profile detail** (`/api/get_profile`) — load when a profile page
+  opens, not at app launch. Response includes `following_count` and
+  `follower_count` (see below).
+
+## Profile follow counts (v1.30.0)
+
+`GET /api/get_profile?address=<addr>` includes two additive integers:
+
+- `following_count` — how many users this account follows
+- `follower_count` — how many users follow this account
+
+Both are non-negative ints from indexed `COUNT`s on `followed_users`. Always
+present (including missing-profile responses, where both are `0`). Additive
+for older clients that ignore unknown keys.
 
 ## Example Responses
 

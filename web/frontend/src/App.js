@@ -9,6 +9,8 @@ import { captureFirstTouchAttribution } from './utils/visitorId';
 import AuthPromptModal from './components/AuthPromptModal';
 import * as tx from './utils/tx';
 import { seedFromBootstrap as seedProfileFromBootstrap } from './utils/ProfileCache';
+import { deriveBootstrapView } from './utils/bootstrapView';
+import { getAllowedTagsParam } from './utils/ContentTags';
 import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } from './registry/theme';
 
 import UnlockPrompt from './components/UnlockPrompt';
@@ -432,16 +434,12 @@ class App extends Component {
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
         // Single combined bootstrap fetch: replaces the cold-load fan-out of
-        // get_node_config + get_user_status + get_user_followed + get_user_blocked +
-        // get_invite_codes + /rewards/summary (one round-trip instead of six).
-        // Per-section nulls fall through to the existing per-endpoint fetches.
+        // get_node_config + get_chain_config + get_user_status + get_user_followed +
+        // get_user_blocked + get_invite_codes + /rewards/summary + the initial
+        // screen payload (feed/thread/inbox). Per-section nulls fall through
+        // to the existing per-endpoint fetches; chain_config falls back to
+        // _bootstrapChainConfig when missing from the response.
         try { this._bootstrapApp(); } catch (_) { }
-
-        // Fetch chain config in parallel with bootstrap and get_posts so it
-        // doesn't serialize behind the feed request. Retry up to 3 attempts
-        // with 1s, then 3s backoff; bail early if another path populates
-        // the cache between attempts.
-        try { this._bootstrapChainConfig(); } catch (_) { }
 
         // Add the "beforeunload" event listener
         window.addEventListener('beforeunload', this.handleBeforeUnload);
@@ -563,12 +561,39 @@ class App extends Component {
         }
     }
 
+    _resolveBootstrapPathname() {
+        // Mirror RouteTracker restoration: `/` may rewrite to last_route or /home
+        // AFTER componentDidMount, so bootstrap must target the post-restore path.
+        try {
+            let path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
+            path = String(path).split('?')[0] || '/';
+            if (path === '/') {
+                const lastRoute = Storage.load('last_route', null);
+                if (
+                    lastRoute &&
+                    typeof lastRoute === 'string' &&
+                    lastRoute !== '/' &&
+                    !excludedRoutes.some(route => lastRoute.startsWith(route)) &&
+                    restorableRoutePrefixes.some(route => lastRoute.startsWith(route))
+                ) {
+                    path = String(lastRoute).split('?')[0] || '/home';
+                } else {
+                    path = '/home';
+                }
+            }
+            return path;
+        } catch (_) {
+            return '/home';
+        }
+    }
+
     _bootstrapApp(attempt = 0) {
         // Combined first-paint fetch via /api/bootstrap. Distributes results into
         // the existing caches so consumer hooks see the data on their first effect.
-        // For logged-out users only node_config comes back; user_* sections are null.
-        // On failure, the per-endpoint hooks (useMain blocked-topics fetcher, useQuests
-        // fetchAll, etc.) keep their existing fetch logic and pick up the slack.
+        // For logged-out users only node_config/chain_config (+ optional view) come
+        // back; user_* sections are null. On failure, the per-endpoint hooks
+        // (useMain blocked-topics fetcher, useQuests fetchAll, etc.) keep their
+        // existing fetch logic and pick up the slack.
         const delays = [0, 1000, 3000, 7000];
         if (attempt >= delays.length) {
             // Out of retries: fire the same nodeConfigUpdated event the
@@ -580,23 +605,39 @@ class App extends Component {
 
         const run = () => {
             const pk = this.state.publicKey || Storage.load('publicKey', '');
+            const bootstrapPath = this._resolveBootstrapPathname();
+            const view = deriveBootstrapView(bootstrapPath);
 
             // If we already have a fresh nodeConfig in localStorage AND there's no
-            // logged-in user, there's nothing for bootstrap to do — skip the request
-            // entirely. (24h staleness matches the backend's server-side cache.)
+            // logged-in user AND no initial view to embed, there's nothing for
+            // bootstrap to do — skip the request entirely. (24h staleness matches
+            // the backend's server-side cache.)
             const nowMs = Date.now();
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
             const nodeConfigCached = Storage.load('nodeConfig', null);
             const hasFreshNodeConfig = !!(nodeConfigCached && typeof nodeConfigCached === 'object')
                 && nodeCachedAt && (nowMs - nodeCachedAt) <= 86_400_000;
-            if (!pk && hasFreshNodeConfig) {
-                console.debug('[App] bootstrap.skipped (anonymous + fresh node_config)');
+            if (!pk && hasFreshNodeConfig && !view) {
+                console.debug('[App] bootstrap.skipped (anonymous + fresh node_config + no view)');
+                // Reload clears chain_config_cached_at; still refresh chain config.
+                try { this._bootstrapChainConfig(); } catch (_) { }
                 return;
             }
 
-            console.debug('[App] bootstrap.fetch attempt', attempt + 1, 'logged_in:', !!pk);
+            const params = {};
+            if (pk) params.address = pk;
+            if (view) {
+                params.view = view;
+                let by = Storage.load('home_sort_mode', 'magic');
+                if (by !== 'magic' && by !== 'newest') by = 'magic';
+                params.by = by;
+                params.allowed_tags = getAllowedTagsParam();
+                params.limit = 15;
+            }
+
+            console.debug('[App] bootstrap.fetch attempt', attempt + 1, 'logged_in:', !!pk, 'view:', view || null, 'path:', bootstrapPath);
             const requestPk = pk || '';
-            const request = Api.get('bootstrap', pk ? { address: pk } : undefined)
+            const request = Api.get('bootstrap', Object.keys(params).length ? params : undefined)
                 .then((resp) => {
                     if (!resp || typeof resp !== 'object') {
                         this._bootstrapApp(attempt + 1);
@@ -609,6 +650,26 @@ class App extends Component {
                         // node_config came back null: fall through to the legacy
                         // retrying fetcher so home cards eventually populate.
                         try { this._bootstrapNodeConfig(); } catch (_) { }
+                    }
+
+                    if (resp.chain_config) {
+                        try { tx.cacheChainConfig(resp.chain_config); } catch (_) { }
+                    } else {
+                        // chain_config missing from bootstrap: fall back to the
+                        // standalone get_chain_config path.
+                        try { this._bootstrapChainConfig(); } catch (_) { }
+                    }
+
+                    const stashAt = Date.now();
+                    if (resp.view) {
+                        try {
+                            Storage.save('bootstrap_view', { data: resp.view, at: stashAt, pk: requestPk });
+                            console.debug('[Bootstrap] stashed view', {
+                                kind: resp.view.kind,
+                                feed: resp.view.feed,
+                                topic: resp.view.topic,
+                            });
+                        } catch (_) { }
                     }
 
                     if (pk) {
@@ -646,7 +707,6 @@ class App extends Component {
                         if (resp.user_followed) {
                             try { seedProfileFromBootstrap(pk, resp.user_followed); } catch (_) { }
                         }
-                        const stashAt = Date.now();
                         if (resp.user_blocked) {
                             try { Storage.save('bootstrap_user_blocked', { data: resp.user_blocked, at: stashAt, pk }); } catch (_) { }
                         }
@@ -728,14 +788,12 @@ class App extends Component {
         Storage.remove('bootstrap_user_blocked');
         Storage.remove('bootstrap_invite_codes');
         Storage.remove('bootstrap_rewards_summary');
+        Storage.remove('bootstrap_view');
 
-        // Fetch latest status on login: chain config in parallel + bootstrap
-        // for everything user-specific. Previously this issued separate
-        // get_user_status / get_node_config / etc. requests; bootstrap collapses
-        // them all into one round-trip and also seeds recent_votes / username.
+        // Fetch latest status on login via bootstrap (includes chain_config +
+        // user sections). chain_config falls back inside _bootstrapApp when null.
         try {
             if (publicKey) {
-                try { this._bootstrapChainConfig(); } catch (_) { }
                 try { this._bootstrapApp(); } catch (_) { }
             }
         } catch (e) {

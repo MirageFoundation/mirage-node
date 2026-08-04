@@ -5013,30 +5013,12 @@ class TransactionHandler {
                                                 const newVal = Number(prev) + 1;
                                                 Storage.setLastVisitCommentCount(rootId, newVal);
                                             } else {
-                                                // If no previous count, try to fetch current count from API for the ROOT post
-                                                // We can't rely on 'parent.comments' if parent is a comment, because that's the reply count of the comment, not the root.
+                                                // No previous count: use in-memory root if present.
                                                 try {
-                                                    // If we have the root post object in state, use it
-                                                    let currentRootCount = 0;
                                                     const rootPost = this.getPost ? this.getPost(rootId) : null;
                                                     if (rootPost && typeof rootPost.comments === 'number') {
-                                                        currentRootCount = rootPost.comments;
-                                                    } else {
-                                                        // Fetch root post to get accurate current count
-                                                        const p = await Api.get('get_post', { post_id: rootId }, { timeoutMs: 5000 });
-                                                        if (p && typeof p.comments === 'number') {
-                                                            currentRootCount = p.comments;
-                                                        }
+                                                        Storage.setLastVisitCommentCount(rootId, rootPost.comments + 1);
                                                     }
-                                                    // Set it to current + 1 (assuming our new comment isn't included in that count yet, OR set to count if it is?)
-                                                    // If we fetched from API, and API is fast, it might include our comment.
-                                                    // But safer to just ensure it's at least what we saw + 1.
-                                                    // Actually, simpler heuristic: if we just added a comment, we want to suppress "new".
-                                                    // Setting timestamp is the most important part for "new" highlight.
-                                                    // Setting count is for the "(+X new)" text.
-                                                    // Let's just set it to currentRootCount + 1.
-                                                    const newVal = currentRootCount + 1;
-                                                    Storage.setLastVisitCommentCount(rootId, newVal);
                                                 } catch (e) { }
                                             }
 

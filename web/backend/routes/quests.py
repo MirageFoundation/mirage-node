@@ -10,7 +10,6 @@ User endpoints:
 Admin endpoints (require level >= 100):
 - POST /api/admin/rewards/suspend: Suspend rewards for a user
 - POST /api/admin/rewards/unsuspend: Unsuspend a user
-- GET /api/admin/rewards/suspensions: List all suspended users
 
 Note: Reward stats moved to GET /api/get_stats?tab=rewards
       Reward history moved to GET /api/get_stats?tab=rewards_history
@@ -1004,64 +1003,6 @@ def admin_unsuspend_rewards():
         return safe_error(e)
 
 
-@quests_bp.route("/api/admin/rewards/suspensions", methods=["GET"])
-def admin_list_suspensions():
-    """List all currently suspended users (admin only, level >= 100).
-
-    Query params:
-    - admin: Admin address (required)
-    """
-    rid = next_request_id()
-    log_event(rid, "admin.suspensions.begin")
-
-    try:
-        admin = (request.args.get("admin") or "").strip().lower()
-
-        if not admin:
-            return jsonify({"error": "admin required"}), 400
-        update_user_last_seen(admin, source=request.path)
-
-        # Check admin level
-        admin_level = get_user_level(admin)
-        if admin_level < 100:
-            return api_error_code("unauthorized", 403)
-
-        ts = int(time.time())
-
-        # Get all active suspensions
-        with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT owner, suspended_until, suspended_by, reason, updated_at
-                    FROM reward_suspensions
-                    WHERE suspended_until > %s
-                    ORDER BY updated_at DESC
-                    """,
-                    (ts,),
-                )
-                rows = cur.fetchall()
-
-        suspensions = []
-        for row in rows:
-            suspensions.append(
-                {
-                    "owner": row[0],
-                    "suspended_until": row[1],
-                    "suspended_by": row[2],
-                    "reason": row[3],
-                    "updated_at": row[4],
-                }
-            )
-
-        log_event(rid, "admin.suspensions.ok", count=len(suspensions))
-        return jsonify({"suspensions": suspensions})
-    except Exception as e:
-        log_event(rid, "admin.suspensions.err", error=str(e))
-        return safe_error(e)
-
-
-# ==================== Debug Endpoints (localhost only) ====================
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:

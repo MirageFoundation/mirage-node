@@ -130,6 +130,14 @@ def test_account(backend: str):
     code, profile = _get(f"{backend}/api/get_profile", {"address": addr})
     if code == 200:
         _pass("account.get_profile returns 200")
+        if isinstance(profile.get("following_count"), int) and profile["following_count"] >= 0:
+            _pass("account.get_profile following_count")
+        else:
+            _fail("account.get_profile following_count", f"got={profile.get('following_count')}")
+        if isinstance(profile.get("follower_count"), int) and profile["follower_count"] >= 0:
+            _pass("account.get_profile follower_count")
+        else:
+            _fail("account.get_profile follower_count", f"got={profile.get('follower_count')}")
     else:
         _fail("account.get_profile returns 200", f"code={code}")
 
@@ -301,8 +309,7 @@ def test_account(backend: str):
         _fail("account.profile_referral client gate suppresses attribution", f"code={summary_code}")
         return
     duplicate_attributed = any(
-        str(item.get("address", "")).lower() == duplicate_addr
-        for item in (summary_after_gate.get("referrals") or [])
+        str(item.get("address", "")).lower() == duplicate_addr for item in (summary_after_gate.get("referrals") or [])
     )
     if not duplicate_attributed:
         _pass("account.profile_referral client gate suppresses attribution")

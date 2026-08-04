@@ -512,7 +512,7 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `GET /api/get_posts` | Recent posts with aggregates |
 | `GET /api/get_user_posts` | Posts by specific user |
 | `GET /api/get_comments` | Comment tree for a post |
-| `GET /api/get_profile` | User profile with lists |
+| `GET /api/get_profile` | User profile with lists + `following_count` / `follower_count` |
 | `GET /api/search` | Full-text search |
 | `GET /api/get_welcome_stats` | Public stats: registered users, posts 24h, 7d active |
 | `GET /api/get_stats` | Admin stats (overview, signups tabs) |

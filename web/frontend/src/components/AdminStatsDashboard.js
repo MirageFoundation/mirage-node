@@ -794,9 +794,11 @@ export default function AdminStatsDashboard() {
                                 ?
                                 <InfoPopup>
                                     <InfoTitle>Retention by horizon</InfoTitle>
-                                    Of the {formatNumber(r.cohort_size)} users who signed up in this window, the share
-                                    still active 7 / 14 / 30 days later — either posted/commented (chain) or
-                                    browsed/voted (tracked). Only signups old enough to judge are counted.
+                                    Share of a matured signup cohort still active 7 / 14 / 30 days later —
+                                    either posted/commented (chain) or browsed/voted (tracked). Each horizon
+                                    uses a cohort as wide as your selected range, slid back far enough that
+                                    every member is old enough to judge (so D30 is never blank on a 7d or 30d
+                                    preset). Selected-window signups: {formatNumber(r.cohort_size)}.
                                     <InfoNote>{trackedSince}</InfoNote>
                                 </InfoPopup>
                             </InfoBadge>
@@ -825,10 +827,10 @@ export default function AdminStatsDashboard() {
                                         title={`Day-${days} retention`}
                                         note="Shown as retained / eligible."
                                     >
-                                        Of this window's signups that are at least {days} days old
-                                        ({formatNumber(r[k].eligible)} eligible), {formatNumber(r[k].retained)} were
-                                        still active {days} days after signing up. Too-recent signups are excluded, so
-                                        the rate isn't dragged down by people who haven't had {days} days yet.
+                                        Of a signup cohort matching your selected range width, matured so
+                                        every member is at least {days} days old ({formatNumber(r[k].eligible)} eligible),
+                                        {" "}{formatNumber(r[k].retained)} were still active {days} days after signing up.
+                                        The date preset only sets cohort width — it does not blank longer horizons.
                                     </MetricTile>
                                 );
                             })}

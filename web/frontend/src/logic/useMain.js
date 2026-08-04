@@ -6,7 +6,7 @@ import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
 import { fetchFollowedTopics } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
-import { readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
+import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
@@ -14,6 +14,18 @@ const MODERATION_REMINDER_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 // Show the moderation reminder only after the user has been logged in on the
 // home feed for at least this long. Avoids piling onto first-visit onboarding.
 const MODERATION_REMINDER_MIN_AGE_MS = 10 * 60 * 1000;
+
+function bootstrapFeedMatchesTopic(stashed, topic) {
+    if (!stashed || stashed.kind !== 'feed') return false;
+    const t = String(topic || '').trim().toLowerCase();
+    if (stashed.feed) {
+        return String(stashed.feed).trim().toLowerCase() === t;
+    }
+    if (stashed.topic) {
+        return String(stashed.topic).trim().toLowerCase() === t;
+    }
+    return false;
+}
 
 // Session storage key helpers for feed state preservation (keyed by topic)
 export const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
@@ -956,16 +968,17 @@ export function useMain({
     }, [flashingPostsSet]);
     const optimisticPostIdsRef = useRef(new Map()); // post_id -> created_at_ms
 
-    const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false) => {
+    const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false, preloaded = null) => {
         if (!isMountedRef.current) return;
 
         // Logged-out users only fetch when open browsing is on. Guests have no
         // personalized home/following feed, so show the public "all" feed instead.
+        // Bootstrap preloaded feed must NOT bypass the open-browsing gate.
         const viewer = Storage.load("publicKey", "");
         const isGuest = !viewer || viewer === 'guest';
         if (isGuest && !openBrowsingEnabled) return;
         if (topic === "") topic = "all";
-        if (isGuest && (topic === 'home' || topic === 'following')) topic = 'all';
+        if (isGuest && (topic === 'home' || topic === 'following') && !preloaded) topic = 'all';
         const isHomeFeed = topic === 'home';
         const isFollowingFeed = topic === 'following';
         if (topic !== state.topic) {
@@ -1113,6 +1126,16 @@ export function useMain({
                 loadMoreLockRef.current = false;
             } catch (_) { }
         };
+
+        if (preloaded && page === 1) {
+            console.debug('[Bootstrap] applying feed stash', {
+                topic,
+                feed: preloaded.feed,
+                posts: Array.isArray(preloaded.posts) ? preloaded.posts.length : 0,
+            });
+            handleResponse(preloaded);
+            return;
+        }
 
         // Determine sort mode
         const mode = overrideChrono !== null ? overrideChrono ? 'newest' : 'magic' : homeSortMode;
@@ -1457,13 +1480,7 @@ export function useMain({
     useEffect(() => {
         window.getPosts = getPosts; // Expose getPosts globally
         let cancelled = false;
-
-        // Skip posts fetch for logged-out users, unless open browsing is on (then
-        // they read the feed as a guest; account prompts fire only on write actions).
-        if (!isLoggedIn && !openBrowsingEnabled) {
-            setIsLoading(false);
-            return;
-        }
+        let timeoutId = null;
 
         // On back navigation (POP), restore from cache if available
         if (shouldRestoreFeedState) {
@@ -1485,23 +1502,71 @@ export function useMain({
             }
         }
 
-        // For forward navigation (clicking links), ALWAYS fetch fresh
-        // Force bypass debounce - this is a user-initiated navigation
-        forceHardRefreshRef.current = true;
-        setCurrentPage(1);
-        setStableOrder([]); // Clear stale order
-        setIsLoading(true);
-        try {
-            console.log('[Feed] PUSH fetch fresh:', urlTopic);
-        } catch (_) { }
-        const timeoutId = setTimeout(() => {
+        (async () => {
+            // Cold-start: consume bootstrap_view feed stash before openBrowsing gate
+            // and before the 50ms get_posts debounce.
+            try {
+                const stashed = await peekBootstrapStashAfterBootstrap(
+                    'bootstrap_view',
+                    isLoggedIn ? viewerAddress : null,
+                );
+                if (cancelled || !isMountedRef.current) return;
+                if (bootstrapFeedMatchesTopic(stashed, urlTopic)) {
+                    // Closed browsing: discard feed stash for guests.
+                    if (!isLoggedIn && !openBrowsingEnabled) {
+                        readBootstrapStash('bootstrap_view', null);
+                        console.debug('[Bootstrap] feed stash discarded (open browsing off)');
+                    } else {
+                        readBootstrapStash('bootstrap_view', isLoggedIn ? viewerAddress : null);
+                        console.debug('[Bootstrap] feed stash hit', {
+                            urlTopic,
+                            feed: stashed.feed,
+                            topic: stashed.topic,
+                            posts: Array.isArray(stashed.posts) ? stashed.posts.length : 0,
+                        });
+                        forceHardRefreshRef.current = true;
+                        setCurrentPage(1);
+                        setStableOrder([]);
+                        setIsLoading(true);
+                        getPosts(urlTopic, null, 1, false, stashed);
+                        return;
+                    }
+                }
+            } catch (_) { /* fall through to normal fetch */ }
+
             if (cancelled || !isMountedRef.current) return;
-            // Hard force page 1 on navigation so Home/Following never starts at page 2
-            getPosts(urlTopic, null, 1);
-        }, 50);
+
+            // Skip posts fetch for logged-out users, unless open browsing is on (then
+            // they read the feed as a guest; account prompts fire only on write actions).
+            if (!isLoggedIn && !openBrowsingEnabled) {
+                try { Storage.remove('bootstrap_view'); } catch (_) { }
+                setIsLoading(false);
+                return;
+            }
+
+            // Independent fetch path: drop any late-arriving launch stash so a
+            // later POP cannot paint cold-start posts over a restored feed.
+            try { Storage.remove('bootstrap_view'); } catch (_) { }
+
+            // For forward navigation (clicking links), ALWAYS fetch fresh
+            // Force bypass debounce - this is a user-initiated navigation
+            forceHardRefreshRef.current = true;
+            setCurrentPage(1);
+            setStableOrder([]); // Clear stale order
+            setIsLoading(true);
+            try {
+                console.log('[Feed] PUSH fetch fresh:', urlTopic);
+            } catch (_) { }
+            timeoutId = setTimeout(() => {
+                if (cancelled || !isMountedRef.current) return;
+                // Hard force page 1 on navigation so Home/Following never starts at page 2
+                getPosts(urlTopic, null, 1);
+            }, 50);
+        })();
+
         return () => {
             cancelled = true;
-            clearTimeout(timeoutId);
+            if (timeoutId) clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [urlTopic, location.pathname, openBrowsingEnabled]);

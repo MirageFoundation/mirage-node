@@ -278,18 +278,38 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.anonymous returns 200", f"code={code}")
         return
 
-    expected_keys = {"node_config", "user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary"}
+    expected_keys = {
+        "node_config",
+        "chain_config",
+        "user_status",
+        "user_followed",
+        "user_blocked",
+        "invite_codes",
+        "rewards_summary",
+        "view",
+    }
     missing = expected_keys - set(body.keys())
     if not missing:
-        _pass("bootstrap.anonymous has all 6 keys")
+        _pass("bootstrap.anonymous has all keys")
     else:
-        _fail("bootstrap.anonymous has all 6 keys", f"missing={sorted(missing)}")
+        _fail("bootstrap.anonymous has all keys", f"missing={sorted(missing)}")
+
+    if body.get("view") is None:
+        _pass("bootstrap.anonymous view is null without view=")
+    else:
+        _fail("bootstrap.anonymous view is null without view=", f"got={body.get('view')}")
 
     nc = body.get("node_config")
     if isinstance(nc, dict) and nc.get("validator_account_address"):
         _pass("bootstrap.anonymous node_config valid")
     else:
         _fail("bootstrap.anonymous node_config valid", f"got={type(nc).__name__}")
+
+    cc = body.get("chain_config")
+    if isinstance(cc, dict) and "tiers" in cc and "award_configs" in cc:
+        _pass("bootstrap.anonymous chain_config valid")
+    else:
+        _fail("bootstrap.anonymous chain_config valid", f"got_keys={list((cc or {}).keys())[:8]}")
 
     user_sections = {k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary")}
     if all(v is None for v in user_sections.values()):
@@ -364,6 +384,35 @@ def test_bootstrap(backend: str):
             _pass("bootstrap.user_followed matches per-endpoint")
     else:
         _fail("bootstrap.user_followed matches per-endpoint", f"per-endpoint code={code3}")
+
+    # ----- view=feed:home embeds posts -----
+    code4, body4 = _get(
+        f"{backend}/api/bootstrap",
+        {"address": addr, "view": "feed:home", "by": "magic", "limit": "5"},
+    )
+    if code4 == 200 and isinstance(body4, dict):
+        view = body4.get("view") or {}
+        if view.get("kind") == "feed" and view.get("feed") == "home" and isinstance(view.get("posts"), list):
+            _pass("bootstrap.view feed:home returns posts")
+        else:
+            _fail("bootstrap.view feed:home returns posts", f"view_keys={list(view.keys())[:8]}")
+    else:
+        _fail("bootstrap.view feed:home returns posts", f"code={code4}")
+
+    # ----- view=thread:<missing> returns found:false -----
+    missing_id = "0" * 64
+    code5, body5 = _get(
+        f"{backend}/api/bootstrap",
+        {"address": addr, "view": f"thread:{missing_id}"},
+    )
+    if code5 == 200 and isinstance(body5, dict):
+        view5 = body5.get("view") or {}
+        if view5.get("kind") == "thread" and view5.get("found") is False:
+            _pass("bootstrap.view thread missing returns found:false")
+        else:
+            _fail("bootstrap.view thread missing returns found:false", f"view={view5}")
+    else:
+        _fail("bootstrap.view thread missing returns found:false", f"code={code5}")
 
 
 # =========================================================================

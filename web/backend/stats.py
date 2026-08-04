@@ -19,6 +19,7 @@ Core model (see the Server Stats Redesign plan):
 
 import base64
 import binascii
+import logging
 import re
 import threading
 import time
@@ -30,6 +31,8 @@ from flask import has_request_context, request
 from chain import get_connected_peers
 from client_ip import hash_visitor_id
 from db import connect_backend_db, connect_db
+
+logger = logging.getLogger(__name__)
 
 VISITOR_HEADER = "X-Mirage-Visitor"
 
@@ -62,6 +65,7 @@ _ADDRESS_IS_TARGET_PREFIXES = ("/api/get_profile",)
 
 def _path_address_is_target(path: str) -> bool:
     return bool(path) and path.startswith(_ADDRESS_IS_TARGET_PREFIXES)
+
 
 # Throttle event/visitor writes per identity+type, like user_last_seen, to keep
 # one write per identity per minute instead of one per request.
@@ -406,14 +410,59 @@ def _contributors(start: int, end: int) -> Tuple[int, int, int]:
             return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
 
 
-def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
-    """Forward retention for the signup cohort in [start, end].
+def _matured_cohort_window(start: int, end: int, now_ts: int, n_days: int) -> Tuple[int, int]:
+    """Signup window used to judge N-day retention.
 
-    For each horizon N in {7,14,30}: eligible = users whose signup + N days has
-    elapsed; retained = eligible users active (engagement OR post/comment) at or
-    after signup + N days. "Active later" combines the indexer (posts/comments)
-    and the backend engagement log, joined by address.
+    Prefer the selected ``[start, end]``, clipped so every member is at least
+    N days old. When the whole selection is still too young for that horizon
+    (e.g. preset "7d" / "30d" asked for D30), slide a same-width window back
+    so D7 / D14 / D30 always report a real matured cohort instead of 0/0.
     """
+    horizon = n_days * DAY
+    c_end = min(end, now_ts - horizon)
+    c_start = start
+    if c_end <= c_start:
+        width = max(end - start, 0)
+        c_end = now_ts - horizon
+        c_start = c_end - width
+    return c_start, c_end
+
+
+def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
+    """Forward retention for matured signup cohorts matching the selected range.
+
+    For each horizon N in {7,14,30} the cohort is ``_matured_cohort_window`` —
+    same width as ``[start, end]`` when possible, always old enough to judge.
+    Retained = cohort members active (engagement OR post/comment) at or after
+    signup + N days. "Active later" combines the indexer (posts/comments) and
+    the backend engagement log, joined by address.
+    """
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM profiles
+                WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0)
+                """,
+                (start, end),
+            )
+            cohort_size = int(cur.fetchone()[0] or 0)
+
+    windows = {n: _matured_cohort_window(start, end, now_ts, n) for n in (7, 14, 30)}
+    span_start = min(w[0] for w in windows.values())
+    span_end = max(w[1] for w in windows.values())
+    logger.debug(
+        "stats.retention windows start=%s end=%s now=%s d7=%s d14=%s d30=%s selected_cohort=%s",
+        start,
+        end,
+        now_ts,
+        windows[7],
+        windows[14],
+        windows[30],
+        cohort_size,
+    )
+
+    profiles: Dict[str, int] = {}
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -421,17 +470,17 @@ def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
                 SELECT LOWER(owner), created_at FROM profiles
                 WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0)
                 """,
-                (start, end),
+                (span_start, span_end),
             )
-            cohort = {r[0]: int(r[1]) for r in cur.fetchall()}
+            profiles = {r[0]: int(r[1]) for r in cur.fetchall()}
 
-    result = {"cohort_size": len(cohort)}
-    if not cohort:
+    result: Dict[str, Any] = {"cohort_size": cohort_size}
+    if not profiles:
         for n in (7, 14, 30):
             result[f"d{n}"] = {"eligible": 0, "retained": 0, "rate": 0.0}
         return result
 
-    addrs = list(cohort.keys())
+    addrs = list(profiles.keys())
     last_chain: Dict[str, int] = {}
     with connect_db() as conn:
         with conn.cursor() as cur:
@@ -458,17 +507,27 @@ def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
 
     for n in (7, 14, 30):
         horizon = n * DAY
+        c_start, c_end = windows[n]
         eligible = 0
         retained = 0
-        for addr, signup_at in cohort.items():
-            if signup_at + horizon > now_ts:
-                continue  # not enough time elapsed to judge N-day retention
+        for addr, signup_at in profiles.items():
+            if signup_at < c_start or signup_at > c_end:
+                continue
             eligible += 1
             last_active = max(last_chain.get(addr, 0), last_engage.get(addr, 0))
             if last_active >= signup_at + horizon:
                 retained += 1
         rate = round(retained / eligible, 4) if eligible else 0.0
         result[f"d{n}"] = {"eligible": eligible, "retained": retained, "rate": rate}
+        logger.debug(
+            "stats.retention.horizon d%s window=[%s,%s] eligible=%s retained=%s rate=%s",
+            n,
+            c_start,
+            c_end,
+            eligible,
+            retained,
+            rate,
+        )
     return result
 
 

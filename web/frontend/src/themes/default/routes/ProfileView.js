@@ -1596,6 +1596,8 @@ function ProfileViewAuthenticated({
         showAllSimilarUsers,
         setShowAllSimilarUsers,
         biography,
+        followingCount,
+        followerCount,
         bioEditing,
         setBioEditing,
         bioDraft,
@@ -1956,6 +1958,22 @@ function ProfileViewAuthenticated({
                                             <Label>Registered:</Label>
                                             <ProfileFieldValuePlain>
                                                 <Mono title={registeredDisplay}>{profileRegisteredAt ? formatAccountAgeLong(profileRegisteredAt) : registeredDisplay}</Mono>
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>
+                                        <ProfileFieldRow>
+                                            <HoverableLabel tabIndex={0} data-tooltip={`How many users this account follows.`}>
+                                                Following:
+                                            </HoverableLabel>
+                                            <ProfileFieldValuePlain>
+                                                <Mono>{followingCount == null ? '—' : followingCount}</Mono>
+                                            </ProfileFieldValuePlain>
+                                        </ProfileFieldRow>
+                                        <ProfileFieldRow>
+                                            <HoverableLabel tabIndex={0} data-tooltip={`How many users follow this account.`}>
+                                                Followers:
+                                            </HoverableLabel>
+                                            <ProfileFieldValuePlain>
+                                                <Mono>{followerCount == null ? '—' : followerCount}</Mono>
                                             </ProfileFieldValuePlain>
                                         </ProfileFieldRow>
                                         <ProfileFieldRow>
@@ -2326,6 +2344,14 @@ function ProfileViewAuthenticated({
                                             <AsideStat>
                                                 <AsideStatValue title={reserveDisplay}>{compactMirageLabel(reserveFunds)}</AsideStatValue>
                                                 <AsideStatLabel>Reserve</AsideStatLabel>
+                                            </AsideStat>
+                                            <AsideStat>
+                                                <AsideStatValue>{followingCount == null ? '—' : followingCount}</AsideStatValue>
+                                                <AsideStatLabel>Following</AsideStatLabel>
+                                            </AsideStat>
+                                            <AsideStat>
+                                                <AsideStatValue>{followerCount == null ? '—' : followerCount}</AsideStatValue>
+                                                <AsideStatLabel>Followers</AsideStatLabel>
                                             </AsideStat>
                                         </AsideStatsGrid>
                                     </AsideInner>

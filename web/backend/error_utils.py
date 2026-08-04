@@ -208,7 +208,6 @@ ERRORS = {
     "media_provider_not_configured": "media provider not configured",
     "media_store_failed": "media upload service error",
     "media_unknown_provider": "unknown media provider configured",
-    "legacy_upload_unsupported": "this node no longer supports the legacy upload endpoint; use /api/upload_media",
     "media_edge_unauthorized": "edge registration signature invalid",
     # Chain rejects (from classify_reject)
     "transaction_rejected": "transaction rejected",
