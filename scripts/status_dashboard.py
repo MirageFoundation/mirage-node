@@ -2096,6 +2096,40 @@ def check_system() -> ServiceStatus:
 # ============================================================================
 
 
+def _dashboard_versions() -> str:
+    """Binary + frontend release versions for the header (highest-signal identity)."""
+    binary = "unknown"
+    try:
+        out = subprocess.check_output(
+            [get_miraged_bin(), "version"],
+            stderr=subprocess.STDOUT,
+            timeout=3,
+            text=True,
+        )
+        for line in reversed(out.splitlines()):
+            token = line.strip()
+            if token:
+                binary = token
+                break
+    except Exception as e:
+        debug_log(f"dashboard: miraged version failed: {e}")
+
+    frontend = "unknown"
+    for path in (
+        "/opt/mirage/web/frontend/build/version.txt",
+        "/opt/mirage/web/frontend/public/version.txt",
+        str(Path(__file__).resolve().parents[1] / "web" / "frontend" / "public" / "version.txt"),
+    ):
+        try:
+            if os.path.isfile(path):
+                frontend = open(path, encoding="utf-8").read().strip() or "unknown"
+                break
+        except Exception as e:
+            debug_log(f"dashboard: version.txt read failed ({path}): {e}")
+
+    return f"binary {binary}  ·  frontend {frontend}"
+
+
 def render_header(width: int) -> list[str]:
     """Render the dashboard header."""
     lines = []
@@ -2108,11 +2142,13 @@ def render_header(width: int) -> list[str]:
     ]
 
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    versions = _dashboard_versions()
 
     lines.append("")
     for art_line in title_art:
         lines.append(center_text(art_line, width))
     lines.append(center_text(f"{Colors.DIM}System Status Dashboard{Colors.RESET}", width))
+    lines.append(center_text(f"{Colors.BRIGHT_WHITE}{versions}{Colors.RESET}", width))
     lines.append(center_text(f"{Colors.DIM}{timestamp}{Colors.RESET}", width))
     lines.append("")
 

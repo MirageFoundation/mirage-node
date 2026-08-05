@@ -9,6 +9,7 @@ import json
 import math
 import os
 import random
+import socket
 import string
 import subprocess
 import sys
@@ -926,10 +927,27 @@ def run_suite(
         print(f"  Either run this from inside the container, or ensure the 'mirage' Docker container is running.")
         return 1
 
-    if _INSIDE_CONTAINER:
-        print(f"  Running inside container.")
-    else:
-        print(f"  Docker container 'mirage' is running.")
+    # Hostname gate BEFORE any HTTP — prod/UAT Caddy redirects :80→:443 and
+    # would otherwise spam SSLError retries (and must never mutate live state).
+    try:
+        if _INSIDE_CONTAINER:
+            ch = socket.gethostname().strip().lower()
+            print(f"  Running inside container (hostname={ch}).")
+        else:
+            print(f"  Docker container 'mirage' is running.")
+            rc, container_hostname = _docker_exec("hostname", timeout=5)
+            ch = container_hostname.strip().lower()
+            if rc != 0:
+                print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname (rc={rc}).{_COLOR_RESET}")
+                return 1
+        if ch != "testnet":
+            print(f"\n{_COLOR_RED}ABORT: Container hostname is '{ch}', expected 'testnet'.{_COLOR_RESET}")
+            print(f"  This suite must NEVER run against prod/UAT (e.g. mirage-talk, mirage.vote).")
+            print(f"  Only the local Docker testnet (hostname=testnet) is allowed.")
+            return 1
+    except Exception as e:
+        print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname: {e}{_COLOR_RESET}")
+        return 1
 
     try:
         code, _ = _get(f"{backend}/api/get_parameters")
@@ -938,17 +956,6 @@ def run_suite(
             return 1
     except Exception as e:
         print(f"\n{_COLOR_RED}Cannot reach backend at {backend}: {e}{_COLOR_RESET}")
-        return 1
-
-    try:
-        rc, container_hostname = _docker_exec("hostname", timeout=5)
-        ch = container_hostname.strip().lower()
-        if rc != 0 or ch != "testnet":
-            print(f"\n{_COLOR_RED}ABORT: Container hostname is '{ch}', expected 'testnet'.{_COLOR_RESET}")
-            print(f"  This suite must NEVER run against prod/UAT.")
-            return 1
-    except Exception as e:
-        print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname: {e}{_COLOR_RESET}")
         return 1
 
     if not setup_test_wallets(backend):
