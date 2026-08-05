@@ -35,6 +35,8 @@ ERRORS = {
     "username_invalid_format": "invalid username format",
     # Referrals
     "referral_requires_invite_codes": "referral links require invite codes",
+    "invalid_week_format": "invalid week format, use YYYY-Www (e.g. 2026-W13)",
+    "referral_data_incomplete": "referral data missing referred_at",
     "referrer_not_found": "referrer not found",
     "referrer_not_opted_in": "referrer has not enabled referral links",
     "referrer_no_codes": "referrer has no available codes",
@@ -60,6 +62,7 @@ ERRORS = {
     "invalid_owner": "invalid owner",
     "address_mismatch": "address does not match pubkey",
     "address_required": "address required",
+    "visitor_id_required": "visitor_id required",
     "control_characters": "fields contain invalid control characters",
     "forbidden": "action forbidden",
     "unauthorized": "unauthorized access",
@@ -103,6 +106,7 @@ ERRORS = {
     "invalid_hash": "invalid or missing hash",
     # Media
     "media_not_list": "media must be a list",
+    "posts_not_list": "posts must be a list",
     "media_limit_exceeded": "media exceeds limit",
     "media_item_too_long": "media item exceeds length limit",
     "media_must_use_https": "media must use https",

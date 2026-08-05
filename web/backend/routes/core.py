@@ -4021,14 +4021,10 @@ def core_vote():
         if not user_is_sub:
             if not (has_difficulty and has_pow):
                 log_event(rid, "vote.pow_required", user_addr=user_addr, difficulty=difficulty, proof=proof)
-                return (
-                    jsonify(
-                        {
-                            "error": "pow_required",
-                            "details": "Non-subscriber must provide valid PoW. Your subscription may have expired.",
-                        }
-                    ),
+                return api_error_code(
+                    "pow_required",
                     400,
+                    details="Non-subscriber must provide valid PoW. Your subscription may have expired.",
                 )
             required = _min_required_difficulty()
             if int(difficulty) < int(required):

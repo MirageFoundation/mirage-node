@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import json
 import math
 import os
 import random
+import re
 import string
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
@@ -1249,3 +1252,70 @@ def test_failed_tx_non_post_vote(backend: str):
         _do_block(backend, sub1, block_target, "user", block=False, skip_pow=True)
     except Exception:
         pass
+
+
+def test_error_registry(backend):
+    """Every literal error string returned by a route must be in the error registry.
+
+    factory._inject_error_code re-raises on an unmapped message, so an
+    unregistered string turns a deliberate 4xx into a 500.
+    """
+    backend_src = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+    )
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    try:
+        from error_utils import _MSG_TO_CODE
+    except Exception as e:
+        _skip("error_registry.unmapped_messages", f"backend modules not importable: {e}")
+        return
+
+    unregistered = []
+    for root, _dirs, files in os.walk(backend_src):
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            try:
+                tree = ast.parse(open(path, encoding="utf-8").read())
+            except SyntaxError as e:
+                _fail("error_registry.unmapped_messages", f"cannot parse {path}: {e}")
+                return
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "jsonify"):
+                    continue
+                for arg in node.args:
+                    if not isinstance(arg, ast.Dict):
+                        continue
+                    keys = {k.value for k in arg.keys if isinstance(k, ast.Constant)}
+                    if "error" not in keys or "error_code" in keys:
+                        continue
+                    for key, val in zip(arg.keys, arg.values):
+                        if not (isinstance(key, ast.Constant) and key.value == "error"):
+                            continue
+                        if isinstance(val, ast.Constant) and val.value not in _MSG_TO_CODE:
+                            rel = os.path.relpath(path, backend_src)
+                            unregistered.append(f"{rel}:{node.lineno} {val.value!r}")
+
+    if unregistered:
+        _fail("error_registry.unmapped_messages", f"{len(unregistered)} unregistered: {'; '.join(unregistered[:6])}")
+    else:
+        _pass("error_registry.unmapped_messages", checked=len(_MSG_TO_CODE))
+
+    # Every code must have user-facing copy, or the UI renders "Unknown error code: x".
+    js_path = os.path.join(
+        os.path.dirname(backend_src), "frontend", "src", "utils", "errorMessages.js"
+    )
+    if not os.path.exists(js_path):
+        _skip("error_registry.frontend_copy", "frontend source not present in this image")
+        return
+    js = open(js_path, encoding="utf-8").read()
+    mapped = set(re.findall(r"^\s{4}([a-z0-9_]+):", js, re.M))
+    missing = sorted(set(_MSG_TO_CODE.values()) - mapped)
+    if missing:
+        _fail("error_registry.frontend_copy", f"{len(missing)} codes without UI copy: {', '.join(missing[:8])}")
+    else:
+        _pass("error_registry.frontend_copy", checked=len(mapped))

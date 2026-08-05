@@ -25,6 +25,7 @@ from tests.cases.test_backend_infra import (
     test_failed_tx_status,
     test_tx_status_matrix,
     test_failed_tx_non_post_vote,
+    test_error_registry,
 )
 from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_subscribe_validation
 from tests.cases.test_backend_content import (
@@ -68,6 +69,7 @@ ALL_CATEGORIES = {
     "security": test_security,
     "validation": test_validation,
     "relay_signing": test_relay_signing,
+    "error_registry": test_error_registry,
     "tokens": test_tokens,
     "agents": test_agents,
     "media": test_media,

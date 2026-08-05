@@ -247,6 +247,30 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
     return 599, {}
 
 
+def _post_multipart(url: str, data: dict, files: Optional[dict] = None):
+    """POST multipart/form-data, retrying edge throttling the way _post does.
+
+    Uploads cannot use _post (it sends JSON), and the Caddy edge rate limiter
+    answers a burst of uploads with 429 before the request reaches the backend.
+    Returns the raw Response so callers can read status and body.
+    """
+    max_retries = 7
+    for attempt in range(1, max_retries + 1):
+        r = requests.post(url, data=data, files=files, timeout=30)
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
+            except Exception:
+                delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry upload {url} status={r.status_code} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+        return r
+
+    return r
+
+
 def _expect_http_error(label: str, resp: dict, status: int, contains: str | None = None) -> None:
     http_status = int(resp.get("_http_status", 0) or 0)
     err = str(resp.get("error", "")).lower()

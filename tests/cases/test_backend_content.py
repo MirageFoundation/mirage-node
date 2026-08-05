@@ -22,6 +22,7 @@ from tests.common import (
     _debug,
     _get,
     _post,
+    _post_multipart,
     _b64,
     _rand_str,
     _now_ms,
@@ -1406,35 +1407,35 @@ def test_upload_media(backend: str) -> None:
     url = f"{backend}/api/upload_media"
 
     # Invalid kind -> 400 media_invalid_kind
-    r = requests.post(url, data={"kind": "bogus"}, files={"file": ("x.png", png, "image/png")}, timeout=30)
+    r = _post_multipart(url, {"kind": "bogus"}, {"file": ("x.png", png, "image/png")})
     if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_invalid_kind":
         _pass("upload_media.invalid_kind_rejected")
     else:
         _fail("upload_media.invalid_kind_rejected", f"code={r.status_code} body={r.text[:200]}")
 
     # Missing file -> 400 media_file_required
-    r = requests.post(url, data={"kind": "image"}, timeout=30)
+    r = _post_multipart(url, {"kind": "image"})
     if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_file_required":
         _pass("upload_media.missing_file_rejected")
     else:
         _fail("upload_media.missing_file_rejected", f"code={r.status_code} body={r.text[:200]}")
 
     # Bad magic bytes (text labelled as image) -> 415 media_invalid_type
-    r = requests.post(url, data={"kind": "image"}, files={"file": ("x.png", b"not an image", "image/png")}, timeout=30)
+    r = _post_multipart(url, {"kind": "image"}, {"file": ("x.png", b"not an image", "image/png")})
     if r.status_code == 415 and (r.json() or {}).get("error_code") == "media_invalid_type":
         _pass("upload_media.bad_magic_rejected")
     else:
         _fail("upload_media.bad_magic_rejected", f"code={r.status_code} body={r.text[:200]}")
 
     # Video without duration/height -> 400 media_metadata_required
-    r = requests.post(url, data={"kind": "video"}, files={"file": ("x.mp4", fake_mp4, "video/mp4")}, timeout=30)
+    r = _post_multipart(url, {"kind": "video"}, {"file": ("x.mp4", fake_mp4, "video/mp4")})
     if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_metadata_required":
         _pass("upload_media.video_metadata_required")
     else:
         _fail("upload_media.video_metadata_required", f"code={r.status_code} body={r.text[:200]}")
 
     # Valid image upload -> 200 {url, asset_id, kind}
-    r = requests.post(url, data={"kind": "image"}, files={"file": ("x.png", png, "image/png")}, timeout=30)
+    r = _post_multipart(url, {"kind": "image"}, {"file": ("x.png", png, "image/png")})
     if r.status_code == 200:
         body = r.json() or {}
         if body.get("url") and body.get("asset_id") and body.get("kind") == "image":

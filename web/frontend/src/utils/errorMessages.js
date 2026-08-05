@@ -25,6 +25,8 @@ const ERROR_MAP = {
 
     // Referrals
     referral_requires_invite_codes: "Referral links require invite codes to be enabled.",
+    referral_data_incomplete: "Referral data is incomplete. Please try again later.",
+    invalid_week_format: "Invalid week format. Use YYYY-Www (e.g. 2026-W13).",
     referrer_not_found: "Referrer not found.",
     referrer_not_opted_in: "This referrer has not enabled referral links.",
     referrer_no_codes: "This referrer has no invite codes left.",
@@ -52,6 +54,7 @@ const ERROR_MAP = {
     enabled_must_be_boolean: "Enabled must be a boolean.",
     address_mismatch: "Address does not match the provided key.",
     address_required: "Address is required.",
+    visitor_id_required: "Visitor id is required.",
     control_characters: "Fields contain invalid control characters.",
     forbidden: "You do not have permission to perform this action.",
     unauthorized: "Unauthorized.",
@@ -100,10 +103,25 @@ const ERROR_MAP = {
 
     // Media
     media_not_list: "Media must be provided as a list.",
+    posts_not_list: "Posts must be provided as a list.",
     media_limit_exceeded: "Too many media attachments.",
     media_item_too_long: "A media URL is too long.",
     media_must_use_https: "Media URLs must use HTTPS.",
     media_control_characters: "Media contains invalid control characters.",
+
+    // Uploads
+    uploads_disabled: "Uploads are disabled on this node.",
+    media_file_required: "Please choose a file to upload.",
+    media_invalid_kind: "Uploads must be an image or a video.",
+    media_invalid_type: "That file type is not supported.",
+    media_too_large: "That file is too large.",
+    media_metadata_required: "Video duration and height are required.",
+    video_too_long: "That video is too long.",
+    video_resolution_too_high: "That video's resolution is too high for its length on this node.",
+    media_store_failed: "The upload service failed. Please try again.",
+    media_provider_not_configured: "Uploads are not configured on this node.",
+    media_unknown_provider: "This node has an unknown upload provider configured.",
+    media_edge_unauthorized: "Upload registration was rejected.",
 
     // Biography
     biography_too_long: "Your biography exceeds the maximum length.",
@@ -153,6 +171,8 @@ const ERROR_MAP = {
     admin_insufficient_balance: "Your account balance is too low to cover the transaction fee.",
     insufficient_funds: "Node does not have enough gas for this transaction.",
     auto_renew_required: "Auto-renewal setting is required.",
+    gift_invalid_target: "The gift recipient must be a valid mirage1 address.",
+    gift_rejected_higher_tier: "That user already has a higher tier than the one you are gifting.",
 
     // Awards
     cannot_award_own_post: "You cannot award your own post.",

@@ -7864,7 +7864,7 @@ def seen_posts_beacon():
 
     posts_raw = data.get("posts") or []
     if not isinstance(posts_raw, list):
-        return jsonify({"error": "posts must be a list"}), 400
+        return api_error_code("posts_not_list", 400)
     entries = []
     fallback_reason = str(data.get("reason", "view")).strip().lower()
     for entry in posts_raw[:100]:
@@ -8021,7 +8021,7 @@ def _verify_admin_stats_request(data: dict):
         return None, (gerr[0], gerr[1])
 
     if get_user_level(user_addr) < STATS_ADMIN_MIN_LEVEL:
-        return None, (jsonify({"error": "forbidden"}), 403)
+        return None, api_error_code("forbidden", 403)
 
     return user_addr.lower(), None
 
@@ -8136,7 +8136,7 @@ def stats_visitor_attribution():
     data = request.get_json(silent=True) or {}
     visitor_id = str(data.get("visitor_id", "")).strip()
     if not visitor_id:
-        return jsonify({"error": "visitor_id required"}), 400
+        return api_error_code("visitor_id_required", 400)
     platform = str(data.get("platform", "")).strip().lower() or None
     utm = {
         k: str(data.get(k, "")).strip() for k in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
@@ -9492,7 +9492,7 @@ def referrals_summary():
     try:
         week_start, week_end = _iso_week_bounds(week_str)
     except ValueError:
-        return jsonify({"error": "invalid week format, use YYYY-Www (e.g. 2026-W13)"}), 400
+        return api_error_code("invalid_week_format", 400)
 
     log_event(rid, "referrals.summary.week_parsed", week=week_str, week_start=week_start, week_end=week_end)
 
@@ -9538,7 +9538,7 @@ def referrals_summary():
                 address=address,
                 missing_count=len(missing_referred),
             )
-            return jsonify({"error": "referral data missing referred_at"}), 500
+            return api_error_code("referral_data_incomplete", 500)
 
         all_addrs = list(referred_at_by_owner.keys())
         page_addrs = [r[0] for r in page_referrals]

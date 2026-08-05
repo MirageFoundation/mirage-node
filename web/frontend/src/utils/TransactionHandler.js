@@ -4995,7 +4995,7 @@ class TransactionHandler {
             const errMsg = String(error && error.message ? error.message : error);
             const errStr = String(error);
             const fullErr = errMsg + ' ' + errStr;
-            if (/pow_required/i.test(fullErr)) {
+            if (/pow_required/i.test(fullErr) || error?.error_code === 'pow_required') {
                 console.warn('Subscription status mismatch detected - clearing cached user_level');
                 try {
                     Storage.save('user_level', '0');
