@@ -50,7 +50,22 @@ from tests.cases.test_backend_subscriptions import (
     test_subscribe_gift_agent,
 )
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
-from tests.cases.test_backend_security import test_security, test_validation, test_relay_signing
+from tests.cases.test_backend_security import (
+    test_security,
+    test_validation,
+    test_relay_signing,
+    test_client_ip_trust,
+    test_hash_salt_fail_hard,
+    test_upload_body_bound,
+    test_invite_code_hygiene,
+    test_indexer_drift,
+)
+from tests.cases.test_backend_authz import (
+    test_route_authz_parity,
+    test_admin_authz,
+    test_reward_claim_authz,
+    test_cross_user_reads,
+)
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
 from tests.cases.test_backend_indexer import test_indexer, test_tx_index
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
@@ -70,6 +85,15 @@ ALL_CATEGORIES = {
     "validation": test_validation,
     "relay_signing": test_relay_signing,
     "error_registry": test_error_registry,
+    "route_authz": test_route_authz_parity,
+    "admin_authz": test_admin_authz,
+    "reward_claim_authz": test_reward_claim_authz,
+    "cross_user_reads": test_cross_user_reads,
+    "client_ip_trust": test_client_ip_trust,
+    "hash_salt": test_hash_salt_fail_hard,
+    "upload_bound": test_upload_body_bound,
+    "invite_code_hygiene": test_invite_code_hygiene,
+    "indexer_drift": test_indexer_drift,
     "tokens": test_tokens,
     "agents": test_agents,
     "media": test_media,
@@ -114,6 +138,15 @@ STATELESS_CATEGORIES = {
     "stats_admin_auth",
     "stats_attribution",
     "stats_pure",
+    "error_registry",
+    "route_authz",
+    "admin_authz",
+    "cross_user_reads",
+    "client_ip_trust",
+    "hash_salt",
+    "upload_bound",
+    "invite_code_hygiene",
+    "indexer_drift",
 }
 
 

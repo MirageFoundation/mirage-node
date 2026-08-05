@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import json
@@ -23,6 +24,7 @@ from tests.common import (
     _debug,
     _get,
     _post,
+    _post_multipart,
     _expect_http_error,
     _b64,
     _rand_str,
@@ -1130,3 +1132,206 @@ print("OTHER", len(other), code2)
 # =========================================================================
 # Category 12: Token Transfers
 # =========================================================================
+
+
+def _backend_src() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+    )
+
+
+def _iter_backend_py(backend_src: str):
+    for root, _dirs, files in os.walk(backend_src):
+        for name in sorted(files):
+            if name.endswith(".py"):
+                path = os.path.join(root, name)
+                yield path, open(path, encoding="utf-8").read()
+
+
+def test_client_ip_trust(backend):
+    """M-1: nothing may derive trust from X-Forwarded-For.
+
+    The header is set by the client and is trivially spoofable. AGENTS.md states
+    the rule and client_ip.py already has the correct primitive
+    (get_trusted_client_ip, CF-Connecting-IP with a remote_addr fallback), so any
+    remaining read of X-Forwarded-For is a trust decision on attacker input.
+    """
+    backend_src = _backend_src()
+    if not os.path.isdir(backend_src):
+        _skip("client_ip.no_forwarded_for_trust", "backend source not present")
+        return
+
+    hits = []
+    for path, src in _iter_backend_py(backend_src):
+        for lineno, line in enumerate(src.splitlines(), start=1):
+            if "X-Forwarded-For" in line:
+                hits.append(f"{os.path.relpath(path, backend_src)}:{lineno}")
+
+    if hits:
+        _fail(
+            "client_ip.no_forwarded_for_trust",
+            f"{len(hits)} read(s) of the spoofable X-Forwarded-For header: {', '.join(hits[:6])}",
+        )
+    else:
+        _pass("client_ip.no_forwarded_for_trust")
+
+
+def test_hash_salt_fail_hard(backend):
+    """M-2: a missing CLIENT_HASH_SALT must stop the process, not invent a salt.
+
+    client_ip.py generates a random salt at import time when the variable is
+    unset. Under gunicorn that runs once per worker, so every control keyed on
+    the IP or visitor hash (rate limits, dedupe, analytics identity) silently
+    partitions by worker. The project rule is to fail hard rather than mask.
+
+    ENV_DIR is cleared so the probe cannot persist a salt into backend.env.
+    """
+    code, out = _docker_exec(
+        "cd /opt/mirage/web/backend && unset CLIENT_HASH_SALT && ENV_DIR= "
+        "python3 -c 'import client_ip' 2>&1; echo rc=$?",
+        timeout=60,
+    )
+    if "rc=" not in out:
+        _skip("hash_salt.fail_hard", f"probe did not run: code={code} out={out[:200]}")
+        return
+    rc = out.rsplit("rc=", 1)[-1].strip()
+    if rc != "0":
+        _pass("hash_salt.fail_hard", rc=rc)
+    else:
+        _fail(
+            "hash_salt.fail_hard",
+            "M-2: importing client_ip without CLIENT_HASH_SALT succeeded; it generated a "
+            "per-process salt instead of failing hard",
+        )
+
+
+def test_upload_body_bound(backend):
+    """M-4: an oversized upload must be refused, and bounded before it is read.
+
+    Two separate properties. The size check inside the media layer is only
+    reached after request.files has already materialized the whole body, so a
+    global MAX_CONTENT_LENGTH is what actually bounds memory.
+    """
+    backend_src = _backend_src()
+    if os.path.isdir(backend_src):
+        configured = any("MAX_CONTENT_LENGTH" in src for _p, src in _iter_backend_py(backend_src))
+        if configured:
+            _pass("upload_bound.max_content_length_configured")
+        else:
+            _fail(
+                "upload_bound.max_content_length_configured",
+                "M-4: no MAX_CONTENT_LENGTH anywhere in the backend, so an arbitrarily large "
+                "upload body is read into memory before any size check runs",
+            )
+    else:
+        _skip("upload_bound.max_content_length_configured", "backend source not present")
+
+    # Dynamic: exceed the image limit and require a clean 413, not a 500.
+    limit_mb = 15
+    oversize = b"\xff\xd8\xff" + b"\x00" * (limit_mb * 1024 * 1024 + 1024)
+    try:
+        r = _post_multipart(
+            f"{backend}/api/upload_media", {"kind": "image"}, {"file": ("big.jpg", oversize, "image/jpeg")}
+        )
+    except requests.RequestException as e:
+        _fail("upload_bound.oversize_rejected", f"upload raised {type(e).__name__}: {e}")
+        return
+
+    if r.status_code == 413:
+        _pass("upload_bound.oversize_rejected", code=r.status_code)
+    elif r.status_code == 403 and "uploads_disabled" in r.text:
+        _skip("upload_bound.oversize_rejected", "uploads disabled on this node")
+    elif r.status_code == 200:
+        _fail("upload_bound.oversize_rejected", f"an oversized upload was ACCEPTED: {r.text[:200]}")
+    else:
+        _fail("upload_bound.oversize_rejected", f"expected 413, got {r.status_code}: {r.text[:200]}")
+
+
+def test_invite_code_hygiene(backend):
+    """M-3: invite codes need real entropy and must not disclose their owner.
+
+    Codes are generated with random.choices (Mersenne Twister, predictable from
+    observed output) and /api/validate_invite_code answers a valid code with the
+    owner's address, which turns the endpoint into an unauthenticated oracle
+    mapping guessable codes to accounts.
+    """
+    backend_src = _backend_src()
+    if not os.path.isdir(backend_src):
+        _skip("invite_code.crypto_rng", "backend source not present")
+        return
+
+    gen_src = ""
+    for path, src in _iter_backend_py(backend_src):
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_generate_invite_code":
+                gen_src = ast.get_source_segment(src, node) or ""
+    if not gen_src:
+        _skip("invite_code.crypto_rng", "_generate_invite_code not found")
+    elif "secrets." in gen_src and "random." not in gen_src:
+        _pass("invite_code.crypto_rng")
+    else:
+        _fail(
+            "invite_code.crypto_rng",
+            "M-3: invite codes are generated with a non-cryptographic RNG; use secrets",
+        )
+
+    # Owner disclosure: the validation response must not name the code's owner.
+    discloses = []
+    for path, src in _iter_backend_py(backend_src):
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.FunctionDef) and node.name == "validate_invite_code"):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Dict):
+                    keys = {k.value for k in sub.keys if isinstance(k, ast.Constant)}
+                    if "owner" in keys:
+                        discloses.append(f"{os.path.relpath(path, backend_src)}:{sub.lineno}")
+    if discloses:
+        _fail(
+            "invite_code.no_owner_disclosure",
+            f"M-3: validate_invite_code returns the code owner's address at {', '.join(discloses)}",
+        )
+    else:
+        _pass("invite_code.no_owner_disclosure")
+
+
+def test_indexer_drift(backend):
+    """M-8: state served from the indexer DB must match the chain.
+
+    Narrow but exact: the backend serves pow_base_bits out of the indexer DB and
+    the chain owns min_difficulty. They are the same number, so a mismatch means
+    the indexer's copy has drifted from consensus state.
+    """
+    code, params = _get(f"{backend}/api/get_parameters")
+    if code != 200 or not isinstance(params, dict) or "pow_base_bits" not in params:
+        _skip("indexer_drift.pow_base_bits", f"backend params unavailable: code={code}")
+        return
+
+    rc, out = _run_miraged(["q", "core", "params", "-o", "json"], timeout=30)
+    if rc != 0 or not out:
+        _skip("indexer_drift.pow_base_bits", f"chain params query failed rc={rc}")
+        return
+    try:
+        chain = json.loads(out)
+    except ValueError as e:
+        _skip("indexer_drift.pow_base_bits", f"chain params not JSON: {e}")
+        return
+
+    if "min_difficulty" not in chain:
+        _skip("indexer_drift.pow_base_bits", "chain params missing min_difficulty")
+        return
+
+    served = int(params["pow_base_bits"])
+    onchain = int(chain["min_difficulty"])
+    if served == onchain:
+        _pass("indexer_drift.pow_base_bits", value=served)
+    else:
+        _fail(
+            "indexer_drift.pow_base_bits",
+            f"M-8: backend serves pow_base_bits={served} but the chain has "
+            f"min_difficulty={onchain}; the indexer's copy has drifted",
+        )
