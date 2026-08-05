@@ -69,6 +69,8 @@ from tests.common import (
     _canon_base_award_raw,
     _canon_base_annotate_raw,
     _request_with_retries,
+    _faucet,
+    _get_spendable_balance,
 )
 import tests.blockchain_helpers as _bh
 from tests.blockchain_helpers import (
@@ -241,6 +243,125 @@ def test_fee(backend: str) -> None:
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=1
     )
     _check_reject("fee.insufficient_fee_rejected", code, log, "insufficient fee")
+
+
+def test_c1_unauthorized_gas_payer(backend: str) -> None:
+    """C-1: placeholder outer signature / third-party gas payer must be rejected.
+
+    Before the fix, a relay tx with signatures=[0x00] and fee.payer=victim drained
+    the victim. After the fix, SigVerificationDecorator rejects unsigned outer txs.
+    """
+    wallet = WALLETS["sub1"]
+    victim = LocalWallet(PrivateKey(), prefix="mirage")
+    victim_addr = str(victim.address())
+    lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
+    ts = _now_ms()
+    topic = f"c1{_rand_str(4)}"
+    msg = _build_msg_follow_topic(wallet, lb, 0, ts, str(wallet.address()), topic, pow_val=0, nonce=_gen_nonce())
+    # Name victim as both authority and fee.payer (single required signer slot).
+    msg.authority = victim_addr
+    signer_pub = wallet.public_key().public_key_bytes
+    gas = DEFAULT_GAS_LIMIT
+    steal = gas * 1000  # meets floor if it were accepted
+
+    tx_bytes = _bh._build_tx_bytes(
+        [(msg, "/mirage.core.v1.MsgFollowTopic")],
+        gas,
+        fee_payer=victim_addr,
+        signer_pubkey=signer_pub,
+        fee_amount=steal,
+        sign_outer=False,
+    )
+    tx_hash, code, log = _bh._broadcast_tx_sync(tx_bytes)
+    _debug(f"c1 unsigned drain attempt hash={tx_hash} code={code} log={log[:200]}")
+    _check_reject("c1.unsigned_fee_payer_rejected", code, log, "pubkey")
+
+    # Empty fee.payer + foreign SignerInfo pubkey (same class: unverified outer identity).
+    msg2 = _build_msg_follow_topic(
+        wallet, lb, 0, ts, str(wallet.address()), f"c1e{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    )
+    msg2.authority = _bh._VALIDATOR_ADDR or ""
+    tx_bytes2 = _bh._build_tx_bytes(
+        [(msg2, "/mirage.core.v1.MsgFollowTopic")],
+        gas,
+        fee_payer="",  # empty → SDK falls back to first signer (authority)
+        signer_pubkey=signer_pub,  # attacker's pubkey, not validator's
+        fee_amount=steal,
+        sign_outer=False,
+    )
+    tx_hash2, code2, log2 = _bh._broadcast_tx_sync(tx_bytes2)
+    _debug(f"c1 empty fee.payer attempt hash={tx_hash2} code={code2} log={log2[:200]}")
+    _check_reject("c1.empty_fee_payer_foreign_pubkey_rejected", code2, log2, "pubkey")
+
+    # The sharpest forgery: the victim's real (public) pubkey in SignerInfo with a
+    # forged 64-byte signature. This passes SetPubKey, so only SigVerification can
+    # stop it. The victim is funded and the fee is exactly at the ceiling, so a
+    # rejection cannot come from insufficient funds or the fee bound instead.
+    funded_victim = LocalWallet(PrivateKey(), prefix="mirage")
+    fv_addr = str(funded_victim.address())
+    fv_pub = funded_victim.public_key().public_key_bytes
+    ceiling_fee = gas * int((_bh._get_chain_params().get("relay_min_gas_price")) or 0)
+    if not _faucet(backend, fv_addr, amount=ceiling_fee + 10_000_000):
+        _fail("c1.forged_signature_rejected", f"could not fund victim {fv_addr}")
+        return
+    time.sleep(2)
+    balance_before = _get_spendable_balance(fv_addr)
+    if balance_before < ceiling_fee:
+        _fail("c1.forged_signature_rejected", f"victim underfunded: {balance_before} < {ceiling_fee}")
+        return
+
+    msg4 = _build_msg_follow_topic(
+        wallet, lb, 0, ts, str(wallet.address()), f"c1f{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    )
+    msg4.authority = fv_addr
+    tx_bytes4 = _bh._build_tx_bytes(
+        [(msg4, "/mirage.core.v1.MsgFollowTopic")],
+        gas,
+        fee_payer=fv_addr,
+        signer_pubkey=fv_pub,  # victim's real pubkey — matches the required signer
+        fee_amount=ceiling_fee,
+        sign_outer=False,
+        outer_sig=b"\x11" * 64,  # forged signature of the right shape
+        unordered=True,
+    )
+    tx_hash4, code4, log4 = _bh._broadcast_tx_sync(tx_bytes4)
+    _debug(f"c1 forged-signature attempt hash={tx_hash4} code={code4} log={log4[:200]}")
+    _check_reject("c1.forged_signature_rejected", code4, log4, "signature verification failed")
+
+    balance_after = _get_spendable_balance(fv_addr)
+    _debug(f"c1 forged-signature victim balance before={balance_before} after={balance_after}")
+    if balance_after < balance_before:
+        _fail(
+            "c1.forged_signature_victim_unharmed",
+            f"victim was charged: {balance_before} -> {balance_after}",
+        )
+    else:
+        _pass("c1.forged_signature_victim_unharmed")
+
+    # Over-ceiling gas payment with a *valid* outer signature must still be rejected.
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+    msg3 = _build_msg_follow_topic(
+        wallet, lb, 0, ts, str(wallet.address()), f"c1c{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    )
+    params = _bh._get_chain_params()
+    relay_min = int(params.get("relay_min_gas_price") or 0)
+    relay_max = int(params.get("relay_max_gas_fee") or 0)
+    if relay_min <= 0:
+        _fail("c1.over_ceiling_fee_rejected", "relay_min_gas_price missing from chain params")
+        return
+    ceiling = gas * relay_min
+    if relay_max > 0 and ceiling > relay_max:
+        ceiling = relay_max
+    over = ceiling + 1
+    _, code3, log3, _, _ = _submit_tx(
+        [(msg3, "/mirage.core.v1.MsgFollowTopic")],
+        gas,
+        fee_payer,
+        signer_pub,
+        fee_amount=over,
+    )
+    _debug(f"c1 over-ceiling attempt over={over} ceiling={ceiling} code={code3} log={log3[:200]}")
+    _check_reject("c1.over_ceiling_fee_rejected", code3, log3, "fee too high")
 
 
 def test_staking(backend: str) -> None:

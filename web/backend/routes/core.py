@@ -98,7 +98,7 @@ from pow import (
     decode_b64,
 )
 from shared.canon import canon_signed_with_pow
-from tx import estimate_total_gas_limit, build_tx_bytes, simulate_gas, broadcast_tx
+from tx import estimate_total_gas_limit, build_tx_bytes, build_and_broadcast_tx, simulate_gas
 from chain import (
     classify_reject,
     get_difficulty_info,
@@ -140,7 +140,7 @@ def derive_address_from_pubkey(pub_dec: bytes) -> str:
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
 # state changes between simulation and execution, and storage write costs
 # (WriteFlat) that vary based on key/value sizes.
-GAS_BUFFER_MULTIPLIER = 1.10  # 10% buffer — simulation is accurate
+GAS_BUFFER_MULTIPLIER = 1.25  # C-1: simulate skips some sig-verify cost vs DeliverTx
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
 ENVELOPE_TIMESTAMP_SKEW_MS = 90 * 1000
@@ -1013,8 +1013,7 @@ def core_set_username():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -1295,8 +1294,7 @@ def core_set_biography():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -1417,8 +1415,7 @@ def core_enable_agent():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -1519,8 +1516,7 @@ def core_disable_agent():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -1665,8 +1661,7 @@ def core_set_agents():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -1788,8 +1783,7 @@ def core_block_post():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -1913,8 +1907,7 @@ def core_block_user():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2006,8 +1999,7 @@ def core_unblock_post():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2099,8 +2091,7 @@ def core_unblock_user():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2224,8 +2215,7 @@ def core_block_topic():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2318,8 +2308,7 @@ def core_unblock_topic():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2429,8 +2418,7 @@ def core_follow_user():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2544,8 +2532,7 @@ def core_unfollow_user():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2641,8 +2628,7 @@ def core_follow_topic():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2731,8 +2717,7 @@ def core_unfollow_topic():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2862,8 +2847,7 @@ def core_delete_post():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -2994,8 +2978,7 @@ def core_delete_user():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -3367,8 +3350,7 @@ def core_edit():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -3574,8 +3556,7 @@ def core_annotate():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -3883,8 +3864,7 @@ def core_post():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -4143,8 +4123,7 @@ def core_vote():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
         if code != 0:
             extra = {
                 "height": height,
@@ -4331,8 +4310,7 @@ def core_send_tokens():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
 
         if code != 0:
             extra = {
@@ -4511,8 +4489,7 @@ def core_subscribe():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
 
         if code != 0:
             extra = {
@@ -4663,8 +4640,7 @@ def core_set_auto_renewal():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
 
         if code != 0:
             extra = {
@@ -4793,8 +4769,7 @@ def core_award():
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
 
         if code != 0:
             extra = {

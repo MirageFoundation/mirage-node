@@ -114,10 +114,7 @@ build-all: test-fast build build-compact-db
 # Build a specific version for upgrades (version embedded via ldflags; binary is always miraged)
 build-version:
 	@if [ -z "$(V)" ]; then echo "Usage: make build-version V=v2.0.0"; exit 1; fi
-	@echo "--> Building $(APPNAME)d version $(V)"
-	@mkdir -p ./bin
-	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./bin/$(APPNAME)d ./cmd/$(APPNAME)d
-	@echo "--> Binary created: ./bin/$(APPNAME)d"
+	@$(MAKE) build VERSION=$(V)
 
 .PHONY: all install build build-version build-compact-db build-all
 

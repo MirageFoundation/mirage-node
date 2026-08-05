@@ -965,6 +965,168 @@ def test_validation(backend: str):
             _fail(f"validation.subscriber_pow_{endpoint_name}_allowed", str(e))
 
 
+def test_relay_signing(backend: str):
+    """C-1: relay txs the backend broadcasts must carry a real gas-payer signature.
+
+    Pins the wire format the ante now requires: a 64-byte outer secp256k1
+    signature, unordered=true with a timeout_timestamp nonce, sequence 0, and a
+    gas payment between the floor and the ceiling. Fails against pre-v1.32.0
+    code, which shipped a 1-byte placeholder signature.
+    """
+    wallet = WALLETS["sub1"]
+    topic = f"relaysig{_rand_str(5)}"
+    resp = _do_follow_topic(backend, wallet, topic)
+    txh = str((resp or {}).get("tx_hash", "") or "").strip().lower()
+    if not txh:
+        _fail("relay_signing.tx_submitted", f"no tx_hash in response: {str(resp)[:200]}")
+        return
+    _pass("relay_signing.tx_submitted")
+
+    # Tx indexing is disabled on Mirage nodes, so fetch the decoded tx from the
+    # block it landed in and match it by topic.
+    tx = None
+    deadline = time.time() + 30
+    scanned = 0
+    while time.time() < deadline and tx is None:
+        head = _rpc_latest_height()
+        for height in range(head, max(head - 30, 1), -1):
+            code, block = _get(f"{backend}/chain/rest/cosmos/tx/v1beta1/txs/block/{height}")
+            if code != 200:
+                continue
+            scanned += 1
+            for candidate in (block or {}).get("txs") or []:
+                messages = ((candidate.get("body") or {}).get("messages")) or []
+                if not messages:
+                    continue
+                msg = messages[0]
+                if str(msg.get("@type", "")) == "/mirage.core.v1.MsgFollowTopic" and msg.get("topic") == topic:
+                    tx = candidate
+                    _debug(f"relay_signing found tx at height={height}")
+                    break
+            if tx:
+                break
+        if tx is None:
+            time.sleep(2)
+    if not tx:
+        _fail("relay_signing.tx_fetched", f"tx {txh} (topic {topic}) not found in {scanned} scanned blocks")
+        return
+    _pass("relay_signing.tx_fetched")
+
+    sigs = tx.get("signatures") or []
+    if len(sigs) != 1:
+        _fail("relay_signing.single_signature", f"expected 1 signature, got {len(sigs)}")
+    else:
+        _pass("relay_signing.single_signature")
+        raw = base64.b64decode(sigs[0])
+        _debug(f"relay_signing outer sig len={len(raw)}")
+        if len(raw) != 64:
+            _fail("relay_signing.real_signature", f"signature is {len(raw)} bytes, want 64 (placeholder?)")
+        else:
+            _pass("relay_signing.real_signature")
+
+    body_obj = tx.get("body") or {}
+    if body_obj.get("unordered") is True:
+        _pass("relay_signing.unordered")
+    else:
+        _fail("relay_signing.unordered", f"unordered={body_obj.get('unordered')!r}")
+    if str(body_obj.get("timeout_timestamp") or "").strip():
+        _pass("relay_signing.timeout_timestamp")
+    else:
+        _fail("relay_signing.timeout_timestamp", "timeout_timestamp missing (unordered nonce)")
+
+    auth = tx.get("auth_info") or {}
+    signer_infos = auth.get("signer_infos") or []
+    if len(signer_infos) == 1 and str(signer_infos[0].get("sequence") or "0") == "0":
+        _pass("relay_signing.sequence_zero")
+    else:
+        _fail("relay_signing.sequence_zero", f"signer_infos={str(signer_infos)[:200]}")
+
+    fee = auth.get("fee") or {}
+    validator_addr = ""
+    code, conf = _get(f"{backend}/api/get_node_config")
+    if code == 200 and isinstance(conf, dict):
+        validator_addr = str(conf.get("validator_account_address", "")).strip()
+    if not validator_addr:
+        _fail("relay_signing.fee_payer_is_validator", "validator_account_address missing from node config")
+    elif str(fee.get("payer") or "") == validator_addr:
+        _pass("relay_signing.fee_payer_is_validator")
+    else:
+        _fail("relay_signing.fee_payer_is_validator", f"payer={fee.get('payer')!r} want {validator_addr}")
+
+    code, params = _get(f"{backend}/chain/rest/mirage/core/v1/params")
+    chain_params = (params or {}).get("params") or {}
+    relay_min = int(chain_params.get("relay_min_gas_price") or 0)
+    relay_max = int(chain_params.get("relay_max_gas_fee") or 0)
+    gas = int(fee.get("gas_limit") or 0)
+    amounts = fee.get("amount") or []
+    if relay_min <= 0 or gas <= 0 or len(amounts) != 1:
+        _fail(
+            "relay_signing.fee_within_bounds",
+            f"relay_min={relay_min} gas={gas} amounts={str(amounts)[:120]}",
+        )
+        return
+    paid = int(amounts[0].get("amount") or 0)
+    denom = str(amounts[0].get("denom") or "")
+    ceiling = gas * relay_min
+    if relay_max > 0 and ceiling > relay_max:
+        ceiling = relay_max
+    _debug(f"relay_signing gas={gas} paid={paid} ceiling={ceiling} denom={denom}")
+    if denom == "umirage" and 0 < paid <= ceiling:
+        _pass("relay_signing.fee_within_bounds")
+    else:
+        _fail("relay_signing.fee_within_bounds", f"paid={paid}{denom} ceiling={ceiling}")
+
+    _check_unordered_nonce_retry()
+
+
+def _check_unordered_nonce_retry() -> None:
+    """An unordered-nonce collision must rebuild the tx; other errors must not retry.
+
+    Runs against the deployed backend module inside the container, stubbing the
+    broadcast so the retry branch is exercised without touching the chain.
+    """
+    script = """
+import tx
+calls = []
+tx.build_tx_bytes = lambda body, gas: b"stub"
+
+def collide_then_succeed(_):
+    calls.append(1)
+    if len(calls) == 1:
+        return ("hash1", 1, 0, "unordered nonce already used timeout: 123")
+    return ("hash2", 0, 42, "")
+
+tx._broadcast_once = collide_then_succeed
+_, code, height, _ = tx.build_and_broadcast_tx(b"body", 1000)
+print("COLLISION", len(calls), code, height)
+
+other = []
+
+def hard_error(_):
+    other.append(1)
+    return ("hash3", 11, 0, "out of gas")
+
+tx._broadcast_once = hard_error
+_, code2, _, _ = tx.build_and_broadcast_tx(b"body", 1000)
+print("OTHER", len(other), code2)
+"""
+    payload = base64.b64encode(script.encode()).decode()
+    cmd = f"cd /opt/mirage/web/backend && echo {payload} | base64 -d | PYTHONPATH=/opt/mirage python3 -"
+    code, out = _docker_exec(cmd, timeout=60)
+    _debug(f"relay_signing retry probe rc={code} out={out.splitlines()[-2:]}")
+    if code != 0:
+        _fail("relay_signing.nonce_collision_retried", f"probe failed rc={code}: {out[-300:]}")
+        return
+    if "COLLISION 2 0 42" in out:
+        _pass("relay_signing.nonce_collision_retried")
+    else:
+        _fail("relay_signing.nonce_collision_retried", f"expected one rebuild+success, got: {out[-300:]}")
+    if "OTHER 1 11" in out:
+        _pass("relay_signing.other_errors_not_retried")
+    else:
+        _fail("relay_signing.other_errors_not_retried", f"expected no retry on non-nonce error: {out[-300:]}")
+
+
 # =========================================================================
 # Category 12: Token Transfers
 # =========================================================================

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	cosmoslog "cosmossdk.io/log/v2"
 	sdkmath "cosmossdk.io/math"
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -193,27 +192,42 @@ func TestValidateEnvelopeTimestampBoundaries(t *testing.T) {
 	require.Error(t, validateEnvelopeTimestamp(ctx, tooFuture, maxAge))
 }
 
-func TestRelayGasFeeDecoratorEnforcesMinGasOnCheckTx(t *testing.T) {
-	minPrices := sdk.NewDecCoins(sdk.NewDecCoinFromDec("umirage", sdkmath.LegacyNewDec(1)))
-	ctx := sdk.Context{}.WithMinGasPrices(minPrices).WithExecMode(sdk.ExecModeCheck).WithLogger(cosmoslog.NewNopLogger())
-
-	tx := testFeeTx{
-		fee: sdk.NewCoins(),
-		gas: 1000,
-	}
-
-	dec := RelayGasFeeDecorator{}
-	nextCalled := false
-	next := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
-		nextCalled = true
-		return ctx, nil
-	}
-
-	t.Logf("[debug] checktx min_gas_prices=%s gas=%d fee=%s", minPrices.String(), tx.gas, tx.fee.String())
-	_, err := dec.AnteHandle(ctx, tx, false, next)
+func TestCheckRelayGasPaymentFloor(t *testing.T) {
+	// Ante-level rejection of placeholder outer sigs / third-party fee.payer is
+	// covered by tests/cases/test_blockchain_chain_rules.py::test_c1_unauthorized_gas_payer
+	// (full CheckTx against a live node). These unit tests cover the fee math only.
+	minPrices := sdk.NewDecCoins(sdk.NewDecCoinFromDec("umirage", sdkmath.LegacyNewDec(1000)))
+	// gas=200000 → floor = 200_000_000
+	err := checkRelayGasPayment(200000, sdk.NewCoins(), minPrices, 1000, 500_000_000)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "insufficient fee")
-	require.False(t, nextCalled)
+
+	okFee := sdk.NewCoins(sdk.NewInt64Coin("umirage", 200_000_000))
+	require.NoError(t, checkRelayGasPayment(200000, okFee, minPrices, 1000, 500_000_000))
+}
+
+func TestCheckRelayGasPaymentCeiling(t *testing.T) {
+	// Ceiling = min(gas * relayMinGasPrice, relayMaxGasFee) = min(200_000_000, 500_000_000) = 200M
+	tooHigh := sdk.NewCoins(sdk.NewInt64Coin("umirage", 200_000_001))
+	err := checkRelayGasPayment(200000, tooHigh, sdk.DecCoins{}, 1000, 500_000_000)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fee too high")
+
+	// Hard cap at relayMaxGasFee when gas * price would exceed it
+	// gas=1_000_000 * 1000 = 1e9 > cap 500M → max = 500M
+	overCap := sdk.NewCoins(sdk.NewInt64Coin("umirage", 500_000_001))
+	err = checkRelayGasPayment(1_000_000, overCap, sdk.DecCoins{}, 1000, 500_000_000)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fee too high")
+
+	atCap := sdk.NewCoins(sdk.NewInt64Coin("umirage", 500_000_000))
+	require.NoError(t, checkRelayGasPayment(1_000_000, atCap, sdk.DecCoins{}, 1000, 500_000_000))
+}
+
+func TestCheckRelayGasPaymentRejectsNonUmirage(t *testing.T) {
+	err := checkRelayGasPayment(1000, sdk.NewCoins(sdk.NewInt64Coin("stake", 1000)), sdk.DecCoins{}, 1000, 500_000_000)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported denom")
 }
 
 type testFeeTx struct {

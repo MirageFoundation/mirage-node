@@ -2159,6 +2159,25 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// ── v1.32.0: Authorize relay gas payer (C-1) ──
+	// Consensus-breaking ante change: relay txs require a real outer unordered
+	// signature from the gas payer. No store or param migration — binary swap only.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.32.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.32.0 (relay gas-payer authorization)...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.32.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.32.0 complete - relay outer signature required for gas payment")
+			return toVM, nil
+		},
+	)
+
 	// Register the store loader for v1.28.0's store deletions. This must run
 	// before app.Load() (called later in App.New) so the deleted stores are
 	// dropped while loading the multistore at the upgrade height.

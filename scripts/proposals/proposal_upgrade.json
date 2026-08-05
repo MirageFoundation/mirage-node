@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.31.0 (permanent bridge removal + security review remediation)",
-    "summary": "Coordinated consensus-breaking upgrade. The Solana bridge and its off-chain orchestrator are removed permanently: bridge RPCs and messages are deleted from tx.proto and query.proto, Params fields 50 and 51 (bridge_chains, bridge_attestation_threshold) are dropped with the field numbers reserved, and the upgrade handler sweeps every orphaned bridge KV prefix plus the bridge_pending_count scalar, verifying emptiness after deletion and rewriting params without the removed fields. Historical bridge messages remain decodable via legacy stubs so past blocks still replay, but new bridge messages are rejected in the ante handler. The release also lands the blockchain security review remediations: CONSENSUS_FATAL sites now terminate the process instead of leaving a node answering RPC without advancing consensus, the relay signature check runs ahead of the Argon2 proof-of-work work to close a cheap CPU-burn vector, the proof-of-work difficulty factor uses exact rational arithmetic instead of float64 so the calculation is deterministic across platforms, the full supply-versus-balances invariant runs every block, relay credit accounting moved into the MsgPost handler so its errors propagate, BurnFromModuleAmount requires an exact burn, and SetAutoRenewal always deducts the relay gas fee. None of these behaviors are gated on block height, so mixed binaries diverge immediately: every validator must cross this single coordinated height and restart on the v1.31.0 binary. There is no state migration beyond the bridge KV cleanup described above.",
+    "title": "Upgrade to v1.32.0 (authorize relay gas payer)",
+    "summary": "Consensus-breaking ante fix for C-1. Relay transactions must carry a real outer unordered signature from the gas payer; the hand-rolled RelayGasFeeDecorator that deducted from fee.payer without authorization is replaced by the SDK SigVerification and DeductFee decorators with a floor and ceiling on the gas payment. Validator still pays gas for free-user relays; paid users still burn from reserve. No store or param migration — binary swap only. Mixed binaries diverge immediately: every validator must cross this single coordinated height on the v1.32.0 binary.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.31.0",
+                "name": "v1.32.0",
                 "height": "T+50",
                 "info": ""
             }

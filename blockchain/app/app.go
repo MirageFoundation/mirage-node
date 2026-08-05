@@ -310,7 +310,7 @@ func New(
 	// build app
 	app.App = appBuilder.Build(db, baseAppOptions...)
 
-	// Signature-less ante chain for relay flow
+	// Signature-less envelope auth; outer Cosmos signature required for gas payer (C-1).
 	if app.App != nil {
 		if base := app.App.GetBaseApp(); base != nil {
 			// Build individual decorators for granular control
@@ -328,10 +328,13 @@ func New(
 				Keeper: app.CoreKeeper,
 			}
 			meta := RelaySigDecorator{Keeper: app.CoreKeeper}
-			metaFees := RelayGasFeeDecorator{BankKeeper: app.BankKeeper}
 			logDec := LoggingDecorator{}
 			validateBasic := authante.NewValidateBasicDecorator()
 			govDec := GovAuthorityDecorator{}
+			setPubKey := authante.NewSetPubKeyDecorator(app.AuthKeeper)
+			sigGas := authante.NewSigGasConsumeDecorator(app.AuthKeeper, authante.DefaultSigVerificationGasConsumer)
+			sigVerify := authante.NewSigVerificationDecorator(app.AuthKeeper, app.txConfig.SignModeHandler())
+			deductFee := authante.NewDeductFeeDecorator(app.AuthKeeper, app.BankKeeper, nil, makeRelayTxFeeChecker(app.CoreKeeper))
 
 			// Build the standard SDK ante handler for normal (signed) txs
 			stdOpts := authante.HandlerOptions{
@@ -347,11 +350,13 @@ func New(
 			}
 
 			// Relay ante chain (must start with SetUpContextDecorator).
-			// M-1: RelaySigDecorator (meta) runs BEFORE PowDecorator (powDec)
-			// so unauthenticated envelopes are rejected ~35x cheaper than
-			// paying Argon2id first. meta only needs envelope fields + the
-			// nonce store — it does not depend on powDec state. Nonce writes
-			// roll back with the cached context if a later decorator fails.
+			// C-1: outer SigVerification + DeductFee run BEFORE envelope/PoW so the
+			// gas payer must prove consent (unordered outer signature). The old
+			// RelayGasFeeDecorator deducted from fee.payer with no signature check.
+			// M-1: RelaySigDecorator (meta) still runs BEFORE PowDecorator (powDec)
+			// so unauthenticated envelopes are rejected ~35x cheaper than Argon2id.
+			// ensure precedes setPubKey so the outer signer account exists.
+			// IncrementSequenceDecorator is omitted — relay txs are unordered.
 			relayAnte := sdk.ChainAnteDecorators(
 				setup,
 				validateBasic,
@@ -359,10 +364,13 @@ func New(
 				timeout,
 				gasSize,
 				logDec,
+				ensure,
+				setPubKey,
+				sigGas,
+				sigVerify,
+				deductFee,
 				meta,
 				powDec,
-				ensure,
-				metaFees,
 			)
 
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {

@@ -439,30 +439,40 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
 
 ### Transaction Building
 
+Relay txs are **unordered** and signed with the validator key (C-1). The Cosmos
+`Fee` field is the gas payment; the named `fee.payer` must prove consent via a
+real outer `SIGN_MODE_DIRECT` signature. Routes call `build_and_broadcast_tx`,
+which rebuilds once on unordered-nonce collision (`already used timeout`).
+
 ```python
 def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
-    """Construct TxRaw bytes with validator as fee payer."""
+    """Signed unordered TxRaw; gas payer = validator."""
     min_gas_price = min_gas_price_umirage()
     fee_amt = ceil(gas_limit * min_gas_price)
-    
+
     fee = Fee(gas_limit=gas_limit)
     fee.amount.append(Coin(denom="umirage", amount=str(fee_amt)))
-    fee.payer = require_runtime().validator_payer_addr  # Validator pays
-    
-    # Get validator's current sequence number
-    sequence = get_account_sequence(validator_payer_addr)
-    
-    # Build AuthInfo with validator's pubkey
+    fee.payer = require_runtime().validator_payer_addr
+
+    # Unordered txs use sequence=0; timeout_timestamp is the nonce.
     pub_any = AnyPB()
     pub_any.Pack(SecpPubKey(key=validator_pubkey_bytes))
-    si = SignerInfo(public_key=pub_any, sequence=sequence)
+    mode = ModeInfo(single=ModeInfo.Single(mode=SignMode.SIGN_MODE_DIRECT))
+    si = SignerInfo(public_key=pub_any, mode_info=mode, sequence=0)
     auth = AuthInfo(signer_infos=[si], fee=fee)
-    
-    # Placeholder signature (chain validates envelope signature, not SDK signature)
-    return TxRaw(
-        body_bytes=body_bytes,
+
+    signed_body = append_unordered_timeout(body_bytes, unique_timeout_ns())
+    sign_doc = SignDoc(
+        body_bytes=signed_body,
         auth_info_bytes=auth.SerializeToString(),
-        signatures=[b"\x00"]  # Placeholder
+        chain_id=runtime.chain_id,
+        account_number=runtime.validator_account_number,
+    )
+    sig = sign_sign_doc(runtime.validator_privkey_bytes, sign_doc.SerializeToString())
+    return TxRaw(
+        body_bytes=signed_body,
+        auth_info_bytes=auth.SerializeToString(),
+        signatures=[sig],
     ).SerializeToString()
 ```
 
@@ -472,7 +482,7 @@ Transactions are broadcast synchronously via the Cosmos tx REST service:
 
 ```python
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
-    """Broadcast transaction via REST (BROADCAST_MODE_SYNC)."""
+    """Broadcast an already-built TxRaw (BROADCAST_MODE_SYNC)."""
     tx_hash = hashlib.sha256(tx_bytes).hexdigest().lower()
     payload = {
         "tx_bytes": base64.b64encode(tx_bytes).decode(),

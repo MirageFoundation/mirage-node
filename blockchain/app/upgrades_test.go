@@ -95,6 +95,7 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.27.0"), "v1.27.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.28.0"), "v1.28.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.31.0"), "v1.31.0 upgrade handler should be registered")
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.32.0"), "v1.32.0 upgrade handler should be registered")
 }
 
 func TestRemovedBridgePrefixesComplete(t *testing.T) {

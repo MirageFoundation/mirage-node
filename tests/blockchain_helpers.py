@@ -20,12 +20,16 @@ from cosmpy.protos.cosmos.base.v1beta1.coin_pb2 import Coin
 from cosmpy.protos.cosmos.crypto.secp256k1.keys_pb2 import PubKey as SecpPubKey
 from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgBeginRedelegate, MsgDelegate, MsgUndelegate
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
-from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import AuthInfo, Fee, ModeInfo, SignerInfo, TxBody, TxRaw
+from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import AuthInfo, Fee, ModeInfo, SignerInfo, TxBody, TxRaw, SignDoc
 from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import SimulateRequest
 from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
 from google.protobuf.any_pb2 import Any as AnyPB
+from google.protobuf.timestamp_pb2 import Timestamp
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 
-from shared.client import _request_with_retries, check_pow_target, compute_pow, get_status, sign_canonical
+from shared.client import _request_with_retries, check_pow_target, compute_pow, get_status, sign_canonical, der_to_compact_sig
 from shared.canon import (
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_block_topic as _canon_base_block_topic_raw,
@@ -115,6 +119,10 @@ _GRPC_CHANNEL = None
 _SIMULATE_MODE_LOGGED = False
 
 _MIN_GAS_PRICE_CACHE: Optional[float] = None
+_VALIDATOR_PRIVKEY: Optional[bytes] = None
+_VALIDATOR_ACCOUNT_NUMBER: Optional[int] = None
+_CHAIN_ID: Optional[str] = None
+_UNORDERED_TTL_NS = 120 * 1_000_000_000
 
 
 def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float, lb: str) -> int:
@@ -388,7 +396,19 @@ def _build_tx_bytes(
     signer_pubkey: bytes,
     fee_denom: str = "umirage",
     fee_amount: Optional[int] = None,
+    *,
+    sign_outer: bool = True,
+    outer_sig: Optional[bytes] = None,
+    unordered: bool = False,
 ) -> bytes:
+    """Build TxRaw. By default signs unordered outer tx with validator key (C-1).
+
+    Set sign_outer=False only for negative tests that assert rejection of
+    placeholder signatures / unauthorized fee payers. In that mode outer_sig
+    overrides the 1-byte placeholder (use a 64-byte forgery to force the chain
+    all the way into signature verification), and unordered=True adds the
+    unordered/timeout_timestamp body fields the real signed path uses.
+    """
     any_msgs: list[AnyPB] = []
     for msg, type_url in msgs:
         any_msg = AnyPB()
@@ -406,10 +426,146 @@ def _build_tx_bytes(
     fee.payer = fee_payer
 
     mode = ModeInfo(single=ModeInfo.Single(mode=SignMode.SIGN_MODE_DIRECT))
-    signer_info = SignerInfo(public_key=_make_pubkey_any(signer_pubkey), mode_info=mode, sequence=0)
+    outer_pub = signer_pubkey
+    if sign_outer:
+        # Outer signer must be the gas payer (validator). Envelope pubkey is unrelated.
+        from cosmpy.crypto.keypairs import PrivateKey as _Priv
+
+        outer_pub = _Priv(_require_validator_privkey()).public_key.public_key_bytes
+    signer_info = SignerInfo(public_key=_make_pubkey_any(outer_pub), mode_info=mode, sequence=0)
     auth = AuthInfo(signer_infos=[signer_info], fee=fee)
-    tx_raw = TxRaw(body_bytes=body_bytes, auth_info_bytes=auth.SerializeToString(), signatures=[b"\x00"])
+    auth_bytes = auth.SerializeToString()
+
+    if not sign_outer:
+        forged_body = _append_unordered_timeout(body_bytes, _unique_timeout_ns()) if unordered else body_bytes
+        tx_raw = TxRaw(
+            body_bytes=forged_body,
+            auth_info_bytes=auth_bytes,
+            signatures=[outer_sig if outer_sig is not None else b"\x00"],
+        )
+        return tx_raw.SerializeToString()
+
+    timeout_ns = _unique_timeout_ns()
+    signed_body = _append_unordered_timeout(body_bytes, timeout_ns)
+    priv = _require_validator_privkey()
+    chain_id = _require_chain_id()
+    acc_num = _require_validator_account_number()
+    sign_doc = SignDoc(
+        body_bytes=signed_body,
+        auth_info_bytes=auth_bytes,
+        chain_id=chain_id,
+        account_number=int(acc_num),
+    )
+    sig = _sign_sign_doc(priv, sign_doc.SerializeToString())
+    tx_raw = TxRaw(body_bytes=signed_body, auth_info_bytes=auth_bytes, signatures=[sig])
     return tx_raw.SerializeToString()
+
+
+def _unique_timeout_ns() -> int:
+    now = time.time_ns()
+    cand = now + _UNORDERED_TTL_NS + ((os.getpid() & 0xFFFF) << 16) + random.getrandbits(16)
+    max_ns = now + 9 * 60 * 1_000_000_000
+    if cand > max_ns:
+        cand = max_ns - random.getrandbits(20)
+    if cand <= now:
+        cand = now + _UNORDERED_TTL_NS + random.getrandbits(20)
+    return int(cand)
+
+
+def _encode_varint(n: int) -> bytes:
+    out = bytearray()
+    while n > 0x7F:
+        out.append((n & 0x7F) | 0x80)
+        n >>= 7
+    out.append(n & 0x7F)
+    return bytes(out)
+
+
+def _append_unordered_timeout(body_bytes: bytes, timeout_ns: int) -> bytes:
+    unordered = b"\x20\x01"
+    ts = Timestamp()
+    ts.seconds = timeout_ns // 1_000_000_000
+    ts.nanos = int(timeout_ns % 1_000_000_000)
+    ts_bytes = ts.SerializeToString()
+    timeout = b"\x2a" + _encode_varint(len(ts_bytes)) + ts_bytes
+    return body_bytes + unordered + timeout
+
+
+def _sign_sign_doc(privkey_bytes: bytes, sign_doc_bytes: bytes) -> bytes:
+    priv_key_int = int.from_bytes(privkey_bytes, "big")
+    priv_key = ec.derive_private_key(priv_key_int, ec.SECP256K1(), default_backend())
+    sig_der = priv_key.sign(sign_doc_bytes, ec.ECDSA(hashes.SHA256()))
+    sig = der_to_compact_sig(sig_der)
+    if len(sig) != 64:
+        raise RuntimeError(f"outer signature must be 64 bytes, got {len(sig)}")
+    return sig
+
+
+def _require_validator_privkey() -> bytes:
+    global _VALIDATOR_PRIVKEY
+    if _VALIDATOR_PRIVKEY is not None:
+        return _VALIDATOR_PRIVKEY
+    code, out = _run_miraged(
+        [
+            "keys",
+            "export",
+            "validator",
+            "--unarmored-hex",
+            "--unsafe",
+            "-y",
+            "--home",
+            "/root/.mirage/node",
+            "--keyring-backend",
+            "test",
+        ],
+        timeout=10,
+    )
+    if code != 0:
+        raise RuntimeError(f"validator privkey export failed: {out[:300]}")
+    hex_key = ""
+    for line in reversed((out or "").splitlines()):
+        token = line.strip()
+        if len(token) == 64 and all(c in "0123456789abcdefABCDEF" for c in token):
+            hex_key = token
+            break
+    if not hex_key:
+        raise RuntimeError(f"validator privkey export: no hex key in output: {(out or '')[:200]}")
+    _VALIDATOR_PRIVKEY = bytes.fromhex(hex_key)
+    return _VALIDATOR_PRIVKEY
+
+
+def _require_chain_id() -> str:
+    global _CHAIN_ID
+    if _CHAIN_ID:
+        return _CHAIN_ID
+    # Prefer client.toml inside container; fall back to REST node_info.
+    code, out = _docker_exec("grep -E '^chain-id' /root/.mirage/node/config/client.toml || true")
+    if code == 0 and out and "=" in out:
+        _CHAIN_ID = out.split("=", 1)[1].strip().strip('"').strip("'")
+        if _CHAIN_ID:
+            return _CHAIN_ID
+    resp = requests.get(f"{COMET_RPC_URL}/status", timeout=5).json()
+    _CHAIN_ID = str(resp["result"]["node_info"]["network"])
+    if not _CHAIN_ID:
+        raise RuntimeError("chain_id unresolved")
+    return _CHAIN_ID
+
+
+def _require_validator_account_number() -> int:
+    global _VALIDATOR_ACCOUNT_NUMBER
+    if _VALIDATOR_ACCOUNT_NUMBER is not None:
+        return _VALIDATOR_ACCOUNT_NUMBER
+    if not _VALIDATOR_ADDR:
+        raise RuntimeError("validator address not set")
+    url = f"http://127.0.0.1:80/chain/rest/cosmos/auth/v1beta1/accounts/{_VALIDATOR_ADDR}"
+    resp = requests.get(url, timeout=10)
+    if resp.status_code != 200:
+        raise RuntimeError(f"account query failed: {resp.status_code} {resp.text[:200]}")
+    acc = (resp.json().get("account") or {})
+    if "base_account" in acc:
+        acc = acc["base_account"] or {}
+    _VALIDATOR_ACCOUNT_NUMBER = int(acc["account_number"])
+    return _VALIDATOR_ACCOUNT_NUMBER
 
 
 _SIMULATE_PY = """import base64

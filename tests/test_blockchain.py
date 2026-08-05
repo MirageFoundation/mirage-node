@@ -37,6 +37,7 @@ from tests.cases.test_blockchain_pow import test_pow
 from tests.cases.test_blockchain_chain_rules import (
     test_authority,
     test_fee,
+    test_c1_unauthorized_gas_payer,
     test_staking,
     test_msg_validation,
     test_msg_format,
@@ -65,6 +66,7 @@ ALL_CATEGORIES = {
     "pow": test_pow,
     "authority": test_authority,
     "fee": test_fee,
+    "c1_gas_payer": test_c1_unauthorized_gas_payer,
     "staking": test_staking,
     "msg_validation": test_msg_validation,
     "direct_bank": test_direct_bank,
@@ -92,6 +94,7 @@ ALL_CATEGORIES = {
 STATELESS_CATEGORIES = {
     "authority",
     "fee",
+    "c1_gas_payer",
     "staking",
     "malicious_inputs",
     "tier_enforcement",

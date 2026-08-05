@@ -17,9 +17,11 @@ Functions:
 
 import base64
 import json
+import logging
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import tomllib as _toml
@@ -32,6 +34,8 @@ from paths import project_root
 
 KEYRING_BACKEND = get_config().get_keyring_backend()
 
+_log = logging.getLogger("node")
+
 
 @dataclass
 class Runtime:
@@ -41,10 +45,12 @@ class Runtime:
     grpc_target: str
     validator_payer_addr: str
     validator_pubkey_bytes: bytes
+    validator_privkey_bytes: bytes
+    validator_account_number: int
+    chain_id: str
     validator_operator_address: str
     validator_consensus_address: str
     min_gas_price_umirage: float
-
 
 _RUNTIME: Optional[Runtime] = None
 
@@ -275,6 +281,92 @@ def derive_address_from_pubkey(pubkey_bytes: bytes, hrp: str = "mirage") -> str:
     return bech32_encode(hrp, data5)
 
 
+def resolve_validator_privkey_bytes() -> bytes:
+    """Export the validator account private key once at startup (test keyring).
+
+    C-1: the backend must sign the outer Cosmos tx so the gas payer proves consent.
+    Keyring backend is `test` (plaintext on disk); this loads it into process memory.
+    """
+    cfg = get_config()
+    home = cfg.get_node_config()["home"]
+    bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "bin", "miraged"))
+    cmd = [
+        bin_path,
+        "keys",
+        "export",
+        "validator",
+        "--unarmored-hex",
+        "--unsafe",
+        "-y",
+        "--output",
+        "text",
+        "--home",
+        home,
+        "--keyring-backend",
+        KEYRING_BACKEND,
+    ]
+    out = subprocess.check_output(cmd, timeout=10, stderr=subprocess.STDOUT).decode("utf-8").strip()
+    # CLI may print log lines before the hex key; take the last 64-hex token.
+    hex_key = ""
+    for line in reversed(out.splitlines()):
+        token = line.strip()
+        if re.fullmatch(r"[0-9a-fA-F]{64}", token):
+            hex_key = token
+            break
+    if not hex_key:
+        raise RuntimeError(f"validator privkey export: no 64-hex key in output: {out[:200]}")
+    pk = bytes.fromhex(hex_key)
+    if len(pk) != 32:
+        raise RuntimeError(f"validator privkey must be 32 bytes, got {len(pk)}")
+    return pk
+
+
+def resolve_chain_id() -> str:
+    cfg = get_config()
+    home = cfg.get_node_config()["home"]
+    path = os.path.join(home, "config", "client.toml")
+    with open(path, "rb") as f:
+        data = _toml.load(f)
+    chain_id = str(data.get("chain-id") or data.get("chain_id") or "").strip()
+    if not chain_id:
+        raise RuntimeError("chain-id missing in client.toml")
+    return chain_id
+
+
+def resolve_account_number(api_url: str, address: str, wait_budget_sec: float = 60.0) -> int:
+    """Fetch account_number once at startup (stable for the life of the account).
+
+    The entrypoint only waits for the node's RPC port before starting gunicorn, so
+    the REST API may not be bound yet. Retry within a bounded budget, then fail.
+    """
+    import requests
+
+    url = f"{api_url.rstrip('/')}/cosmos/auth/v1beta1/accounts/{address}"
+    deadline = time.monotonic() + wait_budget_sec
+    last_err = ""
+    while True:
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                break
+            last_err = f"http {resp.status_code}: {resp.text[:300]}"
+        except Exception as e:
+            last_err = str(e)
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"account query failed after {wait_budget_sec:.0f}s waiting for node API: {last_err}")
+        _log.warning("account query not ready, retrying: %s", last_err[:200])
+        time.sleep(2)
+    body = resp.json()
+    acc = body.get("account") or {}
+    # Some deployments wrap BaseAccount under a nested key.
+    if "base_account" in acc:
+        acc = acc["base_account"] or {}
+    raw = acc.get("account_number")
+    if raw is None or str(raw).strip() == "":
+        raise RuntimeError(f"account_number missing for {address}: {str(body)[:200]}")
+    return int(raw)
+
+
 def initialize_runtime() -> Runtime:
     global _RUNTIME
     assert_node_home_ready()
@@ -284,6 +376,15 @@ def initialize_runtime() -> Runtime:
     grpc_target = get_grpc_target()
     validator_payer_addr = resolve_validator_payer_address()
     validator_pubkey_bytes = resolve_validator_pubkey_bytes()
+    validator_privkey_bytes = resolve_validator_privkey_bytes()
+    # Pubkey derived from privkey must match the keyring pubkey.
+    from cosmpy.crypto.keypairs import PrivateKey as _Priv
+
+    derived_pub = _Priv(validator_privkey_bytes).public_key.public_key_bytes
+    if derived_pub != validator_pubkey_bytes:
+        raise RuntimeError("validator privkey/pubkey mismatch after export")
+    chain_id = resolve_chain_id()
+    validator_account_number = resolve_account_number(api_url, validator_payer_addr)
     validator_operator_address = _derive_valoper_from_account(validator_payer_addr)
     validator_consensus_address = _derive_valcons_from_pubkey(_get_node_consensus_pubkey_bytes())
     min_gas_price = _load_min_gas_price_umirage()
@@ -294,6 +395,9 @@ def initialize_runtime() -> Runtime:
         grpc_target=grpc_target,
         validator_payer_addr=validator_payer_addr,
         validator_pubkey_bytes=validator_pubkey_bytes,
+        validator_privkey_bytes=validator_privkey_bytes,
+        validator_account_number=validator_account_number,
+        chain_id=chain_id,
         validator_operator_address=validator_operator_address,
         validator_consensus_address=validator_consensus_address,
         min_gas_price_umirage=min_gas_price,
@@ -319,6 +423,7 @@ __all__ = [
     "min_gas_price_umirage",
     "resolve_validator_payer_address",
     "resolve_validator_pubkey_bytes",
+    "resolve_validator_privkey_bytes",
     "find_local_operator_address",
     "find_local_consensus_address",
     "derive_address_from_pubkey",

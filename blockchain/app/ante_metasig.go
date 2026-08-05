@@ -8,9 +8,7 @@ import (
 
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 
 	corekeeper "mirage/x/core/keeper"
@@ -999,106 +997,3 @@ func validateEnvelopeTimestamp(ctx sdk.Context, timestampMs uint64, maxAgeSec ui
 	return nil
 }
 
-// RelayGasFeeDecorator enforces min-gas-prices on CheckTx and deducts SDK fees on DeliverTx
-// for relay transactions by deriving the fee payer from the embedded pubkey.
-type RelayGasFeeDecorator struct {
-	BankKeeper bankkeeper.Keeper
-}
-
-func (d RelayGasFeeDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	ftx, ok := tx.(sdk.FeeTx)
-	if !ok {
-		return ctx, fmt.Errorf("relay fee: expected FeeTx")
-	}
-
-	// Compute required fees from min gas prices for all execution modes; CheckTx enforces min-gas here.
-	minPrices := ctx.MinGasPrices()
-	if !minPrices.IsZero() {
-		required := sdk.NewCoins()
-		gas := ftx.GetGas()
-		for _, gp := range minPrices {
-			amt := gp.Amount.MulInt64(int64(gas)).Ceil().TruncateInt()
-			if amt.IsPositive() {
-				required = required.Add(sdk.NewCoin(gp.Denom, amt))
-			}
-		}
-		offered := ftx.GetFee()
-		if !offered.IsAnyGTE(required) {
-			ctx.Logger().Warn("relay insufficient fee", "offered", offered.String(), "required", required.String(), "min_gas_prices", minPrices.String(), "gas", gas)
-			return ctx, fmt.Errorf("insufficient fee: got %s required any >= %s (minGasPrices=%s, gas=%d)", offered, required, minPrices, gas)
-		}
-
-		// Early reject in CheckTx if payer cannot cover offered fees
-		if ctx.IsCheckTx() && !offered.IsZero() {
-			// resolve payer (explicit fee.payer preferred, then outer signer)
-			var payerAddr sdk.AccAddress
-			if payerBz := ftx.FeePayer(); len(payerBz) > 0 {
-				payerAddr = sdk.AccAddress(payerBz)
-			}
-			if payerAddr == nil {
-				if svtx, ok := tx.(authsigning.SigVerifiableTx); ok {
-					if pubs, err := svtx.GetPubKeys(); err == nil {
-						if len(pubs) > 0 && pubs[0] != nil {
-							if bz := pubs[0].Address(); len(bz) > 0 {
-								payerAddr = sdk.AccAddress(bz)
-							}
-						}
-					}
-				}
-			}
-			if payerAddr == nil {
-				ctx.Logger().Warn("relay fee payer not resolvable in CheckTx (require fee.payer or outer signer)")
-				return ctx, fmt.Errorf("relay fee: missing payer (require fee.payer or outer signer)")
-			}
-			// check each offered coin against balance
-			for _, c := range offered {
-				bal := d.BankKeeper.GetBalance(ctx, payerAddr, c.Denom).Amount
-				if bal.LT(c.Amount) {
-					ctx.Logger().Warn("relay fee payer insufficient funds", "payer", payerAddr.String(), "denom", c.Denom, "need", c.Amount.String(), "bal", bal.String())
-					return ctx, fmt.Errorf("insufficient funds: payer %s needs %s%s has %s%s", payerAddr.String(), c.Amount.String(), c.Denom, bal.String(), c.Denom)
-				}
-			}
-		}
-	}
-
-	// Deduct fees during Finalize and Simulate (simulate for accurate gas estimation).
-	// Do NOT deduct during Prepare/ProcessProposal.
-	if ctx.ExecMode() == sdk.ExecModeFinalize || ctx.ExecMode() == sdk.ExecModeSimulate {
-		payer := ""
-		if payerBz := ftx.FeePayer(); len(payerBz) > 0 {
-			payer = sdk.AccAddress(payerBz).String()
-		}
-		if payer == "" {
-			if svtx, ok := tx.(authsigning.SigVerifiableTx); ok {
-				if pubs, err := svtx.GetPubKeys(); err == nil {
-					if len(pubs) > 0 && pubs[0] != nil {
-						if bz := pubs[0].Address(); len(bz) > 0 {
-							payer = sdk.AccAddress(bz).String()
-						}
-					}
-				}
-			}
-		}
-		if payer == "" {
-			ctx.Logger().Warn("relay fee: unable to resolve fee payer")
-			return ctx, fmt.Errorf("relay fee: unable to resolve fee payer")
-		}
-		fees := ftx.GetFee()
-		if !fees.IsZero() {
-			addr, err := sdk.AccAddressFromBech32(payer)
-			if err != nil {
-				ctx.Logger().Warn("relay invalid fee payer address", "err", err.Error())
-				return ctx, fmt.Errorf("invalid fee payer address: %w", err)
-			}
-			if err := d.BankKeeper.SendCoinsFromAccountToModule(ctx, addr, authtypes.FeeCollectorName, fees); err != nil {
-				ctx.Logger().Warn("relay fee deduction failed", "payer", payer, "fees", fees.String(), "err", err.Error())
-				return ctx, fmt.Errorf("fee deduction failed: %w", err)
-			}
-			if ctx.ExecMode() == sdk.ExecModeSimulate {
-				ctx.Logger().Debug("relay fee: simulated deduction", "payer", payer, "fees", fees.String())
-			}
-		}
-	}
-
-	return next(ctx, tx, simulate)
-}

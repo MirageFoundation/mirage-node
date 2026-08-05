@@ -49,7 +49,7 @@ from tests.cases.test_backend_subscriptions import (
     test_subscribe_gift_agent,
 )
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
-from tests.cases.test_backend_security import test_security, test_validation
+from tests.cases.test_backend_security import test_security, test_validation, test_relay_signing
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
 from tests.cases.test_backend_indexer import test_indexer, test_tx_index
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
@@ -67,6 +67,7 @@ ALL_CATEGORIES = {
     "edge": test_edge_cases,
     "security": test_security,
     "validation": test_validation,
+    "relay_signing": test_relay_signing,
     "tokens": test_tokens,
     "agents": test_agents,
     "media": test_media,
