@@ -121,15 +121,12 @@ message Params {
   uint64 max_envelope_age = 45;
 
   // tags 46-49 reserved
+  reserved 46 to 49;
 
-  // bridge_chains defines the configuration for each supported bridge chain
-  repeated BridgeChainConfig bridge_chains = 50;
+  // Were bridge_chains / bridge_attestation_threshold; removed in v1.31.0
+  reserved 50, 51;
 
-  // bridge_attestation_threshold is the voting power fraction required for minting [0.0, 1.0]
-  // Default: 0.6667 (66.67% of total voting power required)
-  double bridge_attestation_threshold = 51;
-
-  // pow_difficulty_step is the fractional step for the exponential difficulty factor [0.0, 1.0]
+  // pow_difficulty_step is the fractional step for the exponential difficulty factor [0.01, 1.0]
   // Effective factor: 1000 * (1 + step)^difficulty. On busy: difficulty += 1. On calm: difficulty -= 1.
   // Default: 0.25 (25% per step)
   double pow_difficulty_step = 52;
@@ -147,20 +144,4 @@ message AwardConfig {
 
   // cost is the amount of umirage burned when giving this award (0 for free awards)
   uint64 cost = 2;
-}
-
-// BridgeChainConfig defines the configuration for a bridgeable chain.
-// Supports attested chains (Solana, etc.)
-message BridgeChainConfig {
-  option (gogoproto.equal) = true;
-
-  // chain_id is the unique identifier for this chain (e.g., "solana")
-  string chain_id = 1;
-
-  // enabled indicates whether bridging to/from this chain is currently allowed
-  bool enabled = 2;
-
-  // fee is the flat fee in umirage charged and burned for bridge transfers to this chain
-  // Default: 1000000 = 1 MIRAGE
-  uint64 fee = 3;
 }

@@ -103,6 +103,31 @@ func TestProcessSubscriptionsFailsFastOnCorruptProfile(t *testing.T) {
 		"error must be tagged for incident triage")
 }
 
+// TestProcessSubscriptionsFailsFastOnCorruptProfileOneTimePayment: even when
+// SubscriptionPeriod==0 (one-time payment, no renewal), a corrupt ProfileCore
+// on an expired subscription MUST still return CONSENSUS_FATAL:PROFILE_DECODE.
+// Regression for review M-7 (decode used to sit below the period==0 continue).
+func TestProcessSubscriptionsFailsFastOnCorruptProfileOneTimePayment(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithBlockTime(time.Unix(2_000_000_000, 0))
+	am := newTestModule(mk)
+
+	owner := testAccAddressString()
+	expiry := int64(1_000_000_000)
+
+	require.NoError(t, mk.SetSubscription(ctx, owner, 1, expiry))
+	require.NoError(t, mk.SetProfileCore(ctx, owner, []byte{0xff, 0x00, 0xff, 0x00}),
+		"seed corrupt profile bytes")
+
+	params := types.DefaultParams()
+	params.SubscriptionPeriod = 0
+
+	err := am.processSubscriptions(ctx, params)
+	require.Error(t, err, "corrupt profile must fail-fast even for one-time payments")
+	require.Contains(t, err.Error(), "CONSENSUS_FATAL:PROFILE_DECODE",
+		"error must be tagged for incident triage")
+}
+
 // TestProcessSubscriptionsFailsFastOnMissingProfile: an expired subscription
 // pointing to a missing profile is a state inconsistency. Skipping the
 // renewal/expiry on this node only would leave its subscription index and

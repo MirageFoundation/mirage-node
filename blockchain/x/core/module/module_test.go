@@ -41,9 +41,6 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		"RelayMaxGasFee":   true,
 		// Envelope
 		"MaxEnvelopeAge": true,
-		// Bridge
-		"BridgeChains":               true,
-		"BridgeAttestationThreshold": true,
 		// Awards
 		"AwardConfigs": true,
 	}
@@ -96,8 +93,8 @@ func TestApplyParamUpdatesPartial(t *testing.T) {
 	base := types.DefaultParams()
 	updates := types.Params{
 		MinDifficulty: base.MinDifficulty + 1,
-		BridgeChains: []*types.BridgeChainConfig{
-			{ChainId: "solana", Enabled: true, Fee: 1},
+		AwardConfigs: []*types.AwardConfig{
+			{Name: "test", Cost: 1},
 		},
 	}
 
@@ -114,8 +111,8 @@ func TestApplyParamUpdatesPartial(t *testing.T) {
 	if updated.SubscriptionPeriod != base.SubscriptionPeriod {
 		t.Fatalf("SubscriptionPeriod changed unexpectedly: %d", updated.SubscriptionPeriod)
 	}
-	if len(updated.BridgeChains) != 1 || updated.BridgeChains[0].ChainId != "solana" {
-		t.Fatalf("BridgeChains not updated as expected: %v", updated.BridgeChains)
+	if len(updated.AwardConfigs) != 1 || updated.AwardConfigs[0].Name != "test" {
+		t.Fatalf("AwardConfigs not updated as expected: %v", updated.AwardConfigs)
 	}
 	if len(changed) == 0 {
 		t.Fatal("Expected changed fields to be reported")

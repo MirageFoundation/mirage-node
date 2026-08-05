@@ -34,7 +34,6 @@ from params import load_params  # noqa: E402
 from tx import load_tx_size_cost_per_byte  # noqa: E402
 from routes.public import public_bp  # noqa: E402
 from routes.core import core_bp  # noqa: E402
-from routes.bridge import bridge_bp  # noqa: E402
 from routes.quests import quests_bp  # noqa: E402
 
 
@@ -51,7 +50,6 @@ def create_app(init_runtime: bool = True) -> Flask:
 
     app.register_blueprint(public_bp)
     app.register_blueprint(core_bp)
-    app.register_blueprint(bridge_bp)
     app.register_blueprint(quests_bp)
 
     # Global safety net: catch any unhandled exception and return a generic error

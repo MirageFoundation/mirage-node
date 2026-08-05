@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.29.0.
+Post-deploy verification for v1.31.0.
 
 Per the /upgrade workflow this file is rewritten every release to check ONLY
 what THIS release changes — generic/prior-upgrade checks are removed so a green
@@ -10,54 +10,35 @@ probe (not run automatically by deploy/deploy.sh):
   python scripts/verify_upgrade.py                       # inside container
   docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
 
-What v1.29.0 actually changes (deploy-visible, and therefore checked here)
+What v1.31.0 actually changes (deploy-visible, and therefore checked here)
 -------------------------------------------------------------------------
-v1.29.0 is the "single edge vendor" release: mirage.vote / mirage.talk move
-behind Bunny.net (edge + Bunny Shield upload scanning), media uploads become
-fail-closed on any node without a scanning edge, and video limits grow to ~30
-minutes. The config the deploy migrations + templates land — and that this
-script verifies — is:
+v1.31.0 permanently removes the Solana bridge and orchestrator:
 
-  1. MEDIA_UPLOADS_ENABLED — fail-closed upload gate, pinned PER NODE by
-     deploy/migrations/v1_29_0_media_uploads_enabled.py: `true` only on the
-     domains behind a scanning edge (mirage.vote, mirage.talk), `false`
-     everywhere else (e.g. the IP-only nodes). settings.py only treats the
-     literal "false" as off, so we evaluate the same way the backend does.
-  2. 30-min video caps — MEDIA_VIDEO_MAX_DURATION_SEC 600->1800 and
-     MEDIA_MAX_VIDEO_MB 300->1500 (deploy/migrations/v1_29_0_video_caps_30min.py;
-     Caddy @upload max_size is raised in the template alongside).
-  3. AntiSpamBot default agent — added to AUTO_ENABLED_AGENTS on mirage.talk ONLY
-     (deploy/migrations/v1_29_0_mirage_talk_antispam_agent.py).
-  4. Edge cache correctness — Caddy stamps `Cache-Control: no-store` on the
-     dynamic @api and /chain/* routes so the CDN never caches them.
-  5. Edge client-IP trust — deploy/refresh_edge_ips.py is wired into the
-     entrypoint (and a daily refresh) to emit /etc/caddy/trusted-proxies.caddy
-     so Caddy resolves the real client IP behind Cloudflare/Bunny.
+  1. Frontend version.txt reports v1.31.0.
+  2. Indexer DB no longer has a bridge_transactions table
+     (deploy/migrations/v1_31_0_drop_bridge_tables.py).
+  3. Orchestrator is absent — no orchestrator.env, ~/.mirage/orchestrator,
+     or ~/.orchestrator directory, and no orchestrator process / tmux window
+     (deploy/migrations/v1_31_0_remove_orchestrator.py).
+  4. Chain params no longer expose bridge_chains /
+     bridge_attestation_threshold (removed in the v1.31.0 upgrade handler).
+  5. The core KV store no longer contains bridge prefixes or scalar state.
   6. The chain is live after the rolling restart (indexer freshness).
-  7. The shipped frontend reports the release version.
 
-Config is read from the RUNNING backend process's environment (gunicorn, via
-/proc/<pid>/environ) because that is the ground truth for what the app actually
-serves with. We deliberately do NOT use os.environ: a `docker exec` inherits the
-container's create-time --env-file, which misses any value a migration changed on
-this same deploy. We also do NOT read the env files: a file can be ahead of the
-running process when a restart did not pick the change up — which is exactly the
-class of failure this check must catch (file says fail-closed, process still
-serving). If the backend process isn't found, the config checks fail hard.
-
-Not verified here (no point-in-time deploy signature):
-  - The origin nftables firewall (deploy/setup_origin_firewall.sh) and Bunny
-    dashboard state (pull zones, Shield, DNS) are infrastructure outside the
-    container; validate those with the runbook, not this script.
-  - The Bunny Stream thumbnail backfill is a one-shot indexer migration whose
-    effect is historical rows; it has no steady-state runtime signature.
+Config paths are resolved from ENV_DIR (entrypoint sets this to
+~/.mirage/env), or from the current user's home for local runs. DB URLs for
+this script's own connections come from os.environ (create-time --env-file).
 """
 from __future__ import annotations
 
+import json
 import os
-import re
+import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -72,24 +53,23 @@ except ImportError:
 
 # ─── Constants tied to THIS release. If any change, this file must change. ─────
 
-RELEASE_VERSION = "v1.29.0"
+RELEASE_VERSION = "v1.31.0"
 
-# Domains that sit behind a scanning edge (Bunny Shield) and therefore accept
-# public uploads. Must match UPLOAD_DOMAINS in the media-uploads migration.
-UPLOAD_DOMAINS = {"mirage.vote", "mirage.talk"}
+REMOVED_PARAM_FIELDS = ("bridge_chains", "bridge_attestation_threshold")
 
-# AntiSpamBot — default-enabled agent on mirage.talk only.
-ANTISPAM_AGENT = "mirage17jn2j2wwnvqdhtecwfh0wa0vpj9qa5gcalztap"
-ANTISPAM_DOMAIN = "mirage.talk"
-
-# 30-min video caps: (env key, old default we replaced, new value).
-VIDEO_CAPS = [
-    ("MEDIA_VIDEO_MAX_DURATION_SEC", "600", "1800"),
-    ("MEDIA_MAX_VIDEO_MB", "300", "1500"),
-]
-
-CADDYFILE = Path("/etc/caddy/Caddyfile")
-TRUSTED_PROXIES = Path("/etc/caddy/trusted-proxies.caddy")
+PARAMS_URL = "http://127.0.0.1:1317/mirage/core/v1/params"
+COMET_RPC_URL = "http://127.0.0.1:26657"
+BRIDGE_PREFIXES = (
+    b"bridge_attestations/",
+    b"bridge_attestors/",
+    b"bridge_mint_attestations/",
+    b"bridge_mint_attestors/",
+    b"bridge_mint_fee_pending/",
+    b"bridge_mint_fee_failures/",
+    b"bridge_burns/",
+    b"bridge_mints/",
+    b"bridge_sequence/",
+)
 
 
 passed = 0
@@ -134,152 +114,229 @@ def require_env(key: str) -> str:
     return val
 
 
-_BACKEND_ENV = None
-_BACKEND_ENV_LOADED = False
+def mirage_home() -> Path:
+    env_dir = os.environ.get("ENV_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir).parent
+    return Path.home() / ".mirage"
 
 
-def _load_backend_env():
-    """Read the environment of the running backend (gunicorn) from /proc — the
-    ground truth for what the app serves with. Returns a dict, or None if no
-    gunicorn process is running."""
-    import glob
-
-    for proc in glob.glob("/proc/[0-9]*"):
-        try:
-            cmd = (Path(proc) / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
-        except (OSError, ValueError):
-            continue
-        if "gunicorn" not in cmd:
-            continue
-        try:
-            raw = (Path(proc) / "environ").read_bytes()
-        except (OSError, ValueError):
-            continue
-        env = {}
-        for kv in raw.split(b"\x00"):
-            if b"=" in kv:
-                k, _, v = kv.partition(b"=")
-                env[k.decode("utf-8", "ignore")] = v.decode("utf-8", "ignore")
-        return env
-    return None
+def env_dir() -> Path:
+    env_dir_raw = os.environ.get("ENV_DIR", "").strip()
+    if env_dir_raw:
+        return Path(env_dir_raw)
+    return mirage_home() / "env"
 
 
-def backend_env():
-    """Cached accessor for the running backend's environment (or None)."""
-    global _BACKEND_ENV, _BACKEND_ENV_LOADED
-    if not _BACKEND_ENV_LOADED:
-        _BACKEND_ENV = _load_backend_env()
-        _BACKEND_ENV_LOADED = True
-    return _BACKEND_ENV
+# ─── v1.31.0 checks ───────────────────────────────────────────────────────────
 
 
-def env_value(key: str) -> str:
-    env = backend_env()
-    if env is None:
-        return ""
-    return env.get(key, "").strip()
-
-
-# ─── v1.29.0 checks ───────────────────────────────────────────────────────────
-
-
-def check_media_uploads_gate() -> None:
-    """Fail-closed upload gate, pinned per node.
-
-    A node only accepts public uploads when it sits behind a scanning edge.
-    settings.py disables uploads only when the value is literally "false", so we
-    derive the *effective* state the same way and compare it to what this domain
-    should be (true behind Bunny, false everywhere else)."""
-    if backend_env() is None:
-        fail("backend (gunicorn) process not found; cannot read runtime env")
-        return
-    domain = env_value("DOMAIN").lower()
-    behind_edge = domain in UPLOAD_DOMAINS
-    expected = "true" if behind_edge else "false"
-
-    raw = env_value("MEDIA_UPLOADS_ENABLED")
-    effective = "false" if raw.lower() == "false" else "true"  # mirrors settings.py
-
-    where = domain or "(no DOMAIN — IP-only node)"
-    if effective == expected:
-        if behind_edge:
-            ok(f"MEDIA_UPLOADS_ENABLED={effective} for {where} (uploads accepted behind Bunny Shield)")
-        else:
-            ok(f"MEDIA_UPLOADS_ENABLED={effective} for {where} (uploads refused — no scanning edge)")
+def check_frontend_version() -> None:
+    """Require the deployed build version in-container, or the source version locally."""
+    install_root = Path("/opt/mirage")
+    if install_root.exists():
+        version_path = install_root / "web" / "frontend" / "build" / "version.txt"
     else:
-        fail(
-            f"MEDIA_UPLOADS_ENABLED is effectively {effective} for {where}, expected {expected} "
-            f"(raw={raw!r}) — fail-closed gate not applied for this node"
+        version_path = Path(__file__).parent.parent / "web" / "frontend" / "public" / "version.txt"
+
+    if not version_path.exists():
+        fail(f"required version file is missing: {version_path}")
+        return
+
+    actual = version_path.read_text().strip()
+    if actual != RELEASE_VERSION:
+        fail(f"version.txt at {version_path} reports {actual!r}, expected {RELEASE_VERSION!r}")
+        return
+    ok(f"version.txt reports {actual} ({version_path})")
+
+
+def check_bridge_table_gone(conn: psycopg.Connection) -> None:
+    """bridge_transactions must be absent after v1_31_0_drop_bridge_tables."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = 'bridge_transactions'
+            """
         )
-
-
-def check_video_caps() -> None:
-    """30-minute video caps. The migration only bumps nodes still on the old
-    default, so a deliberate operator override is a warning (not a failure); the
-    OLD default or a missing value means the cap was not applied (failure)."""
-    if backend_env() is None:
-        fail("backend (gunicorn) process not found; cannot read runtime env")
+        row = cur.fetchone()
+    if row is None:
+        ok("bridge_transactions table absent from indexer DB")
         return
-    for key, old_default, new_value in VIDEO_CAPS:
-        val = env_value(key)
-        if not val:
-            fail(f"{key} not set (expected {new_value})")
-        elif val == new_value:
-            ok(f"{key}={val} (30-min video caps applied)")
-        elif val == old_default:
-            fail(f"{key}={val} is the old default — v1.29.0 cap not applied (expected {new_value})")
+    fail("bridge_transactions table still present in indexer DB — v1.31.0 drop migration not applied")
+
+
+def check_orchestrator_absent() -> None:
+    """Orchestrator files, process, and tmux window must all be gone."""
+    home = mirage_home()
+    orch_env = env_dir() / "orchestrator.env"
+    orch_dir = home / "orchestrator"
+    registry_dir = home.parent / ".orchestrator"
+
+    if orch_env.exists():
+        fail(f"orchestrator.env still present at {orch_env}")
+    else:
+        ok(f"orchestrator.env absent ({orch_env})")
+
+    if orch_dir.exists():
+        fail(f"orchestrator directory still present at {orch_dir}")
+    else:
+        ok(f"orchestrator directory absent ({orch_dir})")
+
+    if registry_dir.exists():
+        fail(f"legacy orchestrator registry still present at {registry_dir}")
+    else:
+        ok(f"legacy orchestrator registry absent ({registry_dir})")
+
+    # Process check — match the same cmdline pattern the migration pkills.
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-af", "blockchain/bin/orchestrator"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        fail("pgrep not available; cannot verify orchestrator process absence")
+        proc = None
+    except Exception as exc:
+        fail(f"pgrep orchestrator check failed: {exc}")
+        proc = None
+
+    if proc is not None:
+        if proc.returncode == 1:
+            ok("no orchestrator process running")
+        elif proc.returncode == 0:
+            hits = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip() and "verify_upgrade" not in ln]
+            if hits:
+                fail(f"orchestrator process still running: {hits[0]}")
+            else:
+                fail("pgrep matched an orchestrator process but returned no usable process line")
         else:
-            warn(f"{key}={val} (operator-customized; not the {new_value} default)")
+            fail(f"pgrep orchestrator check failed: {(proc.stderr or '').strip() or proc.returncode}")
 
+    # tmux window check — fail if session exists and lists an orchestrator window.
+    try:
+        list_result = subprocess.run(
+            ["tmux", "list-windows", "-t", "mirage", "-F", "#{window_name}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        info("tmux not available; skipping orchestrator window check")
+        return
+    except Exception as exc:
+        fail(f"tmux list-windows failed: {exc}")
+        return
 
-def check_antispam_agent() -> None:
-    """AntiSpamBot is a default agent on mirage.talk ONLY. On every other node
-    this is a no-op, so we skip with an informational note."""
-    if backend_env() is None:
-        fail("backend (gunicorn) process not found; cannot read runtime env")
+    if list_result.returncode != 0:
+        stderr = (list_result.stderr or "").strip()
+        if (
+            "no server running" in stderr.lower()
+            or "can't find" in stderr.lower()
+            or "session not found" in stderr.lower()
+        ):
+            ok("no mirage tmux session (orchestrator window absent)")
+            return
+        fail(f"tmux list-windows -t mirage failed: {stderr or list_result.returncode}")
         return
-    domain = env_value("DOMAIN").lower()
-    if domain != ANTISPAM_DOMAIN:
-        info(f"AntiSpamBot check skipped (domain={domain or '(none)'}; only applies to {ANTISPAM_DOMAIN})")
-        return
-    agents = [a.strip() for a in env_value("AUTO_ENABLED_AGENTS").split(",") if a.strip()]
-    if ANTISPAM_AGENT in agents:
-        ok(f"AntiSpamBot present in AUTO_ENABLED_AGENTS ({len(agents)} agent(s) total)")
+
+    windows = [w.strip() for w in (list_result.stdout or "").splitlines() if w.strip()]
+    if "orchestrator" in windows:
+        fail("tmux mirage session still has an 'orchestrator' window")
     else:
-        fail(f"AntiSpamBot missing from AUTO_ENABLED_AGENTS on {ANTISPAM_DOMAIN} (got: {agents or 'none'})")
+        ok(f"tmux mirage session has no orchestrator window ({len(windows)} window(s))")
 
 
-def check_cache_control_no_store() -> None:
-    """The dynamic API and chain routes must send Cache-Control: no-store so the
-    CDN never serves stale API/RPC responses. Verified from the rendered
-    Caddyfile (the source of truth for the header). Expect three: @api,
-    /chain/rpc, /chain/rest."""
-    if not CADDYFILE.exists():
-        fail(f"Caddyfile not found ({CADDYFILE}); cannot verify no-store headers")
+def _abci_query(path: str, key: bytes) -> str | None:
+    query = urllib.parse.urlencode(
+        {
+            "path": json.dumps(path),
+            "data": f"0x{key.hex()}",
+            "prove": "false",
+        }
+    )
+    url = f"{COMET_RPC_URL}/abci_query?{query}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        fail(f"ABCI query failed for {path} key={key!r}: {exc}")
+        return None
+
+    response = payload.get("result", {}).get("response", {})
+    try:
+        code = int(response.get("code", 0))
+    except (TypeError, ValueError):
+        fail(f"ABCI query returned invalid code for {path} key={key!r}: {response.get('code')!r}")
+        return None
+    if code != 0:
+        fail(f"ABCI query failed for {path} key={key!r}: code={code} log={response.get('log', '')}")
+        return None
+    return str(response.get("value", "") or "")
+
+
+def check_bridge_kv_absent() -> None:
+    """The live core store must not retain any removed bridge state."""
+    for prefix in BRIDGE_PREFIXES:
+        value = _abci_query("/store/core/subspace", prefix)
+        if value is None:
+            continue
+        if value:
+            fail(f"core store still contains keys under removed prefix {prefix.decode()}")
+        else:
+            ok(f"core store prefix absent: {prefix.decode()}")
+
+    scalar = _abci_query("/store/core/key", b"bridge_pending_count")
+    if scalar is None:
         return
-    content = CADDYFILE.read_text(errors="ignore")
-    n = len(re.findall(r'Cache-Control\s+"no-store"', content))
-    if n >= 3:
-        ok(f'Caddyfile stamps Cache-Control "no-store" on API + chain routes ({n} directives)')
-    elif n > 0:
-        warn(f'Caddyfile has only {n} no-store directive(s); expected >=3 (@api, /chain/rpc, /chain/rest)')
+    if scalar:
+        fail("core store still contains removed key bridge_pending_count")
     else:
-        fail('Caddyfile has no Cache-Control "no-store" on dynamic routes')
+        ok("core store key absent: bridge_pending_count")
 
 
-def check_trusted_proxies() -> None:
-    """The entrypoint runs deploy/refresh_edge_ips.py to emit trusted-proxies.caddy
-    so Caddy can recover the real client IP behind the edge. The file must exist
-    and carry a trusted_proxies directive regardless of which edge provider."""
-    if not TRUSTED_PROXIES.exists():
-        fail(f"trusted-proxies.caddy not found ({TRUSTED_PROXIES}); edge IP refresh did not run")
+def check_bridge_params_absent() -> None:
+    """Live chain params must not still expose removed bridge fields."""
+    try:
+        with urllib.request.urlopen(PARAMS_URL, timeout=10) as resp:
+            body = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        fail(f"GET {PARAMS_URL} returned HTTP {exc.code}")
         return
-    content = TRUSTED_PROXIES.read_text(errors="ignore")
-    if "trusted_proxies" not in content:
-        fail("trusted-proxies.caddy present but has no trusted_proxies directive")
+    except Exception as exc:
+        fail(f"GET {PARAMS_URL} failed: {exc}")
         return
-    provider = env_value("EDGE_PROVIDER") or "(default/cloudflare)"
-    ok(f"trusted-proxies.caddy present with trusted_proxies (EDGE_PROVIDER={provider})")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        fail(f"params response is not JSON: {exc}")
+        return
+
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        fail(f"params response missing object at .params (got {type(params).__name__})")
+        return
+
+    still_present = [k for k in REMOVED_PARAM_FIELDS if k in params]
+    if still_present:
+        fail(
+            f"chain params still expose removed bridge field(s): {', '.join(still_present)} "
+            f"— v1.31.0 upgrade handler not applied or old binary still running"
+        )
+        return
+
+    # Also fail if the raw body somehow still names them outside .params keys.
+    raw_hits = [k for k in REMOVED_PARAM_FIELDS if k in body]
+    if raw_hits:
+        fail(f"params JSON body still contains removed field name(s): {', '.join(raw_hits)}")
+        return
+
+    ok("chain params lack bridge_chains / bridge_attestation_threshold " f"({len(params)} param field(s) present)")
 
 
 def check_indexer_freshness(conn: psycopg.Connection) -> None:
@@ -287,23 +344,23 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
     the rolling restart, the deploy's consensus-neutral changes are executing
     without a fatal mismatch."""
     with conn.cursor() as cur:
-        cur.execute("SELECT MAX(height), MAX(block_time) FROM recent_blocks")
+        cur.execute("SELECT height, block_time FROM recent_blocks ORDER BY height DESC LIMIT 1")
         row = cur.fetchone()
     if not row or row[0] is None:
         fail("recent_blocks table is empty (indexer not running?)")
         return
-    max_height, max_block_time = row
-    ok(f"latest indexed block height={max_height}")
-    if max_block_time is None:
-        warn("block_time is NULL on latest block")
+    latest_height, latest_block_time = row
+    ok(f"latest indexed block height={latest_height}")
+    if latest_block_time is None:
+        fail("block_time is NULL on latest block — cannot verify chain liveness")
         return
     try:
-        if hasattr(max_block_time, "timestamp"):
-            block_ts = max_block_time.timestamp()
+        if hasattr(latest_block_time, "timestamp"):
+            block_ts = latest_block_time.timestamp()
         else:
-            block_ts = float(max_block_time)
+            block_ts = float(latest_block_time)
     except Exception as exc:
-        warn(f"could not parse block_time: {exc}")
+        fail(f"could not parse block_time: {exc}")
         return
     age_sec = time.time() - block_ts
     if age_sec < 120:
@@ -315,29 +372,6 @@ def check_indexer_freshness(conn: psycopg.Connection) -> None:
             f"latest block is {age_sec:.0f}s old — chain may have halted "
             f"(check node logs for CONSENSUS_FATAL or panic)"
         )
-
-
-def check_binary_version() -> None:
-    """Cross-check that the shipped frontend version.txt reports the release
-    version — a cheap proxy for 'we shipped the correct build'."""
-    candidates = [
-        Path("/opt/mirage/web/frontend/build/version.txt"),
-        Path("/opt/mirage/web/frontend/public/version.txt"),
-        Path.cwd() / "web" / "frontend" / "build" / "version.txt",
-        Path.cwd() / "web" / "frontend" / "public" / "version.txt",
-        Path(__file__).parent.parent / "web" / "frontend" / "build" / "version.txt",
-        Path(__file__).parent.parent / "web" / "frontend" / "public" / "version.txt",
-    ]
-    for p in candidates:
-        if not p.exists():
-            continue
-        actual = p.read_text().strip()
-        if actual == RELEASE_VERSION:
-            ok(f"version.txt reports {actual} ({p})")
-            return
-        fail(f"version.txt at {p} reports {actual!r}, expected {RELEASE_VERSION!r}")
-        return
-    warn("version.txt not found in any known location; skipping frontend version cross-check")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -352,9 +386,7 @@ def main() -> None:
 
     section("1. Environment Variables")
     try:
-        backend_db_url = require_env("BACKEND_DB_URL")
         indexer_ro_url = require_env("INDEXER_DB_RO_URL")
-        ok("BACKEND_DB_URL is set")
         ok("INDEXER_DB_RO_URL is set")
     except Exception as exc:
         fail(str(exc))
@@ -363,46 +395,34 @@ def main() -> None:
 
     section("2. Database Connectivity")
     indexer_conn = None
-    backend_conn = None
-    try:
-        backend_conn = psycopg.connect(backend_db_url, autocommit=True)
-        ok("Backend DB reachable")
-    except Exception as exc:
-        fail(f"Backend DB unreachable: {exc}")
     try:
         indexer_conn = psycopg.connect(indexer_ro_url, autocommit=True)
         ok("Indexer DB (RO) reachable")
     except Exception as exc:
         fail(f"Indexer DB (RO) unreachable: {exc}")
-    if not indexer_conn or not backend_conn:
-        print("\nFATAL: Cannot proceed without database connections")
+    if not indexer_conn:
+        print("\nFATAL: Cannot proceed without indexer database connection")
         sys.exit(1)
 
-    section("3. Media uploads fail-closed gate (per node)")
-    check_media_uploads_gate()
+    section("3. Frontend Version")
+    check_frontend_version()
 
-    section("4. 30-minute video caps")
-    check_video_caps()
+    section("4. Bridge Table Removed")
+    check_bridge_table_gone(indexer_conn)
 
-    section("5. Default agents (AntiSpamBot on mirage.talk)")
-    check_antispam_agent()
+    section("5. Orchestrator Absent")
+    check_orchestrator_absent()
 
-    section("6. Edge cache headers (Cache-Control: no-store)")
-    check_cache_control_no_store()
+    section("6. Bridge Params Removed")
+    check_bridge_params_absent()
 
-    section("7. Edge client-IP trust (trusted-proxies.caddy)")
-    check_trusted_proxies()
+    section("7. Bridge KV State Removed")
+    check_bridge_kv_absent()
 
     section("8. Chain Liveness")
     check_indexer_freshness(indexer_conn)
 
-    section("9. Binary Version Cross-Check")
-    check_binary_version()
-
-    if backend_conn:
-        backend_conn.close()
-    if indexer_conn:
-        indexer_conn.close()
+    indexer_conn.close()
 
     print(f"\n{'=' * 60}")
     total = passed + failed + warnings

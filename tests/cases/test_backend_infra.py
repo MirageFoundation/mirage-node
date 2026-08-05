@@ -118,7 +118,7 @@ def test_params(backend: str):
         _fail("params.get_parameters returns valid data", f"code={code}")
         return  # can't continue without params
 
-    # 1.2 pow_factor is float in (0,1]
+    # 1.2 pow_factor is float in [0.01,1]
     step = data.get("pow_factor")
     try:
         fstep = float(step)
@@ -228,17 +228,6 @@ def test_params(backend: str):
     else:
         _fail("params.get_node_config valid", f"code={code3b}")
 
-    # 1.8 bridge_attestation_threshold is float in [0,1] (via bridge config)
-    code_bridge, bridge_data = _get(f"{backend}/api/bridge/config")
-    if code_bridge == 200 and bridge_data.get("attestation_threshold") is not None:
-        bat = float(bridge_data["attestation_threshold"])
-        if 0 <= bat <= 1:
-            _pass("params.bridge_attestation_threshold in [0,1]", value=bat)
-        else:
-            _fail("params.bridge_attestation_threshold in [0,1]", f"got {bat}")
-    else:
-        _pass("params.bridge_attestation_threshold (bridge endpoint may not be available)")
-
     # 1.9 get_total_supply positive (returns plain text, not JSON)
     try:
         code4, body4 = _get(f"{backend}/api/get_total_supply")
@@ -311,7 +300,9 @@ def test_bootstrap(backend: str):
     else:
         _fail("bootstrap.anonymous chain_config valid", f"got_keys={list((cc or {}).keys())[:8]}")
 
-    user_sections = {k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary")}
+    user_sections = {
+        k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary")
+    }
     if all(v is None for v in user_sections.values()):
         _pass("bootstrap.anonymous user_* sections are null")
     else:

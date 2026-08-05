@@ -16,11 +16,10 @@ This document provides a comprehensive technical overview of the Mirage blockcha
 8. [Vote Weighting System](#vote-weighting-system)
 9. [Profile Synchronization](#profile-synchronization)
 10. [Governance Proposal Handling](#governance-proposal-handling)
-11. [Bridge Transaction Indexing](#bridge-transaction-indexing)
-12. [Content Processing](#content-processing)
-13. [Security Model](#security-model)
-14. [Observability](#observability)
-15. [Operational Considerations](#operational-considerations)
+11. [Content Processing](#content-processing)
+12. [Security Model](#security-model)
+13. [Observability](#observability)
+14. [Operational Considerations](#operational-considerations)
 
 ---
 
@@ -156,7 +155,6 @@ For each block, the processing pipeline is:
 │     b. Check tx_results.code == 0 (skip failed txs)                         │
 │     c. For each message in tx_body:                                         │
 │        - Route to appropriate handler by type_url                           │
-│        - Process tx_events for bridge confirmations                         │
 │  4. Process end_block_events:                                               │
 │     - Governance proposals (passed/executed)                                │
 │     - Subscription events (expired/renewed)                                 │
@@ -195,7 +193,7 @@ indexer/
 - Message type routing (`/mirage.core.v1.MsgPost` → `_handle_post`)
 - Business logic validation (content length, topic format)
 - Database operations via DatabaseManager
-- Event processing for bridge and subscription updates
+- Event processing for subscription updates
 
 **DatabaseManager (database.py)**
 - Schema initialization (idempotent CREATE TABLE IF NOT EXISTS)
@@ -602,52 +600,6 @@ Proposal Lifecycle:
 messages = self._proposal_cache.pop(proposal_id, None)
 if not messages:
     messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
-```
-
----
-
-## Bridge Transaction Indexing
-
-### Transaction Types
-
-The indexer tracks three bridge message types:
-
-| Message | Direction | Purpose |
-|---------|-----------|---------|
-| `MsgBridgeBurn` | Outbound | User burns tokens on Mirage to receive on external chain |
-| `MsgBridgeAttestBurned` | Inbound | Validator attests burn on external chain |
-| `MsgBridgeAttestMinted` | Outbound | Validator attests mint on external chain |
-
-### Status Tracking
-
-Bridge transactions have a multi-step confirmation process tracked via events:
-
-```python
-def process_tx_events(self, events):
-    for ev_type, attrs in self.decode_events(events):
-        if ev_type == "bridge_attest":
-            # Inbound: external burn confirmed, Mirage mint threshold reached
-            if attrs.get("minted") == "true":
-                self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
-                
-        elif ev_type == "bridge_attest_minted":
-            # Outbound: Mirage burn confirmed minted on external chain
-            if attrs.get("minted") == "true":
-                self.db.update_bridge_mint_attestation_confirmed(burn_id, True)
-```
-
-### Query Support
-
-The indexed data enables bridge status queries:
-
-```python
-# Inbound: "Is my Solana burn confirmed on Mirage?"
-result = db.get_bridge_attestation("solana", burn_signature)
-# Returns: {found: True, minted: True, tx_hash: "...", recipient: "mirage1..."}
-
-# Outbound: "Is my Mirage burn minted on Solana?"
-result = db.get_bridge_burn(mirage_tx_hash)
-# Returns: {found: True, minted: True, destination_tx: "...", destination_chain: "solana"}
 ```
 
 ---

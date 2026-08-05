@@ -3,6 +3,9 @@ package iavl
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"cosmossdk.io/log"
@@ -37,26 +40,25 @@ func dropVersionRoot(t *testing.T, tree *MutableTree, version int64) {
 	require.ErrorIs(t, err, ErrVersionDoesNotExist, "expected version %d to read as missing", version)
 }
 
-func capturePanic(f func()) (msg string) {
-	defer func() {
-		if r := recover(); r != nil {
-			msg = fmt.Sprint(r)
-		}
-	}()
-	f()
-	return ""
-}
-
 // A version missing in the MIDDLE of present history is DB corruption, not a
 // state-sync gap: pruning must halt loudly (CONSENSUS_FATAL) rather than
 // silently skip and advance past it (the prune-race app-hash divergence vector).
 func TestDeleteVersionsToHaltsOnMidHistoryHole(t *testing.T) {
-	tree := buildVersionedTree(t, 8)
-	dropVersionRoot(t, tree, 4) // v1..3 present, v4 missing, v5..8 present
+	if os.Getenv("MIRAGE_TEST_IAVL_PRUNE_HOLE_EXIT") == "1" {
+		tree := buildVersionedTree(t, 8)
+		dropVersionRoot(t, tree, 4)
+		_ = tree.DeleteVersionsTo(6)
+		return
+	}
 
-	msg := capturePanic(func() { _ = tree.DeleteVersionsTo(6) })
-	require.Contains(t, msg, "CONSENSUS_FATAL:PRUNE_HOLE")
-	require.Contains(t, msg, "version=4")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestDeleteVersionsToHaltsOnMidHistoryHole$")
+	cmd.Env = append(os.Environ(), "MIRAGE_TEST_IAVL_PRUNE_HOLE_EXIT=1")
+	output, err := cmd.CombinedOutput()
+	exitErr, ok := err.(*exec.ExitError)
+	require.True(t, ok, "subprocess did not exit non-zero: err=%v output=%s", err, output)
+	require.Equal(t, 1, exitErr.ExitCode(), "output=%s", output)
+	require.True(t, strings.Contains(string(output), "CONSENSUS_FATAL:PRUNE_HOLE"), "output=%s", output)
+	require.True(t, strings.Contains(string(output), "version=4"), "output=%s", output)
 }
 
 // Versions missing as a CONTIGUOUS prefix at the bottom are the legitimate

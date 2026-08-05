@@ -73,7 +73,6 @@ const FollowsView = lazyWithRetry(() => import('./views/FollowsView'));
 const BlocksView = lazyWithRetry(() => import('./views/BlocksView'));
 const AgentsView = lazyWithRetry(() => import('./views/AgentsView'));
 const FAQView = lazyWithRetry(() => import('./views/FAQView'));
-const BridgeView = lazyWithRetry(() => import('./views/BridgeView'));
 const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
@@ -109,7 +108,6 @@ const restorableRoutePrefixes = [
     '/topics',
     '/stats',
     '/search',
-    '/bridge',
 ];
 
 // Component to track and restore the last route
@@ -1063,7 +1061,6 @@ class App extends Component {
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
                                             <Route path="/referrals" element={<ReferralsView state={this.state} />} />
                                             <Route path="/referrals/:address" element={<ReferralsView state={this.state} />} />
-                                            <Route path="/bridge" element={<BridgeView state={this.state} />} />
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>

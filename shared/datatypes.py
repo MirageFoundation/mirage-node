@@ -420,21 +420,6 @@ def _build_pool():
     add_f(msg_set_auto, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_set_auto, "auto_renew", 100, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
 
-    # MsgBridgeBurn (burn MIRAGE for bridging to non-IBC chains like Solana)
-    msg_bridge_burn = file_proto.message_type.add()
-    msg_bridge_burn.name = "MsgBridgeBurn"
-    add_f(msg_bridge_burn, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
-    add_f(msg_bridge_burn, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
-    add_f(msg_bridge_burn, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn, "envelope_nonce", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
-    add_f(msg_bridge_burn, "destination_chain", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn, "destination_address", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn, "amount", 102, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-
     # TierConfig (tier configuration for subscription levels)
     tier_config = file_proto.message_type.add()
     tier_config.name = "TierConfig"
@@ -481,45 +466,6 @@ def _build_pool():
     msg_award_resp = file_proto.message_type.add()
     msg_award_resp.name = "MsgAwardResponse"
 
-    # BridgeChainConfig (used in Params.bridge_chains)
-    bridge_config = file_proto.message_type.add()
-    bridge_config.name = "BridgeChainConfig"
-    add_f(bridge_config, "chain_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(bridge_config, "enabled", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(bridge_config, "fee", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-
-    # MsgBridgeAttestBurned (validator attestation for external chain burns - inbound)
-    msg_bridge_attest_burned = file_proto.message_type.add()
-    msg_bridge_attest_burned.name = "MsgBridgeAttestBurned"
-    add_f(msg_bridge_attest_burned, "validator", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_burned, "source_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_burned, "burn_id", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_burned, "mirage_recipient", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_burned, "amount", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-
-    # MsgBridgeAttestBurnedResponse
-    msg_bridge_attest_burned_resp = file_proto.message_type.add()
-    msg_bridge_attest_burned_resp.name = "MsgBridgeAttestBurnedResponse"
-    add_f(msg_bridge_attest_burned_resp, "confirmed", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_attest_burned_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_bridge_attest_burned_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-
-    # MsgBridgeAttestMinted (validator attestation for external chain mints - outbound)
-    msg_bridge_attest_minted = file_proto.message_type.add()
-    msg_bridge_attest_minted.name = "MsgBridgeAttestMinted"
-    add_f(msg_bridge_attest_minted, "validator", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_minted, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_minted, "destination_chain", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_minted, "destination_tx", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_minted, "mirage_tx_hash", 5, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-
-    # MsgBridgeAttestMintedResponse
-    msg_bridge_attest_minted_resp = file_proto.message_type.add()
-    msg_bridge_attest_minted_resp.name = "MsgBridgeAttestMintedResponse"
-    add_f(msg_bridge_attest_minted_resp, "confirmed", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_attest_minted_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_bridge_attest_minted_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-
     # Params (module parameters) - ALL fields from proto/mirage/core/v1/params.proto
     #
     # Field NAMES here MUST match the chain proto exactly so that
@@ -559,14 +505,6 @@ def _build_pool():
     add_f(msg4, "relay_min_gas_price", 43, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_max_gas_fee", 44, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_envelope_age", 45, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    # bridge_chains is a repeated BridgeChainConfig (field 50)
-    f_bridge = msg4.field.add()
-    f_bridge.name = "bridge_chains"
-    f_bridge.number = 50
-    f_bridge.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
-    f_bridge.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
-    f_bridge.type_name = ".mirage.core.v1.BridgeChainConfig"
-    add_f(msg4, "bridge_attestation_threshold", 51, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "pow_difficulty_step", 52, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     # award_configs is a repeated AwardConfig (field 53)
     f_awards = msg4.field.add()
@@ -638,93 +576,6 @@ def _build_pool():
     add_f(msg_profile_resp, "blocked_topics", 17, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
     add_f(msg_profile_resp, "flair", 18, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # BridgeChainStatus
-    msg_bridge_chain_status = file_proto.message_type.add()
-    msg_bridge_chain_status.name = "BridgeChainStatus"
-    add_f(msg_bridge_chain_status, "chain_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_chain_status, "current_sequence", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-
-    # QueryBridgeStatusRequest (empty)
-    add_msg("QueryBridgeStatusRequest")
-
-    # QueryBridgeStatusResponse
-    msg_bridge_status_resp = file_proto.message_type.add()
-    msg_bridge_status_resp.name = "QueryBridgeStatusResponse"
-    f_enabled = msg_bridge_status_resp.field.add()
-    f_enabled.name = "enabled_chains"
-    f_enabled.number = 1
-    f_enabled.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
-    f_enabled.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
-    f_enabled.type_name = ".mirage.core.v1.BridgeChainConfig"
-    add_f(msg_bridge_status_resp, "pending_attestations_count", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    f_chain_status = msg_bridge_status_resp.field.add()
-    f_chain_status.name = "chain_status"
-    f_chain_status.number = 3
-    f_chain_status.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
-    f_chain_status.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
-    f_chain_status.type_name = ".mirage.core.v1.BridgeChainStatus"
-
-    # QueryBridgeMintRequest
-    msg_bridge_mint_req = file_proto.message_type.add()
-    msg_bridge_mint_req.name = "QueryBridgeMintRequest"
-    add_f(msg_bridge_mint_req, "destination_chain", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_mint_req, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-
-    # QueryBridgeMintResponse
-    msg_bridge_mint_resp = file_proto.message_type.add()
-    msg_bridge_mint_resp.name = "QueryBridgeMintResponse"
-    add_f(msg_bridge_mint_resp, "minted", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_mint_resp, "destination_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_mint_resp, "destination_tx", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_mint_resp, "found", 4, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    # attestors is repeated string (field 5)
-    f_attestors_mint = msg_bridge_mint_resp.field.add()
-    f_attestors_mint.name = "attestors"
-    f_attestors_mint.number = 5
-    f_attestors_mint.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
-    f_attestors_mint.type = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
-    add_f(msg_bridge_mint_resp, "attested_power", 6, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_bridge_mint_resp, "required_power", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-
-    # QueryBridgeAttestationRequest (for inbound bridges)
-    msg_bridge_attest_req = file_proto.message_type.add()
-    msg_bridge_attest_req.name = "QueryBridgeAttestationRequest"
-    add_f(msg_bridge_attest_req, "source_chain", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_req, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-
-    # QueryBridgeAttestationResponse
-    msg_bridge_attest_resp = file_proto.message_type.add()
-    msg_bridge_attest_resp.name = "QueryBridgeAttestationResponse"
-    add_f(msg_bridge_attest_resp, "found", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_attest_resp, "source_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_resp, "burn_id", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_resp, "mirage_recipient", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest_resp, "amount", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    # Note: attestors is repeated string but we'll skip for simplicity
-    add_f(msg_bridge_attest_resp, "attested_power", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_bridge_attest_resp, "required_power", 8, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_bridge_attest_resp, "minted", 9, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_attest_resp, "created_at", 10, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-
-    # QueryBridgeBurnRequest
-    msg_bridge_burn_req = file_proto.message_type.add()
-    msg_bridge_burn_req.name = "QueryBridgeBurnRequest"
-    add_f(msg_bridge_burn_req, "destination_chain", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn_req, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-
-    # QueryBridgeBurnResponse
-    msg_bridge_burn_resp = file_proto.message_type.add()
-    msg_bridge_burn_resp.name = "QueryBridgeBurnResponse"
-    add_f(msg_bridge_burn_resp, "found", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_burn_resp, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn_resp, "owner", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn_resp, "destination_chain", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn_resp, "destination_address", 5, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_burn_resp, "amount", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn_resp, "bridge_fee", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn_resp, "sequence", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_bridge_burn_resp, "created_at", 9, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-
     pool.Add(file_proto)
     return pool
 
@@ -777,13 +628,7 @@ MsgSetAutoRenewal = _get_message_class("mirage.core.v1.MsgSetAutoRenewal")
 MsgAward = _get_message_class("mirage.core.v1.MsgAward")
 MsgAwardResponse = _get_message_class("mirage.core.v1.MsgAwardResponse")
 AwardConfig = _get_message_class("mirage.core.v1.AwardConfig")
-MsgBridgeBurn = _get_message_class("mirage.core.v1.MsgBridgeBurn")
-MsgBridgeAttestBurned = _get_message_class("mirage.core.v1.MsgBridgeAttestBurned")
-MsgBridgeAttestBurnedResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestBurnedResponse")
-MsgBridgeAttestMinted = _get_message_class("mirage.core.v1.MsgBridgeAttestMinted")
-MsgBridgeAttestMintedResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestMintedResponse")
 TierConfig = _get_message_class("mirage.core.v1.TierConfig")
-BridgeChainConfig = _get_message_class("mirage.core.v1.BridgeChainConfig")
 Params = _get_message_class("mirage.core.v1.Params")
 MsgUpdateParams = _get_message_class("mirage.core.v1.MsgUpdateParams")
 QueryParamsRequest = _get_message_class("mirage.core.v1.QueryParamsRequest")
@@ -792,12 +637,3 @@ QueryDifficultyRequest = _get_message_class("mirage.core.v1.QueryDifficultyReque
 QueryDifficultyResponse = _get_message_class("mirage.core.v1.QueryDifficultyResponse")
 QueryProfileRequest = _get_message_class("mirage.core.v1.QueryProfileRequest")
 QueryProfileResponse = _get_message_class("mirage.core.v1.QueryProfileResponse")
-BridgeChainStatus = _get_message_class("mirage.core.v1.BridgeChainStatus")
-QueryBridgeStatusRequest = _get_message_class("mirage.core.v1.QueryBridgeStatusRequest")
-QueryBridgeStatusResponse = _get_message_class("mirage.core.v1.QueryBridgeStatusResponse")
-QueryBridgeMintRequest = _get_message_class("mirage.core.v1.QueryBridgeMintRequest")
-QueryBridgeMintResponse = _get_message_class("mirage.core.v1.QueryBridgeMintResponse")
-QueryBridgeAttestationRequest = _get_message_class("mirage.core.v1.QueryBridgeAttestationRequest")
-QueryBridgeAttestationResponse = _get_message_class("mirage.core.v1.QueryBridgeAttestationResponse")
-QueryBridgeBurnRequest = _get_message_class("mirage.core.v1.QueryBridgeBurnRequest")
-QueryBridgeBurnResponse = _get_message_class("mirage.core.v1.QueryBridgeBurnResponse")

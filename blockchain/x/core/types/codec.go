@@ -24,10 +24,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgDelete{}, &MsgDeleteUser{}, &MsgSendTokens{}, &MsgSetLevel{},
 		&MsgPunishValidator{}, &MsgMintTokens{}, &MsgBurnTokens{}, &MsgSubscribe{},
 		&MsgSetAutoRenewal{},
-		// Bridge messages
-		&MsgBridgeBurn{},
-		&MsgBridgeAttestBurned{},
-		&MsgBridgeAttestMinted{},
 		// Award
 		&MsgAward{},
 		// Profile
@@ -49,10 +45,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgDeleteResponse{}, &MsgDeleteUserResponse{}, &MsgSendTokensResponse{}, &MsgSetLevelResponse{},
 		&MsgPunishValidatorResponse{}, &MsgMintTokensResponse{}, &MsgBurnTokensResponse{}, &MsgSubscribeResponse{},
 		&MsgSetAutoRenewalResponse{},
-		// Bridge responses
-		&MsgBridgeBurnResponse{},
-		&MsgBridgeAttestBurnedResponse{},
-		&MsgBridgeAttestMintedResponse{},
 		// Award
 		&MsgAwardResponse{},
 		// Profile
@@ -65,5 +57,13 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	// Register legacy message types for backwards compatibility (decoding old transactions)
 	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgMintTo{})
 	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgFollowModerator{}, &MsgUnfollowModerator{})
+	registry.RegisterImplementations(
+		(*sdk.Msg)(nil),
+		&MsgBridgeBurn{},
+		&MsgBridgeAttest{},
+		&MsgBridgeMinted{},
+		&MsgBridgeAttestBurned{},
+		&MsgBridgeAttestMinted{},
+	)
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
 }

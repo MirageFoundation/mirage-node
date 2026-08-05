@@ -371,7 +371,6 @@ class Indexer:
                         self.processor.process_core_message(any_msg.type_url, any_msg.value, tx_hash, ts, height)
 
                     tx_events = txs_results[idx].get("events", []) if idx < len(txs_results) else []
-                    self.processor.process_tx_events(tx_events, tx_hash)
 
                     if pending_proposals:
                         proposal_ids_set: set[int] = set()

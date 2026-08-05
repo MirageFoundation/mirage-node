@@ -88,7 +88,7 @@ func (d *PowDecorator) recentHashSeen(ctx sdk.Context, hash string) (bool, error
 // brand-new account, which is free-tier by definition.
 func (d *PowDecorator) getUserLevel(ctx sdk.Context, pubkey []byte) (level int, addr string, err error) {
 	if len(pubkey) != 33 {
-		return 0, "", nil
+		return 0, "", fmt.Errorf("invalid envelope_pubkey length: got %d, want 33", len(pubkey))
 	}
 	var cpk cryptotypes.PubKey
 	cpk.Key = pubkey
@@ -129,11 +129,11 @@ func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, 
 // every PoW-eligible message branch in AnteHandle.
 //
 // Returns (canPoW, err):
-//   - err != nil: tx must be rejected (decode failure or insufficient reserve).
+//   - err != nil: tx must be rejected (profile decode failure or malformed pubkey).
 //     The error string is logged with msgName context for triage.
 //   - canPoW == true: caller must run validatePoWBytesArgon2.
-//   - canPoW == false, err == nil: caller must skip PoW (paid path covered
-//     by reserve, gas will be deducted by the message handler).
+//   - canPoW == false, err == nil: caller must skip PoW (paid path; gas deducted
+//     by the message handler, which also downgrades on exhausted reserve).
 func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgName string) (canPoW bool, err error) {
 	allowed, _, lerr := d.canUsePoW(ctx, pubkey)
 	if lerr != nil {
@@ -143,7 +143,7 @@ func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretyp
 	}
 	if !allowed {
 		if rerr := d.checkReserveOrDowngrade(ctx, pubkey, params); rerr != nil {
-			ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", msgName, "err", rerr.Error())
+			ctx.Logger().Error("PoW: reserve/profile check failed", "msg", msgName, "err", rerr.Error())
 			return false, rerr
 		}
 		return false, nil
@@ -152,11 +152,15 @@ func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretyp
 }
 
 // checkReserveOrDowngrade checks if a paid user has sufficient reserve for gas.
-// If reserve is insufficient, downgrades user to free tier and returns an error.
-// Returns nil if user has sufficient reserve or is already free tier.
+// Ante must NOT reject on insufficient reserve and must NOT mutate state:
+// baseapp discards ante mutations when the ante returns an error, which previously
+// wedged paid users (M-5). Insufficient reserve is logged here; the durable
+// downgrade lives in deductRelayGasFee on the handler path — so this function
+// returns nil for the insufficient-reserve case so the tx reaches the handler.
+// Returns an error only for CONSENSUS_FATAL profile failures or malformed pubkey.
 func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, params coretypes.Params) error {
 	if len(pubkey) != 33 {
-		return nil
+		return fmt.Errorf("invalid envelope_pubkey length: got %d, want 33", len(pubkey))
 	}
 	var cpk cryptotypes.PubKey
 	cpk.Key = pubkey
@@ -196,54 +200,13 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 		return nil // Sufficient reserve
 	}
 
-	// Insufficient reserve - downgrade to free tier
-	previousLevel := core.Level
-	ctx.Logger().Warn("checkReserveOrDowngrade: insufficient reserve, downgrading to free tier",
+	ctx.Logger().Warn("checkReserveOrDowngrade: insufficient reserve; allowing tx so handler can downgrade",
 		"owner", addr,
 		"level", core.Level,
 		"reserve", core.ReserveFunds,
 		"min_required", minReserve)
 
-	// Remove subscription index
-	if core.SubscriptionExpiry > 0 {
-		if err := d.Keeper.RemoveSubscription(ctx, addr, core.SubscriptionExpiry); err != nil {
-			return fmt.Errorf("checkReserveOrDowngrade: remove subscription failed: %w", err)
-		}
-	}
-
-	// Burn any remaining reserve
-	if core.ReserveFunds > 0 {
-		if err := d.Keeper.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
-			return fmt.Errorf("checkReserveOrDowngrade: burn reserve failed: %w", err)
-		}
-	}
-
-	// Downgrade to free tier
-	core.Level = 0
-	core.ReserveFunds = 0
-	core.SubscriptionExpiry = 0
-	core.AutoRenew = false
-
-	// Save updated profile
-	newBz, err := json.Marshal(core)
-	if err != nil {
-		return fmt.Errorf("failed to marshal profile: %w", err)
-	}
-	if err := d.Keeper.SetProfileCore(ctx, addr, newBz); err != nil {
-		return fmt.Errorf("failed to save profile: %w", err)
-	}
-
-	// Emit event for indexer
-	ctx.EventManager().EmitEvent(
-		sdk.NewEvent(
-			"subscription_expired",
-			sdk.NewAttribute("address", addr),
-			sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
-			sdk.NewAttribute("reason", "insufficient_reserve"),
-		),
-	)
-
-	return fmt.Errorf("insufficient reserve (%d < %d), subscription terminated - please use PoW or top up", core.ReserveFunds, minReserve)
+	return nil
 }
 
 func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
@@ -275,6 +238,22 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 
+	// Reject malformed envelope pubkeys before getUserLevel / PoW routing
+	// so we never silently normalize them to free-tier (review L-5).
+	// Governance-authority messages skip envelope validation (same as the
+	// per-case `continue` below) and may carry empty pubkeys.
+	for _, msg := range tx.GetMsgs() {
+		if auth, ok := envelopeAuthorityOf(msg); ok && auth == govAuthority {
+			continue
+		}
+		if pk, ok := envelopePubkeyOf(msg); ok {
+			if err := requireEnvelopePubkey(pk); err != nil {
+				ctx.Logger().Error("PoW: malformed envelope_pubkey", "err", err.Error())
+				return ctx, err
+			}
+		}
+	}
+
 	for _, msg := range tx.GetMsgs() {
 		switch m := msg.(type) {
 		case *coretypes.MsgSubscribe:
@@ -294,9 +273,10 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				ctx.Logger().Error("PoW: MsgSetAutoRenewal cannot use PoW, must pay with reserve")
 				return ctx, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
 			}
-			// Paid users must have sufficient reserve for relayed gas
+			// Paid path only: reject on profile CONSENSUS_FATAL / malformed pubkey.
+			// Insufficient reserve is allowed through so deductRelayGasFee can downgrade.
 			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-				ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgSetAutoRenewal", "err", err.Error())
+				ctx.Logger().Error("PoW: reserve/profile check failed", "msg", "MsgSetAutoRenewal", "err", err.Error())
 				return ctx, err
 			}
 			// Skip PoW validation entirely for set_auto_renewal; gas is covered via reserve
@@ -323,6 +303,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -348,6 +329,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -373,6 +355,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -385,7 +368,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				return ctx, fmt.Errorf("MsgAnnotate cannot use PoW")
 			}
 			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-				ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgAnnotate", "err", err.Error())
+				ctx.Logger().Error("PoW: reserve/profile check failed", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, err
 			}
 
@@ -411,6 +394,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -436,6 +420,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -461,6 +446,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -486,6 +472,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -511,6 +498,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -521,16 +509,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
 				return ctx, fmt.Errorf("MsgAward cannot use PoW")
 			}
-
-		case *coretypes.MsgBridgeBurn:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
-				ctx.Logger().Error("PoW: MsgBridgeBurn cannot use PoW", "pow", m.EnvelopePow, "difficulty", m.EnvelopeDifficulty)
-				return ctx, fmt.Errorf("MsgBridgeBurn cannot use PoW")
-			}
-			ctx.Logger().Debug("PoW: skipped for MsgBridgeBurn", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "dest_chain", m.DestinationChain)
 
 		case *coretypes.MsgEnableAgent:
 			if m.Authority == govAuthority {
@@ -554,6 +532,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -579,6 +558,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -604,6 +584,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -629,6 +610,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -654,6 +636,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -679,6 +662,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -704,6 +688,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -729,6 +714,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -754,6 +740,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -779,6 +766,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -804,6 +792,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -829,6 +818,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
@@ -854,15 +844,141 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
 				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+					return ctx, err
 				}
 			}
 
 		default:
-			// ignore others
+			return ctx, fmt.Errorf("PowDecorator: unsupported relay message %T", msg)
 		}
 	}
 
 	return next(ctx, tx, simulate)
+}
+
+// requireEnvelopePubkey rejects non-compressed secp256k1 pubkeys before any
+// free-tier normalization or PoW routing (review L-5).
+func requireEnvelopePubkey(pubkey []byte) error {
+	if len(pubkey) != 33 {
+		return fmt.Errorf("invalid envelope_pubkey length: got %d, want 33", len(pubkey))
+	}
+	return nil
+}
+
+// envelopeAuthorityOf returns the Authority field for relay-routed messages.
+func envelopeAuthorityOf(msg sdk.Msg) (string, bool) {
+	switch m := msg.(type) {
+	case *coretypes.MsgPost:
+		return m.Authority, true
+	case *coretypes.MsgVote:
+		return m.Authority, true
+	case *coretypes.MsgEdit:
+		return m.Authority, true
+	case *coretypes.MsgAnnotate:
+		return m.Authority, true
+	case *coretypes.MsgSetUsername:
+		return m.Authority, true
+	case *coretypes.MsgSetBiography:
+		return m.Authority, true
+	case *coretypes.MsgDelete:
+		return m.Authority, true
+	case *coretypes.MsgDeleteUser:
+		return m.Authority, true
+	case *coretypes.MsgSendTokens:
+		return m.Authority, true
+	case *coretypes.MsgAward:
+		return m.Authority, true
+	case *coretypes.MsgEnableAgent:
+		return m.Authority, true
+	case *coretypes.MsgDisableAgent:
+		return m.Authority, true
+	case *coretypes.MsgSetAgents:
+		return m.Authority, true
+	case *coretypes.MsgFollowUser:
+		return m.Authority, true
+	case *coretypes.MsgUnfollowUser:
+		return m.Authority, true
+	case *coretypes.MsgFollowTopic:
+		return m.Authority, true
+	case *coretypes.MsgUnfollowTopic:
+		return m.Authority, true
+	case *coretypes.MsgBlockPost:
+		return m.Authority, true
+	case *coretypes.MsgUnblockPost:
+		return m.Authority, true
+	case *coretypes.MsgBlockUser:
+		return m.Authority, true
+	case *coretypes.MsgUnblockUser:
+		return m.Authority, true
+	case *coretypes.MsgBlockTopic:
+		return m.Authority, true
+	case *coretypes.MsgUnblockTopic:
+		return m.Authority, true
+	case *coretypes.MsgSubscribe:
+		return m.Authority, true
+	case *coretypes.MsgSetAutoRenewal:
+		return m.Authority, true
+	default:
+		return "", false
+	}
+}
+
+// envelopePubkeyOf returns the envelope pubkey for relay-routed messages.
+func envelopePubkeyOf(msg sdk.Msg) ([]byte, bool) {
+	switch m := msg.(type) {
+	case *coretypes.MsgPost:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgVote:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgEdit:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgAnnotate:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgSetUsername:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgSetBiography:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgDelete:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgDeleteUser:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgSendTokens:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgAward:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgEnableAgent:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgDisableAgent:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgSetAgents:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgFollowUser:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgUnfollowUser:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgFollowTopic:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgUnfollowTopic:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgBlockPost:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgUnblockPost:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgBlockUser:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgUnblockUser:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgBlockTopic:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgUnblockTopic:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgSubscribe:
+		return m.EnvelopePubkey, true
+	case *coretypes.MsgSetAutoRenewal:
+		return m.EnvelopePubkey, true
+	default:
+		return nil, false
+	}
 }
 
 // (legacy helpers removed)
@@ -984,20 +1100,6 @@ func buildCanonForAward(m *coretypes.MsgAward) []byte {
 	cw.writeUvarint(7, m.EnvelopeNonce)
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.AwardType)
-	return cw.buf
-}
-
-func buildCanonForBridgeBurn(m *coretypes.MsgBridgeBurn) []byte {
-	cw := newCanonWriter("MsgBridgeBurn")
-	cw.writeBytes(2, m.EnvelopePubkey)
-	cw.writeBytes(3, m.EnvelopeBlockHash)
-	cw.writeUvarint(4, m.EnvelopeDifficulty)
-	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
-	cw.writeUvarint(6, m.EnvelopeTimestamp)
-	cw.writeUvarint(7, m.EnvelopeNonce)
-	cw.writeString(100, m.DestinationChain)
-	cw.writeString(101, m.DestinationAddress)
-	cw.writeUvarint(102, m.Amount)
 	return cw.buf
 }
 
@@ -1210,19 +1312,83 @@ func computeDifficultyFactor(powFactor float64, difficultySteps uint64) (uint64,
 	if difficultySteps > corekeeper.MaxSafeDifficultySteps {
 		return corekeeper.MaxSafeDifficultyFactor, nil
 	}
-	pow := math.Pow(1+powFactor, float64(difficultySteps))
-	if math.IsNaN(pow) || math.IsInf(pow, 0) {
+
+	// Exact rational arithmetic: factor = round(Base * (1+powFactor)^steps).
+	// big.Rat.SetFloat64 is exact for the IEEE754 bit pattern stored in
+	// params (protobuf fixed64), so all nodes share the same rational base.
+	// Avoids math.Pow float64 / FMA non-determinism across architectures.
+	base := new(big.Rat).SetFloat64(powFactor)
+	if base == nil {
+		return 0, fmt.Errorf("invalid pow_factor: %v", powFactor)
+	}
+	base.Add(base, big.NewRat(1, 1)) // 1 + powFactor
+
+	maxFactorRat := new(big.Rat).SetUint64(corekeeper.MaxSafeDifficultyFactor)
+	baseFactorRat := new(big.Rat).SetUint64(corekeeper.BaseDifficultyFactor)
+	// Cap when Base*(1+p)^n would exceed MaxSafe ⇒ (1+p)^n > MaxSafe/Base
+	capPow := new(big.Rat).Quo(new(big.Rat).Set(maxFactorRat), baseFactorRat)
+
+	powered := ratPowCapped(base, difficultySteps, capPow)
+	if powered == nil {
 		return corekeeper.MaxSafeDifficultyFactor, nil
 	}
-	factorFloat := float64(corekeeper.BaseDifficultyFactor) * pow
-	if factorFloat > float64(corekeeper.MaxSafeDifficultyFactor) {
+
+	factorRat := new(big.Rat).Mul(powered, baseFactorRat)
+	if factorRat.Cmp(maxFactorRat) > 0 {
 		return corekeeper.MaxSafeDifficultyFactor, nil
 	}
-	factor := uint64(math.Round(factorFloat))
+
+	factor := roundRatToUint64(factorRat)
 	if factor < corekeeper.BaseDifficultyFactor {
 		return corekeeper.BaseDifficultyFactor, nil
 	}
+	if factor > corekeeper.MaxSafeDifficultyFactor {
+		return corekeeper.MaxSafeDifficultyFactor, nil
+	}
 	return factor, nil
+}
+
+// ratPowCapped computes base^exp as a rational. Returns nil if the result
+// exceeds cap (caller treats that as MaxSafeDifficultyFactor).
+func ratPowCapped(base *big.Rat, exp uint64, cap *big.Rat) *big.Rat {
+	result := big.NewRat(1, 1)
+	b := new(big.Rat).Set(base)
+	overCap := new(big.Rat).Add(cap, big.NewRat(1, 1))
+	for exp > 0 {
+		if exp&1 == 1 {
+			result.Mul(result, b)
+			if result.Cmp(cap) > 0 {
+				return nil
+			}
+		}
+		exp >>= 1
+		if exp > 0 {
+			b.Mul(b, b)
+			if b.Cmp(cap) > 0 {
+				b.Set(overCap)
+			}
+		}
+	}
+	return result
+}
+
+// roundRatToUint64 rounds a non-negative rational half-away-from-zero
+// (same as math.Round for positive values).
+func roundRatToUint64(r *big.Rat) uint64 {
+	if r.Sign() <= 0 {
+		return 0
+	}
+	num := new(big.Int).Set(r.Num())
+	den := r.Denom()
+	q, rem := new(big.Int).DivMod(num, den, new(big.Int))
+	twoRem := new(big.Int).Lsh(rem, 1)
+	if twoRem.Cmp(den) >= 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	if !q.IsUint64() {
+		return corekeeper.MaxSafeDifficultyFactor
+	}
+	return q.Uint64()
 }
 
 // computeTarget returns base_target * base_factor / effective_factor where base_target = 2^(256-pow_base_bits).
@@ -1241,8 +1407,8 @@ func computeTarget(baseBits uint64, difficultySteps uint64, powFactor float64) (
 // and requires hash <= target derived from difficulty steps and pow_base_bits (with grace period).
 //
 // The last_block_hash check accepts:
-//   1. Equality with the current LastBlockId (most common path), OR
-//   2. Membership in the on-chain recent-block-hashes window via lookupHash.
+//  1. Equality with the current LastBlockId (most common path), OR
+//  2. Membership in the on-chain recent-block-hashes window via lookupHash.
 //
 // lookupHash MUST be a deterministic, state-derived predicate (not a process-
 // local cache) to ensure all peers and restarted nodes agree on acceptance.
@@ -1263,6 +1429,25 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	if effectiveRequired < minRequired {
 		effectiveRequired = minRequired
 	}
+	// M-1: reject stale/fabricated last_block_hash BEFORE Argon2id. The hash
+	// check is O(1) (string compare + optional store read) and independent of
+	// the PoW work product, so paying 1.76ms+4MB first was pure DoS amplification.
+	if !skipHashCheck && strings.TrimSpace(currentLastID) != "" {
+		lb := strings.ToLower(hex.EncodeToString(lastBlockHash))
+		if lb != strings.ToLower(currentLastID) {
+			if lookupHash == nil {
+				return fmt.Errorf("invalid last_block_hash")
+			}
+			seen, lerr := lookupHash(lb)
+			if lerr != nil {
+				return fmt.Errorf("recent-block-hash window read failed: %w", lerr)
+			}
+			if !seen {
+				return fmt.Errorf("invalid last_block_hash")
+			}
+		}
+	}
+
 	var tmp [10]byte
 	n := binary.PutUvarint(tmp[:], pow)
 	guess := make([]byte, 0, len(canonical)+1+n)
@@ -1284,24 +1469,6 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	hashInt := new(big.Int).SetBytes(sum)
 	if hashInt.Cmp(effTarget) > 0 {
 		return fmt.Errorf("insufficient proof of work")
-	}
-	if skipHashCheck || strings.TrimSpace(currentLastID) == "" {
-		return nil
-	}
-	// Compare block hash as lowercase hex
-	lb := strings.ToLower(hex.EncodeToString(lastBlockHash))
-	if lb == strings.ToLower(currentLastID) {
-		return nil
-	}
-	if lookupHash == nil {
-		return fmt.Errorf("invalid last_block_hash")
-	}
-	seen, lerr := lookupHash(lb)
-	if lerr != nil {
-		return fmt.Errorf("recent-block-hash window read failed: %w", lerr)
-	}
-	if !seen {
-		return fmt.Errorf("invalid last_block_hash")
 	}
 	return nil
 }

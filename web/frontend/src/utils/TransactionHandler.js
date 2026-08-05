@@ -42,8 +42,6 @@ const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "Minimum amount is 0.001 MIRAGE": "amount_too_small",
     "Missing target or award type": "award_missing_target_or_type",
     "Invalid level (must be 1 or 10)": "invalid_level",
-    "destination_chain required": "destination_chain_required",
-    "destination_address required": "destination_address_required",
     "amount must be positive": "amount_must_be_positive",
     "missing recovery phrase": "missing_recovery_phrase",
     "invalid signer address": "invalid_signer_address",
@@ -1650,49 +1648,6 @@ class TransactionHandler {
             const challenge = `${derivedAddress}:${last_block_hash}:0`;
 
             // Force fees mode (no PoW)
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
-        } catch (e) {
-            return this._failFromException(e);
-        }
-    }
-
-    /**
-     * Bridge tokens via attested burn (e.g., Solana)
-     * @param {string} destinationChain - Target chain ID (e.g., "solana")
-     * @param {string} destinationAddress - Recipient address on target chain
-     * @param {number} amountUmirage - Amount in umirage to burn and bridge
-     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, burn_tx_hash?: string, burn_sequence?: string|number|null, result?: any}>}
-     */
-    async bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
-        try {
-            const seedPhrase = seedVault.getSeed() || "";
-
-            const chain = String(destinationChain || "").trim().toLowerCase();
-            if (!chain) return this._fail("destination_chain required");
-
-            const address = String(destinationAddress || "").trim();
-            if (!address) return this._fail("destination_address required");
-
-            const amount = Number(amountUmirage) || 0;
-            if (amount <= 0) return this._fail("amount must be positive");
-
-            // Bridge burn never uses PoW - token transfers are self-authenticating
-            // (you can't burn tokens you don't have)
-            const tx = {
-                action: 'bridge_burn',
-                destination_chain: chain,
-                destination_address: address,
-                amount: amount,
-                last_block_hash: "",
-                pow_difficulty: 0,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${tx.last_block_hash}:${tx.pow_difficulty}`;
-
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
         } catch (e) {
@@ -3876,7 +3831,6 @@ class TransactionHandler {
             else if (action === 'annotate_post') msgName = 'MsgAnnotate';
             else if (action === 'subscribe') msgName = 'MsgSubscribe';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
-            else if (action === 'bridge_burn') msgName = 'MsgBridgeBurn';
             else if (action === 'award') msgName = 'MsgAward';
             else throw new Error(`CRITICAL: Missing or invalid transaction.action: "${action}". Transaction must have explicit action field.`);
 
@@ -4779,76 +4733,6 @@ class TransactionHandler {
                     envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/set_auto_renewal';
-            } else if (msgName === 'MsgBridgeBurn') {
-                // Sign relay for bridge burn (e.g., Solana)
-                const difficulty = resolveTxDifficulty(transaction);
-                const uvarint = (n) => {
-                    const out = [];
-                    let v = (n >>> 0);
-                    while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-                    out.push(v);
-                    return Uint8Array.from(out);
-                };
-                const uvarint64 = (n) => {
-                    const out = [];
-                    let v = BigInt(n || 0);
-                    while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-                    out.push(Number(v));
-                    return Uint8Array.from(out);
-                };
-                const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-                const encStr = (s) => { const b = new TextEncoder().encode(s || ""); return new Uint8Array([...uvarint(b.length), ...b]); };
-                const hexToBytes = (hex) => {
-                    const h = (hex || "").replace(/^0x/i, "");
-                    if (!h || h.length % 2) return new Uint8Array(0);
-                    const arr = new Uint8Array(h.length / 2);
-                    for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-                    return arr;
-                };
-                const concat = (...arrs) => {
-                    let total = 0; arrs.forEach(a => total += a.length);
-                    const out = new Uint8Array(total);
-                    let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-                    return out;
-                };
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgBridgeBurn\x00");
-                const tag2 = Uint8Array.from([2]);   // envelope_pubkey
-                const tag3 = Uint8Array.from([3]);   // envelope_block_hash
-                const tag4 = Uint8Array.from([4]);   // envelope_difficulty
-                const tag5 = Uint8Array.from([5]);   // envelope_pow
-                const tag6 = Uint8Array.from([6]);   // envelope_timestamp
-                const tag100 = Uint8Array.from([100]); // destination_chain
-                const tag101 = Uint8Array.from([101]); // destination_address
-                const tag102 = Uint8Array.from([102]); // amount
-                const canon = concat(
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(difficulty),
-                    tag5, uvarint(Number(proof)),
-                    tag6, uvarint64(transaction.timestamp || 0),
-                    Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr(transaction.destination_chain || ""),
-                    tag101, encStr(transaction.destination_address || ""),
-                    tag102, uvarint64(transaction.amount || 0),
-                );
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    pubkey: pubB64,
-                    signature: sigB64,
-                    timestamp: transaction.timestamp || 0,
-                    last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: difficulty,
-                    pow: Number(proof),
-                    destination_chain: transaction.destination_chain || "",
-                    destination_address: transaction.destination_address || "",
-                    amount: transaction.amount || 0,
-                    envelope_nonce: envelopeNonce,
-                };
-                endpoint = 'bridge/burn';
             } else if (msgName === 'MsgAward') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const uvarint = (n) => {

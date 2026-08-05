@@ -30,7 +30,6 @@ The Mirage deployment system packages all components into a single Docker contai
 - **Indexer** (Python) - PostgreSQL-backed chain indexer
 - **PostgreSQL** - Two databases: `mirage_indexer` (indexer) and `mirage_backend` (backend-owned data)
 - **Caddy** - Reverse proxy with automatic HTTPS
-- **Optional Services**: Bridge Orchestrator
 
 **Key Design Principle:** One container per node. All services are managed via tmux windows for easy operator access. Persistent data lives in `~/.mirage` on the host (volume-mounted).
 
@@ -122,7 +121,6 @@ FROM ubuntu:24.04
 | Component | Source | Destination |
 |-----------|--------|-------------|
 | miraged binary | `blockchain/bin/miraged` | `/opt/mirage/blockchain/bin/miraged` |
-| orchestrator binary | `blockchain/bin/orchestrator` | `/opt/mirage/blockchain/bin/orchestrator` |
 | React build | `web/frontend/build/` | `/opt/mirage/web/frontend/build/` |
 | Python backend | `web/backend/` | `/opt/mirage/web/backend/` |
 | Python indexer | `indexer/` | `/opt/mirage/indexer/` |
@@ -324,7 +322,7 @@ tmux new-session -d -s mirage
 #    → Ensure both DBs exist (mirage_indexer + mirage_backend) + mirage_indexer_ro role
 #    → Initialize backend schema (init_backend_schema)
 #    → Run deploy migrations
-#    → Node → Indexer → Backend → (optional: Orchestrator)
+#    → Node → Indexer → Backend
 ```
 
 ### Service Dependencies
@@ -349,8 +347,6 @@ tmux new-session -d -s mirage
 │  Indexer (after Node RPC ready)                                              │
 │    ↓                                                                         │
 │  Backend (after Node RPC ready)                                              │
-│    ↓                                                                         │
-│  Orchestrator (if binary exists)                                             │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -362,10 +358,6 @@ The entrypoint handles SIGTERM/SIGINT:
 ```bash
 cleanup() {
     echo "Received shutdown signal, gracefully stopping services..."
-    
-    # Stop orchestrator
-    pkill -TERM -f "blockchain/bin/orchestrator"
-    sleep 1
     
     # Stop node (with timeout for block completion)
     pkill -TERM -f "miraged start"
@@ -397,7 +389,6 @@ tmux new-window -t mirage -n postgres
 tmux new-window -t mirage -n node
 tmux new-window -t mirage -n indexer
 tmux new-window -t mirage -n backend
-tmux new-window -t mirage -n orchestrator # Optional
 tmux new-window -t mirage -n status
 ```
 
@@ -437,7 +428,6 @@ Logs are stored in `~/.mirage/logs/<component>/`:
 ├── backend/backend-2026-01-21.log
 ├── postgres/postgres-2026-01-21.log
 ├── caddy/caddy-2026-01-21.log
-├── orchestrator/orchestrator-2026-01-21.log
 └── deploy/entrypoint-2026-01-21.log
 ```
 
@@ -455,7 +445,6 @@ Configuration is stored in `~/.mirage/env/`:
 | `backend.env` | Backend settings + DB URLs (INDEXER_DB_RO_URL, BACKEND_DB_URL) |
 | `indexer.env` | Indexer settings + DB URLs (INDEXER_DB_URL, INDEXER_DB_RO_URL, BACKEND_DB_URL) |
 | `secrets.env` | Sensitive values (excluded from git) |
-| `orchestrator.env` | ORCHESTRATOR_ENABLED, Solana RPC URL |
 
 **Critical DB variables (must be set):**
 

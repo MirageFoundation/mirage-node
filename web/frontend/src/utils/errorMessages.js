@@ -186,19 +186,7 @@ const ERROR_MAP = {
     invalid_max_depth: "Invalid max depth.",
     unsupported_sort_mode: "Unsupported sort mode.",
 
-    // Bridge / upload
-    destination_chain_required: "Destination chain is required.",
-    destination_address_required: "Destination address is required.",
-    destination_chain_not_enabled: "Destination chain is not enabled.",
-    destination_chain_too_long: "Destination chain is too long.",
-    destination_address_too_long: "Destination address is too long.",
-    invalid_solana_address: "Invalid Solana address.",
-    invalid_solana_address_length: "Invalid Solana address length.",
-    burn_sequence_required: "Burn sequence is required.",
-    burn_tx_hash_required: "Burn tx hash is required.",
-    burn_sequence_not_allowed_outbound: "Burn sequence is not allowed for outbound queries.",
-    burn_tx_hash_not_allowed_inbound: "Burn tx hash is not allowed for inbound queries.",
-    invalid_burn_tx_hash: "Invalid burn tx hash.",
+    // Upload
     upload_service_error: "Upload service encountered an error.",
     cloudflare_not_configured: "Upload service is not configured.",
     cloudflare_stream_not_configured: "Stream upload service is not configured.",

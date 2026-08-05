@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"math"
 )
 
 // Valid user levels. Only these levels can be assigned to a profile.
@@ -15,11 +16,12 @@ const (
 
 // Governance-safe upper bounds for key economics parameters.
 const (
-	MaxMintQuantity     = 10_000_000_000_000 // 10M MIRAGE per interval
-	MaxVoteWeight       = 100.0              // no single tier gets >100x weight
-	MaxRelayMinGasPrice = 1_000_000_000      // 1000 MIRAGE per gas unit
-	MaxRelayMaxGasFee   = 100_000_000_000    // 100k MIRAGE per tx
-	MaxAwardConfigCost  = 1_000_000_000_000  // 1M MIRAGE per award
+	MaxMintQuantity      = 10_000_000_000_000 // 10M MIRAGE per interval
+	MaxVoteWeight        = 100.0              // no single tier gets >100x weight
+	MaxRelayMinGasPrice  = 1_000_000_000      // 1000 MIRAGE per gas unit
+	MaxRelayMaxGasFee    = 100_000_000_000    // 100k MIRAGE per tx
+	MaxAwardConfigCost   = 1_000_000_000_000  // 1M MIRAGE per award
+	MinPowDifficultyStep = 0.01
 )
 
 // ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
@@ -138,7 +140,7 @@ func DefaultParams() Params {
 		// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty)
 		MinDifficulty: 10,
 
-		// PoW difficulty step (fraction (0,1]): factor = 1000 * (1+pow_difficulty_step)^difficulty, steps +/-1
+		// PoW difficulty step: factor = 1000 * (1+pow_difficulty_step)^difficulty, steps +/-1
 		PowDifficultyStep: 0.25,
 
 		// PoW message window
@@ -178,10 +180,6 @@ func DefaultParams() Params {
 		// Max age in seconds for envelope_timestamp (replay protection)
 		MaxEnvelopeAge: 60,
 
-		// Bridge parameters
-		BridgeChains:               []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
-		BridgeAttestationThreshold: 0.6667,                 // 66.67% of voting power required
-
 		// Award configurations (cost in umirage; 1 MIRAGE = 1,000,000 umirage)
 		AwardConfigs: DefaultAwardConfigs(),
 	}
@@ -213,7 +211,8 @@ func (p Params) Validate() error {
 	if p.MintQuantity > MaxMintQuantity {
 		return fmt.Errorf("mint_quantity %d exceeds max %d", p.MintQuantity, MaxMintQuantity)
 	}
-	if p.MintDynamicSplit < 0 || p.MintDynamicSplit > 1 {
+	if math.IsNaN(p.MintDynamicSplit) || math.IsInf(p.MintDynamicSplit, 0) ||
+		p.MintDynamicSplit < 0 || p.MintDynamicSplit > 1 {
 		return fmt.Errorf("mint_dynamic_split must be in [0,1]")
 	}
 	if p.BlockHashWindow == 0 || p.BlockHashWindow > 1000 {
@@ -238,12 +237,15 @@ func (p Params) Validate() error {
 		return fmt.Errorf("min_username_size must be <= max_username_size")
 	}
 	// SubscriptionReservePercent must be in [0,1]
-	if p.SubscriptionReservePercent < 0 || p.SubscriptionReservePercent > 1 {
+	if math.IsNaN(p.SubscriptionReservePercent) || math.IsInf(p.SubscriptionReservePercent, 0) ||
+		p.SubscriptionReservePercent < 0 || p.SubscriptionReservePercent > 1 {
 		return fmt.Errorf("subscription_reserve_percent must be in [0,1]")
 	}
-	// PowDifficultyStep must be in (0,1]
-	if p.PowDifficultyStep <= 0 || p.PowDifficultyStep > 1 {
-		return fmt.Errorf("pow_difficulty_step must be in (0,1]")
+	// PowDifficultyStep must be large enough that exact rational
+	// exponentiation reaches its cap without unbounded intermediate growth.
+	if math.IsNaN(p.PowDifficultyStep) || math.IsInf(p.PowDifficultyStep, 0) ||
+		p.PowDifficultyStep < MinPowDifficultyStep || p.PowDifficultyStep > 1 {
+		return fmt.Errorf("pow_difficulty_step must be in [%.2f,1]", MinPowDifficultyStep)
 	}
 	// Relay gas price bounds
 	if p.RelayMinGasPrice > MaxRelayMinGasPrice {
@@ -257,19 +259,28 @@ func (p Params) Validate() error {
 		return fmt.Errorf("max_envelope_age must be > 0")
 	}
 	// Validate tiers
-	if len(p.Tiers) == 0 {
-		return fmt.Errorf("tiers must not be empty")
+	if len(p.Tiers) != 3 {
+		return fmt.Errorf("tiers must contain exactly 3 entries")
 	}
 	// Free tier (index 0) must have 0 monthly fee
+	if p.Tiers[0] == nil {
+		return fmt.Errorf("tier 0 must not be nil")
+	}
 	if p.Tiers[0].PeriodFee != 0 {
 		return fmt.Errorf("tier 0 (free) must have period_fee = 0")
 	}
 	for i, tier := range p.Tiers {
+		if tier == nil {
+			return fmt.Errorf("tier %d must not be nil", i)
+		}
 		if tier.MaxTitleLength == 0 {
 			return fmt.Errorf("tier %d: max_title_length must be > 0", i)
 		}
 		if tier.MaxContentLength == 0 {
 			return fmt.Errorf("tier %d: max_content_length must be > 0", i)
+		}
+		if math.IsNaN(tier.VoteWeight) || math.IsInf(tier.VoteWeight, 0) {
+			return fmt.Errorf("tier %d: vote_weight must be finite", i)
 		}
 		if tier.VoteWeight < 0 {
 			return fmt.Errorf("tier %d: vote_weight must be >= 0", i)
@@ -278,16 +289,15 @@ func (p Params) Validate() error {
 			return fmt.Errorf("tier %d: vote_weight %.2f exceeds max %.2f", i, tier.VoteWeight, MaxVoteWeight)
 		}
 	}
-	// Validate bridge params
-	if p.BridgeAttestationThreshold <= 0 || p.BridgeAttestationThreshold > 1 {
-		return fmt.Errorf("bridge_attestation_threshold must be in (0,1]")
-	}
 	// Validate award configs
 	if len(p.AwardConfigs) == 0 {
 		return fmt.Errorf("award_configs must not be empty")
 	}
 	awardNames := make(map[string]bool)
 	for i, ac := range p.AwardConfigs {
+		if ac == nil {
+			return fmt.Errorf("award_configs[%d] must not be nil", i)
+		}
 		if ac.Name == "" {
 			return fmt.Errorf("award_configs[%d]: name must not be empty", i)
 		}

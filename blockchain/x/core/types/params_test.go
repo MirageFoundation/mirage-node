@@ -1,6 +1,7 @@
 package types
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -149,6 +150,49 @@ func TestParamsValidateUpperBounds(t *testing.T) {
 	// Default params should pass
 	p = DefaultParams()
 	require.NoError(t, p.Validate())
+}
+
+func TestParamsValidateRejectsNonFiniteFloats(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Params)
+	}{
+		{"mint_dynamic_split_nan", func(p *Params) { p.MintDynamicSplit = math.NaN() }},
+		{"mint_dynamic_split_inf", func(p *Params) { p.MintDynamicSplit = math.Inf(1) }},
+		{"subscription_reserve_percent_nan", func(p *Params) { p.SubscriptionReservePercent = math.NaN() }},
+		{"subscription_reserve_percent_inf", func(p *Params) { p.SubscriptionReservePercent = math.Inf(-1) }},
+		{"pow_difficulty_step_nan", func(p *Params) { p.PowDifficultyStep = math.NaN() }},
+		{"pow_difficulty_step_inf", func(p *Params) { p.PowDifficultyStep = math.Inf(1) }},
+		{"pow_difficulty_step_too_small", func(p *Params) { p.PowDifficultyStep = MinPowDifficultyStep / 2 }},
+		{"vote_weight_nan", func(p *Params) { p.Tiers[0].VoteWeight = math.NaN() }},
+		{"vote_weight_inf", func(p *Params) { p.Tiers[0].VoteWeight = math.Inf(1) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := DefaultParams()
+			tt.mutate(&p)
+			require.Error(t, p.Validate())
+		})
+	}
+}
+
+func TestParamsValidateRejectsNilEntries(t *testing.T) {
+	p := DefaultParams()
+	p.Tiers = p.Tiers[:2]
+	require.EqualError(t, p.Validate(), "tiers must contain exactly 3 entries")
+
+	p = DefaultParams()
+	p.Tiers[0] = nil
+	require.EqualError(t, p.Validate(), "tier 0 must not be nil")
+
+	p = DefaultParams()
+	p.Tiers[1] = nil
+	require.EqualError(t, p.Validate(), "tier 1 must not be nil")
+
+	p = DefaultParams()
+	p.AwardConfigs[0] = nil
+	require.EqualError(t, p.Validate(), "award_configs[0] must not be nil")
 }
 
 func TestProfileValidateBasicRuneCounts(t *testing.T) {

@@ -35,7 +35,6 @@ What gets backed up:
     - ~/.mirage/node/keyring-*   - Keyring (validator + any other named keys, e.g. rewards_pool)
     - ~/.mirage/postgres/        - PostgreSQL data directory
     - ~/.mirage/env/             - Environment files
-    - ~/.mirage/orchestrator/    - Orchestrator files (Solana keypair)
     - PostgreSQL dump            - Clean SQL dump for easy restore
 
 Restore modes:
@@ -52,7 +51,6 @@ Restore modes:
         only the `validator` account key is replaced from the mnemonic; every
         other key (e.g. `rewards_pool`) is preserved from the backup so the
         target node keeps its full signing capability.
-        You'll still need to manually set up the orchestrator afterward.
         Must use --file to specify which server's backup to use.
 
         Safety check: after derivation, the script verifies the derived consensus
@@ -433,15 +431,12 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         docker exec mirage tmux send-keys -t mirage:node C-c 2>/dev/null || true
         docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true
         docker exec mirage tmux send-keys -t mirage:backend C-c 2>/dev/null || true
-        docker exec mirage tmux send-keys -t mirage:orchestrator C-c 2>/dev/null || true
         sleep 5
         docker exec mirage pkill -f miraged 2>/dev/null || true
         docker exec mirage pkill -f gunicorn 2>/dev/null || true
-        docker exec mirage pkill -f orchestrator 2>/dev/null || true
         sleep 5
         docker exec mirage pkill -9 -f miraged 2>/dev/null || true
         docker exec mirage pkill -9 -f gunicorn 2>/dev/null || true
-        docker exec mirage pkill -9 -f orchestrator 2>/dev/null || true
         sleep 2
     """,
     )

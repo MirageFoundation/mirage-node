@@ -454,28 +454,6 @@ def canon_base_award(
     )
 
 
-def canon_base_bridge_burn(
-    pub_dec: bytes,
-    last_block_hash: str,
-    difficulty: int,
-    timestamp: int,
-    destination_chain: str,
-    destination_address: str,
-    amount: int,
-    nonce: int = 0,
-) -> bytes:
-    return canon_shared.canon_base_bridge_burn(
-        pub_dec,
-        _hex_to_bytes(last_block_hash),
-        int(difficulty),
-        int(timestamp),
-        destination_chain,
-        destination_address,
-        int(amount),
-        nonce=int(nonce),
-    )
-
-
 _BASE_DIFFICULTY_FACTOR = 1000
 _MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
 
@@ -608,7 +586,6 @@ __all__ = [
     "canon_base_subscribe",
     "canon_base_set_auto_renewal",
     "canon_base_award",
-    "canon_base_bridge_burn",
     "check_pow_target",
     "argon2_digest",
     "decode_b64",

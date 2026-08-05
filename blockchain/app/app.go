@@ -183,6 +183,14 @@ func mirageAnteRouter(
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	for _, m := range tx.GetMsgs() {
 		msgTypes = append(msgTypes, sdk.MsgTypeURL(m))
+		switch m.(type) {
+		case *coretypes.MsgBridgeBurn,
+			*coretypes.MsgBridgeAttest,
+			*coretypes.MsgBridgeMinted,
+			*coretypes.MsgBridgeAttestBurned,
+			*coretypes.MsgBridgeAttestMinted:
+			return ctx, fmt.Errorf("bridge messages were removed in v1.31.0")
+		}
 		if am, ok := m.(interface{ GetAuthority() string }); ok {
 			if strings.TrimSpace(am.GetAuthority()) == govAuthority {
 				isRelayTx = false
@@ -218,23 +226,11 @@ func mirageAnteRouter(
 
 // isRelayMessage returns true if the message is a relay-routed core message
 // (uses envelope PoW + signature instead of standard SDK signatures).
+// Derived from relayMessagePrototypes — keep PoW and RelaySig switches in
+// lockstep with that registry (see TestRelayMessageRegistryParity).
 func isRelayMessage(m sdk.Msg) bool {
-	switch m.(type) {
-	case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-		*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
-		*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-		*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-		*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-		*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-		*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
-		*coretypes.MsgDelete, *coretypes.MsgDeleteUser, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-		*coretypes.MsgSubscribe, *coretypes.MsgSetAutoRenewal,
-		*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
-		*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
-		return true
-	default:
-		return false
-	}
+	_, ok := relayMessageURLs[sdk.MsgTypeURL(m)]
+	return ok
 }
 
 // AppConfig returns the default app config.
@@ -333,7 +329,6 @@ func New(
 			}
 			meta := RelaySigDecorator{Keeper: app.CoreKeeper}
 			metaFees := RelayGasFeeDecorator{BankKeeper: app.BankKeeper}
-			accDec := RelayAccountingDecorator{Keeper: app.CoreKeeper}
 			logDec := LoggingDecorator{}
 			validateBasic := authante.NewValidateBasicDecorator()
 			govDec := GovAuthorityDecorator{}
@@ -351,7 +346,12 @@ func New(
 				panic(fmt.Errorf("app: NewAnteHandler failed: %w", err))
 			}
 
-			// Relay ante chain (must start with SetUpContextDecorator)
+			// Relay ante chain (must start with SetUpContextDecorator).
+			// M-1: RelaySigDecorator (meta) runs BEFORE PowDecorator (powDec)
+			// so unauthenticated envelopes are rejected ~35x cheaper than
+			// paying Argon2id first. meta only needs envelope fields + the
+			// nonce store — it does not depend on powDec state. Nonce writes
+			// roll back with the cached context if a later decorator fails.
 			relayAnte := sdk.ChainAnteDecorators(
 				setup,
 				validateBasic,
@@ -359,11 +359,10 @@ func New(
 				timeout,
 				gasSize,
 				logDec,
+				meta,
 				powDec,
 				ensure,
 				metaFees,
-				accDec,
-				meta,
 			)
 
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {

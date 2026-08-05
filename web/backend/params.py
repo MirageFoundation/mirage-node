@@ -45,7 +45,6 @@ _REQUIRED_FLOAT_PARAMS = [
     "mint_dynamic_split",
     "pow_factor",
     "subscription_reserve_percent",
-    "bridge_attestation_threshold",
 ]
 
 
@@ -82,8 +81,6 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
         except (TypeError, ValueError):
             raise RuntimeError(f"invalid max_biography_length in tier {idx}: {tier.get('max_biography_length')}")
     result["tiers"] = tiers
-
-    result["bridge_chains"] = p.get("bridge_chains") or []
 
     award_configs = p.get("award_configs")
     if not award_configs or not isinstance(award_configs, list) or len(award_configs) == 0:

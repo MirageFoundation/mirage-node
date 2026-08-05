@@ -18,10 +18,9 @@ This document provides a comprehensive technical overview of the Mirage web back
 10. [API Endpoints](#api-endpoints)
 11. [Chain Query Helpers](#chain-query-helpers)
 12. [Database Integration](#database-integration)
-13. [Bridge Endpoints](#bridge-endpoints)
-14. [Security Model](#security-model)
-15. [Observability](#observability)
-16. [Operational Considerations](#operational-considerations)
+13. [Security Model](#security-model)
+14. [Observability](#observability)
+15. [Operational Considerations](#operational-considerations)
 
 ---
 
@@ -115,21 +114,19 @@ web/backend/
 ├── routes/
 │   ├── public.py       # Read-only endpoints (feeds, profiles, search, stats)
 │   ├── core.py         # Write endpoints (post, vote, username, etc.)
-│   ├── quests.py       # Quest/reward endpoints
-│   └── bridge.py       # Bridge endpoints (attested transfers)
+│   └── quests.py       # Quest/reward endpoints
 └── logging_utils.py    # Structured logging
 ```
 
 ### Blueprint Organization
 
-Routes are organized into three Flask blueprints:
+Routes are organized into Flask blueprints:
 
 | Blueprint | Prefix | Purpose |
 |-----------|--------|---------|
 | `public_bp` | `/api/` | Read operations, no auth required |
 | `core_bp` | `/api/core/` | Write operations, requires meta-signature |
 | `quests_bp` | `/api/rewards/` | Quest/reward endpoints |
-| `bridge_bp` | `/api/bridge/` | Cross-chain operations |
 
 ---
 
@@ -548,14 +545,6 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/award` | MsgAward (burn MIRAGE to award a post/comment) |
 | `POST /api/core/report` | Content reporting |
 
-### Bridge Endpoints
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/bridge/config` | Enabled chains, fees |
-| `POST /api/bridge/burn` | Burn for attested bridge (Solana) |
-| `GET /api/bridge/status` | Query bridge status and attestation progress |
-
 ---
 
 ## Chain Query Helpers
@@ -623,10 +612,10 @@ The backend uses two separate PostgreSQL databases with strict ownership boundar
 │  │ profiles, balances   │         │ user_daily_quests, pending_  │          │
 │  │ followed_*, blocked_*│         │   rewards, user_quest_state  │          │
 │  │ preferences          │         │ push_tokens, push_throttle   │          │
-│  │ bridge_transactions  │         │ push_event_cursor/seen       │          │
-│  │ supply_history       │         │ reports, user_similarity_    │          │
-│  │ mentions, tx_index   │         │   cache, user_last_seen      │          │
-│  │ (chain-indexed data) │         │ user_inbox_state             │          │
+│  │ supply_history       │         │ push_event_cursor/seen       │          │
+│  │ mentions, tx_index   │         │ reports, user_similarity_    │          │
+│  │ (chain-indexed data) │         │   cache, user_last_seen      │          │
+│  │                      │         │ user_inbox_state             │          │
 │  └──────────┬───────────┘         └──────────────┬───────────────┘          │
 │             │                                    │                          │
 │     READ-ONLY access                    READ-WRITE access                   │
@@ -692,40 +681,6 @@ The backend runs a background thread (`push_listener.py`) that polls the indexer
 ### User Activity Tracking
 
 `user_last_seen.py` updates a timestamp in the backend DB on every authenticated API hit, throttled to one DB write per user per 60 seconds via an in-memory cache. This powers the DAU/MAU metrics in `/api/get_welcome_stats` and `/api/get_stats`.
-
----
-
-## Bridge Endpoints
-
-### Attested Bridge (Solana)
-
-For validator-attested chains:
-
-```python
-@bridge_bp.route("/api/bridge/burn", methods=["POST"])
-def bridge_burn():
-    # 1. Validate request
-    destination_chain = data["destination_chain"]  # e.g., "solana"
-    destination_address = data["destination_address"]
-    amount = data["amount"]
-    
-    # 2. Verify chain is enabled
-    if not _resolve_enabled_attested_chain(destination_chain):
-        return error("destination_chain not enabled")
-    
-    # 3. Chain-specific address validation
-    if destination_chain == "solana":
-        decoded = base58_decode(destination_address)
-        if len(decoded) != 32:
-            return error("invalid solana address")
-    
-    # 4. Build and broadcast MsgBridgeBurn
-    msg = MsgBridgeBurn()
-    msg.destination_chain = destination_chain
-    msg.destination_address = destination_address
-    msg.amount = amount
-    # ... envelope fields, broadcast
-```
 
 ---
 

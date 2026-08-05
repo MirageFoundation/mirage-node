@@ -315,8 +315,8 @@ const StatusBadge = styled.button`
         if ($tone === 'active') {
             return css`
                 /* Matches the canonical warning palette used across default
-                   (SeedWarningBanner, WelcomeView WarningBox, BridgeView
-                   WarningBanner, LoggedOutPromptCard): amber #f59e0b with
+                   (SeedWarningBanner, WelcomeView WarningBox,
+                   LoggedOutPromptCard): amber #f59e0b with
                    0.08 bg / 0.25 border. */
                 background: rgba(245, 158, 11, 0.08);
                 color: #f59e0b;

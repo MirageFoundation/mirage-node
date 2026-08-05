@@ -811,11 +811,12 @@ func (ndb *nodeDB) deleteVersionsTo(toVersion int64) error {
 			} else if !errors.Is(rerr, ErrVersionDoesNotExist) {
 				return rerr
 			} else {
+				// CONSENSUS_FATAL class: node-local (correlates with pruning config / local DB state)
 				ndb.logger.Error("CONSENSUS_FATAL:PRUNE_HOLE",
 					"missing_version", version, "first", first, "prune_to", toVersion, "latest", latest)
-				panic(fmt.Errorf(
+				consensusFatalHalt(
 					"CONSENSUS_FATAL:PRUNE_HOLE version=%d missing above existing history (first=%d prune_to=%d latest=%d); refusing to prune inconsistent state",
-					version, first, toVersion, latest))
+					version, first, toVersion, latest)
 			}
 		}
 		seenExisting = true

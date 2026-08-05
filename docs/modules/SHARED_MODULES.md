@@ -153,17 +153,12 @@ MsgBlockUser, MsgUnblockUser
 # Subscription messages
 MsgSubscribe, MsgSetAutoRenewal, MsgSetLevel
 
-# Bridge messages
-MsgBridgeBurn
-MsgBridgeAttestBurned, MsgBridgeAttestMinted
-
 # Query types
 QueryParamsRequest, QueryParamsResponse
 QueryDifficultyRequest, QueryDifficultyResponse
-QueryBridgeAttestationRequest, QueryBridgeAttestationResponse
 
 # Configuration types
-Params, TierConfig, BridgeChainConfig
+Params, TierConfig
 ```
 
 ---
@@ -405,8 +400,7 @@ All three raise `RuntimeError` if the corresponding environment variable is miss
 ├── postgres/       # postgres-YYYY-MM-DD.log
 ├── caddy/          # Web server logs
 ├── referrals/      # Referral daemon logs
-├── deploy/         # Deployment logs
-└── orchestrator/   # Bridge orchestrator logs
+└── deploy/         # Deployment logs
 ```
 
 ### Date-Based Handler

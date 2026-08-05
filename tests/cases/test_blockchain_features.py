@@ -632,7 +632,7 @@ def test_annotate_chain(backend: str) -> None:
 
 
 def test_security(backend: str) -> None:
-    """Security checks: tier params, subscription period, bridge threshold, replay rejection."""
+    """Security checks: tier params, subscription period, replay rejection."""
 
     fee_payer = _bh._VALIDATOR_ADDR or ""
 
@@ -666,17 +666,7 @@ def test_security(backend: str) -> None:
     except Exception as e:
         _fail("security.subscription_period_nonzero", str(e))
 
-    # 3. Bridge attestation threshold should be > 0 and <= 1
-    try:
-        threshold = float(params.get("bridge_attestation_threshold", 0))
-        if 0 < threshold <= 1:
-            _pass("security.bridge_threshold_valid")
-        else:
-            _fail("security.bridge_threshold_valid", f"threshold={threshold}")
-    except Exception as e:
-        _fail("security.bridge_threshold_valid", str(e))
-
-    # 4. Relay nonce: submit same tx twice — second should be rejected
+    # 3. Relay nonce: submit same tx twice — second should be rejected
     #    (Note: basic timestamp replay check already exists via envelope_timestamp;
     #    we verify the timestamp + PoW dedup here)
     agent = WALLETS.get("agent1")

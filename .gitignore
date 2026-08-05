@@ -78,6 +78,7 @@ scripts/*
 !scripts/stake.py
 !scripts/unjail_validator.sh
 !scripts/check_validator_status.sh
+!scripts/check_patches.sh
 !scripts/get_persistent_peers.sh
 !scripts/backup_restore.py
 !scripts/create_snapshot.sh

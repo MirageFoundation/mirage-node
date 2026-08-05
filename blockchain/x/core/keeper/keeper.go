@@ -1,7 +1,6 @@
 package keeper
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -10,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"mirage/consensusfatal"
 	"mirage/x/core/types"
 
 	corestore "cosmossdk.io/core/store"
@@ -1004,14 +1004,24 @@ func (k Keeper) PunishValidator(ctx sdk.Context, valoper string, fraction sdkmat
 func (k Keeper) GetRelayCredit(ctx sdk.Context, valoper string) sdkmath.Int {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.relayCreditKey(valoper))
-	if err != nil || len(bz) == 0 {
+	if err != nil {
+		// CONSENSUS_FATAL class: node-local — silent zero previously forked
+		// mint distribution (M-3). Absent key still means zero credit.
+		ctx.Logger().Error("CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET",
+			"height", ctx.BlockHeight(), "module", "core", "valoper", valoper, "err", err)
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET height=%d valoper=%s: %w", ctx.BlockHeight(), valoper, err))
+	}
+	if len(bz) == 0 {
 		return sdkmath.ZeroInt()
 	}
 	// value is big-endian uint64 for simplicity
-	if len(bz) == 8 {
-		return sdkmath.NewIntFromUint64(binary.BigEndian.Uint64(bz))
+	if len(bz) != 8 {
+		// CONSENSUS_FATAL class: deterministic
+		ctx.Logger().Error("CONSENSUS_FATAL:RELAY_CREDIT_DECODE",
+			"height", ctx.BlockHeight(), "module", "core", "valoper", valoper, "bytes_len", len(bz))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDIT_DECODE height=%d valoper=%s bytes=%d: expected 8-byte big-endian uint64", ctx.BlockHeight(), valoper, len(bz)))
 	}
-	return sdkmath.ZeroInt()
+	return sdkmath.NewIntFromUint64(binary.BigEndian.Uint64(bz))
 }
 
 func (k Keeper) AddRelayCredit(ctx sdk.Context, valoper string, delta sdkmath.Int) error {
@@ -1064,23 +1074,50 @@ func (k Keeper) ResetAllRelayCredits(ctx sdk.Context) error {
 	if err != nil {
 		return err
 	}
-	defer it.Close()
+	// Collect keys first, then close the iterator, then delete. Mutating the
+	// store during iteration is undefined across store backends (including
+	// the vendored store/v2 fork); collect-then-delete matches the
+	// pruneCommitInfo pattern used elsewhere for the same reason.
+	var keys [][]byte
 	for ; it.Valid(); it.Next() {
-		_ = store.Delete(it.Key())
+		keys = append(keys, append([]byte(nil), it.Key()...))
+	}
+	it.Close()
+	for _, key := range keys {
+		if err := store.Delete(key); err != nil {
+			return fmt.Errorf("ResetAllRelayCredits: delete %x: %w", key, err)
+		}
 	}
 	return nil
 }
 
+// HasReservedProfilesBootstrapped reports whether the one-shot reserved
+// module-account profile bootstrap has completed.
+func (k Keeper) HasReservedProfilesBootstrapped(ctx sdk.Context) (bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	bz, err := store.Get([]byte(types.ReservedProfilesBootstrappedKey))
+	if err != nil {
+		return false, err
+	}
+	return len(bz) > 0, nil
+}
+
+// SetReservedProfilesBootstrapped writes the one-shot BeginBlock sentinel so
+// the reserved-profile bootstrap loop does not run again.
+func (k Keeper) SetReservedProfilesBootstrapped(ctx sdk.Context) error {
+	store := k.storeService.OpenKVStore(ctx)
+	return store.Set([]byte(types.ReservedProfilesBootstrappedKey), []byte{1})
+}
+
 // GetParams returns the current chain parameters.
 //
-// FAIL-FAST CONTRACT: any read/decode/validate failure panics with a tagged
-// CONSENSUS_FATAL message. Silently substituting DefaultParams() on one node
-// while peers use the stored params produces a single-node app-hash
-// divergence that is invisible until the next consensus round. A panic in
-// BeginBlock/EndBlock halts the validator cleanly so the auto-recovery
-// watchdog can state-sync from healthy peers; a panic in DeliverTx fails the
-// tx loudly with a stack trace operators can grep for. Both outcomes are
-// strictly safer than silent divergence.
+// FAIL-FAST CONTRACT: any read/decode/validate failure terminates via
+// consensusfatal.HaltErr with a tagged CONSENSUS_FATAL message. Silently
+// substituting DefaultParams() on one node while peers use the stored params
+// produces a single-node app-hash divergence that is invisible until the next
+// consensus round. Process exit (not panic) ensures CometBFT's recover cannot
+// leave a consensus zombie; the supervisor/watchdog see an unambiguous dead
+// process. In DeliverTx the same halt surfaces loudly for operators.
 //
 // InitGenesis writes SetParams before any block handler runs, so an empty
 // store post-genesis is also a bug we want to surface, not paper over.
@@ -1088,24 +1125,28 @@ func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get([]byte("params"))
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
+		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_EMPTY",
 			"height", ctx.BlockHeight(), "module", "core")
-		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_EMPTY height=%d: params not initialized (InitGenesis must SetParams)", ctx.BlockHeight()))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_EMPTY height=%d: params not initialized (InitGenesis must SetParams)", ctx.BlockHeight()))
 	}
 	if err := k.cdc.Unmarshal(bz, &p); err != nil {
+		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_UNMARSHAL",
 			"height", ctx.BlockHeight(), "module", "core", "err", err, "bytes_len", len(bz))
-		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_UNMARSHAL height=%d bytes=%d: %w", ctx.BlockHeight(), len(bz), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_UNMARSHAL height=%d bytes=%d: %w", ctx.BlockHeight(), len(bz), err))
 	}
 	if err := p.Validate(); err != nil {
+		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_VALIDATE",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:PARAMS_VALIDATE height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_VALIDATE height=%d: %w", ctx.BlockHeight(), err))
 	}
 	return p
 }
@@ -1212,6 +1253,11 @@ func (k Keeper) mintDenom() string { return types.MintDenom }
 // auto-recovery watchdog then state-syncs the node from healthy peers.
 //
 // See docs/troubleshooting/divergence-recovery.md.
+//
+// Cost note (M-2): this is O(accounts) through the canonical-only IAVL path.
+// The O(1) delta check cannot detect a supply write paired with a missing
+// balance write, so EndBlock retains this scan every block and logs its
+// duration every 1000 blocks.
 func (k Keeper) AssertSupplyInvariant(ctx sdk.Context) error {
 	denom := k.mintDenom()
 	sum := sdkmath.ZeroInt()
@@ -1231,6 +1277,137 @@ func (k Keeper) AssertSupplyInvariant(ctx sdk.Context) error {
 	return nil
 }
 
+func (k Keeper) blockSupplyStartKey() []byte { return []byte(types.BlockSupplyStartKey) }
+func (k Keeper) blockSupplyDeltaKey() []byte { return []byte(types.BlockSupplyDeltaKey) }
+
+func encodeSupplyInt(v sdkmath.Int) []byte {
+	return []byte(v.String())
+}
+
+func decodeSupplyInt(bz []byte) (sdkmath.Int, error) {
+	if len(bz) == 0 {
+		return sdkmath.ZeroInt(), fmt.Errorf("empty supply int bytes")
+	}
+	v, ok := sdkmath.NewIntFromString(string(bz))
+	if !ok {
+		return sdkmath.ZeroInt(), fmt.Errorf("invalid supply int %q", string(bz))
+	}
+	return v, nil
+}
+
+// CaptureBlockSupplyStart records the mint-denom supply at BeginBlock and
+// resets the per-block supply delta to zero. Must run before any mint/burn
+// in the block so EndBlock's AssertSupplyDeltaInvariant is meaningful.
+func (k Keeper) CaptureBlockSupplyStart(ctx sdk.Context) error {
+	store := k.storeService.OpenKVStore(ctx)
+	supply := k.bank.GetSupply(ctx, k.mintDenom()).Amount
+	if err := store.Set(k.blockSupplyStartKey(), encodeSupplyInt(supply)); err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_START_SET: %w", err)
+	}
+	if err := store.Set(k.blockSupplyDeltaKey(), encodeSupplyInt(sdkmath.ZeroInt())); err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_DELTA_SET: %w", err)
+	}
+	ctx.Logger().Debug("supply delta: captured start-of-block supply",
+		"height", ctx.BlockHeight(), "supply_start", supply.String())
+	return nil
+}
+
+// addSupplyDelta accumulates a signed mint-denom supply change for this block.
+// Positive for mints, negative for burns. Called from keeper mint/burn wrappers.
+func (k Keeper) addSupplyDelta(ctx sdk.Context, delta sdkmath.Int) error {
+	if delta.IsZero() {
+		return nil
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	bz, err := store.Get(k.blockSupplyDeltaKey())
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_DELTA_GET: %w", err)
+	}
+	cur := sdkmath.ZeroInt()
+	if len(bz) > 0 {
+		cur, err = decodeSupplyInt(bz)
+		if err != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_DELTA_DECODE: %w", err)
+		}
+	}
+	next := cur.Add(delta)
+	if err := store.Set(k.blockSupplyDeltaKey(), encodeSupplyInt(next)); err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_DELTA_SET: %w", err)
+	}
+	ctx.Logger().Debug("supply delta: updated",
+		"height", ctx.BlockHeight(), "delta", delta.String(), "running", next.String())
+	return nil
+}
+
+// AssertSupplyDeltaInvariant is an O(1) per-block supply guard:
+// recorded bank supply must equal BeginBlock start + accumulated mint/burn
+// delta. It complements, but does not replace, the full supply-vs-balances
+// invariant because it cannot observe a missing account-balance write.
+func (k Keeper) AssertSupplyDeltaInvariant(ctx sdk.Context) error {
+	store := k.storeService.OpenKVStore(ctx)
+	startBz, err := store.Get(k.blockSupplyStartKey())
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_START_GET: %w", err)
+	}
+	if len(startBz) == 0 {
+		// BeginBlock did not capture (e.g. unit tests that only call EndBlock).
+		// Fall back to the full scan so the guard still runs.
+		ctx.Logger().Debug("supply delta: start key absent, falling back to full AssertSupplyInvariant",
+			"height", ctx.BlockHeight())
+		return k.AssertSupplyInvariant(ctx)
+	}
+	start, err := decodeSupplyInt(startBz)
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_START_DECODE: %w", err)
+	}
+	deltaBz, err := store.Get(k.blockSupplyDeltaKey())
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_DELTA_GET: %w", err)
+	}
+	delta := sdkmath.ZeroInt()
+	if len(deltaBz) > 0 {
+		delta, err = decodeSupplyInt(deltaBz)
+		if err != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_DELTA_DECODE: %w", err)
+		}
+	}
+	expected := start.Add(delta)
+	supply := k.bank.GetSupply(ctx, k.mintDenom()).Amount
+	if !supply.Equal(expected) {
+		return fmt.Errorf(
+			"supply delta invariant violated for %s: supply %s != start %s + delta %s (expected %s, diff %s)",
+			k.mintDenom(), supply.String(), start.String(), delta.String(), expected.String(), supply.Sub(expected).String(),
+		)
+	}
+	return nil
+}
+
+// burnCoinsTracked burns amt of the mint denom from the core module and
+// records the supply delta for the O(1) EndBlock invariant.
+func (k Keeper) burnCoinsTracked(ctx sdk.Context, amt sdkmath.Int) error {
+	if !amt.IsPositive() {
+		return nil
+	}
+	coin := sdk.NewCoin(k.mintDenom(), amt)
+	if err := k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin)); err != nil {
+		return err
+	}
+	return k.addSupplyDelta(ctx, amt.Neg())
+}
+
+// mintCoinsTracked mints amt of the mint denom into the core module and
+// records the supply delta for the O(1) EndBlock invariant.
+func (k Keeper) mintCoinsTracked(ctx sdk.Context, amt sdkmath.Int) error {
+	if !amt.IsPositive() {
+		return nil
+	}
+	coin := sdk.NewCoin(k.mintDenom(), amt)
+	if err := k.bank.MintCoins(ctx, types.ModuleName, sdk.NewCoins(coin)); err != nil {
+		return err
+	}
+	return k.addSupplyDelta(ctx, amt)
+}
+
 // BurnAllFromModule burns all balance of the core module account for the mint denom
 func (k Keeper) BurnAllFromModule(ctx sdk.Context) error {
 	addr := k.moduleAddress()
@@ -1238,8 +1415,7 @@ func (k Keeper) BurnAllFromModule(ctx sdk.Context) error {
 	if !bal.IsPositive() {
 		return nil
 	}
-	coin := sdk.NewCoin(k.mintDenom(), bal)
-	return k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin))
+	return k.burnCoinsTracked(ctx, bal)
 }
 
 // BurnAllFromModuleName transfers the entire balance of the given module account
@@ -1257,11 +1433,12 @@ func (k Keeper) BurnAllFromModuleName(ctx sdk.Context, moduleName string) error 
 	if err := k.bank.SendCoinsFromModuleToModule(ctx, moduleName, types.ModuleName, sdk.NewCoins(coin)); err != nil {
 		return err
 	}
-	return k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin))
+	return k.burnCoinsTracked(ctx, bal)
 }
 
-// BurnFromModuleAmount burns up to 'amount' umirage from the core module account.
-// If the module balance is less than amount, it burns the available balance.
+// BurnFromModuleAmount burns exactly amount umirage from the core module
+// account. A short module balance is an accounting inconsistency and must not
+// be hidden with a partial burn.
 func (k Keeper) BurnFromModuleAmount(ctx sdk.Context, amount uint64) error {
 	if amount == 0 {
 		return nil
@@ -1270,13 +1447,19 @@ func (k Keeper) BurnFromModuleAmount(ctx sdk.Context, amount uint64) error {
 	bal := k.bank.GetBalance(ctx, addr, k.mintDenom()).Amount
 	amt := sdkmath.NewIntFromUint64(amount)
 	if bal.LT(amt) {
-		amt = bal
+		// CONSENSUS_FATAL class: deterministic — recorded reserve liabilities
+		// exceed their backing module balance.
+		err := fmt.Errorf(
+			"CONSENSUS_FATAL:CORE_MODULE_SHORT_BURN height=%d balance=%s required=%s denom=%s",
+			ctx.BlockHeight(), bal.String(), amt.String(), k.mintDenom(),
+		)
+		ctx.Logger().Error("CONSENSUS_FATAL:CORE_MODULE_SHORT_BURN",
+			"height", ctx.BlockHeight(), "balance", bal.String(),
+			"required", amt.String(), "denom", k.mintDenom())
+		consensusfatal.HaltErr(err)
+		return err
 	}
-	if !amt.IsPositive() {
-		return nil
-	}
-	coin := sdk.NewCoin(k.mintDenom(), amt)
-	return k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin))
+	return k.burnCoinsTracked(ctx, amt)
 }
 
 // MintToAccount mints amount (umirage) into the core module account and sends to recipient
@@ -1288,8 +1471,9 @@ func (k Keeper) MintToAccount(ctx sdk.Context, recipient string, amount uint64) 
 	if err != nil {
 		return fmt.Errorf("invalid recipient: %w", err)
 	}
-	coin := sdk.NewCoin(k.mintDenom(), sdkmath.NewIntFromUint64(amount))
-	if err := k.bank.MintCoins(ctx, types.ModuleName, sdk.NewCoins(coin)); err != nil {
+	amt := sdkmath.NewIntFromUint64(amount)
+	coin := sdk.NewCoin(k.mintDenom(), amt)
+	if err := k.mintCoinsTracked(ctx, amt); err != nil {
 		return err
 	}
 	return k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, to, sdk.NewCoins(coin))
@@ -1367,6 +1551,10 @@ type mintResult struct {
 // burn itself fails the coins stay in the module account and are accounted
 // as `stuckInModule`. This function returns no error: BeginBlock must never
 // halt on bank subsystem failures.
+//
+// ADR: docs/architecture/adr-mint-log-and-continue.md — intentional
+// log-and-continue (not CONSENSUS_FATAL) after the 2026-07-12 full-chain halt;
+// liveness preferred for mint/admin-waiver bank failures.
 func mintAndDistribute(
 	ctx sdk.Context,
 	bank mintBankIface,
@@ -1655,13 +1843,29 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 
 	result := mintAndDistribute(ctx, k.bank, types.ModuleName, k.mintDenom(), recipients, totalMint)
 
+	// Track net supply change for the O(1) EndBlock delta invariant (M-2).
+	// Net = minted − burned_skipped; stuck_in_module coins remain in supply
+	// (they were minted and not burned) so they stay in the delta.
+	if net := result.minted.Sub(result.burnedSkipped); !net.IsZero() {
+		if err := k.addSupplyDelta(ctx, net); err != nil {
+			ctx.Logger().Error("mint distribution: supply delta tracking failed; EndBlock invariant will halt",
+				"net", net.String(), "err", err)
+		}
+	}
+
 	// Always reset relay credits at end of interval so the next interval
 	// starts fresh, even if no reward was distributed. A failure here is
 	// logged but does not halt the chain; credits may carry over, giving
 	// affected validators extra weight next interval.
 	if err := k.ResetAllRelayCredits(ctx); err != nil {
-		ctx.Logger().Error("mint distribution: ResetAllRelayCredits failed; credits may carry over",
-			"err", err)
+		// CONSENSUS_FATAL class: node-local — partial deletion would commit a
+		// different mint input set on this validator at the next interval.
+		ctx.Logger().Error("CONSENSUS_FATAL:RELAY_CREDITS_RESET",
+			"height", ctx.BlockHeight(), "err", err)
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:RELAY_CREDITS_RESET height=%d: %w",
+			ctx.BlockHeight(), err,
+		))
 	}
 
 	ctx.Logger().Info("mint interval complete",
@@ -1711,11 +1915,19 @@ func (k Keeper) RecordPoWMessage(ctx sdk.Context) error {
 	count := uint64(0)
 	existing, err := store.Get(key)
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:POW_COUNT_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "op", "record", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d op=record: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d op=record: %w", ctx.BlockHeight(), err))
 	}
 	if len(existing) > 0 {
+		if len(existing) != 8 {
+			// CONSENSUS_FATAL class: deterministic
+			consensusfatal.HaltErr(fmt.Errorf(
+				"CONSENSUS_FATAL:POW_COUNT_DECODE height=%d op=record bytes=%d: expected 8-byte big-endian uint64",
+				ctx.BlockHeight(), len(existing),
+			))
+		}
 		count = binary.BigEndian.Uint64(existing)
 	}
 	count++
@@ -1743,11 +1955,19 @@ func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 
 		key := k.powMessageCountKey(height)
 		bz, err := store.Get(key)
 		if err != nil {
+			// CONSENSUS_FATAL class: node-local
 			ctx.Logger().Error("CONSENSUS_FATAL:POW_COUNT_STORE_GET",
 				"height", ctx.BlockHeight(), "read_height", height, "module", "core", "op", "window_sum", "err", err)
-			panic(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d read_height=%d op=window_sum: %w", ctx.BlockHeight(), height, err))
+			consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d read_height=%d op=window_sum: %w", ctx.BlockHeight(), height, err))
 		}
 		if len(bz) > 0 {
+			if len(bz) != 8 {
+				// CONSENSUS_FATAL class: deterministic
+				consensusfatal.HaltErr(fmt.Errorf(
+					"CONSENSUS_FATAL:POW_COUNT_DECODE height=%d read_height=%d op=window_sum bytes=%d: expected 8-byte big-endian uint64",
+					ctx.BlockHeight(), height, len(bz),
+				))
+			}
 			total += binary.BigEndian.Uint64(bz)
 		}
 	}
@@ -1827,8 +2047,8 @@ const BaseDifficultyFactor uint64 = 1000
 // MaxSafeDifficultyFactor caps the factor to 2^53-1 so JSON/JS Number is lossless.
 const MaxSafeDifficultyFactor uint64 = (1 << 53) - 1
 
-// MaxSafeDifficultySteps caps the step count to 2^53-1 so JSON/JS Number is lossless.
-const MaxSafeDifficultySteps uint64 = (1 << 53) - 1
+// MaxSafeDifficultySteps bounds exact rational exponentiation cost in ante.
+const MaxSafeDifficultySteps uint64 = 10_000
 
 // GetCurrentDifficulty returns the current dynamic difficulty step.
 // 0 = base difficulty. Higher values = harder via (1 + pow_factor)^difficulty.
@@ -1836,9 +2056,10 @@ func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return BaseDifficultySteps
@@ -1855,9 +2076,10 @@ func (k Keeper) HasCurrentDifficulty(ctx sdk.Context) bool {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "op", "has", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d op=has: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d op=has: %w", ctx.BlockHeight(), err))
 	}
 	return len(bz) > 0
 }
@@ -1891,9 +2113,10 @@ func (k Keeper) GetPreviousDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.previousDifficultyKey())
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return k.GetCurrentDifficulty(ctx)
@@ -1906,9 +2129,10 @@ func (k Keeper) GetLastDifficultyChangeHeight(ctx sdk.Context) int64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.lastChangeHeightKey())
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return 0
@@ -1921,9 +2145,10 @@ func (k Keeper) GetConsecutiveLowUsage(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.consecutiveLowUsageKey())
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return 0
@@ -2029,8 +2254,8 @@ func (k Keeper) BurnFromAccount(ctx sdk.Context, addr string, amount uint64) err
 	if err := k.bank.SendCoinsFromAccountToModule(ctx, accAddr, types.ModuleName, coins); err != nil {
 		return err
 	}
-	// Then burn from module
-	return k.bank.BurnCoins(ctx, types.ModuleName, coins)
+	// Then burn from module (tracked for O(1) supply delta invariant)
+	return k.burnCoinsTracked(ctx, coin.Amount)
 }
 
 // DeleteUserState removes all on-chain state for a user:
@@ -2124,760 +2349,6 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 	return usernameReleased, sweptAmounts, nil
 }
 
-// ============================================
-// Bridge Attestation State Management
-// ============================================
-
-// GetBridgeAttestation retrieves a bridge attestation by source_chain and burn_id.
-// If multiple attestations exist (conflicting params from a malicious validator),
-// returns the first one found to prevent query DoS. Consensus logic uses
-// GetBridgeAttestationWithParams which is scoped to exact (recipient, amount).
-func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string) (*types.BridgeAttestation, bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	prefix := []byte(fmt.Sprintf("%s%s/%s/", types.BridgeAttestationsPrefix, sourceChain, burnID))
-	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return nil, false, err
-	}
-	defer it.Close()
-
-	// If multiple attestations exist (e.g. malicious validator created conflicting params),
-	// we return the first one found to prevent DoS of this query endpoint.
-	// The consensus logic uses GetBridgeAttestationWithParams so it is unaffected.
-	for ; it.Valid(); it.Next() {
-		parsed, err := types.UnmarshalBridgeAttestation(it.Value())
-		if err != nil {
-			return nil, false, err
-		}
-		// Return the first valid attestation found
-		return parsed, true, nil
-	}
-	return nil, false, nil
-}
-
-// GetBridgeAttestationWithParams retrieves a bridge attestation with parameter-scoped key.
-func (k Keeper) GetBridgeAttestationWithParams(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64) (*types.BridgeAttestation, bool, error) {
-	if strings.TrimSpace(recipient) == "" {
-		return nil, false, fmt.Errorf("recipient cannot be empty")
-	}
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestationKeyWithParams(sourceChain, burnID, recipient, amount)
-	bz, err := store.Get(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(bz) == 0 {
-		return nil, false, nil
-	}
-	attestation, err := types.UnmarshalBridgeAttestation(bz)
-	if err != nil {
-		return nil, false, err
-	}
-	return attestation, true, nil
-}
-
-// SetBridgeAttestation stores a bridge attestation in state using parameterized key.
-func (k Keeper) SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error {
-	if len(attestation.Attestors) > 0 {
-		return fmt.Errorf("bridge attestors must be stored separately")
-	}
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestationKeyWithParams(attestation.SourceChain, attestation.BurnID, attestation.MirageRecipient, attestation.Amount)
-	stored := *attestation
-	stored.Attestors = nil
-	bz, err := stored.Marshal()
-	if err != nil {
-		return err
-	}
-	return store.Set(key, bz)
-}
-
-// GetOrCreateBridgeAttestation retrieves or creates a new bridge attestation.
-// Uses parameterized keys so each (chain, burnID, recipient, amount) tuple has its own record.
-func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error) {
-	attestation, found, err := k.GetBridgeAttestationWithParams(ctx, sourceChain, burnID, mirageRecipient, amount)
-	if err != nil {
-		return nil, err
-	}
-	if found {
-		return attestation, nil
-	}
-	// Create new attestation
-	attestation = types.NewBridgeAttestation(sourceChain, burnID, mirageRecipient, amount, ctx.BlockHeight())
-	if err := k.SetBridgeAttestation(ctx, attestation); err != nil {
-		return nil, err
-	}
-	// Increment pending count
-	if err := k.IncrementBridgePendingCount(ctx); err != nil {
-		return nil, err
-	}
-	return attestation, nil
-}
-
-// SetBridgeAttestor stores a validator's attestation for an inbound burn.
-// Scoped by burn parameters (recipient, amount) to prevent cross-attestation poisoning.
-func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string, power int64) error {
-	if power <= 0 {
-		return fmt.Errorf("attestor power must be positive")
-	}
-	if strings.TrimSpace(valoper) == "" {
-		return fmt.Errorf("attestor valoper cannot be empty")
-	}
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestorKeyWithParams(sourceChain, burnID, recipient, amount, valoper)
-	bz := make([]byte, 8)
-	binary.BigEndian.PutUint64(bz, uint64(power))
-	return store.Set(key, bz)
-}
-
-// HasBridgeAttestor returns true if the validator already attested to the burn with matching params.
-func (k Keeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string) (bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestorKeyWithParams(sourceChain, burnID, recipient, amount, valoper)
-	bz, err := store.Get(key)
-	if err != nil {
-		return false, err
-	}
-	return len(bz) > 0, nil
-}
-
-// IterateBridgeAttestors iterates over attestors for a specific burn + params.
-func (k Keeper) IterateBridgeAttestors(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, fn func(valoper string, power int64) bool) error {
-	store := k.storeService.OpenKVStore(ctx)
-	if strings.TrimSpace(recipient) == "" {
-		return fmt.Errorf("recipient cannot be empty")
-	}
-	paramsHash := types.BurnParamsHash(recipient, amount)
-	prefix := []byte(fmt.Sprintf("%s%s/%s/%s/", types.BridgeAttestorsPrefix, sourceChain, burnID, paramsHash))
-	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for ; it.Valid(); it.Next() {
-		key := string(it.Key())
-		valoper := strings.TrimPrefix(key, string(prefix))
-		if valoper == "" {
-			continue
-		}
-		value := it.Value()
-		if len(value) != 8 {
-			return fmt.Errorf("invalid attestor power for %s/%s: length=%d", sourceChain, burnID, len(value))
-		}
-		power := int64(binary.BigEndian.Uint64(value))
-		if stop := fn(valoper, power); stop {
-			break
-		}
-	}
-	return nil
-}
-
-// GetBridgeAttestorList returns a sorted list of attestors for a burn.
-func (k Keeper) GetBridgeAttestorList(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64) ([]string, error) {
-	var attestors []string
-	if err := k.IterateBridgeAttestors(ctx, sourceChain, burnID, recipient, amount, func(valoper string, _ int64) bool {
-		attestors = append(attestors, valoper)
-		return false
-	}); err != nil {
-		return nil, err
-	}
-	sort.Strings(attestors)
-	return attestors, nil
-}
-
-type bridgeAttestationParams struct {
-	recipient string
-	amount    uint64
-}
-
-// MigrateBridgeAttestationParams moves legacy bridge attestation and attestor keys to param-scoped keys.
-func (k Keeper) MigrateBridgeAttestationParams(ctx sdk.Context) (int, int, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	prefix := []byte(types.BridgeAttestationsPrefix)
-	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return 0, 0, err
-	}
-	defer it.Close()
-
-	attestationParams := make(map[string]bridgeAttestationParams)
-	var attestationsToDelete [][]byte
-	attestationsMoved := 0
-
-	for ; it.Valid(); it.Next() {
-		key := string(it.Key())
-		suffix := strings.TrimPrefix(key, types.BridgeAttestationsPrefix)
-		parts := strings.Split(suffix, "/")
-		if len(parts) != 2 && len(parts) != 3 {
-			return 0, 0, fmt.Errorf("invalid bridge attestation key: %s", key)
-		}
-		attestation, err := types.UnmarshalBridgeAttestation(it.Value())
-		if err != nil {
-			return 0, 0, err
-		}
-		if strings.TrimSpace(attestation.MirageRecipient) == "" {
-			return 0, 0, fmt.Errorf("attestation missing recipient for %s", key)
-		}
-
-		attKey := parts[0] + "/" + parts[1]
-		if existing, ok := attestationParams[attKey]; ok {
-			if existing.recipient != attestation.MirageRecipient || existing.amount != attestation.Amount {
-				return 0, 0, fmt.Errorf("conflicting attestation params for %s", attKey)
-			}
-		} else {
-			attestationParams[attKey] = bridgeAttestationParams{
-				recipient: attestation.MirageRecipient,
-				amount:    attestation.Amount,
-			}
-		}
-
-		if len(parts) == 3 {
-			expected := types.BurnParamsHash(attestation.MirageRecipient, attestation.Amount)
-			if parts[2] != expected {
-				return 0, 0, fmt.Errorf("attestation params hash mismatch for %s", attKey)
-			}
-		}
-
-		if len(parts) == 2 {
-			newKey := types.BridgeAttestationKeyWithParams(parts[0], parts[1], attestation.MirageRecipient, attestation.Amount)
-			existing, err := store.Get(newKey)
-			if err != nil {
-				return 0, 0, err
-			}
-			if len(existing) == 0 {
-				if err := store.Set(newKey, it.Value()); err != nil {
-					return 0, 0, err
-				}
-			} else if !bytes.Equal(existing, it.Value()) {
-				return 0, 0, fmt.Errorf("conflicting attestation for %s", key)
-			}
-			attestationsToDelete = append(attestationsToDelete, append([]byte{}, it.Key()...))
-			attestationsMoved++
-		}
-	}
-
-	for _, k := range attestationsToDelete {
-		if err := store.Delete(k); err != nil {
-			return 0, 0, err
-		}
-	}
-
-	attPrefix := []byte(types.BridgeAttestorsPrefix)
-	attIt, err := store.Iterator(attPrefix, storetypes.PrefixEndBytes(attPrefix))
-	if err != nil {
-		return 0, 0, err
-	}
-	defer attIt.Close()
-
-	var attestorsToDelete [][]byte
-	attestorsMoved := 0
-
-	for ; attIt.Valid(); attIt.Next() {
-		key := string(attIt.Key())
-		suffix := strings.TrimPrefix(key, types.BridgeAttestorsPrefix)
-		parts := strings.Split(suffix, "/")
-		if len(parts) == 4 {
-			continue
-		}
-		if len(parts) != 3 {
-			return 0, 0, fmt.Errorf("invalid bridge attestor key: %s", key)
-		}
-
-		sourceChain := parts[0]
-		burnID := parts[1]
-		valoper := parts[2]
-		info, ok := attestationParams[sourceChain+"/"+burnID]
-		if !ok {
-			return 0, 0, fmt.Errorf("missing attestation for %s/%s", sourceChain, burnID)
-		}
-		newKey := types.BridgeAttestorKeyWithParams(sourceChain, burnID, info.recipient, info.amount, valoper)
-		existing, err := store.Get(newKey)
-		if err != nil {
-			return 0, 0, err
-		}
-		if len(existing) == 0 {
-			if err := store.Set(newKey, attIt.Value()); err != nil {
-				return 0, 0, err
-			}
-		} else if !bytes.Equal(existing, attIt.Value()) {
-			return 0, 0, fmt.Errorf("conflicting attestor entry for %s", key)
-		}
-		attestorsToDelete = append(attestorsToDelete, append([]byte{}, attIt.Key()...))
-		attestorsMoved++
-	}
-
-	for _, k := range attestorsToDelete {
-		if err := store.Delete(k); err != nil {
-			return 0, 0, err
-		}
-	}
-
-	ctx.Logger().Debug("bridge attestation key migration complete",
-		"attestations_moved", attestationsMoved,
-		"attestors_moved", attestorsMoved)
-
-	return attestationsMoved, attestorsMoved, nil
-}
-
-func (k Keeper) iterateBridgeAttestationsLegacy(ctx sdk.Context, fn func(sourceChain, burnID string, attestation *types.BridgeAttestation) bool) error {
-	store := k.storeService.OpenKVStore(ctx)
-	prefix := []byte(types.BridgeAttestationsPrefix)
-	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for ; it.Valid(); it.Next() {
-		key := string(it.Key())
-		suffix := strings.TrimPrefix(key, types.BridgeAttestationsPrefix)
-		parts := strings.Split(suffix, "/")
-		if len(parts) != 2 {
-			continue
-		}
-		attestation, err := types.UnmarshalBridgeAttestation(it.Value())
-		if err != nil {
-			return err
-		}
-		if stop := fn(parts[0], parts[1], attestation); stop {
-			break
-		}
-	}
-	return nil
-}
-
-// MigrateBridgeAttestors moves stored attestor maps to per-attestor keys.
-func (k Keeper) MigrateBridgeAttestors(ctx sdk.Context) error {
-	var migrateErr error
-	err := k.iterateBridgeAttestationsLegacy(ctx, func(sourceChain, burnID string, attestation *types.BridgeAttestation) bool {
-		if len(attestation.Attestors) == 0 {
-			return false
-		}
-
-		var sumPower int64
-		for _, power := range attestation.Attestors {
-			if power <= 0 {
-				continue
-			}
-			sumPower += power
-		}
-		if sumPower != attestation.AttestedPower {
-			migrateErr = fmt.Errorf("attested power mismatch for %s/%s: stored=%d sum=%d", sourceChain, burnID, attestation.AttestedPower, sumPower)
-			return true
-		}
-
-		for valoperAddr, power := range attestation.Attestors {
-			if power <= 0 {
-				continue
-			}
-			if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, attestation.MirageRecipient, attestation.Amount, valoperAddr, power); err != nil {
-				migrateErr = err
-				return true
-			}
-		}
-
-		attestation.Attestors = nil
-		if err := k.SetBridgeAttestation(ctx, attestation); err != nil {
-			migrateErr = err
-			return true
-		}
-
-		return false
-	})
-	if err != nil {
-		return err
-	}
-	return migrateErr
-}
-
-// ============================================
-// Bridge Burn State Management
-// ============================================
-
-// GetBridgeBurnRecord retrieves a bridge burn record from state
-func (k Keeper) GetBridgeBurnRecord(ctx sdk.Context, destChain, burnID string) (*types.BridgeBurnRecord, bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeBurnKey(destChain, burnID)
-	bz, err := store.Get(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(bz) == 0 {
-		return nil, false, nil
-	}
-	record, err := types.UnmarshalBridgeBurnRecord(bz)
-	if err != nil {
-		return nil, false, err
-	}
-	return record, true, nil
-}
-
-// SetBridgeBurnRecord stores a bridge burn record in state
-func (k Keeper) SetBridgeBurnRecord(ctx sdk.Context, record *types.BridgeBurnRecord) error {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeBurnKey(record.DestinationChain, record.BurnID)
-	bz, err := record.Marshal()
-	if err != nil {
-		return err
-	}
-	return store.Set(key, bz)
-}
-
-// ============================================
-// Bridge Mint Confirmation State Management
-// ============================================
-
-// GetBridgeMintedRecord retrieves a bridge mint record from state
-func (k Keeper) GetBridgeMintedRecord(ctx sdk.Context, destChain, burnID string) (*types.BridgeMintedRecord, bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintedKey(destChain, burnID)
-	bz, err := store.Get(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(bz) == 0 {
-		return nil, false, nil
-	}
-	record, err := types.UnmarshalBridgeMintedRecord(bz)
-	if err != nil {
-		return nil, false, err
-	}
-	return record, true, nil
-}
-
-// SetBridgeMintedRecord stores a bridge mint record in state
-func (k Keeper) SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintedKey(record.DestinationChain, record.BurnID)
-	bz, err := record.Marshal()
-	if err != nil {
-		return err
-	}
-	return store.Set(key, bz)
-}
-
-// ============================================
-// Bridge Mint Attestation State Management (Outbound)
-// ============================================
-
-// GetBridgeMintAttestation retrieves a bridge mint attestation from state
-func (k Keeper) GetBridgeMintAttestation(ctx sdk.Context, destChain, burnID string) (*types.BridgeMintAttestation, bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintAttestationKey(destChain, burnID)
-	bz, err := store.Get(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(bz) == 0 {
-		return nil, false, nil
-	}
-	attestation, err := types.UnmarshalBridgeMintAttestation(bz)
-	if err != nil {
-		return nil, false, err
-	}
-	return attestation, true, nil
-}
-
-// SetBridgeMintAttestation stores a bridge mint attestation in state
-func (k Keeper) SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error {
-	if len(attestation.Attestors) > 0 {
-		return fmt.Errorf("bridge mint attestors must be stored separately")
-	}
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintAttestationKey(attestation.DestinationChain, attestation.BurnID)
-	stored := *attestation
-	stored.Attestors = nil
-	bz, err := stored.Marshal()
-	if err != nil {
-		return err
-	}
-	return store.Set(key, bz)
-}
-
-// SetBridgeMintAttestor stores a validator's attestation for an outbound mint.
-func (k Keeper) SetBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string, power int64) error {
-	if power <= 0 {
-		return fmt.Errorf("attestor power must be positive")
-	}
-	if strings.TrimSpace(valoper) == "" {
-		return fmt.Errorf("attestor valoper cannot be empty")
-	}
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintAttestorKey(destChain, burnID, valoper)
-	bz := make([]byte, 8)
-	binary.BigEndian.PutUint64(bz, uint64(power))
-	return store.Set(key, bz)
-}
-
-// HasBridgeMintAttestor returns true if the validator already attested to the mint.
-func (k Keeper) HasBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string) (bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintAttestorKey(destChain, burnID, valoper)
-	bz, err := store.Get(key)
-	if err != nil {
-		return false, err
-	}
-	return len(bz) > 0, nil
-}
-
-// IterateBridgeMintAttestors iterates over attestors for a specific mint.
-func (k Keeper) IterateBridgeMintAttestors(ctx sdk.Context, destChain, burnID string, fn func(valoper string, power int64) bool) error {
-	store := k.storeService.OpenKVStore(ctx)
-	prefix := []byte(fmt.Sprintf("%s%s/%s/", types.BridgeMintAttestorsPrefix, destChain, burnID))
-	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for ; it.Valid(); it.Next() {
-		key := string(it.Key())
-		valoper := strings.TrimPrefix(key, string(prefix))
-		if valoper == "" {
-			continue
-		}
-		value := it.Value()
-		if len(value) != 8 {
-			return fmt.Errorf("invalid attestor power for %s/%s: length=%d", destChain, burnID, len(value))
-		}
-		power := int64(binary.BigEndian.Uint64(value))
-		if stop := fn(valoper, power); stop {
-			break
-		}
-	}
-	return nil
-}
-
-// GetBridgeMintAttestorList returns a sorted list of attestors for a mint.
-func (k Keeper) GetBridgeMintAttestorList(ctx sdk.Context, destChain, burnID string) ([]string, error) {
-	var attestors []string
-	if err := k.IterateBridgeMintAttestors(ctx, destChain, burnID, func(valoper string, _ int64) bool {
-		attestors = append(attestors, valoper)
-		return false
-	}); err != nil {
-		return nil, err
-	}
-	sort.Strings(attestors)
-	return attestors, nil
-}
-
-// IterateBridgeMintAttestations iterates over all outbound mint attestations.
-func (k Keeper) IterateBridgeMintAttestations(ctx sdk.Context, fn func(destChain, burnID string, attestation *types.BridgeMintAttestation) bool) error {
-	store := k.storeService.OpenKVStore(ctx)
-	prefix := []byte(types.BridgeMintAttestationsPrefix)
-	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for ; it.Valid(); it.Next() {
-		key := string(it.Key())
-		suffix := strings.TrimPrefix(key, types.BridgeMintAttestationsPrefix)
-		parts := strings.SplitN(suffix, "/", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		attestation, err := types.UnmarshalBridgeMintAttestation(it.Value())
-		if err != nil {
-			return err
-		}
-		if stop := fn(parts[0], parts[1], attestation); stop {
-			break
-		}
-	}
-	return nil
-}
-
-// MigrateBridgeMintAttestors moves stored attestor maps to per-attestor keys.
-func (k Keeper) MigrateBridgeMintAttestors(ctx sdk.Context) error {
-	var migrateErr error
-	err := k.IterateBridgeMintAttestations(ctx, func(destChain, burnID string, attestation *types.BridgeMintAttestation) bool {
-		if len(attestation.Attestors) == 0 {
-			return false
-		}
-
-		var (
-			bestValoper string
-			bestPower   int64
-			sumPower    int64
-		)
-		for valoperAddr, power := range attestation.Attestors {
-			if power <= 0 {
-				continue
-			}
-			sumPower += power
-			if power > bestPower {
-				bestPower = power
-				bestValoper = valoperAddr
-			}
-		}
-		if sumPower != attestation.AttestedPower {
-			migrateErr = fmt.Errorf("attested power mismatch for %s/%s: stored=%d sum=%d", destChain, burnID, attestation.AttestedPower, sumPower)
-			return true
-		}
-
-		for valoperAddr, power := range attestation.Attestors {
-			if power <= 0 {
-				continue
-			}
-			if err := k.SetBridgeMintAttestor(ctx, destChain, burnID, valoperAddr, power); err != nil {
-				migrateErr = err
-				return true
-			}
-		}
-
-		if attestation.Confirmed && strings.TrimSpace(attestation.ConfirmedBy) == "" {
-			if bestValoper == "" {
-				migrateErr = fmt.Errorf("confirmed mint attestation missing attestors for %s/%s", destChain, burnID)
-				return true
-			}
-			valoper, err := sdk.ValAddressFromBech32(bestValoper)
-			if err != nil {
-				migrateErr = fmt.Errorf("invalid confirmed_by valoper: %w", err)
-				return true
-			}
-			attestation.ConfirmedBy = sdk.AccAddress(valoper).String()
-		} else if strings.TrimSpace(attestation.ConfirmedBy) != "" {
-			confirmedFound := false
-			for valoperAddr := range attestation.Attestors {
-				valoper, err := sdk.ValAddressFromBech32(valoperAddr)
-				if err != nil {
-					migrateErr = fmt.Errorf("invalid confirmed_by valoper: %w", err)
-					return true
-				}
-				if sdk.AccAddress(valoper).String() == attestation.ConfirmedBy {
-					confirmedFound = true
-					break
-				}
-			}
-			if !confirmedFound {
-				migrateErr = fmt.Errorf("confirmed_by not found in attestors for %s/%s", destChain, burnID)
-				return true
-			}
-		}
-
-		attestation.Attestors = nil
-		if err := k.SetBridgeMintAttestation(ctx, attestation); err != nil {
-			migrateErr = err
-			return true
-		}
-		return false
-	})
-	if err != nil {
-		return err
-	}
-	return migrateErr
-}
-
-// GetOrCreateBridgeMintAttestation retrieves or creates a new bridge mint attestation
-func (k Keeper) GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error) {
-	attestation, found, err := k.GetBridgeMintAttestation(ctx, destChain, burnID)
-	if err != nil {
-		return nil, err
-	}
-	if found {
-		return attestation, nil
-	}
-	// Create new attestation
-	attestation = types.NewBridgeMintAttestation(burnID, destChain, destTx, ctx.BlockHeight())
-	if err := k.SetBridgeMintAttestation(ctx, attestation); err != nil {
-		return nil, err
-	}
-	return attestation, nil
-}
-
-// GetNextBridgeSequence increments and returns the next sequence number for a destination chain
-func (k Keeper) GetNextBridgeSequence(ctx sdk.Context, destChain string) (uint64, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := []byte(types.BridgeSequencePrefix + destChain)
-
-	bz, err := store.Get(key)
-	if err != nil {
-		return 0, err
-	}
-
-	var seq uint64 = 1 // Start at 1
-	if len(bz) > 0 {
-		seq = binary.BigEndian.Uint64(bz) + 1
-	}
-
-	// Store the new sequence
-	bzNew := make([]byte, 8)
-	binary.BigEndian.PutUint64(bzNew, seq)
-	if err := store.Set(key, bzNew); err != nil {
-		return 0, err
-	}
-
-	return seq, nil
-}
-
-// GetCurrentBridgeSequence returns the current sequence number for a destination chain (without incrementing)
-func (k Keeper) GetCurrentBridgeSequence(ctx sdk.Context, destChain string) (uint64, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	key := []byte(types.BridgeSequencePrefix + destChain)
-
-	bz, err := store.Get(key)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(bz) == 0 {
-		return 0, nil // No burns yet for this chain
-	}
-
-	return binary.BigEndian.Uint64(bz), nil
-}
-
-// SetBridgeSequence sets the sequence number for a destination chain.
-// Used by upgrade handlers to advance sequence past stale external chain state.
-func (k Keeper) SetBridgeSequence(ctx sdk.Context, destChain string, seq uint64) error {
-	store := k.storeService.OpenKVStore(ctx)
-	key := []byte(types.BridgeSequencePrefix + destChain)
-	bz := make([]byte, 8)
-	binary.BigEndian.PutUint64(bz, seq)
-	return store.Set(key, bz)
-}
-
-// GetBridgePendingCount returns the count of pending (unminted) attestations
-func (k Keeper) GetBridgePendingCount(ctx sdk.Context) (uint64, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	bz, err := store.Get([]byte(types.BridgePendingCountKey))
-	if err != nil {
-		return 0, err
-	}
-	if len(bz) == 0 {
-		return 0, nil
-	}
-	return binary.BigEndian.Uint64(bz), nil
-}
-
-// SetBridgePendingCount sets the pending attestation count
-func (k Keeper) SetBridgePendingCount(ctx sdk.Context, count uint64) error {
-	store := k.storeService.OpenKVStore(ctx)
-	bz := make([]byte, 8)
-	binary.BigEndian.PutUint64(bz, count)
-	return store.Set([]byte(types.BridgePendingCountKey), bz)
-}
-
-// IncrementBridgePendingCount increments the pending attestation count
-func (k Keeper) IncrementBridgePendingCount(ctx sdk.Context) error {
-	count, err := k.GetBridgePendingCount(ctx)
-	if err != nil {
-		return err
-	}
-	return k.SetBridgePendingCount(ctx, count+1)
-}
-
-// DecrementBridgePendingCount decrements the pending attestation count
-func (k Keeper) DecrementBridgePendingCount(ctx sdk.Context) error {
-	count, err := k.GetBridgePendingCount(ctx)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return k.SetBridgePendingCount(ctx, count-1)
-	}
-	return nil
-}
-
 // GetTotalBondedValidatorPower returns the total voting power of all bonded validators
 func (k Keeper) GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error) {
 	var totalPower int64
@@ -2923,9 +2394,10 @@ func (k Keeper) HasEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint6
 	key := []byte(fmt.Sprintf("%s%x/%d", types.EnvelopeNoncePrefix, pubkeyHash, nonce))
 	val, err := store.Get(key)
 	if err != nil {
+		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		panic(fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	return val != nil
 }
@@ -2985,16 +2457,4 @@ func (k Keeper) PruneExpiredNonces(ctx sdk.Context, nowUnix int64) (int, error) 
 		pruned++
 	}
 	return pruned, nil
-}
-
-// GetEnabledBridgeChains returns all enabled bridge chains from params
-func (k Keeper) GetEnabledBridgeChains(ctx sdk.Context) []*types.BridgeChainConfig {
-	params := k.GetParams(ctx)
-	var enabled []*types.BridgeChainConfig
-	for _, chain := range params.BridgeChains {
-		if chain.Enabled {
-			enabled = append(enabled, chain)
-		}
-	}
-	return enabled
 }

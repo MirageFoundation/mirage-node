@@ -404,11 +404,6 @@ export async function setAutoRenewal(autoRenew) {
     return h.setAutoRenewal(autoRenew);
 }
 
-export async function bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
-    const h = await getHandler();
-    return h.bridgeBurn(destinationChain, destinationAddress, amountUmirage);
-}
-
 export async function followUser(address) {
     const h = await getHandler();
     return h.followUser(address);

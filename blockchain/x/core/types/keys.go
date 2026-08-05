@@ -72,7 +72,7 @@ const (
 	MintDenom = "umirage"
 
 	// Envelope nonce dedup (replay protection): seen nonces with TTL for pruning
-	EnvelopeNoncePrefix       = "envelope_nonce/"       // envelope_nonce/{pubkey_hash}/{nonce} -> empty value (existence check)
+	EnvelopeNoncePrefix       = "envelope_nonce/"        // envelope_nonce/{pubkey_hash}/{nonce} -> empty value (existence check)
 	EnvelopeNonceExpiryPrefix = "envelope_nonce_expiry/" // envelope_nonce_expiry/{expiry_unix}/{pubkey_hash}/{nonce} -> empty value (for pruning)
 
 	// RecentBlockHashesKey stores a deterministic, on-chain rolling window of
@@ -84,7 +84,16 @@ const (
 	// PoW ante decorator. Window length is bounded by params.BlockHashWindow.
 	RecentBlockHashesKey = "recent_block_hashes"
 
-	// Bridge-related prefixes (defined in bridge.go for detailed comments)
-	// BridgeAttestationsPrefix = "bridge_attestations/"
-	// BridgePendingCountKey = "bridge_pending_count"
+	// ReservedProfilesBootstrappedKey is a one-shot BeginBlock sentinel.
+	// Once set, the reserved module-account profile bootstrap loop is skipped
+	// for all subsequent blocks (see AppModule.BeginBlock).
+	ReservedProfilesBootstrappedKey = "reserved_profiles_bootstrapped"
+
+	// BlockSupplyStartKey / BlockSupplyDeltaKey track per-block mint-denom
+	// supply for the O(1) EndBlock delta check. BeginBlock writes the
+	// start-of-block supply and resets delta to 0; MintCoins/BurnCoins wrappers
+	// accumulate the delta; EndBlock asserts supply == start + delta before the
+	// full supply-vs-balances invariant.
+	BlockSupplyStartKey = "block_supply_start"
+	BlockSupplyDeltaKey = "block_supply_delta"
 )

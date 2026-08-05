@@ -48,7 +48,6 @@ import {
 
 import AgentsView from './routes/AgentsView';
 import BlocksView from './routes/BlocksView';
-import BridgeView from './routes/BridgeView';
 import ChangeUsernameView from './routes/ChangeUsernameView';
 import CreateAccountView from './routes/CreateAccountView';
 import CreatePostView from './routes/CreatePostView';
@@ -119,7 +118,6 @@ const components = {
 const routes = {
     AgentsView,
     BlocksView,
-    BridgeView,
     ChangeUsernameView,
     CreateAccountView,
     CreatePostView,

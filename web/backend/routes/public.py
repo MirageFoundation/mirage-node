@@ -2987,7 +2987,7 @@ def get_tx_status():
 
     Queries votes/posts for rich details first, then falls back to
     the universal tx_index table for any other tx type (set_username,
-    follow, block, bridge, etc.). Returns {found:false} only when
+    follow, block, etc.). Returns {found:false} only when
     the tx hasn't been indexed yet.
     """
     rid = next_request_id()
@@ -3931,7 +3931,6 @@ def _build_chain_config() -> dict:
         "min_topic_size": p["min_topic_size"],
         "subscription_period": p["subscription_period"],
         "subscription_reserve_percent": p["subscription_reserve_percent"],
-        "bridge_attestation_threshold": p["bridge_attestation_threshold"],
         "mint_interval": p["mint_interval"],
         "block_time": _get_block_time_seconds(),
         "tiers": p["tiers"],

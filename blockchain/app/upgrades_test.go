@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	"cosmossdk.io/log/v2"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	authz "github.com/cosmos/cosmos-sdk/x/authz"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,6 +94,21 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.26.0"), "v1.26.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.27.0"), "v1.27.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.28.0"), "v1.28.0 upgrade handler should be registered")
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.31.0"), "v1.31.0 upgrade handler should be registered")
+}
+
+func TestRemovedBridgePrefixesComplete(t *testing.T) {
+	require.ElementsMatch(t, []string{
+		"bridge_attestations/",
+		"bridge_attestors/",
+		"bridge_mint_attestations/",
+		"bridge_mint_attestors/",
+		"bridge_mint_fee_pending/",
+		"bridge_mint_fee_failures/",
+		"bridge_burns/",
+		"bridge_mints/",
+		"bridge_sequence/",
+	}, removedBridgePrefixes)
 }
 
 // TestRemovedModulesNotWired verifies that the x/group and x/circuit modules,

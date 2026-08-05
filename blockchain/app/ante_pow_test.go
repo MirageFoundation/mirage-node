@@ -95,6 +95,9 @@ func TestValidatePoWBytesArgon2_RestartEquivalence(t *testing.T) {
 // read itself fails, validate must return a wrapped error rather than
 // treating the missing window as "not seen" (which would leak a state-read
 // failure as a tx-rejection on this node only -> divergence).
+//
+// M-1: the hash-window lookup runs BEFORE Argon2, so any nonce works here —
+// we never reach the difficulty check when lookup fails.
 func TestValidatePoWBytesArgon2_PropagatesLookupError(t *testing.T) {
 	canonical := []byte("canonical_bytes_for_lookup_error")
 	envelopeHash, _ := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
@@ -103,23 +106,25 @@ func TestValidatePoWBytesArgon2_PropagatesLookupError(t *testing.T) {
 	const minDiff = uint64(8)
 	const step = 0.25
 
-	// Find a PoW that satisfies the difficulty (the lookup is exercised
-	// only after the difficulty check passes).
-	good := &mockHashLookup{seenHashes: map[string]bool{hex.EncodeToString(envelopeHash): true}}
-	var nonce uint64
-	for nonce = 0; nonce < 100_000; nonce++ {
-		if err := validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, good.lookup, false, 0, 0, 0, 0, 0, minDiff, step); err == nil {
-			break
-		}
-	}
-	require.Less(t, nonce, uint64(100_000), "could not find valid PoW")
-
-	// Now exercise the lookup-error path with the same nonce.
 	failing := &mockHashLookup{err: fmt.Errorf("simulated state-read failure")}
-	err := validatePoWBytesArgon2(canonical, envelopeHash, 0, nonce, currentLastID, failing.lookup, false, 0, 0, 0, 0, 0, minDiff, step)
+	err := validatePoWBytesArgon2(canonical, envelopeHash, 0, 0, currentLastID, failing.lookup, false, 0, 0, 0, 0, 0, minDiff, step)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "recent-block-hash window read failed",
 		"lookup errors must be wrapped, not silently treated as 'not seen'")
+}
+
+// TestValidatePoWBytesArgon2_RejectsBadHashBeforeArgon2 documents M-1: a
+// fabricated last_block_hash is rejected before Argon2id runs, so spam
+// envelopes never pay the memory-hard cost.
+func TestValidatePoWBytesArgon2_RejectsBadHashBeforeArgon2(t *testing.T) {
+	canonical := []byte("canonical_bytes_bad_hash")
+	badHash, _ := hex.DecodeString("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	currentLastID := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	missing := &mockHashLookup{seenHashes: map[string]bool{}}
+
+	err := validatePoWBytesArgon2(canonical, badHash, 0, 0, currentLastID, missing.lookup, false, 0, 0, 0, 0, 0, 8, 0.25)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid last_block_hash")
 }
 
 func TestComputeDifficultyFactor(t *testing.T) {
@@ -143,6 +148,7 @@ func TestComputeDifficultyFactor(t *testing.T) {
 		{"Invalid step (negative)", -0.1, 1, 0, true},
 		{"Invalid step (>1)", 1.1, 1, 0, true},
 		{"Max safe difficulty", 0.25, 1000, 9007199254740991, false}, // Should cap at max safe
+		{"Sparse huge exponent caps without rational growth", 0.25, 1 << 52, 9007199254740991, false},
 	}
 
 	for _, tt := range tests {
@@ -152,17 +158,43 @@ func TestComputeDifficultyFactor(t *testing.T) {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				// Allow small rounding differences for high values if needed, but for low values exact match
-				if tt.difficulty < 100 {
-					require.Equal(t, tt.want, got)
-				} else {
-					// For max cap, just check it's capped
-					if tt.difficulty == 1000 {
-						require.True(t, got <= 9007199254740991)
-					}
-				}
+				require.Equal(t, tt.want, got)
 			}
 		})
+	}
+}
+
+// TestComputeDifficultyFactorDeterminismTable pins exact-rational outputs for a
+// stable input table so architecture-specific float Pow cannot drift factors
+// (review L-1).
+func TestComputeDifficultyFactorDeterminismTable(t *testing.T) {
+	table := []struct {
+		step  float64
+		steps uint64
+		want  uint64
+	}{
+		{0.25, 0, 1000},
+		{0.25, 1, 1250},
+		{0.25, 2, 1563},
+		{0.25, 3, 1953},
+		{0.25, 4, 2441},
+		{0.25, 5, 3052},
+		{0.25, 10, 9313},
+		{0.25, 20, 86736},
+		{0.10, 1, 1100},
+		{0.10, 2, 1210},
+		{0.10, 5, 1611},
+		{0.50, 1, 1500},
+		{0.50, 2, 2250},
+		{0.50, 3, 3375},
+		{1.0, 1, 2000},
+		{1.0, 2, 4000},
+		{1.0, 10, 1024000},
+	}
+	for _, row := range table {
+		got, err := computeDifficultyFactor(row.step, row.steps)
+		require.NoError(t, err, "step=%v steps=%d", row.step, row.steps)
+		require.Equal(t, row.want, got, "step=%v steps=%d", row.step, row.steps)
 	}
 }
 

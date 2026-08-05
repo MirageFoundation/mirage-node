@@ -11,8 +11,16 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
-// EnsureAccountsDecorator creates missing accounts on the fly for whitelisted messages
-// so first transactions do not require a separate funding tx. Signatures are still required.
+// EnsureAccountsDecorator creates missing accounts on the fly for whitelisted
+// messages so first transactions do not require a separate funding tx.
+//
+// Scope: this decorator only ensures the authority account (validator or
+// module/gov address that signs/pays gas as the SDK signer) and any other
+// SDK signers on the tx. It does NOT create accounts for envelope users
+// (those are derived from EnvelopePubkey and materialize when they first
+// receive funds or create a profile). The message-type list below is
+// therefore intentionally a subset of relayMessagePrototypes — missing
+// relay types here are not an oversight.
 type EnsureAccountsDecorator struct {
 	ak authkeeper.AccountKeeper
 }

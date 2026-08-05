@@ -8,6 +8,7 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/stretchr/testify/require"
 
+	"mirage/consensusfatal"
 	"mirage/x/core/types"
 )
 
@@ -16,11 +17,12 @@ import (
 // The previous behavior — silently substituting DefaultParams() on store /
 // unmarshal / validate failure — produced single-node app-hash divergence
 // when one node's stored params bytes diverged from peers'. The fix is to
-// halt loudly via panic so the auto-recovery watchdog can state-sync from
-// healthy peers, which is strictly safer than silent divergence.
+// halt loudly via consensusfatal so the auto-recovery watchdog can state-sync
+// from healthy peers, which is strictly safer than silent divergence.
 //
 // These tests pin the new contract; any regression that reintroduces a
-// silent fallback will fail here.
+// silent fallback will fail here. Tests inject a panic halt hook so
+// require.Panics* still works without os.Exit.
 
 // TestGetParamsReturnsValidParamsAfterSetParams covers the happy path: once
 // SetParams writes valid params, GetParams returns them without panic.
@@ -42,6 +44,8 @@ func TestGetParamsReturnsValidParamsAfterSetParams(t *testing.T) {
 // state truncation. Falling back to DefaultParams here would cause peers
 // (with intact params) to compute a different app-hash than this node.
 func TestGetParamsPanicsOnEmptyStore(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
@@ -59,6 +63,8 @@ func TestGetParamsPanicsOnEmptyStore(t *testing.T) {
 // (mint interval, fee rates, tier configs) than peers, diverging the
 // app-hash on the next consensus round.
 func TestGetParamsPanicsOnCorruptBytes(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
@@ -76,6 +82,8 @@ func TestGetParamsPanicsOnCorruptBytes(t *testing.T) {
 // or a bypass bug — operators must fix the stored params via state-sync or
 // upgrade migration, not paper over them with defaults.
 func TestGetParamsPanicsOnInvalidParams(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
@@ -89,7 +97,7 @@ func TestGetParamsPanicsOnInvalidParams(t *testing.T) {
 	mk.storeService.store["params"] = bz
 
 	require.Panics(t, func() { _ = mk.GetParams(ctx) },
-		"GetParams must panic on Validate failure to prevent silent divergence")
+		"GetParams must halt on Validate failure to prevent silent divergence")
 }
 
 // TestGetParamsPanicsOnStoreGetError covers the third panic-removal branch:
@@ -98,6 +106,8 @@ func TestGetParamsPanicsOnInvalidParams(t *testing.T) {
 // try to unmarshal. The chain MUST halt — silently returning defaults on
 // only the affected node would diverge it from peers.
 func TestGetParamsPanicsOnStoreGetError(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
@@ -106,7 +116,7 @@ func TestGetParamsPanicsOnStoreGetError(t *testing.T) {
 	}
 
 	require.Panics(t, func() { _ = mk.GetParams(ctx) },
-		"GetParams must panic on store.Get failure to prevent silent divergence")
+		"GetParams must halt on store.Get failure to prevent silent divergence")
 }
 
 // TestGetParamsPanicsOnStoredAwardCostAboveBound exercises the interaction
@@ -115,6 +125,8 @@ func TestGetParamsPanicsOnStoreGetError(t *testing.T) {
 // exceeds MaxAwardConfigCost) MUST panic. This guards against a governance
 // proposal that bypassed validation on the way in.
 func TestGetParamsPanicsOnStoredAwardCostAboveBound(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
@@ -128,5 +140,5 @@ func TestGetParamsPanicsOnStoredAwardCostAboveBound(t *testing.T) {
 	mk.storeService.store["params"] = bz
 
 	require.Panics(t, func() { _ = mk.GetParams(ctx) },
-		"GetParams must panic when stored params violate MaxAwardConfigCost")
+		"GetParams must halt when stored params violate MaxAwardConfigCost")
 }

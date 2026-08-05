@@ -29,7 +29,6 @@ Mirage is a decentralized social platform built on **Cosmos SDK** with **CometBF
 2. **Spam Prevention Without Fees**: Use Proof-of-Work as an alternative to economic barriers for free-tier users
 3. **Tiered Feature Access**: Paid subscriptions unlock additional platform capabilities
 4. **Deflationary Economics**: Burn mechanisms reduce supply over time
-5. **Cross-Chain Interoperability**: Support bridging to external chains (Solana)
 
 ### Technology Stack
 
@@ -49,8 +48,7 @@ The decision to build on Cosmos SDK stems from several architectural needs:
 
 1. **Modular Design**: Custom application logic (`x/core`) integrates cleanly with standard SDK modules (auth, bank, staking, governance)
 2. **Sovereignty**: Full control over transaction processing, fee models, and consensus parameters
-3. **Bridge Support**: Attested bridge for external chain transfers
-4. **Governance**: On-chain parameter updates through proposal/voting mechanisms
+3. **Governance**: On-chain parameter updates through proposal/voting mechanisms
 
 ### Why Not a Traditional Backend?
 
@@ -295,11 +293,6 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 - `MsgSubscribe`: Subscribe to paid tier
 - `MsgSetAutoRenewal`: Toggle subscription auto-renewal
 
-**Bridge Messages:**
-- `MsgBridgeBurn`: Burn for external chain bridge
-- `MsgBridgeAttestBurned`: Validator attestation for inbound bridge
-- `MsgBridgeAttestMinted`: Validator attestation for outbound bridge
-
 **Governance Messages:**
 - `MsgUpdateParams`: Update chain parameters
 - `MsgSetLevel`: Set user level (admin assignment)
@@ -324,7 +317,6 @@ The module stores state under prefixed keys in the KV store:
 | `difficulty/` | Current PoW difficulty |
 | `pow_window/` | Per-block message counts |
 | `subscription/` | Subscription expiry index |
-| `bridge/` | Bridge attestation state |
 
 ### Message Handler Philosophy
 
@@ -454,17 +446,13 @@ If reserve is insufficient for even one transaction, the user is immediately dow
 - Subscription fees (non-reserve portion) burned immediately
 - Reserve fees burned as consumed or at subscription end
 
-**Bridge Fees:**
-- External bridge transfers include fees
-- Bridge fees are burned (deflationary)
-
 ### Economic Equilibrium
 
 The system is designed to reach equilibrium:
 
 ```
 Inflows:  Minting (fixed per interval)
-Outflows: Fee burning, bridge fees, subscription burns
+Outflows: Fee burning, subscription burns
 
 If usage ↑ → more fees burned → supply ↓ → token value ↑
 If usage ↓ → less fees burned → supply ↑ → token value ↓ → cheaper to use
@@ -528,7 +516,6 @@ The module emits events that the indexer consumes:
 
 - `subscription_renewed`: Subscription successfully renewed
 - `subscription_expired`: Subscription ended (with reason)
-- `bridge_burn`: External bridge burn initiated
 
 ### Query Endpoints
 
@@ -537,7 +524,6 @@ gRPC query endpoints for debugging:
 - `/mirage.core.v1.Query/GetParams`: Current chain parameters
 - `/mirage.core.v1.Query/GetDifficulty`: Current PoW difficulty and stats
 - `/mirage.core.v1.Query/GetProfile`: User profile data
-- `/mirage.core.v1.Query/GetBridgeStatus`: Bridge operational status
 
 ---
 
@@ -577,7 +563,6 @@ All critical parameters are governance-controlled:
 - PoW difficulty bounds and adjustment rates
 - Subscription periods and fees
 - Tier configurations
-- Bridge parameters
 
 This allows the community to respond to attacks or economic issues without code changes.
 

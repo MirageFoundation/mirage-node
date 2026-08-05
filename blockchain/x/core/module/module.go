@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"cosmossdk.io/core/appmodule"
@@ -298,6 +299,10 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	// Special rule for admins (level >= 100): deduct gas directly from on-chain balance,
 	// never from reserve and never downgrade. If balance is insufficient, skip deduction
 	// but let the tx through -- admin operations should never be blocked over gas fees.
+	//
+	// ADR: docs/architecture/adr-mint-log-and-continue.md — intentional
+	// log-and-continue (not CONSENSUS_FATAL) for insufficient admin balance;
+	// liveness preferred after the 2026-07-12 full-chain halt.
 	if userLevel >= 100 {
 		if err := am.k.DeductFeeFromOwner(ctx, owner, fee); err != nil {
 			ctx.Logger().Warn("relay gas fee (admin): insufficient balance, skipping deduction",
@@ -624,25 +629,34 @@ func (AppModule) ConsensusVersion() uint64 { return 1 }
 // BeginBlock runs consensus-critical housekeeping: burn fee collector,
 // maybe-mint + distribute rewards, initialize difficulty on first run,
 // record the previous block's hash in the on-chain recent-block-hashes
-// window, reconcile reserved module profiles, and periodically clean
-// up counters.
+// window, one-shot reserved module profile bootstrap, and periodically
+// clean up counters.
 //
 // FAIL-FAST CONTRACT (consensus-critical writes only):
-// RecordRecentBlockHash failures propagate as a non-nil return, which
-// the SDK turns into a chain halt. The on-chain recent-block-hashes
+// RecordRecentBlockHash failures and the one-shot reserved-profile
+// bootstrap (when the sentinel is unset) propagate as a non-nil return,
+// which the SDK turns into a chain halt. The on-chain recent-block-hashes
 // window is consensus-critical state read by the PoW ante; a per-node
 // write failure here would cause per-node tx-acceptance divergence on
 // subsequent blocks, which is strictly worse than a clean halt
 // detected by the auto-recovery watchdog.
 //
 // Non-consensus-critical write failures (BurnAllFromModuleName(fee_collector),
-// MintIfNeeded, SetCurrentDifficulty, ClaimUsername/SetProfileCore for
-// reserved module profiles, CleanupOldCounters) are still logged and
-// the corresponding state simply does not update this block; those
+// MintIfNeeded, SetCurrentDifficulty, CleanupOldCounters) are still logged
+// and the corresponding state simply does not update this block; those
 // failures affect ALL nodes equally (same operation, same in-memory
 // state) and so do not cause divergence.
 func (am AppModule) BeginBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	// M-2: capture the baseline before core's mint/burn operations. x/mint runs
+	// earlier in BeginBlock and is intentionally part of this baseline; the
+	// full supply-vs-balances scan below covers all modules every block.
+	if err := am.k.CaptureBlockSupplyStart(sdkCtx); err != nil {
+		sdkCtx.Logger().Error("CONSENSUS_FATAL:SUPPLY_START_CAPTURE BeginBlock; halting chain (auto-recovery will state-sync)",
+			"height", sdkCtx.BlockHeight(), "err", err)
+		return err
+	}
 
 	if err := am.k.BurnAllFromModuleName(sdkCtx, authtypes.FeeCollectorName); err != nil {
 		sdkCtx.Logger().Error("BeginBlock: BurnAllFromModuleName(fee_collector) failed; fees left in collector", "err", err)
@@ -677,16 +691,41 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		return err
 	}
 
-	// Ensure reserved module account profiles exist even if they were absent at genesis
-	for _, modName := range reservedModuleAccountNames() {
-		addr := authtypes.NewModuleAddress(modName).String()
-		if _, found, _ := am.k.GetProfileCore(sdkCtx, addr); !found {
-			username := reservedUsernameForModule(modName)
-			_ = am.k.ClaimUsername(sdkCtx, username, addr)
-			if bz, err := json.Marshal(types.ProfileCore{Owner: addr, Username: username}); err == nil {
-				_ = am.k.SetProfileCore(sdkCtx, addr, bz)
+	// One-shot bootstrap of reserved module-account profiles. Gated by a
+	// sentinel so this never re-runs after the first successful pass —
+	// avoiding a per-block fail-fast opportunity (review M-6).
+	bootstrapped, err := am.k.HasReservedProfilesBootstrapped(sdkCtx)
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:RESERVED_PROFILES_SENTINEL_GET height=%d: %w", sdkCtx.BlockHeight(), err)
+	}
+	if !bootstrapped {
+		for _, modName := range reservedModuleAccountNames() {
+			addr := authtypes.NewModuleAddress(modName).String()
+			_, found, gerr := am.k.GetProfileCore(sdkCtx, addr)
+			if gerr != nil {
+				return fmt.Errorf("CONSENSUS_FATAL:RESERVED_PROFILE_GET module=%s addr=%s: %w", modName, addr, gerr)
 			}
+			if found {
+				continue
+			}
+			username := reservedUsernameForModule(modName)
+			if err := am.k.ClaimUsername(sdkCtx, username, addr); err != nil {
+				return fmt.Errorf("CONSENSUS_FATAL:RESERVED_PROFILE_CLAIM_USERNAME module=%s username=%s: %w", modName, username, err)
+			}
+			bz, merr := json.Marshal(types.ProfileCore{Owner: addr, Username: username})
+			if merr != nil {
+				return fmt.Errorf("CONSENSUS_FATAL:RESERVED_PROFILE_MARSHAL module=%s: %w", modName, merr)
+			}
+			if err := am.k.SetProfileCore(sdkCtx, addr, bz); err != nil {
+				return fmt.Errorf("CONSENSUS_FATAL:RESERVED_PROFILE_SET module=%s addr=%s: %w", modName, addr, err)
+			}
+			sdkCtx.Logger().Info("BeginBlock: bootstrapped reserved module profile",
+				"module", modName, "addr", addr, "username", username)
 		}
+		if err := am.k.SetReservedProfilesBootstrapped(sdkCtx); err != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:RESERVED_PROFILES_SENTINEL_SET height=%d: %w", sdkCtx.BlockHeight(), err)
+		}
+		sdkCtx.Logger().Info("BeginBlock: reserved module profiles bootstrap complete; sentinel set")
 	}
 
 	// Faucet username is set during network bootstrap via a direct tx.
@@ -737,18 +776,25 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		return err
 	}
 
-	// Supply invariant guard: after every balance-affecting operation this
-	// block (BeginBlock fee burn + mint, all txs, subscription processing),
-	// recorded supply MUST equal the sum of all balances. A violation is
-	// impossible under correct serial execution and means this node read stale
-	// state mid-block — the IAVL fast-node stale-read class that caused the
-	// 2026-06-12 app-hash divergence at height 5280036. Halt this node with the
-	// discrepancy named rather than committing a divergent app hash; the
-	// auto-recovery watchdog will state-sync from healthy peers.
+	// The O(1) delta check catches missed or duplicated supply updates. It cannot
+	// prove that the matching account-balance write happened, so the full
+	// supply-vs-balances scan must still run every block: that is the guard that
+	// caught the 2026-06-12 stale-read divergence.
+	if err := am.k.AssertSupplyDeltaInvariant(sdkCtx); err != nil {
+		sdkCtx.Logger().Error("CONSENSUS_FATAL:SUPPLY_DELTA_INVARIANT EndBlock; halting chain (auto-recovery will state-sync)",
+			"height", sdkCtx.BlockHeight(), "err", err)
+		return err
+	}
+	scanStart := time.Now()
 	if err := am.k.AssertSupplyInvariant(sdkCtx); err != nil {
 		sdkCtx.Logger().Error("CONSENSUS_FATAL:SUPPLY_INVARIANT EndBlock; halting chain (auto-recovery will state-sync)",
 			"height", sdkCtx.BlockHeight(), "err", err)
 		return err
+	}
+	if sdkCtx.BlockHeight()%1000 == 0 {
+		sdkCtx.Logger().Info("supply full scan complete",
+			"height", sdkCtx.BlockHeight(),
+			"elapsed_ms", time.Since(scanStart).Milliseconds())
 	}
 
 	currentDifficulty := am.k.GetCurrentDifficulty(sdkCtx)
@@ -849,19 +895,11 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			return fmt.Errorf("processSubscriptions: failed to remove old index for %s: %w", sub.Address, err)
 		}
 
-		// If subscription_period is 0, it's one-time payment, no renewal needed
-		if params.SubscriptionPeriod == 0 {
-			continue
-		}
-
-		// Load profile core.
+		// Load profile core BEFORE the SubscriptionPeriod==0 short-circuit.
 		// FAIL-FAST: an expired-subscription record without a readable profile
-		// is a state inconsistency. Silently `continue`-ing on one node while
-		// peers (with intact state) renew/expire the subscription produces a
-		// per-node state divergence -> app-hash divergence. Returning the
-		// error from EndBlock halts the chain cleanly so the auto-recovery
-		// watchdog can state-sync from healthy peers, which is strictly
-		// safer than silent divergence.
+		// is a state inconsistency even for one-time payments (period==0).
+		// Decoding after the continue would let corrupt ProfileCore escape
+		// detection until a less diagnosable later path (review M-7).
 		bz, found, err := am.k.GetProfileCore(sdkCtx, sub.Address)
 		if err != nil {
 			return fmt.Errorf("CONSENSUS_FATAL:PROFILE_GET processSubscriptions address=%s expiry=%d: %w", sub.Address, sub.Expiry, err)
@@ -873,6 +911,11 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 		var core types.ProfileCore
 		if err := json.Unmarshal(bz, &core); err != nil {
 			return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE processSubscriptions address=%s bytes=%d: %w", sub.Address, len(bz), err)
+		}
+
+		// One-time payment: index already removed; profile must still decode.
+		if params.SubscriptionPeriod == 0 {
+			continue
 		}
 
 		// Burn any remaining reserve from module account before renewal/downgrade
@@ -1273,14 +1316,6 @@ func applyParamUpdates(current types.Params, updates types.Params) (types.Params
 		current.MaxEnvelopeAge = updates.MaxEnvelopeAge
 		changed = append(changed, "max_envelope_age")
 	}
-	if len(updates.BridgeChains) != 0 {
-		current.BridgeChains = updates.BridgeChains
-		changed = append(changed, "bridge_chains")
-	}
-	if updates.BridgeAttestationThreshold != 0 {
-		current.BridgeAttestationThreshold = updates.BridgeAttestationThreshold
-		changed = append(changed, "bridge_attestation_threshold")
-	}
 	if len(updates.AwardConfigs) != 0 {
 		current.AwardConfigs = updates.AwardConfigs
 		changed = append(changed, "award_configs")
@@ -1288,7 +1323,10 @@ func applyParamUpdates(current types.Params, updates types.Params) (types.Params
 	return current, changed
 }
 
-// UpdateParams stores new params
+// UpdateParams stores new params after full Validate().
+// Validation runs here (and again inside SetParams) so a governance proposal
+// that would produce unvalidatable params fails at execution — not on the
+// next BeginBlock GetParams CONSENSUS_FATAL halt across all validators.
 func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	// Only governance authority may update params
@@ -1434,6 +1472,17 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
 	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Post"); err != nil {
 		return nil, err
+	}
+	if authority != govAuthority {
+		valoper, err := am.k.AccToValoper(authority)
+		if err != nil {
+			return nil, fmt.Errorf("relay accounting: AccToValoper: %w", err)
+		}
+		if err := am.k.AddRelayCredit(sdkCtx, valoper, sdkmath.OneInt()); err != nil {
+			return nil, fmt.Errorf("relay accounting: AddRelayCredit: %w", err)
+		}
+		sdkCtx.Logger().Debug("relay accounting: successful post credited",
+			"payer", authority, "valoper", valoper)
 	}
 
 	return &types.MsgPostResponse{}, nil
@@ -3502,7 +3551,10 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 
 	previousAuto := core.AutoRenew
 	if previousAuto == targetAuto {
-		// No state change required
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, int(core.Level), gasUsed, "SetAutoRenewal"); err != nil {
+			return nil, err
+		}
 		return &types.MsgSetAutoRenewalResponse{}, nil
 	}
 
@@ -3533,11 +3585,6 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	return &types.MsgSetAutoRenewalResponse{}, nil
 }
 
-// ============================================
-// Bridge Handlers
-// ============================================
-
-// BridgeBurn burns MIRAGE for bridging to an external (non-IBC) chain
 // Award handler accepts MsgAward, burns MIRAGE (free for admins level >= 100).
 func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgAwardResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -3610,208 +3657,4 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 	}
 
 	return &types.MsgAwardResponse{}, nil
-}
-
-func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*types.MsgBridgeBurnResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	return bridgeBurn(sdkCtx, am.k, req, func(c sdk.Context, owner string, userLevel int) error {
-		gasUsed := c.GasMeter().GasConsumed() - gasStart
-		return am.deductRelayGasFee(c, owner, userLevel, gasUsed, "BridgeBurn")
-	})
-}
-
-// BridgeAttest allows validators to attest to a burn on an external chain (inbound).
-// When 2/3 threshold is met, tokens are minted on Mirage.
-// BridgeAttestBurned allows validators to attest to a burn on an external chain (inbound).
-// When 2/3 threshold is met, tokens are minted on Mirage.
-func (am AppModule) BridgeAttestBurned(ctx context.Context, req *types.MsgBridgeAttestBurned) (*types.MsgBridgeAttestBurnedResponse, error) {
-	return bridgeAttestBurned(sdk.UnwrapSDKContext(ctx), am.k, req)
-}
-
-// BridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
-// When 2/3 threshold is met, the mint is confirmed and the bridge fee is burned.
-func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridgeAttestMinted) (*types.MsgBridgeAttestMintedResponse, error) {
-	return bridgeAttestMinted(sdk.UnwrapSDKContext(ctx), am.k, req)
-}
-
-// ============================================
-// Bridge Query Handlers
-// ============================================
-
-// BridgeStatus queries the current bridge status
-func (am AppModule) GetBridgeStatus(ctx context.Context, _ *types.QueryBridgeStatusRequest) (*types.QueryBridgeStatusResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-
-	enabledChains := am.k.GetEnabledBridgeChains(sdkCtx)
-	pendingCount, err := am.k.GetBridgePendingCount(sdkCtx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get per-chain sequence counters
-	var chainStatus []*types.BridgeChainStatus
-	for _, chain := range enabledChains {
-		seq, err := am.k.GetCurrentBridgeSequence(sdkCtx, chain.ChainId)
-		if err != nil {
-			// Log but continue - sequence of 0 is valid for new chains
-			seq = 0
-		}
-		chainStatus = append(chainStatus, &types.BridgeChainStatus{
-			ChainId:         chain.ChainId,
-			CurrentSequence: seq,
-		})
-	}
-
-	return &types.QueryBridgeStatusResponse{
-		EnabledChains:            enabledChains,
-		PendingAttestationsCount: pendingCount,
-		ChainStatus:              chainStatus,
-	}, nil
-}
-
-// BridgeAttestation queries a specific attestation
-func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBridgeAttestationRequest) (*types.QueryBridgeAttestationResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	params := am.k.GetParams(sdkCtx)
-
-	sourceChain := strings.TrimSpace(req.GetSourceChain())
-	burnID := strings.TrimSpace(req.GetBurnId())
-
-	if sourceChain == "" || burnID == "" {
-		return nil, fmt.Errorf("source_chain and burn_id are required")
-	}
-
-	attestation, found, err := am.k.GetBridgeAttestation(sdkCtx, sourceChain, burnID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get attestation: %w", err)
-	}
-
-	if !found {
-		return &types.QueryBridgeAttestationResponse{Found: false}, nil
-	}
-
-	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
-	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
-
-	attestors, err := am.k.GetBridgeAttestorList(sdkCtx, sourceChain, burnID, attestation.MirageRecipient, attestation.Amount)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load attestors: %w", err)
-	}
-
-	return &types.QueryBridgeAttestationResponse{
-		Found:           true,
-		SourceChain:     attestation.SourceChain,
-		BurnId:          attestation.BurnID,
-		MirageRecipient: attestation.MirageRecipient,
-		Amount:          attestation.Amount,
-		Attestors:       attestors,
-		AttestedPower:   attestation.AttestedPower,
-		RequiredPower:   requiredPower,
-		Minted:          attestation.Minted,
-		CreatedAt:       attestation.CreatedAt,
-	}, nil
-}
-
-// GetBridgeMint queries outbound mint status including attestation progress and completion.
-// Returns both attestation progress (attested_power, required_power) and completion status (minted).
-func (am AppModule) GetBridgeMint(ctx context.Context, req *types.QueryBridgeMintRequest) (*types.QueryBridgeMintResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	params := am.k.GetParams(sdkCtx)
-
-	burnID := strings.TrimSpace(req.GetBurnId())
-	if burnID == "" {
-		return nil, fmt.Errorf("burn_id is required")
-	}
-
-	destChain := strings.ToLower(strings.TrimSpace(req.GetDestinationChain()))
-	if destChain == "" {
-		return nil, fmt.Errorf("destination_chain is required")
-	}
-
-	// Query attestation progress (may exist even if not yet confirmed)
-	attestation, attFound, err := am.k.GetBridgeMintAttestation(sdkCtx, destChain, burnID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load mint attestation: %w", err)
-	}
-
-	// Query final minted record (exists only after threshold was crossed)
-	record, recFound, err := am.k.GetBridgeMintedRecord(sdkCtx, destChain, burnID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load mint record: %w", err)
-	}
-
-	// Calculate required power for threshold
-	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
-	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
-
-	// Build response with all info
-	resp := &types.QueryBridgeMintResponse{
-		Found:            attFound || recFound,
-		Minted:           recFound,
-		DestinationChain: destChain,
-		RequiredPower:    requiredPower,
-	}
-
-	// Add attestation details if found
-	if attFound {
-		attestors, err := am.k.GetBridgeMintAttestorList(sdkCtx, destChain, burnID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load mint attestors: %w", err)
-		}
-		resp.Attestors = attestors
-		resp.AttestedPower = attestation.AttestedPower
-		resp.DestinationTx = attestation.DestinationTx
-	}
-
-	// Override destination_tx from final record if available (authoritative)
-	if recFound {
-		resp.DestinationTx = record.DestinationTx
-	}
-
-	return resp, nil
-}
-
-// BridgeConfig queries the bridge configuration
-func (am AppModule) GetBridgeConfig(ctx context.Context, _ *types.QueryBridgeConfigRequest) (*types.QueryBridgeConfigResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	params := am.k.GetParams(sdkCtx)
-
-	return &types.QueryBridgeConfigResponse{
-		Chains:               params.BridgeChains,
-		AttestationThreshold: params.BridgeAttestationThreshold,
-	}, nil
-}
-
-// GetBridgeBurn queries an outbound burn record by destination chain and burn_id.
-func (am AppModule) GetBridgeBurn(ctx context.Context, req *types.QueryBridgeBurnRequest) (*types.QueryBridgeBurnResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-
-	destChain := strings.ToLower(strings.TrimSpace(req.GetDestinationChain()))
-	burnID := strings.TrimSpace(req.GetBurnId())
-
-	if destChain == "" || burnID == "" {
-		return nil, fmt.Errorf("destination_chain and burn_id are required")
-	}
-
-	record, found, err := am.k.GetBridgeBurnRecord(sdkCtx, destChain, burnID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get burn record: %w", err)
-	}
-
-	if !found {
-		return &types.QueryBridgeBurnResponse{Found: false}, nil
-	}
-
-	return &types.QueryBridgeBurnResponse{
-		Found:              true,
-		BurnId:             record.BurnID,
-		Owner:              record.Owner,
-		DestinationChain:   record.DestinationChain,
-		DestinationAddress: record.DestinationAddress,
-		Amount:             record.Amount,
-		BridgeFee:          record.BridgeFee,
-		Sequence:           record.Sequence,
-		CreatedAt:          record.CreatedAt,
-	}, nil
 }

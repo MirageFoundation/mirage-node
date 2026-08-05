@@ -12,7 +12,6 @@ Services monitored:
   - Indexer
   - Endpoints (Caddy + public chain RPC/REST/gRPC)
   - System (disk, ~/.mirage usage, memory, CPU)
-  - Bridge Orchestrator (if configured)
 """
 
 import json
@@ -1704,73 +1703,6 @@ def check_referrals() -> ServiceStatus:
     )
 
 
-# Base58 alphabet for Solana addresses
-_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-
-def _base58_encode(data: bytes) -> str:
-    """Encode bytes to base58 string (for Solana addresses)."""
-    # Count leading zeros
-    leading_zeros = 0
-    for b in data:
-        if b == 0:
-            leading_zeros += 1
-        else:
-            break
-
-    # Convert to integer
-    num = int.from_bytes(data, "big")
-
-    # Encode
-    result = []
-    while num > 0:
-        num, rem = divmod(num, 58)
-        result.append(_BASE58_ALPHABET[rem])
-
-    # Add leading '1's for zero bytes
-    return "1" * leading_zeros + "".join(reversed(result))
-
-
-def _get_solana_pubkey(keypair_path: str) -> Optional[str]:
-    """Get Solana public key from keypair file."""
-    try:
-        with open(keypair_path) as f:
-            keypair_bytes = json.load(f)
-        # Solana keypair is 64 bytes: first 32 = private key, last 32 = public key
-        if len(keypair_bytes) != 64:
-            return None
-        pubkey_bytes = bytes(keypair_bytes[32:])
-        return _base58_encode(pubkey_bytes)
-    except Exception as e:
-        debug_log(f"orchestrator: failed to get solana pubkey: {e}")
-        return None
-
-
-def _get_solana_balance(rpc_url: str, pubkey: str) -> Optional[float]:
-    """Query Solana balance in SOL."""
-    try:
-        resp = requests.post(
-            rpc_url,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getBalance",
-                "params": [pubkey],
-            },
-            timeout=5,
-        )
-        data = resp.json()
-        lamports = data.get("result", {}).get("value", 0)
-        return lamports / 1_000_000_000  # Convert lamports to SOL
-    except Exception as e:
-        debug_log(f"orchestrator: failed to get solana balance: {e}")
-        return None
-
-
-# Solana balance thresholds
-ORCHESTRATOR_SOL_WARN = float(os.environ.get("ORCHESTRATOR_SOL_WARN", "0.5"))
-ORCHESTRATOR_SOL_ERROR = float(os.environ.get("ORCHESTRATOR_SOL_ERROR", "0.05"))
-
 # System storage thresholds (in GB)
 SYSTEM_STORAGE_WARN_GB = float(os.environ.get("MIRAGE_STORAGE_WARN_GB", "5"))
 SYSTEM_STORAGE_ERROR_GB = float(os.environ.get("MIRAGE_STORAGE_ERROR_GB", "1"))
@@ -1782,92 +1714,6 @@ SYSTEM_MEMORY_ERROR_PCT = float(os.environ.get("MIRAGE_MEMORY_ERROR_PCT", "95"))
 # Load average thresholds (per CPU core)
 SYSTEM_LOAD_WARN_PER_CORE = float(os.environ.get("MIRAGE_LOAD_WARN_PER_CORE", "0.8"))
 SYSTEM_LOAD_ERROR_PER_CORE = float(os.environ.get("MIRAGE_LOAD_ERROR_PER_CORE", "1.5"))
-
-
-def check_orchestrator() -> ServiceStatus:
-    """Check Bridge Orchestrator status."""
-    env_path = os.path.expanduser("~/.mirage/env/orchestrator.env")
-    keypair_path = os.path.expanduser("~/.mirage/orchestrator/solana-keypair.json")
-
-    # Check if env file exists
-    if not os.path.exists(env_path):
-        return ServiceStatus(
-            name="Orchestrator", status=Status.UNKNOWN, message="Not configured", details={"configured": False}
-        )
-
-    # Parse env file to check if enabled
-    enabled = False
-    solana_rpc = None
-    try:
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("ORCHESTRATOR_ENABLED="):
-                    val = line.split("=", 1)[1].strip().lower().strip('"').strip("'")
-                    enabled = val in ("true", "1", "yes")
-                elif line.startswith("ORCHESTRATOR_SOLANA_RPC="):
-                    solana_rpc = line.split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
-
-    base_details = {
-        "configured": True,
-        "enabled": enabled,
-    }
-
-    # If not enabled, show as unknown (not configured to run)
-    if not enabled:
-        return ServiceStatus(name="Orchestrator", status=Status.UNKNOWN, message="Disabled", details=base_details)
-
-    # Check if process is running
-    try:
-        result = subprocess.run(["pgrep", "-f", "bin/orchestrator"], capture_output=True, text=True)
-        process_running = result.returncode == 0
-    except Exception:
-        process_running = False
-
-    base_details["running"] = process_running
-
-    # Check if Solana keypair exists
-    keypair_exists = os.path.exists(keypair_path)
-    base_details["keypair"] = keypair_exists
-
-    # Determine Solana network from RPC URL
-    if solana_rpc:
-        if "devnet" in solana_rpc:
-            base_details["network"] = "devnet"
-        elif "mainnet" in solana_rpc:
-            base_details["network"] = "mainnet"
-        else:
-            base_details["network"] = "custom"
-
-    # Get Solana wallet balance if keypair exists and RPC is configured
-    sol_balance = None
-    sol_pubkey = None
-    if keypair_exists and solana_rpc:
-        sol_pubkey = _get_solana_pubkey(keypair_path)
-        if sol_pubkey:
-            base_details["sol_pubkey"] = sol_pubkey
-            sol_balance = _get_solana_balance(solana_rpc, sol_pubkey)
-            if sol_balance is not None:
-                base_details["sol_balance"] = sol_balance
-
-    if not process_running:
-        return ServiceStatus(name="Orchestrator", status=Status.ERROR, message="Not running", details=base_details)
-
-    if not keypair_exists:
-        return ServiceStatus(name="Orchestrator", status=Status.WARN, message="No keypair", details=base_details)
-
-    # Check SOL balance thresholds
-    if sol_balance is not None:
-        if sol_balance < ORCHESTRATOR_SOL_ERROR:
-            return ServiceStatus(name="Orchestrator", status=Status.ERROR, message="Low SOL!", details=base_details)
-        elif sol_balance < ORCHESTRATOR_SOL_WARN:
-            return ServiceStatus(
-                name="Orchestrator", status=Status.WARN, message="SOL running low", details=base_details
-            )
-
-    return ServiceStatus(name="Orchestrator", status=Status.OK, message="Running", details=base_details)
 
 
 def _get_cpu_count() -> int:
@@ -2444,28 +2290,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             for name, sz in sorted_dirs[:5]:
                 lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {_format_bytes(sz)}")
 
-    elif status.name == "Orchestrator":
-        if details.get("network"):
-            network = details["network"]
-            net_color = Colors.BRIGHT_YELLOW if network == "devnet" else Colors.BRIGHT_GREEN
-            lines.append(f"{bullet}{Colors.DIM}Network:{Colors.RESET} {net_color}{network}{Colors.RESET}")
-        if details.get("keypair"):
-            lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET}")
-        elif details.get("enabled"):
-            lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_RED}Missing{Colors.RESET}")
-        if "sol_balance" in details:
-            bal = details["sol_balance"]
-            if bal < ORCHESTRATOR_SOL_ERROR:
-                bal_color = Colors.BRIGHT_RED
-                bal_suffix = " CRITICAL!"
-            elif bal < ORCHESTRATOR_SOL_WARN:
-                bal_color = Colors.BRIGHT_YELLOW
-                bal_suffix = " LOW"
-            else:
-                bal_color = Colors.BRIGHT_GREEN
-                bal_suffix = ""
-            lines.append(f"{bullet}{Colors.DIM}SOL:{Colors.RESET} {bal_color}{bal:.4f}{bal_suffix}{Colors.RESET}")
-
     elif status.name == "System":
         # Disk free space
         if "disk_free_gb" in details:
@@ -2555,12 +2379,11 @@ def render_dashboard(refresh_secs: int):
         check_rewards(),
         check_indexer(),
         check_endpoints(),
-        check_orchestrator(),
         check_disk_usage(),
         check_system(),
     ]
 
-    # Hide unconfigured optional services (Validator, Orchestrator)
+    # Hide unconfigured optional services (Validator)
     display_statuses = [
         s
         for s in statuses

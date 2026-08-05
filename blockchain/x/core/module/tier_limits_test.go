@@ -635,12 +635,13 @@ func TestSetUsernameSubscriberCanRemoveAnon(t *testing.T) {
 func TestPostContentLengthFreeTierRejectsOversize(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, _ := testPubkeyOwner()
+	authority := genAddr(40)
 
 	params := mk.GetParams(ctx)
 	maxContent := params.Tiers[0].MaxContentLength // 1000
 
 	_, err := am.Post(ctx, &types.MsgPost{
-		Authority:      "not-gov",
+		Authority:      authority,
 		EnvelopePubkey: pub,
 		Target:         "",
 		Topic:          "test",
@@ -649,6 +650,9 @@ func TestPostContentLengthFreeTierRejectsOversize(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "content exceeds limit")
+	valoper, err := mk.AccToValoper(authority)
+	require.NoError(t, err)
+	require.True(t, mk.GetRelayCredit(ctx, valoper).IsZero(), "failed post must not earn relay credit")
 }
 
 func TestPostContentLengthSubscriberHigherLimit(t *testing.T) {
@@ -660,11 +664,12 @@ func TestPostContentLengthSubscriberHigherLimit(t *testing.T) {
 	freeMax := params.Tiers[0].MaxContentLength // 1000
 	subMax := params.Tiers[1].MaxContentLength  // 20000
 	require.Greater(t, subMax, freeMax)
+	authority := genAddr(41)
 
 	// Content that exceeds free limit but fits subscriber limit
 	content := string(bytes.Repeat([]byte("x"), int(freeMax)+1))
 	_, err := am.Post(ctx, &types.MsgPost{
-		Authority:      "not-gov",
+		Authority:      authority,
 		EnvelopePubkey: pub,
 		Target:         "",
 		Topic:          "test",
@@ -672,17 +677,21 @@ func TestPostContentLengthSubscriberHigherLimit(t *testing.T) {
 		Content:        content,
 	})
 	require.NoError(t, err)
+	valoper, err := mk.AccToValoper(authority)
+	require.NoError(t, err)
+	require.Equal(t, "1", mk.GetRelayCredit(ctx, valoper).String())
 }
 
 func TestPostTitleLengthFreeTierRejectsOversize(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, _ := testPubkeyOwner()
+	authority := genAddr(42)
 
 	params := mk.GetParams(ctx)
 	maxTitle := params.Tiers[0].MaxTitleLength // 150
 
 	_, err := am.Post(ctx, &types.MsgPost{
-		Authority:      "not-gov",
+		Authority:      authority,
 		EnvelopePubkey: pub,
 		Target:         "",
 		Topic:          "test",
@@ -691,6 +700,9 @@ func TestPostTitleLengthFreeTierRejectsOversize(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "title exceeds limit")
+	valoper, err := mk.AccToValoper(authority)
+	require.NoError(t, err)
+	require.True(t, mk.GetRelayCredit(ctx, valoper).IsZero(), "failed post must not earn relay credit")
 }
 
 func TestPostTitleLengthSubscriberHigherLimit(t *testing.T) {
@@ -702,10 +714,11 @@ func TestPostTitleLengthSubscriberHigherLimit(t *testing.T) {
 	freeMaxTitle := params.Tiers[0].MaxTitleLength // 150
 	subMaxTitle := params.Tiers[1].MaxTitleLength  // 300
 	require.Greater(t, subMaxTitle, freeMaxTitle)
+	authority := genAddr(43)
 
 	title := string(bytes.Repeat([]byte("x"), int(freeMaxTitle)+1))
 	_, err := am.Post(ctx, &types.MsgPost{
-		Authority:      "not-gov",
+		Authority:      authority,
 		EnvelopePubkey: pub,
 		Target:         "",
 		Topic:          "test",
@@ -713,6 +726,9 @@ func TestPostTitleLengthSubscriberHigherLimit(t *testing.T) {
 		Content:        "valid content",
 	})
 	require.NoError(t, err)
+	valoper, err := mk.AccToValoper(authority)
+	require.NoError(t, err)
+	require.Equal(t, "1", mk.GetRelayCredit(ctx, valoper).String())
 }
 
 // =========================================================================

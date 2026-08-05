@@ -3,11 +3,7 @@ set -euo pipefail
 
 cleanup() {
   echo "Received shutdown signal, gracefully stopping services..."
-  
-  # Stop orchestrator
-  pkill -TERM -f "blockchain/bin/orchestrator" 2>/dev/null || true
-  sleep 1
-  
+
   # Stop node
   pkill -TERM -f "miraged start" 2>/dev/null || true
   for i in $(seq 1 30); do
@@ -48,7 +44,7 @@ fi
 ENV_DIR="${HOME}/.mirage/env"
 export ENV_DIR
 load_env_files() {
-  for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env" "${ENV_DIR}/orchestrator.env"; do
+  for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env"; do
     if [ -f "$envfile" ]; then
       set -a
       . "$envfile"
@@ -123,7 +119,7 @@ if ! [[ "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$LOG_RETENTION_DAYS" -le 0 ];
 fi
 
 # Create centralized log directory structure
-mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,caddy,referrals,deploy,orchestrator}
+mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,caddy,referrals,deploy}
 
 # Clean up old log files on startup
 find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
@@ -612,22 +608,6 @@ echo "✓ Maintenance mode disabled"
 # Referral accrual daemon (fifth) - DISABLED FOR NOW
 # tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
-
-# Bridge Orchestrator - gated by ORCHESTRATOR_ENABLED
-ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/bin/orchestrator"
-echo "==> Orchestrator enabled? ${ORCHESTRATOR_ENABLED:-<unset>}"
-if [ "${ORCHESTRATOR_ENABLED:-}" = "true" ]; then
-  if [ -f "$ORCHESTRATOR_BIN" ]; then
-    echo "==> Starting bridge orchestrator..."
-    mkdir -p "$DATA_DIR/orchestrator"
-    tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
-    tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
-  else
-    echo "WARNING: Orchestrator binary not found at $ORCHESTRATOR_BIN"
-  fi
-else
-  echo "==> Orchestrator disabled (set ORCHESTRATOR_ENABLED=true to run)"
-fi
 
 # Unified Status Dashboard (last window)
 tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"

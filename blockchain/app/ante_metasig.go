@@ -790,39 +790,9 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-		case *coretypes.MsgSetLevel:
-			if m.Authority == govAuthority {
-				continue // Skip validation for governance
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgSetLevel", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgSetLevel", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeUvarint(101, uint64(uint32(m.Level)))
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetLevel", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetLevel", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
+		// MsgSetLevel is not in isRelayMessage / relayMessagePrototypes — it
+		// routes through stdAnte (governance). A RelaySig branch here would be
+		// unreachable via the relay ante chain.
 		case *coretypes.MsgSubscribe:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -894,40 +864,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAutoRenewal", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-		case *coretypes.MsgBridgeBurn:
-			if m.Authority == govAuthority {
-				continue // Skip validation for governance
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgBridgeBurn", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgBridgeBurn", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.DestinationChain)
-				w.writeString(101, m.DestinationAddress)
-				w.writeUvarint(102, m.Amount)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBridgeBurn", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBridgeBurn", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
 		case *coretypes.MsgAward:
 			if m.Authority == govAuthority {
 				continue
@@ -961,9 +897,8 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAward", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-			// Note: MsgBridgeAttest does NOT use envelope - it's signed directly by validators
 		default:
-			// ignore others
+			return ctx, fmt.Errorf("RelaySig: unsupported relay message %T", msg)
 		}
 	}
 	return next(ctx, tx, simulate)

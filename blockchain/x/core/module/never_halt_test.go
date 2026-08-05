@@ -8,6 +8,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
+	"mirage/consensusfatal"
 	"mirage/x/core/types"
 )
 
@@ -136,6 +137,8 @@ func TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions(t *testing
 // per-node app-hash divergence whenever one node's params bytes diverged
 // from peers'.
 func TestEndBlockPanicsOnCorruptParams(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
@@ -144,13 +147,15 @@ func TestEndBlockPanicsOnCorruptParams(t *testing.T) {
 
 	require.Panics(t, func() {
 		_ = am.EndBlock(ctx)
-	}, "EndBlock must panic on corrupt params (no silent fallback to defaults)")
+	}, "EndBlock must halt on corrupt params (no silent fallback to defaults)")
 }
 
 // TestEndBlockPanicsOnParamsStoreGetFailure: a raw store.Get failure on the
 // "params" key MUST halt the chain. Silently returning defaults on the
 // affected node only would diverge it from peers.
 func TestEndBlockPanicsOnParamsStoreGetFailure(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
@@ -161,7 +166,7 @@ func TestEndBlockPanicsOnParamsStoreGetFailure(t *testing.T) {
 
 	require.Panics(t, func() {
 		_ = am.EndBlock(ctx)
-	}, "EndBlock must panic on store.Get failure for params")
+	}, "EndBlock must halt on store.Get failure for params")
 }
 
 // TestRecordRecentBlockHashPanicsOnReadFailure (proxy for BeginBlock fail-fast
@@ -221,6 +226,8 @@ func TestMintIfNeededNeverReturnsError_NonIntervalBoundary(t *testing.T) {
 // (via GetParams panic). Previously this test asserted the chain stayed up
 // on defaults — which is exactly the silent-divergence vector being closed.
 func TestMintIfNeededPanicsOnCorruptParams(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext().WithBlockHeight(100)
 
@@ -228,12 +235,14 @@ func TestMintIfNeededPanicsOnCorruptParams(t *testing.T) {
 
 	require.Panics(t, func() {
 		_ = mk.MintIfNeeded(ctx)
-	}, "MintIfNeeded must panic on corrupt params (no silent fallback)")
+	}, "MintIfNeeded must halt on corrupt params (no silent fallback)")
 }
 
 // TestMintIfNeededPanicsOnParamsStoreGetFailure: store.Get failure on the
 // params key now halts MintIfNeeded.
 func TestMintIfNeededPanicsOnParamsStoreGetFailure(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	mk := newMockKeeper()
 	ctx := newMockContext().WithBlockHeight(100)
 
@@ -243,7 +252,7 @@ func TestMintIfNeededPanicsOnParamsStoreGetFailure(t *testing.T) {
 
 	require.Panics(t, func() {
 		_ = mk.MintIfNeeded(ctx)
-	}, "MintIfNeeded must panic on store.Get failure for params")
+	}, "MintIfNeeded must halt on store.Get failure for params")
 }
 
 // --- Difficulty / PoW-count / nonce reads: fail fast on store.Get error ----
@@ -255,6 +264,7 @@ func TestMintIfNeededPanicsOnParamsStoreGetFailure(t *testing.T) {
 // contract.
 func requirePanicContains(t *testing.T, substr string, fn func()) {
 	t.Helper()
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
 	defer func() {
 		r := recover()
 		require.NotNil(t, r, "expected panic containing %q, got none", substr)
@@ -276,6 +286,8 @@ func requirePanicContains(t *testing.T, substr string, fn func()) {
 // rest of the suite (newMockKeeper seeds no difficulty/nonce, yet those reads
 // resolve to their defaults without panicking).
 func TestConsensusReadsPanicOnStoreGetFailure(t *testing.T) {
+	defer consensusfatal.SetHaltForTest(func(err error) { panic(err) })()
+
 	// ctx height is 100; powMessageCountKey(100) is the last (always in-window)
 	// iteration of the sliding-window sum, so failing it always triggers.
 	const powKey = "pow_msg_count:100"
@@ -304,6 +316,8 @@ func TestConsensusReadsPanicOnStoreGetFailure(t *testing.T) {
 			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.RecordPoWMessage(ctx) }},
 		{"HasEnvelopeNonce", nonceKey, "CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET",
 			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.HasEnvelopeNonce(ctx, []byte{0xab, 0xcd}, 7) }},
+		{"GetRelayCredit", "relay_credits/miragevaloper1test", "CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetRelayCredit(ctx, "miragevaloper1test") }},
 	}
 
 	for _, tc := range cases {
@@ -314,6 +328,34 @@ func TestConsensusReadsPanicOnStoreGetFailure(t *testing.T) {
 				tc.failKey: errors.New("simulated store.Get failure"),
 			}
 			requirePanicContains(t, tc.tag, func() { tc.invoke(mk, ctx) })
+		})
+	}
+}
+
+// TestGetRelayCreditPanicsOnDecodeFailure pins M-3: corrupt credit bytes must
+// halt with RELAY_CREDIT_DECODE rather than silently returning zero.
+func TestGetRelayCreditPanicsOnDecodeFailure(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	mk.storeService.store["relay_credits/miragevaloper1test"] = []byte{0x01, 0x02, 0x03} // not 8 bytes
+	requirePanicContains(t, "CONSENSUS_FATAL:RELAY_CREDIT_DECODE", func() {
+		_ = mk.GetRelayCredit(ctx, "miragevaloper1test")
+	})
+}
+
+func TestPoWMessageCountPanicsOnDecodeFailure(t *testing.T) {
+	for _, bz := range [][]byte{{0x01}, make([]byte, 9)} {
+		t.Run(fmt.Sprintf("bytes_%d", len(bz)), func(t *testing.T) {
+			mk := newMockKeeper()
+			ctx := newMockContext()
+			mk.storeService.store["pow_msg_count:100"] = bz
+
+			requirePanicContains(t, "CONSENSUS_FATAL:POW_COUNT_DECODE", func() {
+				_ = mk.GetPoWMessageCount(ctx, types.DefaultParams())
+			})
+			requirePanicContains(t, "CONSENSUS_FATAL:POW_COUNT_DECODE", func() {
+				_ = mk.RecordPoWMessage(ctx)
+			})
 		})
 	}
 }
@@ -335,5 +377,6 @@ func TestConsensusReadsReturnDefaultsOnAbsentKey(t *testing.T) {
 		require.Equal(t, uint64(0), mk.GetConsecutiveLowUsage(ctx), "absent calm seq -> 0")
 		require.Equal(t, uint64(0), mk.GetPoWMessageCount(ctx, types.DefaultParams()), "no messages -> 0")
 		require.False(t, mk.HasEnvelopeNonce(ctx, []byte{0xab, 0xcd}, 7), "absent nonce -> not seen")
+		require.True(t, mk.GetRelayCredit(ctx, "miragevaloper1absent").IsZero(), "absent relay credit -> 0")
 	})
 }

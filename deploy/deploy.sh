@@ -223,21 +223,15 @@ maybe_proto_gen_and_go_build() {
     "$REPO_ROOT/blockchain/go.sum" \
     "$REPO_ROOT/blockchain/app" \
     "$REPO_ROOT/blockchain/cmd" \
-    "$REPO_ROOT/blockchain/orchestrator" \
     "$REPO_ROOT/blockchain/x" \
   )"
 
   local miraged_bin="$REPO_ROOT/blockchain/bin/miraged"
-  local orchestrator_bin="$REPO_ROOT/blockchain/bin/orchestrator"
   local need_build=0
 
   # Check if binaries exist
   if [ ! -f "$miraged_bin" ]; then
     echo "==> miraged binary not found; rebuild needed"
-    need_build=1
-  fi
-  if [ ! -f "$orchestrator_bin" ]; then
-    echo "==> orchestrator binary not found; rebuild needed"
     need_build=1
   fi
 
@@ -249,26 +243,10 @@ maybe_proto_gen_and_go_build() {
       "$REPO_ROOT/blockchain/go.sum" \
       "$REPO_ROOT/blockchain/app" \
       "$REPO_ROOT/blockchain/cmd" \
-      "$REPO_ROOT/blockchain/orchestrator" \
       "$REPO_ROOT/blockchain/x" \
       -type f -newer "$miraged_bin" 2>/dev/null | head -1)"
     if [ -n "$newest_source" ]; then
       echo "==> Source newer than miraged: $newest_source"
-      need_build=1
-    fi
-  fi
-  if [ "$need_build" -eq 0 ]; then
-    local newest_source
-    newest_source="$(find \
-      "$REPO_ROOT/blockchain/go.mod" \
-      "$REPO_ROOT/blockchain/go.sum" \
-      "$REPO_ROOT/blockchain/app" \
-      "$REPO_ROOT/blockchain/cmd" \
-      "$REPO_ROOT/blockchain/orchestrator" \
-      "$REPO_ROOT/blockchain/x" \
-      -type f -newer "$orchestrator_bin" 2>/dev/null | head -1)"
-    if [ -n "$newest_source" ]; then
-      echo "==> Source newer than orchestrator: $newest_source"
       need_build=1
     fi
   fi
@@ -286,9 +264,9 @@ maybe_proto_gen_and_go_build() {
   fi
 
   if [ "$need_build" -eq 1 ]; then
-    echo "==> Building miraged and orchestrator..."
+    echo "==> Building miraged..."
     # Delete old binaries to force Go to rebuild
-    rm -f "$miraged_bin" "$orchestrator_bin"
+    rm -f "$miraged_bin"
     ( cd "$REPO_ROOT/blockchain" && make build-all )
     echo "$new_go_hash" > "$go_hash_file"
   else

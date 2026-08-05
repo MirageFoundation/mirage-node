@@ -76,7 +76,7 @@ A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a larg
 
 - `DiscoverView.js`, `AgentsView.js`
 - `SubscriptionView.js`, `ReferralsView.js`
-- `BridgeView.js`, `NotFoundView.js`
+- `NotFoundView.js`
 
 > `FollowsView.js`, `BlocksView.js`, `ReportsView.js` were restyled in sub-plan 06.3. `NetworkView.js`, `StatsView.js` were restyled in sub-plan 06.4.
 
@@ -95,7 +95,7 @@ A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a larg
 3. [`03-social-routes.md`](./06-subplans/03-social-routes.md) — Follows, Blocks, Reports (list-row pattern)
 4. [`04-network-stats.md`](./06-subplans/04-network-stats.md) — Network + Stats (info-panel + chart container)
 5. [`05-subscription-referrals.md`](./06-subplans/05-subscription-referrals.md) — Subscription + Referrals
-6. [`06-bridge.md`](./06-subplans/06-bridge.md) — Bridge (restyle containers only, keep logic)
+6. ~~Bridge~~ — removed permanently in v1.31.0 (no UI)
 7. [`07-agents-discover-notfound.md`](./06-subplans/07-agents-discover-notfound.md) — Agents, Discover (topics), NotFound
 8. [`08-mobile-bottom-nav.md`](./06-subplans/08-mobile-bottom-nav.md) — MobileBottomNav full restyle (deferred from Plan 02)
 9. [`09-polish-and-qa.md`](./06-subplans/09-polish-and-qa.md) — spacing / typography / state / responsive / accessibility polish + QA + optional default-theme switch

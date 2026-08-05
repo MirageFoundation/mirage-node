@@ -34,9 +34,6 @@ from shared.datatypes import (
     MsgSubscribe,
     MsgSetAutoRenewal,
     MsgUpdateParams,
-    MsgBridgeBurn,
-    MsgBridgeAttestBurned,
-    MsgBridgeAttestMinted,
     MsgAward,
     MsgAnnotate,
 )
@@ -107,9 +104,6 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgSubscribe": MsgSubscribe,
     "/mirage.core.v1.MsgSetAutoRenewal": MsgSetAutoRenewal,
     "/mirage.core.v1.MsgUpdateParams": MsgUpdateParams,
-    "/mirage.core.v1.MsgBridgeBurn": MsgBridgeBurn,
-    "/mirage.core.v1.MsgBridgeAttestBurned": MsgBridgeAttestBurned,
-    "/mirage.core.v1.MsgBridgeAttestMinted": MsgBridgeAttestMinted,
     "/mirage.core.v1.MsgAward": MsgAward,
 }
 
@@ -207,13 +201,17 @@ class MessageProcessor:
             self._handle_award(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgSendTokens":
             pass
-        # Bridge messages - index for status queries
         elif type_url == "/mirage.core.v1.MsgBridgeBurn":
-            self._handle_bridge_burn(type_url, value, tx_hash, ts, height)
+            # Bridge removed in v1.31.0; keep decode-noop for historical txs on reindex.
+            pass
+        elif type_url == "/mirage.core.v1.MsgBridgeAttest":
+            pass
+        elif type_url == "/mirage.core.v1.MsgBridgeMinted":
+            pass
         elif type_url == "/mirage.core.v1.MsgBridgeAttestBurned":
-            self._handle_bridge_attest_burned(type_url, value, tx_hash, ts, height)
+            pass
         elif type_url == "/mirage.core.v1.MsgBridgeAttestMinted":
-            self._handle_bridge_attest_minted(type_url, value, tx_hash, ts, height)
+            pass
         else:
             raise RuntimeError(f"Unhandled message type {type_url}")
 
@@ -2381,236 +2379,3 @@ class MessageProcessor:
                     ids.add(pid)
 
         return sorted(ids)
-
-    def process_tx_events(self, events: list, tx_hash: str = "") -> None:
-        """Process per-tx events for bridge confirmation updates and power info.
-
-        Args:
-            events: List of events from the transaction
-            tx_hash: The transaction hash (used to update power on attestation records)
-        """
-        if not events:
-            return
-        for ev_type, attrs in self.decode_events(events):
-            # Handle inbound bridge mint completion (bridge_mint event)
-            # This is emitted when threshold is reached and tokens are minted on Mirage
-            if ev_type == "bridge_mint":
-                source_chain = str(attrs.get("source_chain", "") or "").strip()
-                burn_id = str(attrs.get("burn_id", "") or "").strip()
-                recipient = str(attrs.get("recipient", "") or "").strip()
-                amount = str(attrs.get("amount", "") or "").strip()
-                attested_power = str(attrs.get("attested_power", "") or "").strip()
-                required_power = str(attrs.get("required_power", "") or "").strip()
-                if not source_chain or not burn_id:
-                    logger.warning("bridge_mint event missing identifiers: %s", attrs)
-                    continue
-                updated = self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
-                logger.info(
-                    "Bridge mint event (inbound complete): %s:%s -> %s amount=%s power=%s/%s updated=%s",
-                    source_chain,
-                    burn_id,
-                    recipient,
-                    amount,
-                    attested_power,
-                    required_power,
-                    updated,
-                )
-
-            # Handle inbound bridge attestations (bridge_attest event)
-            # This event is emitted for every attestation with power info
-            elif ev_type == "bridge_attest":
-                source_chain = str(attrs.get("source_chain", "") or "").strip()
-                burn_id = str(attrs.get("burn_id", "") or "").strip()
-                validator = str(attrs.get("validator", "") or "").strip()
-                power = int(attrs.get("power", 0) or 0)
-                attested_power = int(attrs.get("attested_power", 0) or 0)
-                required_power = int(attrs.get("required_power", 0) or 0)
-                minted_raw = str(attrs.get("minted", "") or "").strip().lower()
-                minted = minted_raw in ("true", "1", "t", "yes")
-
-                if not source_chain or not burn_id:
-                    logger.warning("bridge_attest event missing identifiers: %s", attrs)
-                    continue
-
-                # Update power info on the attestation record by tx_hash
-                updated = False
-                if tx_hash:
-                    updated = self.db.update_bridge_attestation_power_by_tx(
-                        tx_hash=tx_hash,
-                        msg_type="attest_burned",
-                        power=power,
-                        attested_power=attested_power,
-                        required_power=required_power,
-                    )
-                logger.info(
-                    "Bridge attest event (inbound): %s:%s tx=%s validator=%s power=%d attested=%d/%d minted=%s updated=%s",
-                    source_chain,
-                    burn_id,
-                    tx_hash[:16] if tx_hash else "?",
-                    validator,
-                    power,
-                    attested_power,
-                    required_power,
-                    minted,
-                    updated,
-                )
-
-                # If threshold reached, also update minted status
-                if minted:
-                    self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
-
-            # Handle outbound bridge attestations (bridge_attest_minted event)
-            elif ev_type == "bridge_attest_minted":
-                burn_id = str(attrs.get("burn_id", "") or "").strip()
-                mirage_tx_hash = str(attrs.get("mirage_tx_hash", "") or "").strip().lower()
-                validator = str(attrs.get("validator", "") or "").strip()
-                power = int(attrs.get("power", 0) or 0)
-                attested_power = int(attrs.get("attested_power", 0) or 0)
-                required_power = int(attrs.get("required_power", 0) or 0)
-                minted_raw = str(attrs.get("minted", "") or "").strip().lower()
-                minted = minted_raw in ("true", "1", "t", "yes")
-
-                # Use mirage_tx_hash for DB linking (matches burn record's tx_hash)
-                effective_burn_id = mirage_tx_hash if mirage_tx_hash else burn_id
-                if not effective_burn_id:
-                    logger.warning("bridge_attest_minted event missing identifiers: %s", attrs)
-                    continue
-
-                # Update power info on the attestation record by tx_hash
-                updated = False
-                if tx_hash:
-                    updated = self.db.update_bridge_attestation_power_by_tx(
-                        tx_hash=tx_hash,
-                        msg_type="attest_minted",
-                        power=power,
-                        attested_power=attested_power,
-                        required_power=required_power,
-                    )
-                logger.info(
-                    "Bridge attest minted event (outbound): burn_id=%s tx=%s validator=%s power=%d attested=%d/%d minted=%s updated=%s",
-                    effective_burn_id,
-                    tx_hash[:16] if tx_hash else "?",
-                    validator,
-                    power,
-                    attested_power,
-                    required_power,
-                    minted,
-                    updated,
-                )
-
-                # If threshold reached, also update minted status
-                if minted:
-                    self.db.update_bridge_mint_attestation_confirmed(effective_burn_id, True)
-
-    # ========== Bridge Message Handlers ==========
-
-    def _handle_bridge_burn(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
-        """Handle MsgBridgeBurn (outbound bridge: Mirage -> external chain)."""
-        try:
-            parsed = MsgBridgeBurn()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-
-            # For outbound burns, the burn_id is the tx_hash
-            destination_chain = str(msg_dict.get("destination_chain", "") or "")
-            destination_address = str(msg_dict.get("destination_address", "") or "")
-            amount = int(msg_dict.get("amount", 0) or 0)
-
-            # Derive sender from envelope pubkey
-            sender = derive_owner_from_msg(msg_dict)
-
-            self.db.insert_bridge_transaction(
-                tx_hash=tx_hash,
-                direction="out",
-                msg_type="burn",
-                burn_id=tx_hash,  # For outbound, burn_id = tx_hash
-                amount=amount,
-                created_at=ts,
-                height=height,
-                destination_chain=destination_chain,
-                recipient=destination_address,
-                sender=sender,
-            )
-
-            logger.debug(f"Indexed bridge burn: {tx_hash} -> {destination_chain}:{destination_address} amount={amount}")
-        except Exception as e:
-            logger.error(f"Failed to index bridge burn {tx_hash}: {e}")
-
-    def _handle_bridge_attest_burned(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
-        """Handle MsgBridgeAttestBurned (inbound bridge: external chain -> Mirage).
-
-        Mint confirmation must come from chain state/events; we do not infer it here.
-        """
-        try:
-            parsed = MsgBridgeAttestBurned()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-
-            validator = str(msg_dict.get("validator", "") or "")
-            source_chain = str(msg_dict.get("source_chain", "") or "")
-            burn_id = str(msg_dict.get("burn_id", "") or "")
-            mirage_recipient = str(msg_dict.get("mirage_recipient", "") or "")
-            amount = int(msg_dict.get("amount", 0) or 0)
-
-            self.db.insert_bridge_transaction(
-                tx_hash=tx_hash,
-                direction="in",
-                msg_type="attest_burned",
-                burn_id=burn_id,
-                amount=amount,
-                created_at=ts,
-                height=height,
-                source_chain=source_chain,
-                recipient=mirage_recipient,
-                validator=validator,
-                minted=False,  # Only set true when chain confirms mint via BridgeConfirmed event
-            )
-
-            logger.info(
-                f"Indexed bridge attest burned: {source_chain}:{burn_id} validator={validator} -> {mirage_recipient} amount={amount}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to index bridge attest burned {tx_hash}: {e}")
-
-    def _handle_bridge_attest_minted(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
-        """Handle MsgBridgeAttestMinted (validator attests mint on external chain for outbound burns).
-
-        The burn_id in the message is the sequence number, but we use mirage_tx_hash
-        for linking to the original burn transaction in the indexer database.
-        """
-        try:
-            parsed = MsgBridgeAttestMinted()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-
-            validator = str(msg_dict.get("validator", "") or "")
-            burn_id_seq = str(msg_dict.get("burn_id", "") or "")  # This is the sequence number
-            destination_chain = str(msg_dict.get("destination_chain", "") or "")
-            destination_tx = str(msg_dict.get("destination_tx", "") or "")
-            # mirage_tx_hash is the original Mirage burn tx hash - use this for DB linking
-            mirage_tx_hash = str(msg_dict.get("mirage_tx_hash", "") or "").lower()
-
-            # Use mirage_tx_hash as burn_id for DB linking (matches the burn record's tx_hash)
-            # Fall back to burn_id_seq if mirage_tx_hash is empty (shouldn't happen in normal operation)
-            effective_burn_id = mirage_tx_hash if mirage_tx_hash else burn_id_seq
-
-            # Record the attestation (confirmation status comes from BridgeConfirmed event)
-            self.db.insert_bridge_transaction(
-                tx_hash=tx_hash,
-                direction="out",
-                msg_type="attest_minted",
-                burn_id=effective_burn_id,
-                amount=0,  # Amount is in the original burn event
-                created_at=ts,
-                height=height,
-                destination_chain=destination_chain,
-                destination_tx=destination_tx,
-                validator=validator,
-                minted=False,  # Only set true via BridgeConfirmed event
-            )
-
-            logger.info(
-                f"Indexed bridge attest minted: burn_id={effective_burn_id} (seq={burn_id_seq}) validator={validator} -> {destination_chain} tx={destination_tx}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to index bridge attest minted {tx_hash}: {e}")

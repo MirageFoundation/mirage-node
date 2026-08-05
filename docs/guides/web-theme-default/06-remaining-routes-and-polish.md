@@ -27,7 +27,6 @@ Per-route current state (from the audit):
 | Stats | `routes/StatsView.js` | 3 lines | oldreddit clone |
 | Subscription | `routes/SubscriptionView.js` | 2 lines | oldreddit clone |
 | Referrals | `routes/ReferralsView.js` | 2 lines | oldreddit clone |
-| Bridge | `routes/BridgeView.js` | 2 lines | oldreddit clone (logic complex) |
 | NotFound | `routes/NotFoundView.js` | 2 lines | oldreddit clone |
 
 Per-component current state:
@@ -53,7 +52,6 @@ See the sub-plan index: [`06-subplans/README.md`](./06-subplans/README.md). Summ
 3. **Social routes** — Follows, Blocks, Reports
 4. **Network + Stats**
 5. **Subscription + Referrals**
-6. **Bridge**
 7. **Agents + Discover + NotFound**
 8. **MobileBottomNav** (deferred from Plan 02)
 9. **Polish + QA** (spacing, typography, state, responsive, accessibility, optional default-theme switch)

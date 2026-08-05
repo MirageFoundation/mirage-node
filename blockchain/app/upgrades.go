@@ -8,11 +8,11 @@ import (
 	"math"
 	"time"
 
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 
 	corekeeper "mirage/x/core/keeper"
 	coretypes "mirage/x/core/types"
@@ -26,6 +26,18 @@ const (
 
 	sdkRestoreUpgradeName = "v1.10.4-restore-sdk"
 )
+
+var removedBridgePrefixes = []string{
+	"bridge_attestations/",
+	"bridge_attestors/",
+	"bridge_mint_attestations/",
+	"bridge_mint_attestors/",
+	"bridge_mint_fee_pending/",
+	"bridge_mint_fee_failures/",
+	"bridge_burns/",
+	"bridge_mints/",
+	"bridge_sequence/",
+}
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
 func (app *App) RegisterUpgradeHandlers() {
@@ -609,7 +621,7 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.9.0-bridge: Cross-chain bridge functionality
+	// v1.9.0-bridge: Cross-chain bridge functionality (removed in v1.31.0)
 	// - Attested bridge for external chains (Solana, Ethereum)
 	// - New params: bridge_chains, bridge_attestation_threshold, bridge_fee
 	app.UpgradeKeeper.SetUpgradeHandler(
@@ -623,71 +635,12 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			// Update core params with bridge defaults
-			params := app.CoreKeeper.GetParams(sdkCtx)
-			changed := false
-
-			// Enable Solana bridge with 500 MIRAGE fee
-			solanaEnabled := false
-			for _, chain := range params.BridgeChains {
-				if chain.ChainId == "solana" {
-					solanaEnabled = true
-					if chain.Fee != 500_000_000 {
-						oldFee := chain.Fee
-						chain.Fee = 500_000_000
-						changed = true
-						sdkCtx.Logger().Info("v1.9.0-bridge: updated Solana bridge fee to 500 MIRAGE",
-							"old_fee", oldFee, "new_fee", 500_000_000)
-					}
-					break
-				}
-			}
-			if !solanaEnabled {
-				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
-					ChainId: "solana",
-					Enabled: true,
-					Fee:     500_000_000, // 500 MIRAGE
-				})
-				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 500 MIRAGE fee")
-			}
-
-			// Set attestation threshold: 66.67%
-			if params.BridgeAttestationThreshold == 0 {
-				params.BridgeAttestationThreshold = 0.6667
-				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_attestation_threshold", "value", params.BridgeAttestationThreshold)
-			}
-
-			if changed {
-				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
-					sdkCtx.Logger().Error("v1.9.0-bridge: failed to update params", "err", err)
-					return nil, err
-				}
-				sdkCtx.Logger().Info("v1.9.0-bridge: params updated successfully")
-			}
-
-			// Advance Solana bridge sequence only if currently lower than minimum
-			// This prevents "AlreadyMinted" errors when Mirage chain is reset but Solana state persists
-			// but doesn't overwrite a higher value that may have been set via genesis
-			const minSolanaSeq uint64 = 100
-			currentSeq, _ := app.CoreKeeper.GetCurrentBridgeSequence(sdkCtx, "solana")
-			if currentSeq < minSolanaSeq {
-				if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", minSolanaSeq); err != nil {
-					sdkCtx.Logger().Error("v1.9.0-bridge: failed to set bridge sequence", "err", err)
-					return nil, err
-				}
-				sdkCtx.Logger().Info("v1.9.0-bridge: advanced Solana bridge sequence", "from", currentSeq, "to", minSolanaSeq)
-			} else {
-				sdkCtx.Logger().Info("v1.9.0-bridge: kept existing Solana bridge sequence", "seq", currentSeq)
-			}
-
-			sdkCtx.Logger().Info("Upgrade to v1.9.0-bridge complete - cross-chain bridge enabled")
+			sdkCtx.Logger().Info("v1.9.0-bridge: bridge logic removed in v1.31.0 (no-op)")
 			return toVM, nil
 		},
 	)
 
-	// v1.9.1-seq-fix: HACK to advance Solana sequence past stale devnet state
+	// v1.9.1-seq-fix: HACK to advance Solana sequence past stale devnet state (removed in v1.31.0)
 	// Use this if v1.9.0-bridge already ran before the sequence fix was added
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.9.1-seq-fix",
@@ -700,20 +653,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			// Advance Solana bridge sequence only if currently lower than minimum
-			const minSolanaSeq uint64 = 100
-			currentSeq, _ := app.CoreKeeper.GetCurrentBridgeSequence(sdkCtx, "solana")
-			if currentSeq < minSolanaSeq {
-				if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", minSolanaSeq); err != nil {
-					sdkCtx.Logger().Error("v1.9.1-seq-fix: failed to set bridge sequence", "err", err)
-					return nil, err
-				}
-				sdkCtx.Logger().Info("v1.9.1-seq-fix: advanced Solana bridge sequence", "from", currentSeq, "to", minSolanaSeq)
-			} else {
-				sdkCtx.Logger().Info("v1.9.1-seq-fix: kept existing Solana bridge sequence", "seq", currentSeq)
-			}
-
-			sdkCtx.Logger().Info("Upgrade to v1.9.1-seq-fix complete")
+			sdkCtx.Logger().Info("v1.9.1-seq-fix: bridge logic removed in v1.31.0 (no-op)")
 			return toVM, nil
 		},
 	)
@@ -796,7 +736,7 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.9.3-bridge-fee-burn: Store mint attestors separately and burn bridge fees
+	// v1.9.3-bridge-fee-burn: Store mint attestors separately and burn bridge fees (removed in v1.31.0)
 	// - Keeps mint attestation record size stable (separate attestor keys)
 	// - Prevents gas variance from growing attestor maps
 	// - Burns bridge fees inline when threshold is reached (no attestor payouts)
@@ -811,16 +751,12 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			if err := app.CoreKeeper.MigrateBridgeMintAttestors(sdkCtx); err != nil {
-				return nil, err
-			}
-
-			sdkCtx.Logger().Info("Upgrade to v1.9.3-bridge-fee-burn complete - attestors moved and fees burned")
+			sdkCtx.Logger().Info("v1.9.3-bridge-fee-burn: bridge logic removed in v1.31.0 (no-op)")
 			return toVM, nil
 		},
 	)
 
-	// v1.9.4-bridge-attestor-fix: Store all attestors separately (replaces v1.9.3 which passed but didn't execute)
+	// v1.9.4-bridge-attestor-fix: Store all attestors separately (removed in v1.31.0)
 	// - Migrates OUTBOUND mint attestors (was v1.9.3-bridge-fee-burn)
 	// - Migrates INBOUND attestors
 	// - Keeps attestation records fixed-size to prevent gas variance
@@ -836,19 +772,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			// Migrate OUTBOUND mint attestors (was v1.9.3-bridge-fee-burn which passed but didn't execute)
-			if err := app.CoreKeeper.MigrateBridgeMintAttestors(sdkCtx); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Info("v1.9.4: outbound mint attestors migrated")
-
-			// Migrate INBOUND attestors
-			if err := app.CoreKeeper.MigrateBridgeAttestors(sdkCtx); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Info("v1.9.4: inbound attestors migrated")
-
-			sdkCtx.Logger().Info("Upgrade to v1.9.4-bridge-attestor-fix complete - all attestors migrated")
+			sdkCtx.Logger().Info("v1.9.4-bridge-attestor-fix: bridge logic removed in v1.31.0 (no-op)")
 			return toVM, nil
 		},
 	)
@@ -947,7 +871,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	)
 
 	// v1.10.0-remove-ibc: Remove IBC/Osmosis support entirely
-	// - Removes Osmosis from bridge_chains params
+	// - Removes Osmosis from bridge_chains params (bridge logic removed in v1.31.0)
 	// - IBC modules have been removed from the binary
 	// - Adds MsgBurnTokens for governance burns
 	// - Renames MsgMintTo to MsgMintTokens
@@ -962,31 +886,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			// Remove Osmosis from bridge_chains if present
-			params := app.CoreKeeper.GetParams(sdkCtx)
-			changed := false
-			newChains := make([]*coretypes.BridgeChainConfig, 0, len(params.BridgeChains))
-			for _, chain := range params.BridgeChains {
-				if chain.ChainId == "osmosis" {
-					sdkCtx.Logger().Info("v1.10.0-remove-ibc: removing Osmosis from bridge_chains")
-					changed = true
-					continue
-				}
-				newChains = append(newChains, chain)
-			}
-
-			if changed {
-				params.BridgeChains = newChains
-				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
-					sdkCtx.Logger().Error("v1.10.0-remove-ibc: failed to update params", "err", err)
-					return nil, err
-				}
-				sdkCtx.Logger().Info("v1.10.0-remove-ibc: params updated - Osmosis removed")
-			} else {
-				sdkCtx.Logger().Info("v1.10.0-remove-ibc: Osmosis not in bridge_chains, no changes needed")
-			}
-
-			sdkCtx.Logger().Info("Upgrade to v1.10.0-remove-ibc complete - IBC support removed")
+			sdkCtx.Logger().Info("v1.10.0-remove-ibc: bridge logic removed in v1.31.0 (no-op)")
 			return toVM, nil
 		},
 	)
@@ -1054,7 +954,6 @@ func (app *App) RegisterUpgradeHandlers() {
 	// - Difficulty changes from bit-count to step count (0 = base, factor = 1000 * (1+step)^difficulty)
 	// - Validation changes from leadingZeroBits to big.Int target comparison
 	// - subscription_reserve_fraction changes from integer percent (0-100) to double fraction [0,1]
-	// - bridge_attestation_threshold changes from basis points (0-10000) to double fraction [0,1]
 	// - New param: pow_factor (double, default 0.25 = 25% per step)
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.11.0",
@@ -1068,8 +967,8 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			// --- 1. Read old param values from raw protobuf bytes ---
-			// The wire type for subscription_reserve_fraction (field 42) and bridge_attestation_threshold (field 51)
-			// changed from varint to double, so we must extract old values from raw bytes before unmarshal.
+			// The wire type for subscription_reserve_fraction (field 42) changed from
+			// varint to double, so we must extract old values from raw bytes before unmarshal.
 			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
 			rawParams, err := store.Get([]byte("params"))
 			if err != nil || len(rawParams) == 0 {
@@ -1078,18 +977,13 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			oldSubReserve := uint64(80) // default if not found
-			oldBridgeThreshold := uint64(6667)
 			if rawParams != nil {
 				if v, ok := extractProtoVarint(rawParams, 42); ok {
 					oldSubReserve = v
 				}
-				if v, ok := extractProtoVarint(rawParams, 51); ok {
-					oldBridgeThreshold = v
-				}
 			}
 			sdkCtx.Logger().Info("v1.11.0: extracted old param values",
-				"old_subscription_reserve_pct", oldSubReserve,
-				"old_bridge_attestation_threshold", oldBridgeThreshold)
+				"old_subscription_reserve_pct", oldSubReserve)
 
 			// --- 2. Write fresh default params first so GetParams doesn't fail ---
 			// (The old bytes will fail unmarshal due to wire type change.)
@@ -1108,17 +1002,6 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 			params.SubscriptionReservePercent = newSubReserve
 			sdkCtx.Logger().Info("v1.11.0: converted subscription_reserve_percent", "old", oldSubReserve, "new", newSubReserve)
-
-			// Convert bridge_attestation_threshold: old basis points (0-10000) → fraction [0,1]
-			newBridgeThreshold := float64(oldBridgeThreshold) / 10000.0
-			if newBridgeThreshold > 1 {
-				newBridgeThreshold = 1
-			}
-			if newBridgeThreshold <= 0 {
-				newBridgeThreshold = 0.6667
-			}
-			params.BridgeAttestationThreshold = newBridgeThreshold
-			sdkCtx.Logger().Info("v1.11.0: converted bridge_attestation_threshold", "old", oldBridgeThreshold, "new", newBridgeThreshold)
 
 			// Set pow_difficulty_step if zero
 			if params.PowDifficultyStep == 0 {
@@ -1759,14 +1642,6 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 			sdkCtx.Logger().Info("v1.17.0: reindexed active subscriptions", "count", reindexed)
 
-			attestationsMoved, attestorsMoved, err := app.CoreKeeper.MigrateBridgeAttestationParams(sdkCtx)
-			if err != nil {
-				return nil, fmt.Errorf("v1.17.0: bridge attestation migration failed: %w", err)
-			}
-			sdkCtx.Logger().Info("v1.17.0: bridge attestation keys migrated",
-				"attestations_moved", attestationsMoved,
-				"attestors_moved", attestorsMoved)
-
 			_ = store // used above
 
 			sdkCtx.Logger().Info("Upgrade to v1.17.0-security complete")
@@ -2205,6 +2080,85 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// ── v1.31.0: Remove cross-chain bridge ──
+	// Deletes all bridge KV prefixes and rewrites params without fields 50/51
+	// (bridge_chains / bridge_attestation_threshold), which are gone from the Params struct.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.31.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.31.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.31.0: RunMigrations failed: %w", err)
+			}
+
+			// Clean up orphaned bridge KV data. These prefixes are no longer read by any code.
+			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
+			totalDeleted := 0
+			for _, prefix := range removedBridgePrefixes {
+				prefixBytes := []byte(prefix)
+				iter, iterErr := store.Iterator(prefixBytes, storetypes.PrefixEndBytes(prefixBytes))
+				if iterErr != nil {
+					return nil, fmt.Errorf("v1.31.0: failed to iterate bridge prefix %q: %w", prefix, iterErr)
+				}
+				var keys [][]byte
+				for ; iter.Valid(); iter.Next() {
+					keys = append(keys, append([]byte(nil), iter.Key()...))
+				}
+				iter.Close()
+				for _, key := range keys {
+					if delErr := store.Delete(key); delErr != nil {
+						return nil, fmt.Errorf("v1.31.0: failed to delete bridge key %x under %q: %w", key, prefix, delErr)
+					}
+				}
+				verifyIter, verifyErr := store.Iterator(prefixBytes, storetypes.PrefixEndBytes(prefixBytes))
+				if verifyErr != nil {
+					return nil, fmt.Errorf("v1.31.0: failed to verify bridge prefix %q: %w", prefix, verifyErr)
+				}
+				empty := !verifyIter.Valid()
+				verifyIter.Close()
+				if !empty {
+					return nil, fmt.Errorf("v1.31.0: bridge prefix %q still contains keys after cleanup", prefix)
+				}
+				deletedCount := len(keys)
+				if deletedCount > 0 {
+					sdkCtx.Logger().Info("v1.31.0: cleaned up bridge prefix", "prefix", prefix, "keys_deleted", deletedCount)
+				}
+				totalDeleted += deletedCount
+			}
+
+			if err := store.Delete([]byte("bridge_pending_count")); err != nil {
+				return nil, fmt.Errorf("v1.31.0: failed to delete bridge_pending_count: %w", err)
+			}
+			pendingExists, err := store.Has([]byte("bridge_pending_count"))
+			if err != nil {
+				return nil, fmt.Errorf("v1.31.0: failed to verify bridge_pending_count deletion: %w", err)
+			}
+			if pendingExists {
+				return nil, fmt.Errorf("v1.31.0: bridge_pending_count still exists after cleanup")
+			}
+			sdkCtx.Logger().Info("v1.31.0: deleted scalar key bridge_pending_count")
+
+			sdkCtx.Logger().Info("v1.31.0: bridge KV cleanup complete", "total_keys_deleted", totalDeleted)
+
+			// Rewrite params bytes without removed fields 50/51 (bridge_chains / bridge_attestation_threshold).
+			// GetParams unmarshals ignoring unknown fields; SetParams re-marshals the current struct.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.31.0: params failed validation before rewrite: %w", err)
+			}
+			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+				return nil, fmt.Errorf("v1.31.0: failed to rewrite params: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.31.0: params rewritten without bridge fields")
+
+			sdkCtx.Logger().Info("Upgrade to v1.31.0 complete - bridge removed")
+			return toVM, nil
+		},
+	)
+
 	// Register the store loader for v1.28.0's store deletions. This must run
 	// before app.Load() (called later in App.New) so the deleted stores are
 	// dropped while loading the multistore at the upgrade height.
@@ -2214,6 +2168,14 @@ func (app *App) RegisterUpgradeHandlers() {
 // registerV1_28_0StoreLoader wires StoreUpgrades for the v1.28.0 upgrade, which
 // physically deletes the dormant x/group and x/circuit KV stores at the planned
 // upgrade height. It is a no-op on every other height/upgrade.
+//
+// TWO-PHASE (NOT ATOMIC): SetStoreLoader applies Deleted stores during the
+// multistore *load* phase at the upgrade height, while the upgrade handler's
+// state migration runs in a separate later phase. An interruption between
+// those phases can leave the physical stores deleted with migration incomplete
+// (or the reverse). Documented so future store removals — especially of stores
+// with live state — account for this split and consider a handler-written
+// sentinel asserted at the start of the next block.
 func (app *App) registerV1_28_0StoreLoader() {
 	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
 	if err != nil {

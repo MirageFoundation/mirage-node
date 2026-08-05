@@ -2,6 +2,12 @@ BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 COMMIT := $(shell git log -1 --format='%H')
 APPNAME := mirage
 BUILD_TAGS := pebbledb
+GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.6.0
+
+# Verify module and auto-downloaded toolchain checksums even if a host-level Go
+# configuration disabled the checksum database.
+export GOSUMDB := sum.golang.org
+export GOTOOLCHAIN := auto
 
 # do not override user values
 ifeq (,$(VERSION))
@@ -50,7 +56,7 @@ test: govet govulncheck test-unit test-iavl
 # read-path correctness when fast-node index is incomplete) runs in every
 # CI/deploy gate alongside ./... — patches/iavl is a separate go module
 # (replace directive in go.mod) and is NOT picked up by ./...
-test-fast: test-fast-app test-iavl test-store
+test-fast: test-fast-app test-iavl test-store test-patch-provenance
 	@echo "--> All fast tests passed (./... + patches/iavl + patches/cosmos-sdk-store-v2)"
 
 test-fast-app:
@@ -77,7 +83,11 @@ test-store:
 	@echo "--> Running patched store/v2 tests (patches/cosmos-sdk-store-v2/rootmulti)"
 	@cd patches/cosmos-sdk-store-v2 && go test -mod=readonly -timeout 5m ./rootmulti/
 
-.PHONY: test test-unit test-race test-cover test-fast test-fast-app test-iavl test-store bench
+test-patch-provenance:
+	@echo "--> Checking consensus patch provenance"
+	@../scripts/check_patches.sh
+
+.PHONY: test test-unit test-race test-cover test-fast test-fast-app test-iavl test-store test-patch-provenance bench
 
 #################
 ###  Install  ###
@@ -94,17 +104,12 @@ install:
 
 build: install
 
-build-orchestrator:
-	@echo "--> building orchestrator"
-	@mkdir -p ./bin
-	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/orchestrator ./cmd/orchestrator
-
 build-compact-db:
 	@echo "--> building compact-db"
 	@mkdir -p ./bin
 	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/compact-db ./cmd/compact-db
 
-build-all: test-fast build build-orchestrator build-compact-db
+build-all: test-fast build build-compact-db
 
 # Build a specific version for upgrades (version embedded via ldflags; binary is always miraged)
 build-version:
@@ -114,7 +119,7 @@ build-version:
 	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./bin/$(APPNAME)d ./cmd/$(APPNAME)d
 	@echo "--> Binary created: ./bin/$(APPNAME)d"
 
-.PHONY: all install build build-version build-orchestrator build-compact-db build-all
+.PHONY: all install build build-version build-compact-db build-all
 
 ##################
 ###  Protobuf  ###
@@ -155,8 +160,13 @@ govet:
 	@go vet ./...
 
 govulncheck:
-	@echo Running govulncheck...
-	@go tool golang.org/x/vuln/cmd/govulncheck@latest
-	@govulncheck ./...
+	@status=0; \
+	echo "Running govulncheck for main module..."; \
+	$(GOVULNCHECK) ./... || status=1; \
+	echo "Running govulncheck for patched IAVL..."; \
+	(cd patches/iavl && $(GOVULNCHECK) .) || status=1; \
+	echo "Running govulncheck for patched store/v2..."; \
+	(cd patches/cosmos-sdk-store-v2 && $(GOVULNCHECK) ./rootmulti/) || status=1; \
+	exit $$status
 
 .PHONY: govet govulncheck

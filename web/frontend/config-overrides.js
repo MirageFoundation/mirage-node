@@ -81,7 +81,7 @@ module.exports = function override(config) {
             resourceRegExp: /^uvu$/,
             contextRegExp: /node_modules/,
         }),
-        // Provide Buffer and process globally for Solana web3.js
+        // Provide Buffer and process globally for crypto polyfills
         new webpack.ProvidePlugin({
             Buffer: ['buffer', 'Buffer'],
             process: 'process/browser',

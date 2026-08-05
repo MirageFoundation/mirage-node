@@ -16,7 +16,6 @@ ENV_FILES = [
     "frontend.env",
     "indexer.env",
     "node.env",
-    "orchestrator.env",
     "secrets.env",
 ]
 

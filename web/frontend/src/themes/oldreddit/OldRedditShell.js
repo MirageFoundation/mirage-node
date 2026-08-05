@@ -180,7 +180,6 @@ const PAGE_TITLES = {
     '/referrals': 'referrals',
     '/reports': 'reports',
     '/search': 'search',
-    '/bridge': 'bridge',
 };
 
 function getPageTitle(path) {

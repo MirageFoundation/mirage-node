@@ -262,7 +262,6 @@ func TestIsRelayMessage(t *testing.T) {
 		&coretypes.MsgEdit{},
 		&coretypes.MsgSubscribe{},
 		&coretypes.MsgSetAutoRenewal{},
-		&coretypes.MsgBridgeBurn{},
 		&coretypes.MsgAward{},
 		&coretypes.MsgSetBiography{},
 		&coretypes.MsgAnnotate{},

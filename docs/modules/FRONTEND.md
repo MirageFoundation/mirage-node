@@ -30,7 +30,6 @@ The frontend is a React SPA that provides:
 - Content creation (posts, comments, votes)
 - Social features (follow users/topics, block content)
 - Subscription management and token transfers
-- Cross-chain bridging UI (Solana)
 - Personalized feeds and discovery
 
 **Key Design Principle:** The frontend handles all cryptographic operations locally. Private keys never leave the browser. The backend only receives signed messages and public keys.
@@ -108,7 +107,6 @@ web/frontend/src/
 │   ├── ProfileView.js     # User profile
 │   ├── SettingsView.js    # User settings
 │   ├── SubscriptionView.js # Subscription management
-│   ├── BridgeView.js      # Cross-chain bridging
 │   └── ...
 ├── components/
 │   ├── CardView.js        # Post card display
@@ -469,9 +467,6 @@ async function post(path, body, options) {
 | `/api/core/post` | POST | Create post/comment |
 | `/api/core/vote` | POST | Submit vote |
 | `/api/core/set_username` | POST | Set username |
-| `/api/bridge/burn` | POST | Bridge burn transaction |
-| `/api/bridge/config` | GET | Bridge configuration (chains, fees) |
-| `/api/bridge/status` | GET | Query bridge status and attestation progress |
 
 ---
 
