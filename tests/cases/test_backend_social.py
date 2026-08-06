@@ -563,14 +563,16 @@ def test_hard_cap_vs_deque(backend: str):
         # Unfollow one, then follow should succeed again
         if follow_targets:
             resp = _do_follow_user(backend, free_wallet, follow_targets[0], follow=False, skip_pow=False)
-            time.sleep(2)
+            # Wait for unfollow to land before re-filling the slot — a fixed
+            # sleep races the indexer and yields empty tx_hash on the next follow.
+            _wait_list_count(backend, free_addr, "followed_users", max_fu_free - 1, timeout=30.0, at_most=True)
             resp = _do_follow_user(backend, free_wallet, overflow_target, follow=True, skip_pow=False)
             txh = str(resp.get("tx_hash", "")).lower()
             tx_code = int(resp.get("code", 0) or 0)
             if txh and tx_code == 0:
                 _pass("hardcap.fu_follow_after_unfollow")
             else:
-                _fail("hardcap.fu_follow_after_unfollow", f"txh={txh} code={tx_code}")
+                _fail("hardcap.fu_follow_after_unfollow", f"txh={txh} code={tx_code} resp={resp}")
         else:
             _pass("hardcap.fu_follow_after_unfollow (skipped — no new targets to unfollow)")
 

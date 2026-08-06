@@ -58,6 +58,8 @@ const ERROR_MAP = {
     control_characters: "Fields contain invalid control characters.",
     forbidden: "You do not have permission to perform this action.",
     unauthorized: "Unauthorized.",
+    signature_required: "A signed request is required.",
+    not_found: "Not found.",
 
     // Server state
     node_catching_up: "The node is syncing. Please try again shortly.",

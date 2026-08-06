@@ -928,10 +928,14 @@ def _wait_list_count(
     list_key: str,
     expected: int,
     timeout: float = 30.0,
+    *,
+    at_most: bool = False,
 ) -> int:
     """Poll until a profile/followed list reaches expected count (or timeout).
 
     list_key: "followed_users", "followed_topics", "enabled_agents"
+    By default waits until count >= expected (fill). With at_most=True waits
+    until count <= expected (after unfollow/disable).
     Returns the actual count observed.
     """
     endpoint = "get_user_followed" if list_key.startswith("followed_") else "get_profile"
@@ -942,7 +946,10 @@ def _wait_list_count(
             code, data = _get(f"{backend}/api/{endpoint}", {"address": address})
             if code == 200 and data:
                 actual = len(data.get(list_key) or [])
-                if actual >= expected:
+                if at_most:
+                    if actual <= expected:
+                        return actual
+                elif actual >= expected:
                     return actual
         except Exception:
             pass

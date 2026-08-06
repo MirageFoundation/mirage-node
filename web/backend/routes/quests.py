@@ -796,7 +796,15 @@ def claim_rewards():
         owner = str(data.get("owner", "")).strip().lower()
 
         if not owner:
-            return jsonify({"error": "owner required"}), 400
+            return api_error_code("owner_required", 400)
+
+        # Fail before burning an envelope_nonce when the payout path is down —
+        # clients (and the test suite's _post retries) re-send the same signed
+        # body on 503, which would otherwise look like a nonce replay.
+        distributor = get_distributor()
+        if not distributor.is_configured():
+            log_event(rid, "rewards.claim.not_configured", owner=owner)
+            return api_error_code("not_configured", 503, success=False)
 
         has_sig = bool(str(data.get("pubkey", "") or "").strip() and str(data.get("signature", "") or "").strip())
         if has_sig:
@@ -807,23 +815,14 @@ def claim_rewards():
         elif legacy_unsigned_claim_allowed():
             log_event(rid, "authz.legacy_unsigned", endpoint="rewards/claim", owner=owner)
         else:
-            return jsonify({"error": "signature required"}), 401
+            return api_error_code("signature_required", 401)
 
         update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
 
-        # Check if suspended
         if _is_user_suspended(owner, ts):
             return api_error_code("suspended", 403, success=False)
-
-        # Use reward distributor to process claim
-        distributor = get_distributor()
-
-        # Check if rewards distribution is properly configured
-        if not distributor.is_configured():
-            log_event(rid, "rewards.claim.not_configured", owner=owner)
-            return api_error_code("not_configured", 503, success=False)
 
         result = distributor.claim_rewards(owner, ts)
 
@@ -1035,8 +1034,6 @@ def admin_unsuspend_rewards():
     except Exception as e:
         log_event(rid, "admin.unsuspend.err", error=str(e))
         return safe_error(e)
-
-
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:

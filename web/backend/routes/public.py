@@ -9843,7 +9843,7 @@ def get_invite_codes():
     rid = next_request_id()
     if not REGISTRATION_INVITE_CODE_REQUIRED:
         log_event(rid, "invite.get_codes.disabled")
-        return jsonify({"error": "not found"}), 404
+        return api_error_code("not_found", 404)
 
     address = request.args.get("address", "", type=str).strip()
     if not address:
@@ -9889,7 +9889,7 @@ def validate_invite_code():
 
     if not REGISTRATION_INVITE_CODE_REQUIRED:
         log_event(rid, "invite.validate.disabled")
-        return jsonify({"error": "not found"}), 404
+        return api_error_code("not_found", 404)
 
     if not _is_main_site():
         log_event(rid, "invite.validate.blocked", host=request.host)

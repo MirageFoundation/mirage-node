@@ -437,13 +437,25 @@ def test_reward_claim_authz(backend):
 
     # 1b. A correctly signed claim must clear the auth gate (even if there is
     #     nothing to pay — that returns success=false / no_rewards at 200).
+    # Single-shot POST: _post retries 503 with the same body, and a signed
+    # envelope_nonce is single-use once auth has run.
     signed = _sign_claim(victim_wallet, victim)
-    code, resp = _post(f"{backend}/api/rewards/claim", signed)
+    r = requests.post(f"{backend}/api/rewards/claim", json=signed, timeout=20)
+    try:
+        resp = r.json()
+    except ValueError:
+        resp = {}
+    code = r.status_code
     if code == 200:
         _pass("reward_claim.signed_accepted", code=code, success=(resp or {}).get("success"))
     elif code == 503:
-        # Pool not configured / payout path unavailable — auth still passed.
-        _pass("reward_claim.signed_accepted", code=code, note="rewards unavailable after auth")
+        err = str((resp or {}).get("error_code") or "")
+        if err == "not_configured":
+            # Config check runs before auth — does not prove the signature path.
+            _skip("reward_claim.signed_accepted", f"rewards not configured: {resp}")
+        else:
+            # Post-auth payout failure (pool empty, tx retry, etc.) — auth cleared.
+            _pass("reward_claim.signed_accepted", code=code, note=err or "payout unavailable")
     elif code in _UNAUTHENTICATED:
         _fail(
             "reward_claim.signed_accepted",

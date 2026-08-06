@@ -66,6 +66,8 @@ ERRORS = {
     "control_characters": "fields contain invalid control characters",
     "forbidden": "action forbidden",
     "unauthorized": "unauthorized access",
+    "signature_required": "signature required",
+    "not_found": "not found",
     "enabled_must_be_boolean": "enabled must be boolean",
     "owner_required": "owner required",
     # Server state
