@@ -8,6 +8,7 @@ Functions:
 - assert_node_home_ready(): Validate node directories/files.
 - get_rpc_url/get_grpc_url/get_grpc_target(): URL helpers.
 - min_gas_price_umirage(): Minimum gas price for umirage.
+- startup_grace_seconds(): Budget for chain-dependent startup queries.
 - resolve_validator_payer_address(): Fee payer address.
 - resolve_validator_pubkey_bytes(): Validator pubkey bytes.
 - find_local_operator_address(): miragevaloper address.
@@ -36,6 +37,10 @@ KEYRING_BACKEND = get_config().get_keyring_backend()
 
 _log = logging.getLogger("node")
 
+# Startup retry pacing for chain-dependent queries.
+_STARTUP_LOG_INTERVAL_SEC = 30.0
+_STARTUP_MAX_BACKOFF_SEC = 30.0
+
 
 @dataclass
 class Runtime:
@@ -51,6 +56,7 @@ class Runtime:
     validator_operator_address: str
     validator_consensus_address: str
     min_gas_price_umirage: float
+
 
 _RUNTIME: Optional[Runtime] = None
 
@@ -333,18 +339,45 @@ def resolve_chain_id() -> str:
     return chain_id
 
 
-def resolve_account_number(api_url: str, address: str, wait_budget_sec: float = 60.0) -> int:
+def startup_grace_seconds() -> float:
+    """How long chain-dependent startup work may wait for the node to serve queries.
+
+    Sized for a coordinated chain upgrade, not for a process restart: past the
+    halt height the REST API stays up but answers height-dependent queries with
+    sdk code 26 until 2/3+ of voting power is back on the new binary, which takes
+    as long as the fleet rollout takes.
+    """
+    raw = os.environ.get("CHAIN_STARTUP_GRACE_SECONDS", "1800").strip()
+    try:
+        value = float(raw)
+    except ValueError as e:
+        raise RuntimeError(f"CHAIN_STARTUP_GRACE_SECONDS is not a number: {raw!r}") from e
+    if value <= 0:
+        raise RuntimeError(f"CHAIN_STARTUP_GRACE_SECONDS must be > 0, got {value}")
+    return value
+
+
+def resolve_account_number(api_url: str, address: str, wait_budget_sec: Optional[float] = None) -> int:
     """Fetch account_number once at startup (stable for the life of the account).
 
     The entrypoint only waits for the node's RPC port before starting gunicorn, so
-    the REST API may not be bound yet. Retry within a bounded budget, then fail.
+    the REST API may not be bound yet, and during an upgrade halt it answers but
+    cannot serve a height. Retry within the startup grace budget, then fail.
     """
     import requests
 
+    if wait_budget_sec is None:
+        wait_budget_sec = startup_grace_seconds()
+
     url = f"{api_url.rstrip('/')}/cosmos/auth/v1beta1/accounts/{address}"
-    deadline = time.monotonic() + wait_budget_sec
+    started = time.monotonic()
+    deadline = started + wait_budget_sec
     last_err = ""
+    attempts = 0
+    delay = 2.0
+    last_log = 0.0
     while True:
+        attempts += 1
         try:
             resp = requests.get(url, timeout=10)
             if resp.status_code == 200:
@@ -352,10 +385,26 @@ def resolve_account_number(api_url: str, address: str, wait_budget_sec: float = 
             last_err = f"http {resp.status_code}: {resp.text[:300]}"
         except Exception as e:
             last_err = str(e)
-        if time.monotonic() >= deadline:
-            raise RuntimeError(f"account query failed after {wait_budget_sec:.0f}s waiting for node API: {last_err}")
-        _log.warning("account query not ready, retrying: %s", last_err[:200])
-        time.sleep(2)
+        now = time.monotonic()
+        elapsed = now - started
+        if now >= deadline:
+            raise RuntimeError(
+                f"account query failed after {elapsed:.0f}s and {attempts} attempts "
+                f"waiting for node API: {last_err}"
+            )
+        # Every gunicorn worker runs this, so one line per attempt floods the log
+        # for the whole halt. Report the first attempt, then once per interval.
+        if attempts == 1 or now - last_log >= _STARTUP_LOG_INTERVAL_SEC:
+            _log.warning(
+                "account query not ready after %.0fs (%d attempts, %.0fs of grace left): %s",
+                elapsed,
+                attempts,
+                deadline - now,
+                last_err[:200],
+            )
+            last_log = now
+        time.sleep(min(delay, max(0.0, deadline - now)))
+        delay = min(delay * 2, _STARTUP_MAX_BACKOFF_SEC)
     body = resp.json()
     acc = body.get("account") or {}
     # Some deployments wrap BaseAccount under a nested key.
@@ -421,6 +470,7 @@ __all__ = [
     "get_grpc_url",
     "get_grpc_target",
     "min_gas_price_umirage",
+    "startup_grace_seconds",
     "resolve_validator_payer_address",
     "resolve_validator_pubkey_bytes",
     "resolve_validator_privkey_bytes",

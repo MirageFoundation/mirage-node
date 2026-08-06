@@ -586,19 +586,29 @@ tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
 tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
 
 # Keep maintenance mode active until Gunicorn and its dependencies are healthy.
-echo "==> Waiting for backend to become available..."
+# The budget must cover a coordinated chain upgrade: the backend resolves the
+# validator account at startup, and past the halt height that query fails until
+# 2/3+ of voting power is back on the new binary. Exiting earlier would restart
+# the container in a loop for the whole rollout.
+BACKEND_WAIT_SECONDS="${CHAIN_STARTUP_GRACE_SECONDS:-1800}"
+echo "==> Waiting for backend to become available (up to ${BACKEND_WAIT_SECONDS}s)..."
 BACKEND_READY=0
-for i in $(seq 1 120); do
+BACKEND_WAITED=0
+while [ "$BACKEND_WAITED" -lt "$BACKEND_WAIT_SECONDS" ]; do
   if curl -sf --max-time 1 http://127.0.0.1:5000/api/get_node_config >/dev/null 2>&1; then
     BACKEND_READY=1
-    echo "✓ Backend is ready"
+    echo "✓ Backend is ready after ${BACKEND_WAITED}s"
     break
   fi
-  sleep 1
+  sleep 5
+  BACKEND_WAITED=$((BACKEND_WAITED + 5))
+  if [ $((BACKEND_WAITED % 60)) -eq 0 ]; then
+    echo "    backend still starting (${BACKEND_WAITED}s elapsed; maintenance mode held)"
+  fi
 done
 
 if [ "$BACKEND_READY" -eq 0 ]; then
-  echo "ERROR: Backend not ready after 120 attempts" >&2
+  echo "ERROR: Backend not ready after ${BACKEND_WAIT_SECONDS}s" >&2
   exit 1
 fi
 
