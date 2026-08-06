@@ -11,6 +11,7 @@ import Api from "../../../utils/api";
 import Storage from "../../../utils/Storage";
 import * as tx from "../../../utils/tx";
 import { updateNotification } from "../../../utils/notifications";
+import { signPlainPayload } from "../../../utils/signPlain";
 import ConfirmDialog from "./ConfirmDialog";
 
 /**
@@ -385,11 +386,15 @@ export function useAdminQuestActions({ post, state, updatePost, onCloseMenu }) {
         }
         setIsSuspending(true);
         try {
+            const sig = await signPlainPayload(
+                (ts, n) => `admin_rewards_suspend:${viewerAddress.toLowerCase()}:${ts}:${n}`
+            );
             const response = await Api.post("/admin/rewards/suspend", {
                 admin: viewerAddress,
                 target: targetUserId,
                 duration_days: suspendDuration,
                 reason: "Attempting to game the quest system",
+                ...sig,
             });
             if (response && response.success) {
                 const durationText = suspendDuration > 0
@@ -432,9 +437,13 @@ export function useAdminQuestActions({ post, state, updatePost, onCloseMenu }) {
         }
         setIsUnsuspending(true);
         try {
+            const sig = await signPlainPayload(
+                (ts, n) => `admin_rewards_unsuspend:${viewerAddress.toLowerCase()}:${ts}:${n}`
+            );
             const response = await Api.post("/admin/rewards/unsuspend", {
                 admin: viewerAddress,
                 target: targetUserId,
+                ...sig,
             });
             if (response && response.success) {
                 setUserSuspendedStatus(false);

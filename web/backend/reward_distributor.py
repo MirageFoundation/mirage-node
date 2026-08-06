@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
+import secrets
 import subprocess
 import time
 from typing import List, Optional, Tuple
@@ -54,8 +54,10 @@ INVITE_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # Excludes I, O, 0, 1 fo
 
 def _generate_invite_code() -> str:
     """Generate a random invite code in format XXXX-XXXX."""
-    part1 = "".join(random.choices(INVITE_CODE_CHARS, k=4))
-    part2 = "".join(random.choices(INVITE_CODE_CHARS, k=4))
+    # secrets (CSPRNG) — invite codes are bearer credentials when the feature is on.
+    # If REGISTRATION_INVITE_CODE_REQUIRED is ever turned back on, this must stay.
+    part1 = "".join(secrets.choice(INVITE_CODE_CHARS) for _ in range(4))
+    part2 = "".join(secrets.choice(INVITE_CODE_CHARS) for _ in range(4))
     return f"{part1}-{part2}"
 
 
@@ -340,6 +342,10 @@ class RewardDistributor:
 
         This is called from the /api/rewards/claim endpoint.
 
+        Serializes per-owner via pg_advisory_xact_lock so concurrent claims
+        cannot both read the same unclaimed rows and double-pay. The lock is
+        held across the payout subprocess and the claimed_at UPDATE.
+
         Args:
             owner: User address
             ts: Current timestamp
@@ -351,186 +357,204 @@ class RewardDistributor:
             - tx_hash: str or None (for MIRAGE rewards)
             - error: str or None
         """
-        # Get pending rewards
+        owner_lc = (owner or "").strip().lower()
         with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, reward_type, reward_data, reason
-                    FROM pending_rewards
-                    WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
-                    """,
-                    (owner,),
-                )
-                rows = cur.fetchall()
+            # xact advisory locks require a real transaction; the helper opens
+            # autocommit connections.
+            prev_autocommit = conn.autocommit
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                        (owner_lc,),
+                    )
+                    cur.execute(
+                        """
+                        SELECT id, reward_type, reward_data, reason
+                        FROM pending_rewards
+                        WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
+                        """,
+                        (owner_lc,),
+                    )
+                    rows = cur.fetchall()
 
-        if not rows:
-            return {
-                "success": False,
-                "rewards": [],
-                "tx_hash": None,
-                "error": "no_rewards",
-            }
-
-        # Separate by type
-        mirage_rewards = []
-        invite_code_rewards = []
-        cosmetic_rewards = []
-        total_mirage_with_multiplier = 0
-        total_mirage_no_multiplier = 0
-
-        for row in rows:
-            reward_id, reward_type, reward_data, reason = row
-            reward_data = reward_data if isinstance(reward_data, dict) else {}
-
-            if reward_type == "mirage":
-                amount = reward_data.get("amount", 0)
-                apply_multiplier = reward_data.get("apply_multiplier", True)
-                if apply_multiplier:
-                    total_mirage_with_multiplier += amount
-                else:
-                    total_mirage_no_multiplier += amount
-                mirage_rewards.append(
-                    {
-                        "id": reward_id,
-                        "amount": amount,
-                        "reason": reason,
-                        "apply_multiplier": apply_multiplier,
+                if not rows:
+                    conn.commit()
+                    return {
+                        "success": False,
+                        "rewards": [],
+                        "tx_hash": None,
+                        "error": "no_rewards",
                     }
-                )
-            elif reward_type == "invite_code":
-                invite_code_rewards.append(
-                    {
-                        "id": reward_id,
-                        "amount": reward_data.get("amount", 1),
-                        "reason": reason,
-                    }
-                )
-            else:
-                cosmetic_rewards.append(
-                    {
-                        "id": reward_id,
-                        "type": reward_type,
-                        "data": reward_data,
-                        "reason": reason,
-                    }
-                )
 
-        # Get reward multiplier and compute payout
-        multiplier = self._get_multiplier(owner, ts)
-        # Apply multiplier only to rewards that allow it
-        payout_amount = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
-        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
+                # Separate by type
+                mirage_rewards = []
+                invite_code_rewards = []
+                cosmetic_rewards = []
+                total_mirage_with_multiplier = 0
+                total_mirage_no_multiplier = 0
 
-        result = {
-            "success": True,
-            "rewards": [],
-            "tx_hash": None,
-            "error": None,
-        }
+                for row in rows:
+                    reward_id, reward_type, reward_data, reason = row
+                    reward_data = reward_data if isinstance(reward_data, dict) else {}
 
-        # Process MIRAGE rewards
-        if mirage_rewards and payout_amount > 0:
-            send_result = self.send_reward(owner, payout_amount, f"quest_rewards:{len(mirage_rewards)}_quests")
-
-            if send_result["success"]:
-                result["tx_hash"] = send_result.get("tx_hash")
-                result["rewards"].append(
-                    {
-                        "type": "mirage",
-                        "amount": payout_amount,
-                        "raw_amount": total_mirage,
-                        "multiplier": round(multiplier, 4),
-                    }
-                )
-            else:
-                # Failed to send - don't mark as claimed
-                logger.error(f"Failed to send MIRAGE rewards to {owner}: {send_result.get('error')}")
-                result["success"] = False
-                result["error"] = send_result.get("error")
-                return result
-
-        # Process cosmetic rewards
-        for cosmetic in cosmetic_rewards:
-            unlock_type = cosmetic["type"]
-            unlock_id = cosmetic["data"].get("id")
-
-            if unlock_id:
-                with connect_backend_db() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO user_unlocks (owner, unlock_type, unlock_id, unlocked_at, source)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (owner, unlock_type, unlock_id) DO NOTHING
-                            """,
-                            (owner, unlock_type, unlock_id, ts, cosmetic["reason"]),
+                    if reward_type == "mirage":
+                        amount = reward_data.get("amount", 0)
+                        apply_multiplier = reward_data.get("apply_multiplier", True)
+                        if apply_multiplier:
+                            total_mirage_with_multiplier += amount
+                        else:
+                            total_mirage_no_multiplier += amount
+                        mirage_rewards.append(
+                            {
+                                "id": reward_id,
+                                "amount": amount,
+                                "reason": reason,
+                                "apply_multiplier": apply_multiplier,
+                            }
+                        )
+                    elif reward_type == "invite_code":
+                        invite_code_rewards.append(
+                            {
+                                "id": reward_id,
+                                "amount": reward_data.get("amount", 1),
+                                "reason": reason,
+                            }
+                        )
+                    else:
+                        cosmetic_rewards.append(
+                            {
+                                "id": reward_id,
+                                "type": reward_type,
+                                "data": reward_data,
+                                "reason": reason,
+                            }
                         )
 
-                result["rewards"].append(
-                    {
-                        "type": unlock_type,
-                        "id": unlock_id,
-                    }
-                )
+                # Get reward multiplier and compute payout
+                multiplier = self._get_multiplier(owner_lc, ts)
+                # Apply multiplier only to rewards that allow it
+                payout_amount = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
+                total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
 
-        # Process invite code rewards
-        generated_codes = []
-        for invite_reward in invite_code_rewards:
-            count = invite_reward.get("amount", 1)
-            codes = _generate_unique_invite_codes(owner, count)
-            generated_codes.extend(codes)
-            result["rewards"].append(
-                {
-                    "type": "invite_code",
-                    "codes": codes,
-                    "count": len(codes),
+                result = {
+                    "success": True,
+                    "rewards": [],
+                    "tx_hash": None,
+                    "error": None,
                 }
-            )
 
-        # Mark all rewards as claimed and store payout amounts
-        mirage_ids = [r["id"] for r in mirage_rewards]
-        cosmetic_ids = [r["id"] for r in cosmetic_rewards]
-        invite_code_ids = [r["id"] for r in invite_code_rewards]
+                # Process MIRAGE rewards while the advisory lock is held so a
+                # concurrent claim waits and then finds nothing unclaimed.
+                if mirage_rewards and payout_amount > 0:
+                    send_result = self.send_reward(
+                        owner_lc, payout_amount, f"quest_rewards:{len(mirage_rewards)}_quests"
+                    )
 
-        with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                if mirage_ids:
-                    for reward in mirage_rewards:
-                        if reward.get("apply_multiplier", True):
-                            reward_payout = int(reward["amount"] * multiplier)
-                        else:
-                            reward_payout = reward["amount"]
+                    if send_result["success"]:
+                        result["tx_hash"] = send_result.get("tx_hash")
+                        result["rewards"].append(
+                            {
+                                "type": "mirage",
+                                "amount": payout_amount,
+                                "raw_amount": total_mirage,
+                                "multiplier": round(multiplier, 4),
+                            }
+                        )
+                    else:
+                        # Failed to send - don't mark as claimed
+                        logger.error(
+                            f"Failed to send MIRAGE rewards to {owner_lc}: {send_result.get('error')}"
+                        )
+                        conn.rollback()
+                        result["success"] = False
+                        result["error"] = send_result.get("error")
+                        return result
+
+                # Process cosmetic rewards
+                for cosmetic in cosmetic_rewards:
+                    unlock_type = cosmetic["type"]
+                    unlock_id = cosmetic["data"].get("id")
+
+                    if unlock_id:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                INSERT INTO user_unlocks (owner, unlock_type, unlock_id, unlocked_at, source)
+                                VALUES (%s, %s, %s, %s, %s)
+                                ON CONFLICT (owner, unlock_type, unlock_id) DO NOTHING
+                                """,
+                                (owner_lc, unlock_type, unlock_id, ts, cosmetic["reason"]),
+                            )
+
+                    result["rewards"].append(
+                        {
+                            "type": unlock_type,
+                            "id": unlock_id,
+                        }
+                    )
+
+                # Process invite code rewards
+                for invite_reward in invite_code_rewards:
+                    count = invite_reward.get("amount", 1)
+                    codes = _generate_unique_invite_codes(owner_lc, count)
+                    result["rewards"].append(
+                        {
+                            "type": "invite_code",
+                            "codes": codes,
+                            "count": len(codes),
+                        }
+                    )
+
+                # Mark all rewards as claimed and store payout amounts
+                mirage_ids = [r["id"] for r in mirage_rewards]
+                cosmetic_ids = [r["id"] for r in cosmetic_rewards]
+                invite_code_ids = [r["id"] for r in invite_code_rewards]
+
+                with conn.cursor() as cur:
+                    if mirage_ids:
+                        for reward in mirage_rewards:
+                            if reward.get("apply_multiplier", True):
+                                reward_payout = int(reward["amount"] * multiplier)
+                            else:
+                                reward_payout = reward["amount"]
+                            cur.execute(
+                                """
+                                UPDATE pending_rewards
+                                SET claimed_at = %s, payout_amount = %s
+                                WHERE id = %s AND claimed_at IS NULL
+                                """,
+                                (ts, reward_payout, reward["id"]),
+                            )
+
+                    if cosmetic_ids:
                         cur.execute(
                             """
                             UPDATE pending_rewards
-                            SET claimed_at = %s, payout_amount = %s
-                            WHERE id = %s
+                            SET claimed_at = %s
+                            WHERE id = ANY(%s) AND claimed_at IS NULL
                             """,
-                            (ts, reward_payout, reward["id"]),
+                            (ts, cosmetic_ids),
                         )
 
-                if cosmetic_ids:
-                    cur.execute(
-                        """
-                        UPDATE pending_rewards
-                        SET claimed_at = %s
-                        WHERE id = ANY(%s)
-                        """,
-                        (ts, cosmetic_ids),
-                    )
+                    if invite_code_ids:
+                        cur.execute(
+                            """
+                            UPDATE pending_rewards
+                            SET claimed_at = %s
+                            WHERE id = ANY(%s) AND claimed_at IS NULL
+                            """,
+                            (ts, invite_code_ids),
+                        )
 
-                if invite_code_ids:
-                    cur.execute(
-                        """
-                        UPDATE pending_rewards
-                        SET claimed_at = %s
-                        WHERE id = ANY(%s)
-                        """,
-                        (ts, invite_code_ids),
-                    )
-
-        return result
+                conn.commit()
+                return result
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.autocommit = prev_autocommit
 
     def _get_multiplier(self, owner: str, ts: int) -> float:
         """Calculate reward multiplier based on completed quest count (1x at 0, 5x at 50)."""

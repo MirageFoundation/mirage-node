@@ -4226,8 +4226,9 @@ def bootstrap():
     """Combined first-paint endpoint.
 
     Returns node_config + chain_config (always) plus, when ?address=<addr> is
-    provided, user_status, user_followed, user_blocked, invite_codes, and
-    rewards_summary. Optional `view=` embeds the initial screen payload
+    provided, user_status, user_followed, user_blocked, and rewards_summary.
+    The invite_codes section is included only when REGISTRATION_INVITE_CODE_REQUIRED
+    is true. Optional `view=` embeds the initial screen payload
     (feed / thread / inbox) so cold start is a single round trip.
     """
     rid = next_request_id()
@@ -4258,10 +4259,16 @@ def bootstrap():
         "user_status": None,
         "user_followed": None,
         "user_blocked": None,
-        "invite_codes": None,
         "rewards_summary": None,
         "view": None,
     }
+    # invite_codes omitted entirely while the feature is off (flag authoritative).
+    # When on, the section is only filled if the request carries a valid signed
+    # read — unused codes are bearer credentials and must not ride an unsigned
+    # bootstrap. Unsigned callers still get the rest of bootstrap; they hydrate
+    # codes via signed GET /api/get_invite_codes.
+    if REGISTRATION_INVITE_CODE_REQUIRED:
+        resp["invite_codes"] = None
 
     if address:
         # Lazy import to avoid module-load ordering issues with routes.quests.
@@ -4270,7 +4277,21 @@ def bootstrap():
         resp["user_status"] = _safe("user_status", lambda: _build_user_status(address))
         resp["user_followed"] = _safe("user_followed", lambda: _build_user_followed(address))
         resp["user_blocked"] = _safe("user_blocked", lambda: _build_user_blocked(address))
-        resp["invite_codes"] = _safe("invite_codes", lambda: _build_invite_codes(address))
+        if REGISTRATION_INVITE_CODE_REQUIRED:
+            from routes.core import _require_signed_read
+
+            sig_data = {
+                "address": address,
+                "pubkey": request.args.get("pubkey", default="", type=str),
+                "signature": request.args.get("signature", default="", type=str),
+                "timestamp": request.args.get("timestamp"),
+                "envelope_nonce": request.args.get("envelope_nonce"),
+            }
+            signed_addr, aerr = _require_signed_read(sig_data, "get_invite_codes", address)
+            if aerr is None:
+                resp["invite_codes"] = _safe("invite_codes", lambda: _build_invite_codes(signed_addr))
+            else:
+                log_event(rid, "bootstrap.invite_codes.unsigned_or_invalid")
         resp["rewards_summary"] = _safe(
             "rewards_summary",
             lambda: _build_rewards_summary(address.lower()),
@@ -6390,19 +6411,29 @@ def get_recent_content():
 @public_bp.route("/api/get_reports")
 def get_reports():
     try:
-        addr = request.args.get("address", default=None, type=str)
+        # Query params carry the signed identity for GET.
+        data = {
+            "address": request.args.get("address", default="", type=str),
+            "pubkey": request.args.get("pubkey", default="", type=str),
+            "signature": request.args.get("signature", default="", type=str),
+            "timestamp": request.args.get("timestamp"),
+            "envelope_nonce": request.args.get("envelope_nonce"),
+        }
+        addr = (data.get("address") or "").strip()
         limit = request.args.get("limit", default=100, type=int)
         limit = max(1, min(limit, 500))
         if not addr:
             return jsonify({"error": "address required"}), 400
 
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT level FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1", (addr,))
-            row = cur.fetchone()
-            level = int(row[0]) if row and row[0] is not None else 0
-            if level < 100:
-                return api_error_code("forbidden", 403)
+        from routes.core import _require_signed_read, get_user_level
+
+        admin_addr, aerr = _require_signed_read(data, "get_reports", addr)
+        if aerr is not None:
+            return aerr
+
+        level = get_user_level(admin_addr)
+        if level < 100:
+            return api_error_code("forbidden", 403)
 
         with connect_backend_db() as bconn:
             bcur = bconn.cursor()
@@ -8185,15 +8216,29 @@ def upload_media():
             get_media_provider,
             validate_upload,
         )
+        from media.base import max_image_bytes, max_video_bytes
 
         kind = (request.form.get("kind") or request.args.get("kind") or "").strip().lower()
         if kind not in ("image", "video"):
             return api_error_code("media_invalid_kind", 400)
 
+        # Bound before request.files materializes the body into memory/disk.
+        # Multipart framing adds a small overhead above the raw file size, so
+        # allow 1 MiB of slack on the Content-Length probe; the post-read check
+        # still enforces the exact per-kind cap.
+        max_bytes = max_image_bytes() if kind == "image" else max_video_bytes()
+        content_length = request.content_length
+        if content_length is not None and content_length > max_bytes + (1024 * 1024):
+            log_event(rid, "upload_media.too_large", kind=kind, content_length=content_length, max=max_bytes)
+            return api_error_code("media_too_large", 413)
+
         f = request.files.get("file")
         if f is None:
             return api_error_code("media_file_required", 400)
         data = f.read()
+        if len(data) > max_bytes:
+            log_event(rid, "upload_media.too_large", kind=kind, size=len(data), max=max_bytes)
+            return api_error_code("media_too_large", 413)
 
         try:
             provider = get_media_provider()
@@ -9788,22 +9833,45 @@ def _build_invite_codes(address: str) -> dict:
 
 @public_bp.route("/api/get_invite_codes")
 def get_invite_codes():
-    """Get all invite codes owned by the given address."""
+    """Get all invite codes owned by the given address.
+
+    Feature-gated by REGISTRATION_INVITE_CODE_REQUIRED. When false (fleet-wide
+    default), returns 404. When true, requires a signed read — unused codes are
+    bearer credentials. If this feature is ever re-enabled, keep the signature
+    requirement; do not serve codes for an unsigned address query.
+    """
     rid = next_request_id()
+    if not REGISTRATION_INVITE_CODE_REQUIRED:
+        log_event(rid, "invite.get_codes.disabled")
+        return jsonify({"error": "not found"}), 404
+
     address = request.args.get("address", "", type=str).strip()
     if not address:
         return jsonify({"error": "address required"}), 400
 
+    from routes.core import _require_signed_read
+
+    data = {
+        "address": address,
+        "pubkey": request.args.get("pubkey", default="", type=str),
+        "signature": request.args.get("signature", default="", type=str),
+        "timestamp": request.args.get("timestamp"),
+        "envelope_nonce": request.args.get("envelope_nonce"),
+    }
+    addr, aerr = _require_signed_read(data, "get_invite_codes", address)
+    if aerr is not None:
+        return aerr
+
     try:
-        resp = _build_invite_codes(address)
+        resp = _build_invite_codes(addr)
         log_event(
             rid,
             "invite.get_codes.ok",
-            address=address[:12],
+            address=addr[:12],
             total=resp.get("total", 0),
             available=resp.get("available", 0),
         )
-        return jsonify(_inject_balance(resp, address))
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "invite.get_codes.err", error=str(e))
         return safe_error(e)
@@ -9811,8 +9879,17 @@ def get_invite_codes():
 
 @public_bp.route("/api/validate_invite_code", methods=["POST"])
 def validate_invite_code():
-    """Validate that an invite code exists and is unused. Only works on mirage.talk/localhost."""
+    """Validate that an invite code exists and is unused. Only works on mirage.talk/localhost.
+
+    Feature-gated by REGISTRATION_INVITE_CODE_REQUIRED. When false, returns 404.
+    Never returns the code owner's address — that disclosure is a leak if the
+    feature is re-enabled.
+    """
     rid = next_request_id()
+
+    if not REGISTRATION_INVITE_CODE_REQUIRED:
+        log_event(rid, "invite.validate.disabled")
+        return jsonify({"error": "not found"}), 404
 
     if not _is_main_site():
         log_event(rid, "invite.validate.blocked", host=request.host)
@@ -9839,13 +9916,15 @@ def validate_invite_code():
             log_event(rid, "invite.validate.notfound", code=code)
             return jsonify({"valid": False, "error": "invalid invite code"})
 
-        owner, used_by = row
+        _owner, used_by = row
         if used_by:
             log_event(rid, "invite.validate.used", code=code)
             return jsonify({"valid": False, "error": "this invite code has already been used"})
 
         log_event(rid, "invite.validate.ok", code=code)
-        return jsonify({"valid": True, "owner": owner})
+        # Deliberately omit owner — unused codes are bearer credentials; naming
+        # the issuer turns this endpoint into an unauthenticated oracle.
+        return jsonify({"valid": True})
     except Exception as e:
         log_event(rid, "invite.validate.err", error=str(e))
         return safe_error(e, context="validate_invite_code")

@@ -43,8 +43,8 @@ from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from quest_multiplier import get_reward_multiplier
 from reward_distributor import get_distributor
-from routes.core import get_user_level
-from settings import QUESTS_ENABLED, require_bool_env
+from routes.core import get_user_level, _require_signed_request
+from settings import QUESTS_ENABLED, require_bool_env, legacy_unsigned_claim_allowed
 from user_last_seen import update_user_last_seen
 
 
@@ -778,6 +778,10 @@ def claim_rewards():
 
     Body:
     - owner: User address (required)
+    - pubkey, signature, timestamp, envelope_nonce: identity proof (required
+      after LEGACY_UNSIGNED_UNTIL; optional during the grace period)
+
+    Signed payload: rewards_claim:<owner-lowercased>:<timestamp>:<nonce>
 
     Returns:
     - success: bool
@@ -793,6 +797,18 @@ def claim_rewards():
 
         if not owner:
             return jsonify({"error": "owner required"}), 400
+
+        has_sig = bool(str(data.get("pubkey", "") or "").strip() and str(data.get("signature", "") or "").strip())
+        if has_sig:
+            addr, aerr = _require_signed_request(data, "rewards_claim", owner)
+            if aerr is not None:
+                return aerr
+            owner = addr
+        elif legacy_unsigned_claim_allowed():
+            log_event(rid, "authz.legacy_unsigned", endpoint="rewards/claim", owner=owner)
+        else:
+            return jsonify({"error": "signature required"}), 401
+
         update_user_last_seen(owner, source=request.path)
 
         ts = int(time.time())
@@ -862,6 +878,9 @@ def admin_suspend_rewards():
     - target: User address to suspend (required)
     - duration_days: Suspension duration in days (required, 0 = permanent)
     - reason: Reason for suspension (required)
+    - pubkey, signature, timestamp, envelope_nonce: identity proof
+
+    Signed payload: admin_rewards_suspend:<admin-lowercased>:<timestamp>:<nonce>
     """
     rid = next_request_id()
     log_event(rid, "admin.suspend.begin")
@@ -880,6 +899,12 @@ def admin_suspend_rewards():
             duration_days = int(duration_days)
         except (TypeError, ValueError):
             return jsonify({"error": "invalid duration_days"}), 400
+
+        admin_addr, aerr = _require_signed_request(data, "admin_rewards_suspend", admin)
+        if aerr is not None:
+            return aerr
+        admin = admin_addr
+
         update_user_last_seen(admin, source=request.path)
 
         # Check admin level
@@ -941,6 +966,9 @@ def admin_unsuspend_rewards():
     - admin: Admin address (required)
     - target: User address to unsuspend (required)
     - void_pending: Whether to void pending rewards (optional, default false)
+    - pubkey, signature, timestamp, envelope_nonce: identity proof
+
+    Signed payload: admin_rewards_unsuspend:<admin-lowercased>:<timestamp>:<nonce>
     """
     rid = next_request_id()
     log_event(rid, "admin.unsuspend.begin")
@@ -953,6 +981,12 @@ def admin_unsuspend_rewards():
 
         if not admin or not target:
             return jsonify({"error": "admin and target required"}), 400
+
+        admin_addr, aerr = _require_signed_request(data, "admin_rewards_unsuspend", admin)
+        if aerr is not None:
+            return aerr
+        admin = admin_addr
+
         update_user_last_seen(admin, source=request.path)
 
         # Check admin level
@@ -1018,16 +1052,15 @@ def _is_debug_enabled() -> bool:
 
 
 def _is_localhost() -> bool:
-    """Check if request is from localhost/private network."""
-    remote_ip = request.remote_addr or ""
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        forwarded_ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
-        if not forwarded_ips:
-            return False
-        if any(not _is_private_or_loopback_ip(ip) for ip in forwarded_ips):
-            return False
-    return _is_private_or_loopback_ip(remote_ip)
+    """Check if request is from localhost/private network.
+
+    Uses get_trusted_client_ip only (CF-Connecting-IP or TCP peer). Never trust
+    a client-supplied forwarded-for header — trivially spoofable.
+    """
+    from client_ip import get_trusted_client_ip
+
+    raw_ip = get_trusted_client_ip() or ""
+    return _is_private_or_loopback_ip(raw_ip)
 
 
 @quests_bp.route("/api/rewards/debug", methods=["GET"])

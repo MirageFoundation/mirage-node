@@ -12,6 +12,7 @@ Variables:
 
 import os
 import re
+import time
 
 
 def require_bool_env(key: str) -> bool:
@@ -92,3 +93,20 @@ AUTO_ENABLED_AGENTS = _parse_address_csv_env("AUTO_ENABLED_AGENTS")
 # New-user highlight: number of days after registration to show green "New User" badge.
 # Set to 0 to disable the feature entirely.
 NEW_USER_HIGHLIGHT_DAYS = int(os.environ.get("NEW_USER_HIGHLIGHT_DAYS", "7"))
+
+# Grace period for unsigned POST /api/rewards/claim while installed mobile builds
+# catch up. ISO date (YYYY-MM-DD, UTC). While today < this date, unsigned claims
+# are served but logged under authz.legacy_unsigned; on/after it, unsigned is 401.
+# Self-expiring: removing the branch later does not change post-cutoff behaviour.
+LEGACY_UNSIGNED_UNTIL = os.environ.get("LEGACY_UNSIGNED_UNTIL", "2026-09-05").strip()
+
+
+def legacy_unsigned_claim_allowed(now_ts: float | None = None) -> bool:
+    """True while the rewards/claim unsigned grace period is still open."""
+    if not LEGACY_UNSIGNED_UNTIL:
+        return False
+    from datetime import datetime, timezone
+
+    cutoff = datetime.strptime(LEGACY_UNSIGNED_UNTIL, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    now = datetime.fromtimestamp(now_ts if now_ts is not None else time.time(), tz=timezone.utc)
+    return now < cutoff

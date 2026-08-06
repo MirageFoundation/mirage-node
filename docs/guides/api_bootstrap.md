@@ -5,10 +5,10 @@
 `GET /api/bootstrap` is a single combined endpoint that returns everything the
 mobile app needs for its first paint. Use it instead of fanning out separate
 calls to `get_node_config`, `get_chain_config`, `get_user_status`,
-`get_user_followed`, `get_user_blocked`, `get_invite_codes`,
-`/rewards/summary`, and (with `view=`) the initial screen payload
-(`get_posts` / `get_comments` / `get_inbox`). One round-trip replaces the
-cold-start fan-out.
+`get_user_followed`, `get_user_blocked`, `/rewards/summary`, and (with `view=`)
+the initial screen payload (`get_posts` / `get_comments` / `get_inbox`). One
+round-trip replaces the cold-start fan-out. Invite codes are included only when
+the node has `registration_invite_code_required` enabled.
 
 **Why this exists:** The web client previously fired ~7 `/api/*` requests in the
 first ~50ms of a cold load and routinely tripped the production node's Caddy
@@ -51,7 +51,8 @@ GET /api/bootstrap?address=<bech32>&view=inbox
 
 **Status codes:** unchanged from before (200 / 503 / 5xx).
 
-The response body always has these top-level keys:
+The response body always has these top-level keys (except `invite_codes`,
+which is omitted entirely while invite codes are disabled on the node):
 
 ```json
 {
@@ -60,7 +61,7 @@ The response body always has these top-level keys:
   "user_status":     { ... } | null,
   "user_followed":   { ... } | null,
   "user_blocked":    { ... } | null,
-  "invite_codes":    { ... } | null,
+  "invite_codes":    { ... } | null,   // only when registration_invite_code_required
   "rewards_summary": { ... } | null,
   "view":            { ... } | null
 }
@@ -158,13 +159,22 @@ per-endpoint routes inject as a convenience (it's already inside
 ### `invite_codes`
 
 - **Source of truth:** same as `GET /api/get_invite_codes?address=…`.
+- **Present only when** the node's `registration_invite_code_required`
+  flag is true. While the flag is false (fleet-wide default), this
+  key is **omitted entirely** from the bootstrap response — not an
+  empty object, not null. Clients must treat a missing key as
+  "invite codes disabled on this node".
+- **When the flag is true**, the section is filled only if the bootstrap
+  request itself carries a valid signed read
+  (`get_invite_codes:<address>:<timestamp>:<nonce>` as query params).
+  An unsigned bootstrap still returns 200 for everything else, with
+  `invite_codes: null`; hydrate via signed `GET /api/get_invite_codes`.
 - **Cache:** session. Invalidate after a quest claim that grants codes
   (web equivalent: the `inviteCodesUpdated` event fired from the rewards
   flow). Also invalidate when a code's `used_by` field changes.
 - **Drives:** the Invites screen — list of codes, available count,
-  redemption status. Only meaningful on hosts where the backend's
-  invite-code system is active (`mirage.talk` and localhost as of writing).
-  Treat an empty list as "no invites available" rather than an error.
+  redemption status. Unused codes are bearer credentials, so unsigned
+  reads are never served.
 
 ### `rewards_summary`
 
@@ -214,8 +224,9 @@ if (address) {
   if (resp.user_blocked)    cache.setBlocked(resp.user_blocked);
   else                      scheduleUserBlockedFetch();
 
+  // invite_codes is omitted while the feature is off — do not fan out to
+  // /api/get_invite_codes (it 404s). Only hydrate when the section is present.
   if (resp.invite_codes)    cache.setInviteCodes(resp.invite_codes);
-  else                      scheduleInviteCodesFetch();
 
   if (resp.rewards_summary) cache.setRewardsSummary(resp.rewards_summary);
   // No need to schedule rewards_summary fetch — the rewards screen will pull
@@ -283,10 +294,12 @@ curl -s http://127.0.0.1/api/bootstrap | jq
   "user_status":     null,
   "user_followed":   null,
   "user_blocked":    null,
-  "invite_codes":    null,
   "rewards_summary": null
 }
 ```
+
+`invite_codes` is omitted here because `registration_invite_code_required` is
+false on this node.
 
 ### Logged in (with `address`)
 
@@ -322,11 +335,6 @@ curl -s "http://127.0.0.1/api/bootstrap?address=mirage1p9te3c5fgjjw4dkg4kmm6g4yy
     "blocked_users":  [],
     "blocked_topics": []
   },
-  "invite_codes": {
-    "codes":     [],
-    "total":     0,
-    "available": 0
-  },
   "rewards_summary": {
     "disabled":                       true,
     "daily_quests":                   [],
@@ -342,6 +350,10 @@ curl -s "http://127.0.0.1/api/bootstrap?address=mirage1p9te3c5fgjjw4dkg4kmm6g4yy
   }
 }
 ```
+
+When `registration_invite_code_required` is true, the response also includes
+an `invite_codes` object (`codes` / `total` / `available`). When the flag is
+false (fleet default), that key is absent.
 
 (Note: `new_inbox_items` may also appear in the response — that's a
 backend-wide middleware that injects into every JSON response for

@@ -4,46 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import logging
 import os
-import secrets
 
 from flask import request
 
-_log = logging.getLogger(__name__)
-
 _raw_salt = os.environ.get("CLIENT_HASH_SALT", "").strip()
 if not _raw_salt:
-    _raw_salt = secrets.token_hex(32)
-    os.environ["CLIENT_HASH_SALT"] = _raw_salt
-    _log.warning("CLIENT_HASH_SALT missing; generated new salt")
-    env_dir = os.environ.get("ENV_DIR", "").strip()
-    if env_dir:
-        try:
-            env_path = os.path.join(env_dir, "backend.env")
-            if os.path.isfile(env_path):
-                with open(env_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                updated = False
-                for i, line in enumerate(lines):
-                    if line.startswith("CLIENT_HASH_SALT="):
-                        lines[i] = f"CLIENT_HASH_SALT={_raw_salt}\n"
-                        updated = True
-                        break
-                if not updated:
-                    lines.append(f"\nCLIENT_HASH_SALT={_raw_salt}\n")
-                with open(env_path, "w", encoding="utf-8") as f:
-                    f.writelines(lines)
-        except Exception as e:
-            _log.warning("Failed to persist CLIENT_HASH_SALT: %s", e)
-
+    raise RuntimeError(
+        "CLIENT_HASH_SALT is required and must be a non-empty hex string. "
+        "Run deploy migration v1_32_0_ensure_client_hash_salt (or set it in backend.env)."
+    )
 try:
     _CLIENT_HASH_SALT = bytes.fromhex(_raw_salt)
-except ValueError:
-    _raw_salt = secrets.token_hex(32)
-    os.environ["CLIENT_HASH_SALT"] = _raw_salt
-    _CLIENT_HASH_SALT = bytes.fromhex(_raw_salt)
-    _log.warning("CLIENT_HASH_SALT invalid; generated new salt")
+except ValueError as e:
+    raise RuntimeError(
+        f"CLIENT_HASH_SALT must be a hex string (got {len(_raw_salt)} chars): {e}"
+    ) from e
+if len(_CLIENT_HASH_SALT) < 16:
+    raise RuntimeError(
+        f"CLIENT_HASH_SALT too short ({len(_CLIENT_HASH_SALT)} bytes); need at least 16"
+    )
 
 
 def get_trusted_client_ip() -> str | None:

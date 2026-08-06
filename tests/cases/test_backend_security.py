@@ -1181,10 +1181,10 @@ def test_client_ip_trust(backend):
 def test_hash_salt_fail_hard(backend):
     """M-2: a missing CLIENT_HASH_SALT must stop the process, not invent a salt.
 
-    client_ip.py generates a random salt at import time when the variable is
-    unset. Under gunicorn that runs once per worker, so every control keyed on
-    the IP or visitor hash (rate limits, dedupe, analytics identity) silently
-    partitions by worker. The project rule is to fail hard rather than mask.
+    client_ip.py fails hard at import when CLIENT_HASH_SALT is missing or not
+    valid hex. That keeps every control keyed on the IP or visitor hash (rate
+    limits, dedupe, analytics identity) consistent across gunicorn workers.
+    This probe asserts the fail-hard path still rejects an unset salt.
 
     ENV_DIR is cleared so the probe cannot persist a salt into backend.env.
     """
@@ -1202,8 +1202,8 @@ def test_hash_salt_fail_hard(backend):
     else:
         _fail(
             "hash_salt.fail_hard",
-            "M-2: importing client_ip without CLIENT_HASH_SALT succeeded; it generated a "
-            "per-process salt instead of failing hard",
+            "M-2: importing client_ip without CLIENT_HASH_SALT succeeded; it must "
+            "fail hard instead of inventing a per-process salt",
         )
 
 
@@ -1252,10 +1252,10 @@ def test_upload_body_bound(backend):
 def test_invite_code_hygiene(backend):
     """M-3: invite codes need real entropy and must not disclose their owner.
 
-    Codes are generated with random.choices (Mersenne Twister, predictable from
-    observed output) and /api/validate_invite_code answers a valid code with the
-    owner's address, which turns the endpoint into an unauthenticated oracle
-    mapping guessable codes to accounts.
+    Generation must use secrets (not random). validate_invite_code must not
+    return the code owner's address — that would turn the endpoint into an
+    unauthenticated oracle mapping guessable codes to accounts. Both are
+    enforced here as source-level guards so a regression fails the suite.
     """
     backend_src = _backend_src()
     if not os.path.isdir(backend_src):

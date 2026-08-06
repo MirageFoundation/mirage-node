@@ -658,6 +658,124 @@ def _verify_signature(pub_dec: bytes, sig_dec: bytes, signed_bytes: bytes) -> bo
         return False
 
 
+def _auth_error(message: str, status: int = 401):
+    """Authentication failure. 401 (not 403): no proof of identity yet.
+
+    Returns a Flask (response, status) pair ready to return from a route or
+    to stash as the error half of (address, err).
+    """
+    return jsonify({"error": message}), status
+
+
+def _parse_signed_fields(data: dict):
+    """Extract pubkey/signature/timestamp/nonce from a request dict.
+
+    Returns (pub_dec, sig_dec, timestamp, nonce, None) or (None, None, 0, 0, (response, code)).
+    """
+    pub_b64 = str(data.get("pubkey", "") or "").strip()
+    sig_b64 = str(data.get("signature", "") or "").strip()
+    if not (pub_b64 and sig_b64):
+        return None, None, 0, 0, _auth_error("missing required fields")
+    if "timestamp" not in data:
+        return None, None, 0, 0, _auth_error("timestamp required")
+    try:
+        timestamp = int(data.get("timestamp"))
+    except (TypeError, ValueError):
+        return None, None, 0, 0, _auth_error("invalid timestamp")
+    nonce, err = _parse_envelope_nonce(data)
+    if err is not None:
+        # Re-wrap as 401 so unsigned/malformed proofs are never confused with 403.
+        body, _code = err
+        try:
+            payload = body.get_json(silent=True) if hasattr(body, "get_json") else None
+            msg = (payload or {}).get("error") or "invalid envelope_nonce"
+        except Exception:
+            msg = "invalid envelope_nonce"
+        return None, None, 0, 0, _auth_error(msg)
+    try:
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+    except Exception:
+        return None, None, 0, 0, _auth_error("invalid relay fields")
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return None, None, 0, 0, _auth_error("invalid relay fields")
+    return pub_dec, sig_dec, timestamp, nonce, None
+
+
+def _require_signed_read(data: dict, action: str, expected_address: str):
+    """Verify signature + timestamp skew for a read. No push_nonces row.
+
+    Returns (address, None) on success or (None, (response, code)) on failure.
+    """
+    expected = (expected_address or "").strip().lower()
+    if not expected:
+        return None, _auth_error("address required")
+
+    pub_dec, sig_dec, timestamp, nonce, err = _parse_signed_fields(data)
+    if err is not None:
+        return None, err
+
+    if timestamp < 10_000_000_000:
+        return None, _auth_error("timestamp must be milliseconds")
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - timestamp) > PUSH_TIMESTAMP_SKEW_MS:
+        return None, _auth_error("timestamp outside allowed window")
+
+    user_addr = _derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, _auth_error("invalid pubkey")
+    if user_addr.lower() != expected:
+        return None, _auth_error("address does not match pubkey")
+
+    signed_payload = f"{action}:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return None, _auth_error("invalid signature")
+
+    return user_addr.lower(), None
+
+
+def _require_signed_request(data: dict, action: str, expected_address: str):
+    """Verify signature + push-nonce replay guard for a write.
+
+    Returns (address, None) on success or (None, (response, code)) on failure.
+    """
+    expected = (expected_address or "").strip().lower()
+    if not expected:
+        return None, _auth_error("address required")
+
+    pub_dec, sig_dec, timestamp, nonce, err = _parse_signed_fields(data)
+    if err is not None:
+        return None, err
+
+    user_addr = _derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, _auth_error("invalid pubkey")
+    if user_addr.lower() != expected:
+        return None, _auth_error("address does not match pubkey")
+
+    signed_payload = f"{action}:{user_addr.lower()}:{timestamp}:{nonce}"
+    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
+        return None, _auth_error("invalid signature")
+
+    ok, gerr = _guard_push_request(user_addr, action, timestamp, nonce)
+    if not ok:
+        # Preserve the guard's status (400 replay / 503 DB) but surface as auth
+        # failure when the guard returned a 400-class proof problem.
+        body, code = gerr
+        if code == 400:
+            try:
+                payload = body.get_json(silent=True) if hasattr(body, "get_json") else None
+                msg = (payload or {}).get("error") or "invalid signature"
+            except Exception:
+                msg = "invalid signature"
+            return None, _auth_error(msg)
+        return None, gerr
+
+    return user_addr.lower(), None
+
+
 def get_user_level(addr: str) -> int:
     """Return subscription level for user from indexer DB."""
     try:
@@ -3125,12 +3243,11 @@ def core_resolve_report():
         if not address or report_id <= 0:
             return jsonify({"error": "missing required fields"}), 400
 
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT level FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1", (address,))
-            row = cur.fetchone()
-            level = int(row[0]) if row and row[0] is not None else 0
-        if level < 100:
+        admin_addr, aerr = _require_signed_request(data, "resolve_report", address)
+        if aerr is not None:
+            return aerr
+
+        if get_user_level(admin_addr) < 100:
             return api_error_code("forbidden", 403)
         with connect_backend_db() as conn:
             cur = conn.cursor()

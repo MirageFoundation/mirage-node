@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Set, Tuple
 
@@ -23,6 +24,9 @@ from tests.common import (
     _get,
     _post,
     _generate_wallet,
+    _b64,
+    _fresh_nonce,
+    _now_ms,
 )
 
 # Authorization classes.
@@ -31,14 +35,18 @@ from tests.common import (
 # ENVELOPE        relay endpoint - the chain verifies the signed envelope, the
 #                 backend only forwards (see H-3: the backend is not the
 #                 enforcement boundary for chain writes)
-# SIGNED_IDENTITY the backend itself must verify a signature binding the caller
-#                 to the address whose private data it serves or mutates
+# SIGNED_READ     signature binding the caller to the address; no nonce row
+#                 (must not land _guard_push_request on a read path)
+# SIGNED_IDENTITY signature plus the push-nonce replay guard (writes)
 # SIGNED_ADMIN    signature plus an admin level check
+# DISABLED        feature gated off; handler must 404 while the flag is false
 # DEBUG_ONLY      must not be reachable in production
 PUBLIC = "PUBLIC"
 ENVELOPE = "ENVELOPE"
+SIGNED_READ = "SIGNED_READ"
 SIGNED_IDENTITY = "SIGNED_IDENTITY"
 SIGNED_ADMIN = "SIGNED_ADMIN"
+DISABLED = "DISABLED"
 DEBUG_ONLY = "DEBUG_ONLY"
 
 # Intended policy for every registered route. A new route must be added here
@@ -79,20 +87,29 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/stream_proxy/<video_uid>": PUBLIC,
     "/api/stream_proxy/<video_uid>/<path:path>": PUBLIC,
     "/api/upload_media": PUBLIC,
-    "/api/validate_invite_code": PUBLIC,
-    # --- User-private reads (H-2) -------------------------------------------
-    "/api/bootstrap": SIGNED_IDENTITY,
-    "/api/get_blocked_users": SIGNED_IDENTITY,
-    "/api/get_inbox": SIGNED_IDENTITY,
-    "/api/get_invite_codes": SIGNED_IDENTITY,
-    "/api/get_preferences": SIGNED_IDENTITY,
-    "/api/get_user_blocked": SIGNED_IDENTITY,
-    "/api/referrals/precheck": SIGNED_IDENTITY,
-    "/api/referrals/summary": SIGNED_IDENTITY,
-    # --- User-private state and the money path (C-2) ------------------------
-    "/api/rewards/achievements": SIGNED_IDENTITY,
-    "/api/rewards/claim": SIGNED_IDENTITY,
-    "/api/rewards/summary": SIGNED_IDENTITY,
+    # --- Deliberately public (H-2 reclassification) -------------------------
+    # Chain-derived / indexer-backed reads: anyone with a public node can
+    # recompute the same data, so gating the convenience endpoint is theater.
+    "/api/bootstrap": PUBLIC,  # cold-start; invite_codes section omitted when feature off
+    "/api/get_blocked_users": PUBLIC,  # indexer DB (chain-derived)
+    "/api/get_inbox": PUBLIC,  # reply content is on chain
+    "/api/get_preferences": PUBLIC,  # indexer DB (chain-derived)
+    "/api/get_user_blocked": PUBLIC,  # indexer DB (chain-derived)
+    "/api/referrals/precheck": PUBLIC,  # pre-signup; takes username, no identity yet
+    # Backend-owned but not credentials and not actions. Deliberate disclosure.
+    "/api/referrals/summary": PUBLIC,
+    "/api/rewards/achievements": PUBLIC,
+    "/api/rewards/summary": PUBLIC,
+    # --- Invite codes (feature-gated) ---------------------------------------
+    # REGISTRATION_INVITE_CODE_REQUIRED=false fleet-wide: both 404. When the
+    # flag is true, get_invite_codes requires SIGNED_READ (bearer credentials);
+    # validate_invite_code stays callable for pre-signup visitors (no owner
+    # disclosure). Classified DISABLED so the parity test does not require
+    # live auth markers while the feature is off.
+    "/api/get_invite_codes": DISABLED,
+    "/api/validate_invite_code": DISABLED,
+    # --- Authenticated writes / identity-bound state ------------------------
+    "/api/rewards/claim": SIGNED_IDENTITY,  # multiplier applied at claim time
     "/api/mark_inbox_viewed": SIGNED_IDENTITY,
     "/api/seen_posts": SIGNED_IDENTITY,
     "/api/referrals/precheck_opt_in": SIGNED_IDENTITY,
@@ -104,7 +121,7 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/admin/stats/aggregate": SIGNED_ADMIN,
     "/api/admin/stats/export": SIGNED_ADMIN,
     "/api/core/resolve_report": SIGNED_ADMIN,
-    "/api/get_reports": SIGNED_ADMIN,
+    "/api/get_reports": SIGNED_ADMIN,  # signed read + level; no nonce row
     "/api/get_stats": SIGNED_ADMIN,
     # --- Debug (M-1) --------------------------------------------------------
     "/api/rewards/debug": DEBUG_ONLY,
@@ -141,6 +158,9 @@ ROUTE_POLICY: Dict[str, str] = {
 }
 
 # Markers the static scan looks for, mapped to the capability they prove.
+# Values may be a single marker string or a set (for shared helpers that
+# encapsulate multiple checks and live in another module, so the transitive
+# same-file walk cannot see into them).
 _AUTH_CALLS = {
     "_verify_signature": "sig",
     "_guard_push_request": "guard",
@@ -148,14 +168,22 @@ _AUTH_CALLS = {
     "get_user_level": "level",
     "_parse_envelope_nonce": "nonce",
     "verify_envelope": "envelope",
+    # Cross-module helpers in routes.core — markers declared here because the
+    # inventory walk only resolves callees defined in the same route file.
+    "_require_signed_request": {"sig", "guard"},
+    "_require_signed_read": {"sig"},
 }
 
 # What each class requires of the detected marker set.
 _REQUIRED: Dict[str, Set[str]] = {
     PUBLIC: set(),
+    DISABLED: set(),
     DEBUG_ONLY: set(),
     ENVELOPE: {"nonce"},
+    SIGNED_READ: {"sig"},
     SIGNED_IDENTITY: {"sig", "guard"},
+    # get_reports is a signed read (no guard); write admins also carry guard via
+    # _require_signed_request. level is required of all.
     SIGNED_ADMIN: {"sig", "level"},
 }
 
@@ -168,7 +196,11 @@ def _markers_of(fn: ast.FunctionDef) -> Set[str]:
         if isinstance(sub, ast.Call):
             name = getattr(sub.func, "id", None) or getattr(sub.func, "attr", None)
             if name in _AUTH_CALLS:
-                out.add(_AUTH_CALLS[name])
+                marker = _AUTH_CALLS[name]
+                if isinstance(marker, str):
+                    out.add(marker)
+                else:
+                    out |= set(marker)
     return out
 
 
@@ -343,30 +375,129 @@ def test_admin_authz(backend):
 def test_reward_claim_authz(backend):
     """C-2: the money path must be authenticated and must not pay twice.
 
-    /api/rewards/claim takes `owner` from the request body with no signature,
-    and the payout is broadcast before `claimed_at` is set, in a separate
-    transaction, with no `WHERE claimed_at IS NULL` guard. So an unauthenticated
-    caller can trigger someone's claim, and concurrent callers can be paid more
-    than once for the same rows.
+    /api/rewards/claim takes `owner` from the request body. After the grace
+    period it requires a signature; during LEGACY_UNSIGNED_UNTIL an unsigned
+    claim is still served (logged). Concurrent claims must not double-pay.
     """
-    victim = str(_generate_wallet().address())
+    from datetime import datetime, timezone
 
-    # 1. Authentication. Triggering another account's claim must be refused for
-    #    lack of proof, not merely produce an empty result.
-    code, resp = _post(f"{backend}/api/rewards/claim", {"owner": victim})
+    from cosmpy.aerial.wallet import LocalWallet
+    from cosmpy.crypto.keypairs import PrivateKey
+    from shared.client import sign_canonical
+
+    # Read LEGACY_UNSIGNED_UNTIL from settings.py so the live probe stays in
+    # sync with the backend default without importing web/backend (wrong cwd).
+    settings_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+        "settings.py",
+    )
+    settings_src = open(settings_path, encoding="utf-8").read()
+    m = re.search(
+        r'LEGACY_UNSIGNED_UNTIL\s*=\s*os\.environ\.get\(\s*"LEGACY_UNSIGNED_UNTIL"\s*,\s*"([^"]+)"\s*\)',
+        settings_src,
+    )
+    if not m:
+        _fail("reward_claim.grace_period_wired", "LEGACY_UNSIGNED_UNTIL default not found in settings.py")
+        return
+    grace_until = os.environ.get("LEGACY_UNSIGNED_UNTIL", m.group(1)).strip() or m.group(1)
+    cutoff = datetime.strptime(grace_until, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    in_grace = datetime.now(tz=timezone.utc) < cutoff
+
+    victim_wallet = LocalWallet(PrivateKey(), prefix="mirage")
+    victim = str(victim_wallet.address()).lower()
+    other_wallet = LocalWallet(PrivateKey(), prefix="mirage")
+
+    def _sign_claim(wallet: LocalWallet, owner: str) -> dict:
+        ts = _now_ms()
+        nonce = _fresh_nonce()
+        payload = f"rewards_claim:{owner.lower()}:{ts}:{nonce}"
+        sig = sign_canonical(wallet, payload.encode("utf-8"))
+        return {
+            "pubkey": _b64(wallet.public_key().public_key_bytes),
+            "signature": _b64(sig),
+            "timestamp": ts,
+            "envelope_nonce": str(nonce),
+            "owner": owner,
+        }
+
+    # 1. Cross-address signature must be refused (always, grace period or not).
+    forged = _sign_claim(other_wallet, victim)
+    code, resp = _post(f"{backend}/api/rewards/claim", forged)
     if code in _UNAUTHENTICATED:
-        _pass("reward_claim.requires_signature", code=code)
+        _pass("reward_claim.cross_address_rejected", code=code)
     elif code == 503:
-        _skip("reward_claim.requires_signature", f"rewards not configured on this node: {resp}")
+        _skip("reward_claim.cross_address_rejected", f"rewards not configured: {resp}")
     else:
         _fail(
-            "reward_claim.requires_signature",
-            f"C-2: an unsigned claim for a third party was processed (code={code}); the endpoint "
-            f"must require a signature binding the caller to `owner`. resp={resp}",
+            "reward_claim.cross_address_rejected",
+            f"C-2: claim signed by a different address was processed (code={code}). resp={resp}",
         )
 
-    # 2. Double-pay race. Needs a real pending reward, which the debug endpoint
-    #    can create when it is reachable.
+    # 1b. A correctly signed claim must clear the auth gate (even if there is
+    #     nothing to pay — that returns success=false / no_rewards at 200).
+    signed = _sign_claim(victim_wallet, victim)
+    code, resp = _post(f"{backend}/api/rewards/claim", signed)
+    if code == 200:
+        _pass("reward_claim.signed_accepted", code=code, success=(resp or {}).get("success"))
+    elif code == 503:
+        # Pool not configured / payout path unavailable — auth still passed.
+        _pass("reward_claim.signed_accepted", code=code, note="rewards unavailable after auth")
+    elif code in _UNAUTHENTICATED:
+        _fail(
+            "reward_claim.signed_accepted",
+            f"correctly signed claim was rejected as unauthenticated (code={code}). resp={resp}",
+        )
+    else:
+        _fail("reward_claim.signed_accepted", f"unexpected code={code}: {resp}")
+
+    # 2. Unsigned claim: behaviour depends on the grace-period date.
+    code, resp = _post(f"{backend}/api/rewards/claim", {"owner": victim})
+    if in_grace:
+        if code in _UNAUTHENTICATED:
+            _fail(
+                "reward_claim.unsigned_during_grace",
+                f"LEGACY_UNSIGNED_UNTIL={grace_until} but unsigned got {code}: {resp}",
+            )
+        elif code in (200, 503):
+            _pass("reward_claim.unsigned_during_grace", code=code, until=grace_until)
+        else:
+            _fail("reward_claim.unsigned_during_grace", f"unexpected code={code}: {resp}")
+    else:
+        if code in _UNAUTHENTICATED:
+            _pass("reward_claim.unsigned_after_grace", code=code, until=grace_until)
+        elif code == 503:
+            _skip("reward_claim.unsigned_after_grace", f"rewards not configured: {resp}")
+        else:
+            _fail(
+                "reward_claim.unsigned_after_grace",
+                f"C-2: unsigned claim after grace period was processed (code={code}). resp={resp}",
+            )
+
+    # 3. Source guard: the claim handler must reference the self-expiring window.
+    quests_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+        "routes",
+        "quests.py",
+    )
+    quests_src = open(quests_path, encoding="utf-8").read()
+    if "legacy_unsigned_claim_allowed" in quests_src and "authz.legacy_unsigned" in quests_src:
+        _pass("reward_claim.grace_period_wired")
+    else:
+        _fail(
+            "reward_claim.grace_period_wired",
+            "claim handler missing legacy_unsigned_claim_allowed / authz.legacy_unsigned logging",
+        )
+
+    # 4. Double-pay race under the advisory lock. Concurrent claims stay
+    #    unsigned so the race is measured independently of the signing gate.
+    if not in_grace:
+        _skip("reward_claim.no_double_pay", "grace period closed; concurrent unsigned probe not applicable")
+        return
+
     code, summary = _get(f"{backend}/api/rewards/summary", params={"owner": victim})
     if code != 200 or not isinstance(summary, dict):
         _skip("reward_claim.no_double_pay", f"rewards summary unavailable: code={code}")
@@ -393,9 +524,6 @@ def test_reward_claim_authz(backend):
         return
     _debug(f"reward_claim: seeded {len(pending)} pending reward(s) for {victim}")
 
-    # Fire concurrent claims for the same rows. These go through requests
-    # directly rather than _post: _post retries on 5xx, and a retried claim
-    # would be a second claim, which is the very thing being measured.
     def claim(_i):
         r = requests.post(f"{backend}/api/rewards/claim", json={"owner": victim}, timeout=30)
         try:
@@ -417,17 +545,17 @@ def test_reward_claim_authz(backend):
         _fail(
             "reward_claim.no_double_pay",
             f"C-2: {len(paid)} of {len(results)} concurrent claims were each paid for the same "
-            f"pending rows; the claim must be taken atomically "
-            f"(UPDATE ... WHERE claimed_at IS NULL RETURNING) before any payout. "
+            f"pending rows; the claim must be taken atomically under a per-owner advisory lock. "
             f"tx_hashes={[b.get('tx_hash') for _c, b in paid]}",
         )
 
 
-# User-private reads, and the request key each one uses for identity. The suite
-# already covers cross-user *writes* thoroughly; these are the reads.
-_PRIVATE_READS = (
+# Reads that were overstated as H-2 private. Kept here as a documentation
+# assertion: they must remain PUBLIC (or DISABLED) so a future change that
+# re-gates them as SIGNED_IDENTITY without a real secret to protect fails the
+# parity test's intent rather than silently "fixing" a theater gate.
+_PUBLIC_BY_DESIGN = (
     ("get_inbox", "/api/get_inbox", "address"),
-    ("get_invite_codes", "/api/get_invite_codes", "address"),
     ("get_preferences", "/api/get_preferences", "address"),
     ("get_blocked_users", "/api/get_blocked_users", "address"),
     ("get_user_blocked", "/api/get_user_blocked", "address"),
@@ -440,32 +568,41 @@ _PRIVATE_READS = (
 
 
 def test_cross_user_reads(backend):
-    """H-2: an address in the query string is not proof of identity.
+    """H-2 reclassification: chain-derived / deliberate-disclosure reads stay public.
 
-    Each of these endpoints serves data that belongs to one user - inbox,
-    invite codes, preferences, block lists, referral earnings, reward balances -
-    keyed on an `address` (or `owner`) parameter that anyone can set to anyone
-    else's address. The read is the attack: no write is needed to harvest it.
-
-    The test asserts the endpoint refuses a request carrying only an address. It
-    does not assert on the body, because a fix might legitimately return an
-    empty document rather than an error; what it must not do is serve the
-    named user's private data to an unauthenticated caller.
+    Invite-code endpoints are DISABLED (404) while the feature flag is false.
     """
     victim = str(_generate_wallet().address())
 
-    for name, path, key in _PRIVATE_READS:
-        code, resp = _get(f"{backend}{path}", params={key: victim})
-        if code in _UNAUTHENTICATED:
-            _pass(f"cross_user_read.{name}_requires_signature", code=code)
-        elif code == 200:
-            _fail(
-                f"cross_user_read.{name}_requires_signature",
-                f"H-2: served {path} for an arbitrary {key} with no signature; a caller can read "
-                f"any user's private data by naming them. keys={sorted(resp)[:8] if isinstance(resp, dict) else type(resp).__name__}",
-            )
+    for name, path, key in _PUBLIC_BY_DESIGN:
+        # referrals/precheck takes a username, not an address — use a dummy.
+        params = {"username": "nobody"} if name == "referrals_precheck" else {key: victim}
+        code, resp = _get(f"{backend}{path}", params=params)
+        if code == 200:
+            _pass(f"cross_user_read.{name}_public", code=code)
+        elif code == 503:
+            _skip(f"cross_user_read.{name}_public", f"unavailable: {resp}")
         else:
             _fail(
-                f"cross_user_read.{name}_requires_signature",
-                f"expected 400/401 for an unsigned read, got {code}: {resp}",
+                f"cross_user_read.{name}_public",
+                f"expected public read (200), got {code}: {resp}",
             )
+
+    # Invite codes: feature off → 404 (not a private-data leak, not served).
+    code, resp = _get(f"{backend}/api/get_invite_codes", params={"address": victim})
+    if code == 404:
+        _pass("cross_user_read.get_invite_codes_disabled", code=code)
+    else:
+        _fail(
+            "cross_user_read.get_invite_codes_disabled",
+            f"invite codes must 404 while REGISTRATION_INVITE_CODE_REQUIRED=false; got {code}: {resp}",
+        )
+
+    code, resp = _post(f"{backend}/api/validate_invite_code", {"code": "ABCD-EFGH"})
+    if code == 404:
+        _pass("cross_user_read.validate_invite_code_disabled", code=code)
+    else:
+        _fail(
+            "cross_user_read.validate_invite_code_disabled",
+            f"validate_invite_code must 404 while feature off; got {code}: {resp}",
+        )

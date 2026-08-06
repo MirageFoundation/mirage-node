@@ -9,6 +9,7 @@ import Storage from '../../../utils/Storage';
 import { requireAccount } from '../../../utils/openBrowsing';
 import * as tx from "../../../utils/tx.js";
 import Api from '../../../utils/api';
+import { signPlainPayload } from '../../../utils/signPlain';
 import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
 import { requireThemeColor } from "../../../utils/themeColor";
@@ -1029,11 +1030,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setIsSuspending(true);
         try {
             console.log('Making API call to suspend', { adminAddress, target: post.user_id, duration_days: suspendDuration });
+            const sig = await signPlainPayload(
+                (ts, n) => `admin_rewards_suspend:${adminAddress.toLowerCase()}:${ts}:${n}`
+            );
             const response = await Api.post('/admin/rewards/suspend', {
                 admin: adminAddress,
                 target: post.user_id,
                 duration_days: suspendDuration,  // 0 = permanent
                 reason: 'Attempting to game the quest system',
+                ...sig,
             });
             console.log('Suspend response:', response);
             if (response.success) {
@@ -1096,9 +1101,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
         setIsUnsuspending(true);
         try {
+            const sig = await signPlainPayload(
+                (ts, n) => `admin_rewards_unsuspend:${adminAddress.toLowerCase()}:${ts}:${n}`
+            );
             const response = await Api.post('/admin/rewards/unsuspend', {
                 admin: adminAddress,
                 target: post.user_id,
+                ...sig,
             });
             if (response.success) {
                 setConfirmUnsuspend(false);

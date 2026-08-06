@@ -45,6 +45,13 @@ def create_app(init_runtime: bool = True) -> Flask:
     app.config["ENV"] = "production"
     app.config["DEBUG"] = False
     app.config["TESTING"] = False
+    # Bound request bodies before Werkzeug materializes them. Just above the
+    # largest permitted video upload (MEDIA_MAX_VIDEO_MB, default 300) so
+    # legitimate uploads clear the global gate and per-kind checks in
+    # upload_media still enforce the tighter image cap.
+    from media.base import max_video_bytes
+
+    app.config["MAX_CONTENT_LENGTH"] = max_video_bytes() + (16 * 1024 * 1024)
 
     CORS(app)
 

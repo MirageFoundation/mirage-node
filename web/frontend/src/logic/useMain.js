@@ -8,6 +8,7 @@ import { fetchFollowedTopics } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
+import { signPlainPayload } from "../utils/signPlain";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
 const MODERATION_REMINDER_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -727,8 +728,12 @@ export function useMain({
         let cancelled = false;
         const loadInviteCodes = async () => {
             try {
+                const sig = await signPlainPayload(
+                    (ts, n) => `get_invite_codes:${String(viewerAddress).toLowerCase()}:${ts}:${n}`
+                );
                 const resp = await Api.get('get_invite_codes', {
-                    address: viewerAddress
+                    address: viewerAddress,
+                    ...sig,
                 });
                 if (cancelled) return;
                 if (resp && Array.isArray(resp.codes)) {

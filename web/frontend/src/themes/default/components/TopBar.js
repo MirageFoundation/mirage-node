@@ -11,6 +11,7 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
 import ConfirmDialog from './ConfirmDialog.js';
 import UserAvatar from './UserAvatar.js';
 import { getAuthorColor, getAuthorTooltip } from '../../../utils/tierColors';
+import { signPlainPayload } from '../../../utils/signPlain';
 
 /**
  * Reddit-style TopBar for the default theme.
@@ -1036,7 +1037,10 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
         };
         const fetchCount = async () => {
             try {
-                const res = await Api.get('get_reports', { address: publicKey, limit: 200 });
+                const sig = await signPlainPayload(
+                    (ts, n) => `get_reports:${publicKey.toLowerCase()}:${ts}:${n}`
+                );
+                const res = await Api.get('get_reports', { address: publicKey, limit: 200, ...sig });
                 if (cancelled) return;
                 const list = res && Array.isArray(res.reports) ? res.reports : [];
                 persist(list.length);

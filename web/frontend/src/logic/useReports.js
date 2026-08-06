@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
 import * as tx from "../utils/tx";
+import { signPlainPayload } from "../utils/signPlain";
 export function useReports({
   state
 }) {
@@ -31,9 +32,13 @@ export function useReports({
     }
     try {
       setLoading(true);
+      const sig = await signPlainPayload(
+        (ts, n) => `get_reports:${publicKey.toLowerCase()}:${ts}:${n}`
+      );
       const res = await Api.get('get_reports', {
         address: publicKey,
-        limit: 200
+        limit: 200,
+        ...sig,
       });
       const list = res && Array.isArray(res.reports) ? res.reports : [];
       setReports(list);
@@ -50,9 +55,13 @@ export function useReports({
   }, [fetchReports]);
   const resolveReport = async id => {
     try {
+      const sig = await signPlainPayload(
+        (ts, n) => `resolve_report:${publicKey.toLowerCase()}:${ts}:${n}`
+      );
       await Api.post('core/resolve_report', {
         address: publicKey,
-        id: id >>> 0
+        id: id >>> 0,
+        ...sig,
       });
       setReports(prev => prev.filter(r => r && Number(r.id) !== Number(id)));
     } catch (e) {

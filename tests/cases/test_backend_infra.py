@@ -276,7 +276,6 @@ def test_bootstrap(backend: str):
         "user_status",
         "user_followed",
         "user_blocked",
-        "invite_codes",
         "rewards_summary",
         "view",
     }
@@ -285,6 +284,12 @@ def test_bootstrap(backend: str):
         _pass("bootstrap.anonymous has all keys")
     else:
         _fail("bootstrap.anonymous has all keys", f"missing={sorted(missing)}")
+
+    # invite_codes must be omitted while REGISTRATION_INVITE_CODE_REQUIRED=false.
+    if "invite_codes" in body:
+        _fail("bootstrap.anonymous omits invite_codes when feature off", "invite_codes key present")
+    else:
+        _pass("bootstrap.anonymous omits invite_codes when feature off")
 
     if body.get("view") is None:
         _pass("bootstrap.anonymous view is null without view=")
@@ -304,7 +309,7 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.anonymous chain_config valid", f"got_keys={list((cc or {}).keys())[:8]}")
 
     user_sections = {
-        k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "invite_codes", "rewards_summary")
+        k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "rewards_summary")
     }
     if all(v is None for v in user_sections.values()):
         _pass("bootstrap.anonymous user_* sections are null")
@@ -353,10 +358,17 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.logged_in user_blocked valid", f"got_keys={list((ub or {}).keys())[:8]}")
 
     ic = body2.get("invite_codes")
-    if isinstance(ic, dict) and "codes" in ic and "total" in ic and "available" in ic:
-        _pass("bootstrap.logged_in invite_codes valid")
+    invite_required = bool((body2.get("node_config") or {}).get("registration_invite_code_required", False))
+    if invite_required:
+        if isinstance(ic, dict) and "codes" in ic and "total" in ic and "available" in ic:
+            _pass("bootstrap.logged_in invite_codes valid")
+        else:
+            _fail("bootstrap.logged_in invite_codes valid", f"got_keys={list((ic or {}).keys())[:8]}")
     else:
-        _fail("bootstrap.logged_in invite_codes valid", f"got_keys={list((ic or {}).keys())[:8]}")
+        if "invite_codes" in body2:
+            _fail("bootstrap.logged_in omits invite_codes when feature off", "invite_codes key present")
+        else:
+            _pass("bootstrap.logged_in omits invite_codes when feature off")
 
     # rewards_summary may be the disabled stub if QUESTS_ENABLED=false.
     rs = body2.get("rewards_summary")

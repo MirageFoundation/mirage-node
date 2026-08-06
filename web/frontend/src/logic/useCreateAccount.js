@@ -226,7 +226,6 @@ export function useCreateAccount({
             if (resp && resp.valid) {
                 return {
                     valid: true,
-                    owner: resp.owner
                 };
             }
             return resp || {

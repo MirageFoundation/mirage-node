@@ -19,6 +19,7 @@ import { requireAccount } from "../utils/openBrowsing";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
+import { signPlainPayload } from "../utils/signPlain";
 export const pickCard = requireThemeColor;
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
@@ -1007,12 +1008,16 @@ export function useViewPost({
         if (!adminAddress) return;
         setIsSuspending(true);
         try {
+            const sig = await signPlainPayload(
+                (ts, n) => `admin_rewards_suspend:${adminAddress.toLowerCase()}:${ts}:${n}`
+            );
             const response = await Api.post('/admin/rewards/suspend', {
                 admin: adminAddress,
                 target: userId,
                 duration_days: suspendDuration,
                 // 0 = permanent
-                reason: 'Attempting to game the quest system'
+                reason: 'Attempting to game the quest system',
+                ...sig,
             });
             if (response.success) {
                 const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
@@ -1085,9 +1090,13 @@ export function useViewPost({
         if (!adminAddress) return;
         setIsUnsuspending(true);
         try {
+            const sig = await signPlainPayload(
+                (ts, n) => `admin_rewards_unsuspend:${adminAddress.toLowerCase()}:${ts}:${n}`
+            );
             const response = await Api.post('/admin/rewards/unsuspend', {
                 admin: adminAddress,
-                target: userId
+                target: userId,
+                ...sig,
             });
             if (response.success) {
                 setConfirmUnsuspendQuests(null);

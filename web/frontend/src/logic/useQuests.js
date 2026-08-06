@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Api from '../utils/api';
 import Storage from '../utils/Storage';
 import { readBootstrapStashAfterBootstrap } from '../utils/bootstrapStash';
+import { signPlainPayload } from '../utils/signPlain';
 
 const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
 const OPTIMISTIC_CLAIM_TTL_MS = 45000;
@@ -182,7 +183,10 @@ export function useRewards() {
             setOptimisticClaimBalance(totalAfterMultiplier);
             try { window.dispatchEvent(new CustomEvent('optimisticBalanceUpdate')); } catch (_) { }
 
-            const response = await Api.post('/rewards/claim', { owner: userAddress });
+            const sig = await signPlainPayload(
+                (ts, n) => `rewards_claim:${userAddress.toLowerCase()}:${ts}:${n}`
+            );
+            const response = await Api.post('/rewards/claim', { owner: userAddress, ...sig });
 
             if (response.success) {
                 await fetchAll(true);
