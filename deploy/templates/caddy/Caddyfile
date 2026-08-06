@@ -119,7 +119,11 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 
 	# Chain RPC (CometBFT) - includes WebSocket at /chain/rpc/websocket
 	handle /chain/rpc/* {
-		header ?Cache-Control "no-store"
+		# Unconditional, unlike the blocks above: CometBFT stamps some JSON-RPC
+		# responses "public, max-age=86400", including live state like abci_info.
+		# With a CDN in front, a conditional header lets that through and the edge
+		# then publishes day-stale height and app version.
+		header Cache-Control "no-store"
 		rate_limit {
 			zone chain_rpc_limit {
 				key {client_ip}
@@ -156,6 +160,11 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 
 		@html path /
 		header @html Cache-Control "no-cache"
+
+		# Deployed build marker. Caddy sets nothing here by default, so the CDN
+		# applies its own static-file TTL and pins a month-old version string.
+		@version path /version.txt
+		header @version Cache-Control "no-store"
 
 		@spa_route not file
 		header @spa_route Cache-Control "no-cache"
