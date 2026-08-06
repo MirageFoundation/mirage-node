@@ -19,17 +19,25 @@ import time
 from typing import Any, Dict, Optional
 
 from db import connect_db
+from error_utils import IndexerUnavailable
 
 
 _DIFFICULTY_CACHE: Optional[Dict[str, Any]] = None
 _DIFFICULTY_CACHE_TIME: float = 0.0
 _DIFFICULTY_CACHE_TTL: float = 5.0
 
+# Written together by the indexer from one GetDifficulty response; a subset means
+# the row is mid-write or stale, not that the missing values are zero.
+_REQUIRED_DIFFICULTY_KEYS = ("current_difficulty", "previous_difficulty", "last_change_height", "current_height")
+
 
 def get_difficulty_info(timeout: float = 3.0, *, force: bool = False) -> Dict[str, Any]:
     """Get difficulty state from indexer DB chain_stats.
 
-    Falls back to querying the difficulty_history table if chain_stats is empty.
+    The indexer writes every field of difficulty_info in one shot from the chain's
+    GetDifficulty query (indexer/chain_client.py:323), so a missing or partial row
+    means the indexer has not populated it — not that difficulty is zero. Raising
+    keeps a PoW precheck from being computed against a difficulty nobody asserted.
     """
     global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_TIME
 
@@ -37,33 +45,18 @@ def get_difficulty_info(timeout: float = 3.0, *, force: bool = False) -> Dict[st
     if not force and _DIFFICULTY_CACHE is not None and (now - _DIFFICULTY_CACHE_TIME) < _DIFFICULTY_CACHE_TTL:
         return _DIFFICULTY_CACHE
 
-    info: Dict[str, Any] = {
-        "current_difficulty": 0,
-        "previous_difficulty": 0,
-        "last_change_height": 0,
-        "pow_message_count": 0,
-        "consecutive_low_usage": 0,
-        "latest_block_hash": "",
-        "current_height": 0,
-    }
-
     with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
         cur = conn.cursor()
 
-        # Primary source: chain_stats.difficulty_info
         cur.execute("SELECT value FROM chain_stats WHERE key = 'difficulty_info'")
         diff_row = cur.fetchone()
-        if diff_row and isinstance(diff_row[0], dict):
-            info.update(diff_row[0])
+        if not diff_row or not isinstance(diff_row[0], dict):
+            raise IndexerUnavailable("chain_stats.difficulty_info missing from indexer DB")
+        info: Dict[str, Any] = dict(diff_row[0])
 
-        # Fallback: difficulty_history table (most recent)
-        if not info.get("current_height"):
-            cur.execute("SELECT height, difficulty, msg_count FROM difficulty_history ORDER BY height DESC LIMIT 1")
-            row = cur.fetchone()
-            if row:
-                info["current_height"] = int(row[0])
-                info["current_difficulty"] = int(row[1])
-                info["pow_message_count"] = int(row[2]) if row[2] is not None else 0
+        missing = [k for k in _REQUIRED_DIFFICULTY_KEYS if k not in info]
+        if missing:
+            raise IndexerUnavailable(f"chain_stats.difficulty_info incomplete, missing {missing}")
 
         # Latest block hash from recent_blocks
         cur.execute("SELECT height, hash FROM recent_blocks ORDER BY height DESC LIMIT 1")
@@ -201,7 +194,11 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     Returns True if:
     - Last processed time is >30s ago (time-based lag), OR
     - Indexer is >10 blocks behind chain head (height-based lag), OR
-    - Indexer state is unavailable
+    - The indexer has not processed anything yet
+
+    Raises IndexerUnavailable if the DB cannot be read. An outage is not sync lag:
+    reporting it as lag told clients to retry against a node that had no data at
+    all, and hid the outage from every caller (M-6).
     """
     global _CATCHING_UP_CACHE, _CATCHING_UP_CACHE_TIME
 
@@ -216,19 +213,19 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
                 "SELECT key, value FROM indexer_state WHERE key IN ('last_processed_time', 'last_processed_height', 'chain_head_height')"
             )
             state = {r[0]: r[1] for r in cur.fetchall()}
+    except Exception as e:
+        raise IndexerUnavailable(f"indexer_state unreadable: {e}") from e
 
-            last_ts = int(state.get("last_processed_time", 0) or 0)
-            last_height = int(state.get("last_processed_height", 0) or 0)
-            chain_head = int(state.get("chain_head_height", 0) or 0)
+    last_ts = int(state.get("last_processed_time", 0) or 0)
+    last_height = int(state.get("last_processed_height", 0) or 0)
+    chain_head = int(state.get("chain_head_height", 0) or 0)
 
-            if not last_ts:
-                result = True
-            else:
-                time_lag = int(time.time()) - last_ts > 30
-                height_lag = chain_head > 0 and (chain_head - last_height) > 10
-                result = time_lag or height_lag
-    except Exception:
+    if not last_ts:
         result = True
+    else:
+        time_lag = int(time.time()) - last_ts > 30
+        height_lag = chain_head > 0 and (chain_head - last_height) > 10
+        result = time_lag or height_lag
 
     _CATCHING_UP_CACHE = result
     _CATCHING_UP_CACHE_TIME = now
@@ -236,21 +233,27 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
 
 
 def get_indexer_health() -> Dict[str, Any]:
-    """Return indexer health metrics for monitoring."""
+    """Return indexer health metrics for monitoring.
+
+    Raises IndexerUnavailable rather than returning {"error": ..., "catching_up":
+    True}: a monitor that cannot reach the DB must see a failure, not a node that
+    merely looks like it is syncing (M-6).
+    """
     try:
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
             cur = conn.cursor()
             cur.execute("SELECT key, value, updated_at FROM indexer_state")
             rows = {r[0]: {"value": r[1], "updated_at": r[2]} for r in cur.fetchall()}
-            return {
-                "last_processed_height": int(rows.get("last_processed_height", {}).get("value", 0) or 0),
-                "last_processed_time": int(rows.get("last_processed_time", {}).get("value", 0) or 0),
-                "chain_head_height": int(rows.get("chain_head_height", {}).get("value", 0) or 0),
-                "catching_up": is_node_catching_up(),
-                "lag_seconds": int(time.time()) - int(rows.get("last_processed_time", {}).get("value", 0) or 0),
-            }
     except Exception as e:
-        return {"error": str(e), "catching_up": True}
+        raise IndexerUnavailable(f"indexer_state unreadable: {e}") from e
+
+    return {
+        "last_processed_height": int(rows.get("last_processed_height", {}).get("value", 0) or 0),
+        "last_processed_time": int(rows.get("last_processed_time", {}).get("value", 0) or 0),
+        "chain_head_height": int(rows.get("chain_head_height", {}).get("value", 0) or 0),
+        "catching_up": is_node_catching_up(),
+        "lag_seconds": int(time.time()) - int(rows.get("last_processed_time", {}).get("value", 0) or 0),
+    }
 
 
 def classify_reject(raw_log: str) -> Dict[str, Any]:

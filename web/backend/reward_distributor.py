@@ -29,8 +29,24 @@ import subprocess
 import time
 from typing import List, Optional, Tuple
 
+from bech32 import bech32_decode  # type: ignore
+
 from db import connect_backend_db, connect_db
 from quest_multiplier import get_reward_multiplier
+
+
+def is_valid_mirage_address(address: str) -> bool:
+    """True only for a well-formed mirage1 bech32 account address.
+
+    The payout path passes the recipient to miraged as a positional argument, so
+    an unvalidated value could be read as a flag (L-6). Validating here means the
+    address is checked before it can reach an argv list.
+    """
+    addr = str(address or "").strip()
+    if not addr or addr != addr.lower():
+        return False
+    hrp, data = bech32_decode(addr)
+    return hrp == "mirage" and bool(data)
 
 
 def get_balance(address) -> int:
@@ -134,6 +150,11 @@ def _send_tokens_via_cli(
     """
     miraged = _get_miraged_path()
     amount_str = f"{amount}umirage"
+
+    # Last line of defence before argv: send_reward already validates, but this
+    # helper is the only place the address becomes a positional argument (L-6).
+    if not is_valid_mirage_address(to_address):
+        return False, None, "invalid_recipient_address"
 
     # Get the actual minimum gas price from the node config
     gas_price = int(min_gas_price_umirage())
@@ -282,6 +303,15 @@ class RewardDistributor:
                 "tx_hash": None,
                 "amount": 0,
                 "error": "amount must be positive",
+            }
+
+        if not is_valid_mirage_address(recipient):
+            logger.warning("send_reward rejected malformed recipient: %r", str(recipient)[:64])
+            return {
+                "success": False,
+                "tx_hash": None,
+                "amount": 0,
+                "error": "invalid_recipient_address",
             }
 
         if not self.enabled:

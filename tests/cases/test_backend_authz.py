@@ -504,15 +504,13 @@ def test_reward_claim_authz(backend):
             "claim handler missing legacy_unsigned_claim_allowed / authz.legacy_unsigned logging",
         )
 
-    # 4. Double-pay race under the advisory lock. Concurrent claims stay
-    #    unsigned so the race is measured independently of the signing gate.
-    if not in_grace:
-        _skip("reward_claim.no_double_pay", "grace period closed; concurrent unsigned probe not applicable")
-        return
-
+    # 4. Double-pay race under the advisory lock. Each concurrent claim is signed
+    #    with its own nonce: an unsigned probe only worked while the grace period
+    #    was open, so this check silently stopped running the day it closed, and
+    #    the whole race went untested.
     code, summary = _get(f"{backend}/api/rewards/summary", params={"owner": victim})
     if code != 200 or not isinstance(summary, dict):
-        _skip("reward_claim.no_double_pay", f"rewards summary unavailable: code={code}")
+        _fail("reward_claim.no_double_pay", f"rewards summary unavailable: code={code}")
         return
     if summary.get("disabled"):
         _skip("reward_claim.no_double_pay", "quests disabled on this node")
@@ -520,24 +518,33 @@ def test_reward_claim_authz(backend):
 
     quests = summary.get("daily_quests") or []
     if not quests:
-        _skip("reward_claim.no_double_pay", "no daily quests to complete")
+        _fail("reward_claim.no_double_pay", "quests enabled but no daily quests to complete")
         return
 
-    quest_id = quests[0].get("quest_id")
+    # The summary emits the quest identifier as "id" (quests.py:503); reading
+    # "quest_id" here silently produced None, so the seeding POST was rejected as
+    # "quest_id required" and this check skipped even when quests were enabled.
+    quest_id = quests[0].get("id")
+    if not quest_id:
+        _fail("reward_claim.no_double_pay", f"quest object has no id: {quests[0]!r}")
+        return
     code, resp = _post(f"{backend}/api/rewards/debug/complete", {"owner": victim, "quest_id": quest_id})
     if code != 200:
-        _skip("reward_claim.no_double_pay", f"cannot seed a pending reward (debug complete -> {code})")
+        _skip(
+            "reward_claim.no_double_pay",
+            f"cannot seed a pending reward (debug complete -> {code}); needs BACKEND_DEBUG=true",
+        )
         return
 
     code, summary = _get(f"{backend}/api/rewards/summary", params={"owner": victim})
     pending = (summary or {}).get("pending_rewards") or []
     if not pending:
-        _skip("reward_claim.no_double_pay", "no pending reward materialized")
+        _fail("reward_claim.no_double_pay", "quest completed but no pending reward materialized")
         return
     _debug(f"reward_claim: seeded {len(pending)} pending reward(s) for {victim}")
 
     def claim(_i):
-        r = requests.post(f"{backend}/api/rewards/claim", json={"owner": victim}, timeout=30)
+        r = requests.post(f"{backend}/api/rewards/claim", json=_sign_claim(victim_wallet, victim), timeout=30)
         try:
             return r.status_code, r.json()
         except ValueError:
@@ -551,8 +558,18 @@ def test_reward_claim_authz(backend):
         for code, body in results
         if code == 200 and isinstance(body, dict) and body.get("success") is True and body.get("rewards")
     ]
-    if len(paid) <= 1:
+    # Exactly one, not "at most one": a seeded reward that nobody is paid means the
+    # payout never ran (pool unfunded, payouts disabled), and `<= 1` reported that
+    # as proof the race was safe.
+    if len(paid) == 1:
         _pass("reward_claim.no_double_pay", paid=len(paid), attempts=len(results))
+    elif len(paid) == 0:
+        _fail(
+            "reward_claim.no_double_pay",
+            f"C-2 unproven: a pending reward was seeded but none of {len(results)} concurrent claims "
+            f"was paid, so the double-pay race never ran. Needs QUESTS_PAYOUTS_ENABLED=true and a "
+            f"funded QUESTS_REWARDS_POOL_ADDRESS. responses={[(c, (b or {}).get('error_code') or (b or {}).get('error')) for c, b in results]}",
+        )
     else:
         _fail(
             "reward_claim.no_double_pay",

@@ -126,7 +126,10 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
                     raise RuntimeError("chain_params not yet available in indexer DB")
                 cache = _build_cache_from_params(params_dict)
                 _PARAMS_CACHE = cache
-                log.info(f"Loaded chain params from indexer DB: {cache}")
+                # Count at info, values at debug: the full set is long and dumping it
+                # on every start bloats logs that get shared when debugging (L-8).
+                log.info(f"Loaded {len(cache)} chain params from indexer DB")
+                log.debug(f"Chain params: {cache}")
                 return _PARAMS_CACHE
             except Exception as e:
                 last_error = e

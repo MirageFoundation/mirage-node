@@ -308,9 +308,7 @@ def test_bootstrap(backend: str):
     else:
         _fail("bootstrap.anonymous chain_config valid", f"got_keys={list((cc or {}).keys())[:8]}")
 
-    user_sections = {
-        k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "rewards_summary")
-    }
+    user_sections = {k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "rewards_summary")}
     if all(v is None for v in user_sections.values()):
         _pass("bootstrap.anonymous user_* sections are null")
     else:
@@ -1318,9 +1316,7 @@ def test_error_registry(backend):
         _pass("error_registry.unmapped_messages", checked=len(_MSG_TO_CODE))
 
     # Every code must have user-facing copy, or the UI renders "Unknown error code: x".
-    js_path = os.path.join(
-        os.path.dirname(backend_src), "frontend", "src", "utils", "errorMessages.js"
-    )
+    js_path = os.path.join(os.path.dirname(backend_src), "frontend", "src", "utils", "errorMessages.js")
     if not os.path.exists(js_path):
         _skip("error_registry.frontend_copy", "frontend source not present in this image")
         return
@@ -1331,3 +1327,107 @@ def test_error_registry(backend):
         _fail("error_registry.frontend_copy", f"{len(missing)} codes without UI copy: {', '.join(missing[:8])}")
     else:
         _pass("error_registry.frontend_copy", checked=len(mapped))
+
+
+def test_indexer_fail_hard(backend):
+    """M-6: an indexer DB outage must surface as an outage, not as sync lag.
+
+    Before v1.32.1 chain.py answered a dead DB with catching_up=True and a
+    zero-filled difficulty dict, so a total outage looked like a node that was
+    merely syncing and PoW prechecks ran against difficulty 0.
+    """
+    backend_src = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+    )
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    try:
+        import chain as chain_mod
+        from error_utils import IndexerUnavailable
+    except Exception as e:
+        _skip("indexer_fail_hard.raises", f"backend modules not importable: {e}")
+        return
+
+    def _boom(*_a, **_kw):
+        raise OSError("simulated indexer DB outage")
+
+    original = chain_mod.connect_db
+    chain_mod.connect_db = _boom
+    chain_mod._CATCHING_UP_CACHE = None
+    chain_mod._DIFFICULTY_CACHE = None
+    try:
+        for name, fn in (
+            ("is_node_catching_up", chain_mod.is_node_catching_up),
+            ("get_indexer_health", chain_mod.get_indexer_health),
+        ):
+            try:
+                result = fn()
+            except IndexerUnavailable:
+                _pass(f"indexer_fail_hard.{name}")
+            except Exception as e:
+                _fail(f"indexer_fail_hard.{name}", f"raised {type(e).__name__} instead of IndexerUnavailable: {e}")
+            else:
+                _fail(
+                    f"indexer_fail_hard.{name}",
+                    f"returned {result!r} during a DB outage instead of raising IndexerUnavailable",
+                )
+    finally:
+        chain_mod.connect_db = original
+        chain_mod._CATCHING_UP_CACHE = None
+        chain_mod._DIFFICULTY_CACHE = None
+
+    # A reachable DB with no difficulty_info row must also raise, rather than
+    # reporting difficulty 0 as if the chain had asserted it.
+    class _EmptyCursor:
+        def execute(self, *_a, **_kw):
+            return None
+
+        def fetchone(self):
+            return None
+
+    class _EmptyConn:
+        def cursor(self):
+            return _EmptyCursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    chain_mod.connect_db = lambda *_a, **_kw: _EmptyConn()
+    chain_mod._DIFFICULTY_CACHE = None
+    try:
+        info = chain_mod.get_difficulty_info(force=True)
+    except IndexerUnavailable:
+        _pass("indexer_fail_hard.difficulty_no_row")
+    except Exception as e:
+        _fail("indexer_fail_hard.difficulty_no_row", f"raised {type(e).__name__} instead of IndexerUnavailable: {e}")
+    else:
+        _fail(
+            "indexer_fail_hard.difficulty_no_row",
+            f"returned {info!r} with no difficulty_info row instead of raising",
+        )
+    finally:
+        chain_mod.connect_db = original
+        chain_mod._DIFFICULTY_CACHE = None
+
+    # The 503 mapping is what makes the outage distinguishable from
+    # node_catching_up at the 29 relay routes that classify by exception.
+    core_src = open(os.path.join(backend_src, "routes", "core.py"), encoding="utf-8").read()
+    tree = ast.parse(core_src)
+    mapped = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_classify_exception":
+            body = ast.get_source_segment(core_src, node) or ""
+            mapped = "IndexerUnavailable" in body and "indexer_unavailable" in body and "503" in body
+    if mapped:
+        _pass("indexer_fail_hard.classified_503")
+    else:
+        _fail(
+            "indexer_fail_hard.classified_503",
+            "_classify_exception no longer maps IndexerUnavailable to a 503 indexer_unavailable, "
+            "so an outage folds back into a generic 500",
+        )

@@ -15,6 +15,16 @@ from flask import jsonify
 from logging_utils import logger
 
 
+class IndexerUnavailable(RuntimeError):
+    """The indexer DB could not answer a query the backend needs.
+
+    Raised instead of returning a plausible-looking default, so an outage cannot
+    be mistaken for real chain state (M-6). safe_error() maps this to a 503 with
+    the indexer_unavailable code, which is what makes it distinguishable from
+    node_catching_up at every route that already catches Exception.
+    """
+
+
 # ── Canonical error registry: code → message ─────────────────────────
 # This is the single source of truth. The reverse map is auto-derived below.
 # All messages MUST be lowercase. No duplicates allowed.
@@ -258,5 +268,8 @@ def safe_error(e: Exception, context: str = "") -> tuple:
     """Log exception server-side and return a generic JSON error to the client."""
     request_id = uuid.uuid4().hex[:8]
     prefix = f"[{context}] " if context else ""
+    if isinstance(e, IndexerUnavailable):
+        logger().error(f"{prefix}request_id={request_id} indexer_unavailable: {e}")
+        return api_error_code("indexer_unavailable", 503, request_id=request_id)
     logger().error(f"{prefix}request_id={request_id} {type(e).__name__}: {e}\n{traceback.format_exc()}")
     return jsonify({"error": "internal server error", "error_code": "internal_error", "request_id": request_id}), 500

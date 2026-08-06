@@ -19,6 +19,7 @@ Core model (see the Server Stats Redesign plan):
 
 import base64
 import binascii
+import ipaddress
 import logging
 import re
 import threading
@@ -924,7 +925,15 @@ def _peer_endpoint(ip: str) -> Optional[str]:
     http://<ip>: a redirect to https means "domain node — skip" (avoids listing
     the same node twice); a direct response means "this IP is its only endpoint".
     """
-    if not re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", ip):
+    # is_global rather than a shape-only regex (L-1/L-5): the shape check accepted
+    # private, loopback and link-local addresses, so a peer list containing
+    # 169.254.169.254 or 10.x turned this into an outbound probe of the host's own
+    # network from inside the container.
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    if not parsed.is_global:
         return None
     try:
         resp = requests.get(f"http://{ip}/api/get_peers", timeout=3, allow_redirects=False)

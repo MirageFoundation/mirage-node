@@ -18,7 +18,7 @@ Usage:
 
 import argparse
 import os
-import random
+import secrets
 import sys
 import time
 
@@ -29,9 +29,15 @@ CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # Excludes I, O, 0, 1 for clari
 
 
 def generate_code() -> str:
-    """Generate a random invite code in format XXXX-XXXX."""
-    part1 = "".join(random.choices(CODE_CHARS, k=4))
-    part2 = "".join(random.choices(CODE_CHARS, k=4))
+    """Generate a random invite code in format XXXX-XXXX.
+
+    secrets, not random: an invite code is a bearer credential for account
+    creation, and Mersenne Twister output is predictable from observed codes
+    (M-5 in the backend review). 32**8 is only ~1.1e12, so entropy quality is
+    the whole defense.
+    """
+    part1 = "".join(secrets.choice(CODE_CHARS) for _ in range(4))
+    part2 = "".join(secrets.choice(CODE_CHARS) for _ in range(4))
     return f"{part1}-{part2}"
 
 
@@ -323,7 +329,10 @@ def main():
         print("Error: --replenish must be at least 1", file=sys.stderr)
         sys.exit(1)
     if not args.user and args.replenish is None and not args.add:
-        print("Error: specify --replenish N (with or without --user), --user USERNAME, or --user USERNAME --add N", file=sys.stderr)
+        print(
+            "Error: specify --replenish N (with or without --user), --user USERNAME, or --user USERNAME --add N",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     indexer_url = os.environ.get("INDEXER_DB_URL", "").strip()

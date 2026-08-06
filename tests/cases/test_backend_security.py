@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import re
 import string
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1278,6 +1279,35 @@ def test_invite_code_hygiene(backend):
             "M-3: invite codes are generated with a non-cryptographic RNG; use secrets",
         )
 
+    # The backend generator is not the only one. scripts/manage_invites.py and
+    # scripts/onboard_influencer.py are what an operator actually runs to mint
+    # codes, and both used random.choices while this check watched only
+    # web/backend — so the codes in circulation could be weak with the suite green.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    weak_scripts = []
+    checked = 0
+    for rel in ("scripts/manage_invites.py", "scripts/onboard_influencer.py"):
+        path = os.path.join(repo_root, rel)
+        if not os.path.isfile(path):
+            continue
+        src = open(path, encoding="utf-8").read()
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.FunctionDef) and node.name == "generate_code":
+                checked += 1
+                body = ast.get_source_segment(src, node) or ""
+                if "random." in body or "secrets." not in body:
+                    weak_scripts.append(f"{rel}:{node.lineno}")
+    if not checked:
+        _skip("invite_code.script_crypto_rng", "no generate_code found in the invite scripts")
+    elif weak_scripts:
+        _fail(
+            "invite_code.script_crypto_rng",
+            f"M-3: invite codes are minted with a non-cryptographic RNG at {', '.join(weak_scripts)}; "
+            f"use secrets.choice — codes are bearer credentials for account creation",
+        )
+    else:
+        _pass("invite_code.script_crypto_rng", generators=checked)
+
     # Owner disclosure: the validation response must not name the code's owner.
     discloses = []
     for path, src in _iter_backend_py(backend_src):
@@ -1335,3 +1365,91 @@ def test_indexer_drift(backend):
             f"M-8: backend serves pow_base_bits={served} but the chain has "
             f"min_difficulty={onchain}; the indexer's copy has drifted",
         )
+
+    # Params are node-wide. Per-user state is where drift actually bites: the
+    # backend answers profile and balance reads entirely from the indexer DB, so
+    # extend the comparison to a real account rather than a single global number.
+    wallet = WALLETS.get("sub1")
+    if wallet is None:
+        _skip("indexer_drift.profile_level", "sub1 wallet not provisioned")
+        return
+    addr = str(wallet.address()).lower()
+
+    def _chain_profile() -> Optional[dict]:
+        rc, out = _run_miraged(["q", "core", "profile", addr, "-o", "json"], timeout=30)
+        if rc != 0 or not out:
+            return None
+        match = re.search(r"\{.*\}", out, re.S)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except ValueError:
+            return None
+
+    def _chain_balance() -> Optional[int]:
+        rc, out = _run_miraged(["q", "bank", "balances", addr, "-o", "json"], timeout=30)
+        if rc != 0 or not out:
+            return None
+        match = re.search(r"\{.*\}", out, re.S)
+        if not match:
+            return None
+        try:
+            balances = json.loads(match.group(0)).get("balances") or []
+        except ValueError:
+            return None
+        return sum(int(c.get("amount", 0)) for c in balances if c.get("denom") == "umirage")
+
+    # The indexer trails the chain by a block or so, and other categories run in
+    # parallel, so one mismatch is lag rather than drift. Compare fresh read pairs
+    # until they agree, and only report drift if they never do.
+    ATTEMPTS = 5
+
+    def _compare(name: str, read_pair) -> None:
+        """read_pair() -> (served, onchain) or None when a source is unavailable."""
+        served = onchain = None
+        for _attempt in range(ATTEMPTS):
+            pair = read_pair()
+            if pair is None:
+                time.sleep(2)
+                continue
+            served, onchain = pair
+            if served == onchain:
+                break
+            time.sleep(2)
+        if served is None or onchain is None:
+            _skip(f"indexer_drift.{name}", "value unavailable from backend or chain")
+        elif served == onchain:
+            _pass(f"indexer_drift.{name}", value=served)
+        else:
+            _fail(
+                f"indexer_drift.{name}",
+                f"M-8: backend serves {name}={served!r} for {addr} but the chain has "
+                f"{onchain!r} after {ATTEMPTS} attempts; the indexer's copy has drifted",
+            )
+
+    def _served_profile() -> Optional[dict]:
+        code, body = _get(f"{backend}/api/get_profile", {"address": addr})
+        return body if code == 200 and isinstance(body, dict) else None
+
+    def _level_pair():
+        served, onchain = _served_profile(), _chain_profile()
+        if served is None or onchain is None:
+            return None
+        return int(served.get("level", -1)), int(onchain.get("level", -2))
+
+    def _username_pair():
+        served, onchain = _served_profile(), _chain_profile()
+        if served is None or onchain is None:
+            return None
+        return str(served.get("username", "")), str(onchain.get("username", ""))
+
+    def _balance_pair():
+        served, onchain = _served_profile(), _chain_balance()
+        if served is None or onchain is None:
+            return None
+        return int(served.get("balance", -1)), int(onchain)
+
+    _compare("profile_level", _level_pair)
+    _compare("profile_username", _username_pair)
+    _compare("balance", _balance_pair)

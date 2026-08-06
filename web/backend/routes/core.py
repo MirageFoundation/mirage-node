@@ -2,6 +2,15 @@ from __future__ import annotations
 
 """Core message relay endpoints.
 
+TRUST MODEL — read docs/architecture/backend-trust-model.md before adding a check
+here. The chain's ante handlers are the only enforcement boundary. `/chain/rest/*`
+and `/chain/rpc/*` are publicly proxied, so any client can broadcast a relay
+transaction without touching this module. Every validation below is advisory: it
+buys an honest client a fast, cheap rejection, and nothing more. Do not rely on it
+to keep anything out of the chain, and do not read a check on one endpoint as a
+guarantee on another — 13 endpoints verify the envelope signature here and 16 do
+not, by accepted decision.
+
 Endpoints:
 - POST /api/core/set_username: Relay meta-signed username message.
 - POST /api/core/block_post: Relay meta-signed block post message.
@@ -17,6 +26,7 @@ import logging
 import os
 import random
 import re
+import sys
 import time
 import threading
 from typing import Any, Dict
@@ -59,7 +69,7 @@ from shared.datatypes import (
 )
 
 from logging_utils import log_event, next_request_id, logger
-from error_utils import api_error_code, get_message
+from error_utils import IndexerUnavailable, api_error_code, get_message
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
 from db import connect_db, connect_backend_db
@@ -463,6 +473,35 @@ def _pow_factor() -> float:
     return float(p["pow_factor"])
 
 
+def _client_timestamp(rid: str, action: str, data: Dict[str, Any]) -> int:
+    """Return the envelope timestamp exactly as the client sent it.
+
+    follow_topic and unfollow_topic used to substitute `now` when the field was
+    absent, which forwards to the chain an envelope_timestamp the user never
+    signed — latent breakage the moment signature verification is applied to
+    these endpoints (H-3). Absence is passed through as 0 and logged instead.
+    """
+    timestamp = int(data.get("timestamp", 0) or 0)
+    if not timestamp:
+        log_event(rid, "envelope.timestamp_absent", action=action)
+    return timestamp
+
+
+def _log_pow_precheck_error(rid: str, action: str, exc: Exception) -> None:
+    """Record a PoW precheck that could not be evaluated.
+
+    The precheck is advisory — the chain's PowDecorator is authoritative, so a
+    precheck that throws must not reject the request (see
+    docs/architecture/backend-trust-model.md). It must not vanish either: this
+    used to be `except Exception: pass` at 21 sites, which meant a malformed
+    field or an Argon2 error silently disabled the check with no way to observe
+    the rate. Alert on pow.precheck_error — a sustained rate means the precheck
+    is broken and every proof is reaching the chain unscreened.
+    """
+    logger().warning("[pow.precheck_error] action=%s %s: %s", action, type(exc).__name__, exc)
+    log_event(rid, "pow.precheck_error", action=action, error_type=type(exc).__name__, error=str(exc))
+
+
 def _tx_error(
     rid: str,
     endpoint: str,
@@ -518,6 +557,13 @@ def _classify_exception(err_str: str):
     Checks for known error patterns and returns user-safe messages.
     Unknown exceptions get a generic message (details are in server logs).
     """
+    # Read the live exception rather than sniffing err_str: every caller is inside
+    # an except block, and an indexer outage must be reported as 503
+    # indexer_unavailable, not folded into the generic 500 (M-6). Outside an
+    # except block sys.exc_info() is empty and this is a no-op.
+    if isinstance(sys.exc_info()[1], IndexerUnavailable):
+        return get_message("indexer_unavailable"), 503
+
     low = err_str.lower()
     if "admin insufficient balance" in low:
         return "admin insufficient balance", 400
@@ -934,8 +980,8 @@ def core_set_username():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "set_username", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "set_username", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
@@ -1368,8 +1414,8 @@ def core_set_biography():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "set_biography", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "set_biography", difficulty, proof, has_difficulty, has_pow)
 
@@ -1507,8 +1553,8 @@ def core_enable_agent():
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
                 ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "enable_agent", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "enable_agent", difficulty, proof, has_difficulty, has_pow)
 
@@ -1608,8 +1654,8 @@ def core_disable_agent():
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
                 ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "disable_agent", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "disable_agent", difficulty, proof)
 
@@ -1751,8 +1797,8 @@ def core_set_agents():
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
                 ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "set_agents", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "set_agents", difficulty, proof)
 
@@ -1876,8 +1922,8 @@ def core_block_post():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "block_post", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "block_post", difficulty, proof)
 
@@ -2000,8 +2046,8 @@ def core_block_user():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "block_user", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "block_user", difficulty, proof)
 
@@ -2092,8 +2138,8 @@ def core_unblock_post():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "unblock_post", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "unblock_post", difficulty, proof)
 
@@ -2184,8 +2230,8 @@ def core_unblock_user():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "unblock_user", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "unblock_user", difficulty, proof)
 
@@ -2307,8 +2353,8 @@ def core_block_topic():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "block_topic", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "block_topic", difficulty, proof)
 
@@ -2400,8 +2446,8 @@ def core_unblock_topic():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "unblock_topic", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "unblock_topic", difficulty, proof)
 
@@ -2512,8 +2558,8 @@ def core_follow_user():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "follow_user", _pow_exc)
 
         msg = MsgFollowUser()
         msg.authority = validator_addr
@@ -2626,8 +2672,8 @@ def core_unfollow_user():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "unfollow_user", _pow_exc)
 
         msg = MsgUnfollowUser()
         msg.authority = validator_addr
@@ -2682,7 +2728,7 @@ def core_follow_topic():
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
-        timestamp = int(data.get("timestamp", 0)) or int(time.time() * 1000)
+        timestamp = _client_timestamp(rid, "follow_topic", data)
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]
@@ -2722,8 +2768,8 @@ def core_follow_topic():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "follow_topic", _pow_exc)
 
         msg = MsgFollowTopic()
         msg.authority = validator_addr
@@ -2780,7 +2826,7 @@ def core_unfollow_topic():
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
-        timestamp = int(data.get("timestamp", 0)) or int(time.time() * 1000)
+        timestamp = _client_timestamp(rid, "unfollow_topic", data)
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]
@@ -2811,8 +2857,8 @@ def core_unfollow_topic():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "unfollow_topic", _pow_exc)
 
         msg = MsgUnfollowTopic()
         msg.authority = validator_addr
@@ -2929,8 +2975,8 @@ def core_delete_post():
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
                 ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "delete_post", _pow_exc)
 
         # Ownership/admin precheck:
         # - Owner can always delete their own post
@@ -3072,8 +3118,8 @@ def core_delete_user():
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
                 ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "delete_user", _pow_exc)
 
         msg = MsgDeleteUser()
         # AUTHORITY IS ALWAYS THE VALIDATOR NODE (or gov), NEVER the user
@@ -3171,8 +3217,8 @@ def core_report():
                 effective_required = _effective_difficulty(int(difficulty))
                 if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
-        except Exception:
-            pass
+        except Exception as _pow_exc:
+            _log_pow_precheck_error(rid, "report", _pow_exc)
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -3409,8 +3455,8 @@ def core_edit():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "edit", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "edit", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
@@ -3926,8 +3972,8 @@ def core_post():
                         digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
                     ):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "post", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "post", difficulty, proof, has_difficulty, has_pow)
 
@@ -4376,8 +4422,8 @@ def core_send_tokens():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "send_tokens", _pow_exc)
         else:
             _log_subscriber_pow_ignored(rid, "send_tokens", difficulty, proof, has_difficulty, has_pow)
 

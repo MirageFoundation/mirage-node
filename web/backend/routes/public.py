@@ -57,7 +57,7 @@ import calendar
 from datetime import datetime as dt
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 from auto_agents import merge_auto_enabled_agents
 from chain import (
     classify_reject as _classify_reject,
@@ -74,6 +74,16 @@ from chain import (
 
 def _now_epoch() -> int:
     return int(time.time())
+
+
+# stream_proxy input constraints (L-1). Cloudflare Stream UIDs are lowercase hex;
+# the range stays wide so legacy assets keep playing.
+_STREAM_UID_RE = re.compile(r"[0-9a-f]{10,100}")
+_STREAM_PATH_RE = re.compile(r"[A-Za-z0-9._/-]{1,200}")
+# Empirical list: extend it if stream_proxy.param_dropped starts firing. Dropping
+# an unknown parameter degrades playback visibly in the log rather than forwarding
+# arbitrary client input to the upstream CDN.
+_STREAM_PROXY_ALLOWED_PARAMS = frozenset({"token", "exp", "sig", "verify", "clientBandwidthHint", "protocol"})
 
 
 def _get_balance(address) -> int:
@@ -8287,9 +8297,18 @@ def stream_proxy(video_uid, path):
     """
     rid = next_request_id()
     try:
-        # Validate video UID format (hex string, reasonable length)
-        if not video_uid or len(video_uid) < 10 or len(video_uid) > 100:
-            return jsonify({"error": "invalid video uid"}), 400
+        # Validate video UID format. The length-only check this replaced let any
+        # charset through, so the UID reached both the upstream URL and the
+        # manifest-rewrite regexes unconstrained (L-1).
+        if not _STREAM_UID_RE.fullmatch(video_uid or ""):
+            log_event(rid, "stream_proxy.invalid_uid", video_uid=str(video_uid)[:32])
+            return api_error_code("invalid_video_uid", 400)
+
+        # <path:path> matches slashes, so a traversal segment would otherwise
+        # repoint the upstream path away from this UID.
+        if path and (not _STREAM_PATH_RE.fullmatch(path) or ".." in path):
+            log_event(rid, "stream_proxy.invalid_path", path=str(path)[:64])
+            return api_error_code("invalid_video_uid", 400)
 
         # Construct the URL
         if path:
@@ -8304,14 +8323,17 @@ def stream_proxy(video_uid, path):
             # Main manifest
             target_url = f"https://videodelivery.net/{video_uid}/manifest/video.m3u8"
 
-        # Append original query string (e.g., signed token parameters) to target URL
-        try:
-            if request.query_string:
-                qs = request.query_string.decode("utf-8", errors="ignore")
-                if qs:
-                    target_url = f"{target_url}{'&' if '?' in target_url else '?'}{qs}"
-        except Exception:
-            pass
+        # Forward only known upstream parameters (L-1). Anything else is dropped
+        # and logged rather than passed through blind.
+        dropped = [k for k in request.args.keys() if k not in _STREAM_PROXY_ALLOWED_PARAMS]
+        if dropped:
+            log_event(rid, "stream_proxy.param_dropped", params=",".join(sorted(dropped))[:120])
+        forwarded = [
+            (k, v) for k in request.args.keys() if k in _STREAM_PROXY_ALLOWED_PARAMS for v in request.args.getlist(k)
+        ]
+        if forwarded:
+            qs = urlencode(forwarded)
+            target_url = f"{target_url}{'&' if '?' in target_url else '?'}{qs}"
 
         # Forward request without Origin header
         headers = {"User-Agent": request.headers.get("User-Agent", "Mirage/1.0"), "Accept": "*/*"}
@@ -8320,7 +8342,10 @@ def stream_proxy(video_uid, path):
         if request.headers.get("Range"):
             headers["Range"] = request.headers.get("Range")
 
-        response = requests.get(target_url, headers=headers, timeout=30, stream=True)
+        # allow_redirects=False: the response body is reflected to the caller with
+        # Access-Control-Allow-Origin *, so following an upstream redirect would
+        # let videodelivery.net point this proxy at any host (L-1).
+        response = requests.get(target_url, headers=headers, timeout=30, stream=True, allow_redirects=False)
 
         # If Cloudflare returns an error, forward it
         if response.status_code != 200:
@@ -9307,34 +9332,6 @@ def get_stats():
     except Exception as e:
         log_event(rid, "get_stats.err", error=str(e))
         return safe_error(e)
-
-
-# =============================================================================
-# REFERRAL ADMIN ENDPOINTS
-# =============================================================================
-
-
-def _is_admin(address: str) -> bool:
-    """Check if address is an admin (level >= 100 from indexer DB)."""
-    if not address:
-        return False
-    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (address,))
-        row = cur.fetchone()
-        if row and row[0] is not None:
-            return int(row[0]) >= 100
-    return False
-
-
-def _require_admin():
-    """Get admin address from request or return None if not admin."""
-    address = request.args.get("admin_address", "").strip().lower()
-    if not address:
-        address = (request.get_json(force=True, silent=True) or {}).get("admin_address", "").strip().lower()
-    if not address or not _is_admin(address):
-        return None
-    return address
 
 
 # ── Referral link endpoints ──────────────────────────────────────────────────

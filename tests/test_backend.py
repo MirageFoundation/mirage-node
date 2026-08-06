@@ -26,6 +26,7 @@ from tests.cases.test_backend_infra import (
     test_tx_status_matrix,
     test_failed_tx_non_post_vote,
     test_error_registry,
+    test_indexer_fail_hard,
 )
 from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_subscribe_validation
 from tests.cases.test_backend_content import (
@@ -85,6 +86,7 @@ ALL_CATEGORIES = {
     "validation": test_validation,
     "relay_signing": test_relay_signing,
     "error_registry": test_error_registry,
+    "indexer_fail_hard": test_indexer_fail_hard,
     "route_authz": test_route_authz_parity,
     "admin_authz": test_admin_authz,
     "reward_claim_authz": test_reward_claim_authz,
@@ -139,6 +141,7 @@ STATELESS_CATEGORIES = {
     "stats_attribution",
     "stats_pure",
     "error_registry",
+    "indexer_fail_hard",
     "route_authz",
     "admin_authz",
     "cross_user_reads",

@@ -12,6 +12,7 @@ Self-contained: reads backend + indexer DB URLs from shared.config.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -133,12 +134,21 @@ def _send_expo_push_batch(messages: list[dict]) -> list[tuple[str, Optional[str]
         return []
 
 
+def _token_fingerprint(token: str) -> str:
+    """Stable, non-reversible tag for correlating log lines about one token.
+
+    Push tokens are credentials for addressing a user's device, so logs carry a
+    hash instead of a prefix of the token itself (L-7).
+    """
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:12]
+
+
 def _remove_token(token: str) -> None:
     try:
         with _connect_backend_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM push_tokens WHERE token = %s", (token,))
-        logger.info("[Push] Removed invalid token: %s…", token[:20])
+        logger.info("[Push] Removed invalid token: fp=%s", _token_fingerprint(token))
     except Exception as e:
         logger.error("[Push] Failed to remove token: %s", e)
 
@@ -281,7 +291,7 @@ def _check_old_receipts() -> None:
                         if receipt.get("details", {}).get("error") == "DeviceNotRegistered":
                             token = ticket_map[tid][1]
                             cur.execute("DELETE FROM push_tokens WHERE token = %s", (token,))
-                            logger.info("[Push] Receipt: removed stale token %s…", token[:20])
+                            logger.info("[Push] Receipt: removed stale token fp=%s", _token_fingerprint(token))
 
                 if ids_to_delete:
                     cur.execute("DELETE FROM push_receipts WHERE id = ANY(%s)", (ids_to_delete,))
