@@ -2,7 +2,7 @@
 
 **Retest of:** [`review-2026-08-05.md`](review-2026-08-05.md) — the first security review of the Mirage backend, 25 findings (2 Critical, 3 High, 8 Medium, 8 Low, 4 Informational).
 **Review baseline:** `dev` at `3ccf8c70` (v1.31.0).
-**Retest state:** `dev` at `0f04a753` (`v1.32.1-2-g0f04a753`), working tree carrying the remediation described below. Chain-side remediation shipped in the **v1.32.0** consensus upgrade; the remaining backend-only items land on **v1.32.1**.
+**Retest state:** remediation committed as `b7c8b258` and released as **v1.32.1**; deployed to all four validators at **v1.32.2** on 2026-08-06. Chain-side remediation shipped in the **v1.32.0** consensus upgrade; the backend-only items landed on v1.32.1.
 **Scope of this document:** current status of every finding, the evidence for each claim, and the rationale for each item accepted rather than fixed. Where this document and the original disagree about present-day state, **this one is authoritative**; the original is preserved as written, with its line references frozen at its baseline.
 
 > **Count correction.** Earlier planning notes for this retest said "22 findings".
@@ -78,7 +78,7 @@ The finding was not that a check was missing but that nobody could tell which ch
 
 - **[`docs/architecture/backend-trust-model.md`](../../architecture/backend-trust-model.md)** now states the model plainly: the chain ante is authoritative, every backend-side check on a chain write is advisory and exists for fast client feedback, and an advisory check must therefore never be the only thing standing between a request and a state change. `routes/core.py`'s module docstring links to it.
 - **`_log_pow_precheck_error(rid, action, exc)`** replaces all 21 remaining `except Exception: pass` bodies in the PoW prechecks. The precheck still does not reject the request — that is deliberate and now documented — but a precheck that throws is no longer invisible.
-- **`_client_timestamp(rid, action, data)`** replaces timestamp synthesis. The backend previously substituted `now` when a client omitted a timestamp, which quietly produced a valid-looking signed payload the client never signed. It now forwards the client's value or `0` and logs the absence.
+- **`_client_timestamp(rid, action, data)`** replaces timestamp synthesis. The backend previously substituted `now` when a client omitted a timestamp, putting an `envelope_timestamp` on the wire that the client never signed. The chain caught it as `invalid relay signature`, so nothing was accepted, but the failure was misattributed to the signature rather than the missing field. It now forwards the client's value or `0` and logs the absence, and the chain reports `envelope_timestamp is required`.
 
 Three `except Exception: pass` blocks remain in `routes/core.py` (lines ~4053, ~4303, ~4954). All three are post-commit best-effort work — user-action logging and an inbox cache bump — that runs after the transaction has already succeeded and must not fail the response. They are not prechecks and are counted under I-1, not H-3.
 

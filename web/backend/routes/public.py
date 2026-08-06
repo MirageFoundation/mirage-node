@@ -7882,7 +7882,11 @@ def _verify_seen_signature(
 
     ok, guard_err = _guard_push_request(user_addr, "seen_posts", timestamp, nonce)
     if not ok:
-        return None, guard_err
+        # _guard_push_request hands back a (response, status) pair, but this
+        # function's contract is a message string — returning the pair made the
+        # caller jsonify a Response object and 500.
+        body, _code = guard_err
+        return None, (body.get_json(silent=True) or {}).get("error") or "invalid signature"
     return user_addr.lower(), None
 
 
@@ -9833,14 +9837,17 @@ def get_invite_codes():
     """Get all invite codes owned by the given address.
 
     Feature-gated by REGISTRATION_INVITE_CODE_REQUIRED. When false (fleet-wide
-    default), returns 404. When true, requires a signed read — unused codes are
-    bearer credentials. If this feature is ever re-enabled, keep the signature
-    requirement; do not serve codes for an unsigned address query.
+    default), returns an empty list: no codes are issued while the feature is
+    off, so there is nothing to disclose, and installed clients that still poll
+    this route render an empty Invites screen instead of erroring. When true,
+    requires a signed read — unused codes are bearer credentials. If this
+    feature is ever re-enabled, keep the signature requirement; do not serve
+    codes for an unsigned address query.
     """
     rid = next_request_id()
     if not REGISTRATION_INVITE_CODE_REQUIRED:
         log_event(rid, "invite.get_codes.disabled")
-        return api_error_code("not_found", 404)
+        return jsonify({"codes": [], "total": 0, "available": 0})
 
     address = request.args.get("address", "", type=str).strip()
     if not address:

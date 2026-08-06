@@ -77,6 +77,7 @@ from tests.common import (
 )
 from tests.backend_helpers import (
     _do_post,
+    _do_post_at_timestamp,
     _do_post_with_nonce,
     _do_post_with_media,
     _do_vote,
@@ -1128,6 +1129,170 @@ print("OTHER", len(other), code2)
         _pass("relay_signing.other_errors_not_retried")
     else:
         _fail("relay_signing.other_errors_not_retried", f"expected no retry on non-nonce error: {out[-300:]}")
+
+
+def test_envelope_timestamp_window(backend: str):
+    """The relay window must match the ante handler's, and its verdicts must not be 500s.
+
+    val1 fell 21 blocks behind the network during a disk stall on 2026-08-06 and
+    six posts died as "internal server error": simulate compared fresh envelopes
+    against a stale block time, and every ante rejection reaches the backend as
+    HTTP 500 from the tx-service REST, so the 4xx-only mapping reported them as
+    our fault. The relay window was also ±90s against the chain's 60s/30s, which
+    made every envelope in the gap a guaranteed 500.
+    """
+    code, params = _get(f"{backend}/chain/rest/mirage/core/v1/params")
+    chain_params = (params or {}).get("params") or {}
+    max_age_s = int(chain_params.get("max_envelope_age") or 0)
+    if max_age_s <= 0:
+        _fail("envelope_window.params", f"max_envelope_age missing from chain params: {str(chain_params)[:200]}")
+        return
+    future_skew_s = min(max(max_age_s // 2, 5), 30)
+    _debug(f"envelope_window max_age={max_age_s}s future_skew={future_skew_s}s")
+
+    wallet = WALLETS["sub1"]
+    topic = f"tswindow{_rand_str(5)}"
+
+    for label, ts_ms in (
+        ("too_old", _now_ms() - (max_age_s + 5) * 1000),
+        ("too_future", _now_ms() + (future_skew_s + 5) * 1000),
+    ):
+        status, resp = _do_post_at_timestamp(
+            backend,
+            wallet,
+            topic,
+            f"TS {label} {_rand_str(5)}",
+            f"Body {_rand_str(8)}",
+            ts_ms,
+            skip_pow=True,
+        )
+        err_code = str((resp or {}).get("error_code") or "")
+        _debug(f"envelope_window.{label} status={status} code={err_code} body={str(resp)[:160]}")
+        if status == 400 and err_code == "timestamp_outside_window":
+            _pass(f"envelope_window.{label}_rejected")
+        else:
+            _fail(
+                f"envelope_window.{label}_rejected",
+                f"want 400 timestamp_outside_window, got {status} {err_code or str(resp)[:160]}",
+            )
+
+    status, resp = _do_post_at_timestamp(
+        backend,
+        wallet,
+        topic,
+        f"TS inside {_rand_str(5)}",
+        f"Body {_rand_str(8)}",
+        _now_ms() - 2000,
+        skip_pow=True,
+    )
+    txh = str((resp or {}).get("tx_hash", "") or "").strip()
+    if status == 200 and txh:
+        _pass("envelope_window.inside_accepted")
+    else:
+        _fail("envelope_window.inside_accepted", f"status={status} body={str(resp)[:200]}")
+
+    _check_ante_timestamp_mapping()
+    _check_head_staleness_guard()
+
+
+def _check_ante_timestamp_mapping() -> None:
+    """Ante timestamp verdicts must map to 503 (retry) and 400, never a bare 500.
+
+    Runs against the deployed backend module inside the container with the exact
+    simulate errors prod returned, since a node that trails the network cannot be
+    staged from a test.
+    """
+    script = """
+import routes.core as core
+
+future = 'simulate_gas http 500: {"code":2, "message":"envelope_timestamp in future: age=-1m35.859750514s (tx_time=2026-08-06 14:04:36.227 +0000 UTC, block_time=2026-08-06 14:03:00.367249486 +0000 UTC) with gas used: \\'40731\\'", "details":[]}'
+old = 'simulate_gas http 500: {"code":2, "message":"envelope_timestamp too old: age=1m12s, max=1m0s (tx_time=2026-08-06 14:04:36.227 +0000 UTC, block_time=2026-08-06 14:05:48.367249486 +0000 UTC)", "details":[]}'
+other = 'simulate_gas http 500: {"code":2, "message":"envelope replay: nonce already used", "details":[]}'
+
+print("FUTURE", core._classify_exception(future)[1])
+print("OLD", core._classify_exception(old)[1])
+print("OTHER", core._classify_exception(other)[1])
+"""
+    payload = base64.b64encode(script.encode()).decode()
+    cmd = f"cd /opt/mirage/web/backend && echo {payload} | base64 -d | PYTHONPATH=/opt/mirage python3 -"
+    code, out = _docker_exec(cmd, timeout=60)
+    _debug(f"envelope_window mapping probe rc={code} out={out.splitlines()[-3:]}")
+    if code != 0:
+        _fail("envelope_window.ante_mapping", f"probe failed rc={code}: {out[-300:]}")
+        return
+    if "FUTURE 503" in out:
+        _pass("envelope_window.stale_head_retryable")
+    else:
+        _fail("envelope_window.stale_head_retryable", f"want 503 for a stale local head: {out[-300:]}")
+    if "OLD 400" in out:
+        _pass("envelope_window.expired_is_client_error")
+    else:
+        _fail("envelope_window.expired_is_client_error", f"want 400 for an aged-out envelope: {out[-300:]}")
+    if "OTHER 500" in out:
+        _pass("envelope_window.other_rejections_unchanged")
+    else:
+        _fail("envelope_window.other_rejections_unchanged", f"want 500 for unmapped rejections: {out[-300:]}")
+
+
+def _check_head_staleness_guard() -> None:
+    """A node trailing the network must read as catching up, before any simulate.
+
+    CometBFT reported catching_up=False through the 2026-08-06 lag and the
+    indexer kept pace with the node it follows, so the only signal that the head
+    is too stale to relay a write is the newest block's own timestamp.
+    """
+    script = """
+import time
+import chain, params
+
+params._PARAMS_CACHE = {"max_envelope_age": 60}
+now = int(time.time())
+
+class _Cur:
+    def __init__(self, head_time):
+        self._head_time = head_time
+        self._last = ""
+    def execute(self, sql, *a):
+        self._last = sql
+    def fetchall(self):
+        return [("last_processed_time", str(now)), ("last_processed_height", "100"), ("chain_head_height", "100")]
+    def fetchone(self):
+        return (self._head_time,)
+
+class _Conn:
+    def __init__(self, head_time):
+        self._head_time = head_time
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def cursor(self):
+        return _Cur(self._head_time)
+
+def probe(head_time):
+    chain.connect_db = lambda **kw: _Conn(head_time)
+    chain._CATCHING_UP_CACHE = None
+    return chain.is_node_catching_up()
+
+print("FRESH", probe(now - 5))
+print("STALE", probe(now - 45))
+print("NO_BLOCK_TIME", probe(0))
+"""
+    payload = base64.b64encode(script.encode()).decode()
+    cmd = f"cd /opt/mirage/web/backend && echo {payload} | base64 -d | PYTHONPATH=/opt/mirage python3 -"
+    code, out = _docker_exec(cmd, timeout=60)
+    _debug(f"envelope_window staleness probe rc={code} out={out.splitlines()[-3:]}")
+    if code != 0:
+        _fail("envelope_window.head_staleness_guard", f"probe failed rc={code}: {out[-300:]}")
+        return
+    if "FRESH False" in out and "STALE True" in out:
+        _pass("envelope_window.head_staleness_guard")
+    else:
+        _fail("envelope_window.head_staleness_guard", f"want fresh=False stale=True: {out[-300:]}")
+    if "NO_BLOCK_TIME False" in out:
+        _pass("envelope_window.head_staleness_needs_block_time")
+    else:
+        _fail("envelope_window.head_staleness_needs_block_time", f"want no verdict without block_time: {out[-300:]}")
 
 
 # =========================================================================

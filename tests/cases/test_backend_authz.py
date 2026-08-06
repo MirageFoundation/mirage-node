@@ -101,8 +101,10 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/rewards/achievements": PUBLIC,
     "/api/rewards/summary": PUBLIC,
     # --- Invite codes (feature-gated) ---------------------------------------
-    # REGISTRATION_INVITE_CODE_REQUIRED=false fleet-wide: both 404. When the
-    # flag is true, get_invite_codes requires SIGNED_READ (bearer credentials);
+    # REGISTRATION_INVITE_CODE_REQUIRED=false fleet-wide: get_invite_codes
+    # returns an empty list (installed clients still poll it and a 404 broke
+    # their Invites screen), validate_invite_code 404s. When the flag is true,
+    # get_invite_codes requires SIGNED_READ (bearer credentials);
     # validate_invite_code stays callable for pre-signup visitors (no owner
     # disclosure). Classified DISABLED so the parity test does not require
     # live auth markers while the feature is off.
@@ -376,8 +378,10 @@ def test_reward_claim_authz(backend):
     """C-2: the money path must be authenticated and must not pay twice.
 
     /api/rewards/claim takes `owner` from the request body. After the grace
-    period it requires a signature; during LEGACY_UNSIGNED_UNTIL an unsigned
-    claim is still served (logged). Concurrent claims must not double-pay.
+    period it requires a valid signature; during LEGACY_UNSIGNED_UNTIL a claim
+    whose proof is absent OR fails verification is still served (logged), so
+    installed clients keep working either way. Concurrent claims must not
+    double-pay.
     """
     from datetime import datetime, timezone
 
@@ -422,17 +426,60 @@ def test_reward_claim_authz(backend):
             "owner": owner,
         }
 
-    # 1. Cross-address signature must be refused (always, grace period or not).
+    # 1. A proof that fails verification. After the cutoff it must be refused.
+    #    During the grace window it must fall through to the legacy path instead:
+    #    an unsigned claim for the same owner is accepted anyway, so refusing the
+    #    signed-but-unverifiable form denies an attacker nothing while breaking
+    #    every installed client that signs under an older scheme (the mobile
+    #    builds did, and got a hard 401 on every claim).
     forged = _sign_claim(other_wallet, victim)
     code, resp = _post(f"{backend}/api/rewards/claim", forged)
-    if code in _UNAUTHENTICATED:
-        _pass("reward_claim.cross_address_rejected", code=code)
-    elif code == 503:
-        _skip("reward_claim.cross_address_rejected", f"rewards not configured: {resp}")
+    if code == 503 and str((resp or {}).get("error_code") or "") == "not_configured":
+        _skip("reward_claim.bad_proof", f"rewards not configured: {resp}")
+    elif in_grace:
+        if code in _UNAUTHENTICATED:
+            _fail(
+                "reward_claim.bad_proof_falls_through_during_grace",
+                f"LEGACY_UNSIGNED_UNTIL={grace_until} but a proof that fails verification got "
+                f"{code}. During the window it must be served like an unsigned claim, or clients "
+                f"that sign under an older scheme cannot claim at all. resp={resp}",
+            )
+        else:
+            _pass("reward_claim.bad_proof_falls_through_during_grace", code=code, until=grace_until)
+    elif code in _UNAUTHENTICATED:
+        _pass("reward_claim.cross_address_rejected_after_grace", code=code)
     else:
         _fail(
-            "reward_claim.cross_address_rejected",
+            "reward_claim.cross_address_rejected_after_grace",
             f"C-2: claim signed by a different address was processed (code={code}). resp={resp}",
+        )
+
+    # 1a. The exact mobile failure mode: the owner's own key signing a payload
+    #     the backend does not expect. Verification fails, so during the window
+    #     this must be served, not 401'd.
+    legacy_scheme = _sign_claim(victim_wallet, victim)
+    legacy_payload = f"claim_rewards:{victim}:{legacy_scheme['timestamp']}"
+    legacy_scheme["signature"] = _b64(sign_canonical(victim_wallet, legacy_payload.encode("utf-8")))
+    legacy_scheme["envelope_nonce"] = str(_fresh_nonce())
+    code, resp = _post(f"{backend}/api/rewards/claim", legacy_scheme)
+    if code == 503 and str((resp or {}).get("error_code") or "") == "not_configured":
+        _skip("reward_claim.legacy_scheme_signature", f"rewards not configured: {resp}")
+    elif in_grace:
+        if code in _UNAUTHENTICATED:
+            _fail(
+                "reward_claim.legacy_scheme_signature",
+                f"a claim signed under an older payload scheme got {code} during the grace window "
+                f"(LEGACY_UNSIGNED_UNTIL={grace_until}). This is the regression that 401'd every "
+                f"installed mobile build. resp={resp}",
+            )
+        else:
+            _pass("reward_claim.legacy_scheme_signature", code=code, until=grace_until)
+    elif code in _UNAUTHENTICATED:
+        _pass("reward_claim.legacy_scheme_signature", code=code, note="enforced after grace")
+    else:
+        _fail(
+            "reward_claim.legacy_scheme_signature",
+            f"unverifiable signature accepted after the grace window (code={code}). resp={resp}",
         )
 
     # 1b. A correctly signed claim must clear the auth gate (even if there is
@@ -599,7 +646,8 @@ _PUBLIC_BY_DESIGN = (
 def test_cross_user_reads(backend):
     """H-2 reclassification: chain-derived / deliberate-disclosure reads stay public.
 
-    Invite-code endpoints are DISABLED (404) while the feature flag is false.
+    While REGISTRATION_INVITE_CODE_REQUIRED is false, get_invite_codes serves an
+    empty list and validate_invite_code 404s.
     """
     victim = str(_generate_wallet().address())
 
@@ -617,14 +665,21 @@ def test_cross_user_reads(backend):
                 f"expected public read (200), got {code}: {resp}",
             )
 
-    # Invite codes: feature off → 404 (not a private-data leak, not served).
+    # Invite codes: feature off → empty list, no codes and no 404. Installed
+    # clients poll this route on every Invites screen open; a 404 broke them for
+    # a read that has nothing to disclose while the feature is off.
     code, resp = _get(f"{backend}/api/get_invite_codes", params={"address": victim})
-    if code == 404:
-        _pass("cross_user_read.get_invite_codes_disabled", code=code)
+    if code == 200 and (resp or {}).get("codes") == [] and (resp or {}).get("total") == 0:
+        _pass("cross_user_read.get_invite_codes_empty_while_disabled", code=code)
+    elif code == 200:
+        _fail(
+            "cross_user_read.get_invite_codes_empty_while_disabled",
+            f"expected an empty code list while REGISTRATION_INVITE_CODE_REQUIRED=false; got {resp}",
+        )
     else:
         _fail(
-            "cross_user_read.get_invite_codes_disabled",
-            f"invite codes must 404 while REGISTRATION_INVITE_CODE_REQUIRED=false; got {code}: {resp}",
+            "cross_user_read.get_invite_codes_empty_while_disabled",
+            f"invite codes must serve an empty list (200) while the feature is off; got {code}: {resp}",
         )
 
     code, resp = _post(f"{backend}/api/validate_invite_code", {"code": "ABCD-EFGH"})

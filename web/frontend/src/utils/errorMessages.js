@@ -44,6 +44,7 @@ const ERROR_MAP = {
     timestamp_required: "Timestamp is required.",
     timestamp_must_be_millis: "Timestamp must be in milliseconds.",
     timestamp_outside_window: "Timestamp is outside the allowed window.",
+    envelope_expired: "This request took too long to reach the chain. Please try again.",
     invalid_nonce: "Invalid envelope nonce.",
     nonce_required: "Envelope nonce is required.",
     nonce_must_be_positive: "Envelope nonce must be positive.",

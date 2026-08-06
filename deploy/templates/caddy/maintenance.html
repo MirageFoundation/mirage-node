@@ -120,8 +120,41 @@
             We're rolling out an update. This usually takes a few minutes.
             <br />Please check back shortly.
         </p>
-        <p class="timer">This page auto-refreshes every 30 seconds.</p>
+        <p class="timer">This page reloads itself as soon as the update is finished.</p>
     </div>
+
+    <script>
+        // The meta refresh above is only a no-JS backstop: it does not fire while
+        // the tab is frozen or backgrounded, and the CDN rewrites this response's
+        // "no-store" to "no-cache", so a browser is free to keep the page and
+        // re-show it from history long after the upgrade finished. Poll the same
+        // readiness endpoint the entrypoint uses, and re-check the moment the user
+        // comes back to the tab.
+        (function () {
+            var inFlight = false;
+
+            function check() {
+                if (inFlight) return;
+                inFlight = true;
+                fetch('/api/get_node_config?probe=' + Date.now(), { cache: 'no-store' }).then(
+                    function (res) {
+                        inFlight = false;
+                        if (res.ok) location.reload();
+                    },
+                    function () {
+                        inFlight = false;
+                    }
+                );
+            }
+
+            setInterval(check, 5000);
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) check();
+            });
+            window.addEventListener('pageshow', check);
+            check();
+        })();
+    </script>
 </body>
 
 </html>

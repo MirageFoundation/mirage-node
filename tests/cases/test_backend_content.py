@@ -1236,6 +1236,25 @@ def test_seen_posts(backend: str) -> None:
         _fail("seen_posts.beacon_ingest", f"code={code_b} resp={resp_b}")
         return
 
+    # Replaying the exact same signed body must be refused as a replay, not
+    # crash. _guard_push_request hands back a (response, status) pair, and
+    # passing that through as the error message made the handler jsonify a
+    # Response object and 500 — which is what mobile was hitting.
+    code_r, resp_r = _post(
+        f"{backend}/api/seen_posts",
+        {
+            "address": viewer_addr,
+            "posts": [{"id": txh, "reason": "open"}],
+            **sig_viewer,
+        },
+    )
+    if code_r >= 500:
+        _fail("seen_posts.replay_rejected", f"replayed beacon crashed the handler: code={code_r} resp={resp_r}")
+    elif code_r == 400 and str((resp_r or {}).get("error_code") or "") == "nonce_replayed":
+        _pass("seen_posts.replay_rejected", code=code_r)
+    else:
+        _fail("seen_posts.replay_rejected", f"expected 400 nonce_replayed, got {code_r}: {resp_r}")
+
     # Verify the author's own feed still shows their post
     code_self, feed_self = _get(
         f"{backend}/api/get_posts",

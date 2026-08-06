@@ -4,8 +4,8 @@ Per-node procedure to put a Mirage node behind the Bunny edge with Shield upload
 scanning, so all uploads are scanned before they reach the origin and nobody can
 bypass the scan by hitting the origin directly.
 
-This is the operational companion to
-[media_providers.md](media_providers.md) (the architecture). Read that first.
+This is the operational runbook. The media-provider architecture doc it used to
+accompany was removed on 2026-08-06; see git history if you need the background.
 
 ## Scope and end state
 
@@ -57,8 +57,7 @@ flowchart LR
 
 - Bunny account with: Storage Zone `mirage`, pull zones `mirage-img` /
   `mirage-video`, Stream library, and `BUNNY_*` set in the node's
-  `~/.mirage/env/secrets.env` (storage provider already working — see
-  media_providers.md).
+  `~/.mirage/env/secrets.env` (storage provider already working).
 - DNS control for `mirage.vote` and `mirage.talk`.
 - Bunny Shield available on the pull zone in front of the node.
 
@@ -190,7 +189,7 @@ refreshes the Bunny IP set. Confirm the site still loads through Bunny afterward
 When Cloudflare is fully out of this node's path, set `EDGE_PROVIDER=bunny` in
 `node.env` and restart so Caddy trusts only Bunny and reads `X-Real-IP`. (Keep the
 `CLOUDFLARE_*` secrets only as long as the legacy `get_upload_url` shim must serve
-old mobile builds — see media_providers.md.)
+old mobile builds.)
 
 ## Verification checklist (per node)
 
@@ -200,6 +199,10 @@ old mobile builds — see media_providers.md.)
 - [ ] Access log shows real client IPs (not Bunny edge IPs).
 - [ ] `/api/*` and `/chain/*` responses carry `Cache-Control: no-store` and are not
       edge-cached.
+- [ ] `curl -s https://<domain>/version` reports the deployed build. Bunny picks
+      cache policy from the file extension and ignores the origin's `no-store`, so
+      `/version.txt` is pinned at the edge for weeks; `/version` has no extension
+      and reaches the origin.
 - [ ] An upload succeeds and a known-bad sample is blocked by Shield.
 - [ ] `/chain/rest` + `/chain/rpc` respond; `/chain/rpc/websocket` connects.
 - [ ] `setup_origin_firewall.sh --status` shows the table + timer; direct origin

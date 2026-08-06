@@ -9,7 +9,8 @@ Functions:
 - get_recent_block_hashes(): Recent block hashes for validation.
 - is_valid_recent_block_hash(): Check if hash is in recent window.
 - get_block_time_seconds(): Read consensus timeout_commit from config.
-- is_node_catching_up(): True if indexer state indicates lag.
+- max_envelope_future_skew_seconds(): Ante handler's future-timestamp allowance.
+- is_node_catching_up(): True if the node/indexer pair is too far behind to relay.
 - classify_reject(raw_log): Parse common reject reasons from logs.
 """
 
@@ -20,6 +21,8 @@ from typing import Any, Dict, Optional
 
 from db import connect_db
 from error_utils import IndexerUnavailable
+from logging_utils import logger
+from params import expect_params
 
 
 _DIFFICULTY_CACHE: Optional[Dict[str, Any]] = None
@@ -188,12 +191,25 @@ _CATCHING_UP_CACHE_TIME: float = 0.0
 _CATCHING_UP_CACHE_TTL: float = 5.0
 
 
+def max_envelope_future_skew_seconds() -> int:
+    """How far ahead of block time the chain accepts an envelope timestamp.
+
+    Mirrors validateEnvelopeTimestamp in blockchain/app/ante_metasig.go: half of
+    max_envelope_age, clamped to [5s, 30s]. Keep the two in step — a relay that
+    accepts a wider window just forwards txs the ante handler will reject.
+    """
+    max_age = int(expect_params()["max_envelope_age"])
+    return min(max(max_age // 2, 5), 30)
+
+
 def is_node_catching_up(timeout_s: int = 2) -> bool:
-    """Check if indexer is behind — uses indexer_state to detect lag.
+    """Check if the node/indexer pair is too far behind to relay writes.
 
     Returns True if:
     - Last processed time is >30s ago (time-based lag), OR
     - Indexer is >10 blocks behind chain head (height-based lag), OR
+    - The newest committed block is older than the ante handler's future-skew
+      allowance (the node trails the network), OR
     - The indexer has not processed anything yet
 
     Raises IndexerUnavailable if the DB cannot be read. An outage is not sync lag:
@@ -213,6 +229,9 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
                 "SELECT key, value FROM indexer_state WHERE key IN ('last_processed_time', 'last_processed_height', 'chain_head_height')"
             )
             state = {r[0]: r[1] for r in cur.fetchall()}
+            cur.execute("SELECT MAX(block_time) FROM recent_blocks")
+            row = cur.fetchone()
+            head_block_time = int((row[0] if row else 0) or 0)
     except Exception as e:
         raise IndexerUnavailable(f"indexer_state unreadable: {e}") from e
 
@@ -225,7 +244,25 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     else:
         time_lag = int(time.time()) - last_ts > 30
         height_lag = chain_head > 0 and (chain_head - last_height) > 10
-        result = time_lag or height_lag
+        # A node trailing the network keeps committing blocks and reports
+        # catching_up=False, so neither check above fires — but simulate runs
+        # against that stale block time, and every relayed write past this window
+        # is rejected as "envelope_timestamp in future" (val1 fell 21 blocks
+        # behind during a disk stall on 2026-08-06 and dropped six posts).
+        # block_time is 0 only for rows written before the column existed.
+        head_stale = False
+        if head_block_time:
+            head_stale_s = int(time.time()) - head_block_time
+            skew_limit_s = max_envelope_future_skew_seconds()
+            head_stale = head_stale_s > skew_limit_s
+            if head_stale:
+                logger().warning(
+                    "node_catching_up: newest block is %ds old (limit %ds), height=%d — node trails the network",
+                    head_stale_s,
+                    skew_limit_s,
+                    last_height,
+                )
+        result = time_lag or height_lag or head_stale
 
     _CATCHING_UP_CACHE = result
     _CATCHING_UP_CACHE_TIME = now
@@ -347,6 +384,7 @@ __all__ = [
     "get_pow_factor",
     "get_pow_base_bits",
     "get_block_time_seconds",
+    "max_envelope_future_skew_seconds",
     "is_node_catching_up",
     "classify_reject",
     "get_connected_peers",

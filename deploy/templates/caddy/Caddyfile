@@ -161,13 +161,17 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		@html path /
 		header @html Cache-Control "no-cache"
 
-		# Deployed build marker. Caddy sets nothing here by default, so the CDN
-		# applies its own static-file TTL and pins a month-old version string.
-		@version path /version.txt
-		header @version Cache-Control "no-store"
-
 		@spa_route not file
 		header @spa_route Cache-Control "no-cache"
+
+		# Deployed build marker, served without an extension: the CDN picks cache
+		# policy from the file extension and ignores this no-store, which pinned
+		# /version.txt to a weeks-old build string. Extensionless paths reach the
+		# origin, so /version is the one that reports the deployed build. Declared
+		# after @spa_route so no-store wins over the shell's no-cache.
+		@version path /version /version.txt
+		header @version Cache-Control "no-store"
+		rewrite /version /version.txt
 
 		try_files {path} /index.html
 		file_server

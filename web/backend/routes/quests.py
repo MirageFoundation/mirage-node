@@ -806,16 +806,31 @@ def claim_rewards():
             log_event(rid, "rewards.claim.not_configured", owner=owner)
             return api_error_code("not_configured", 503, success=False)
 
+        # While the grace window is open, ANY failed proof falls through to the
+        # legacy path instead of 401. Installed mobile builds already send an
+        # identity block signed under an older scheme, so gating the window on
+        # the mere presence of pubkey+signature rejects exactly the clients the
+        # window exists to protect. Accepting an unverifiable proof is the same
+        # accepted risk as accepting no proof at all (the payout always goes to
+        # `owner`), and it ends when the window does.
         has_sig = bool(str(data.get("pubkey", "") or "").strip() and str(data.get("signature", "") or "").strip())
+        signed_owner, aerr = None, None
         if has_sig:
-            addr, aerr = _require_signed_request(data, "rewards_claim", owner)
-            if aerr is not None:
+            signed_owner, aerr = _require_signed_request(data, "rewards_claim", owner)
+            if aerr is not None and aerr[1] != 401:
+                # Nonce-guard DB unavailable (503) — infrastructure, not a bad proof.
                 return aerr
-            owner = addr
+
+        if signed_owner:
+            owner = signed_owner
         elif legacy_unsigned_claim_allowed():
-            log_event(rid, "authz.legacy_unsigned", endpoint="rewards/claim", owner=owner)
+            reason = "unsigned"
+            if aerr is not None:
+                reason = (aerr[0].get_json(silent=True) or {}).get("error_code") or "invalid_proof"
+            log_event(rid, "authz.legacy_unsigned", endpoint="rewards/claim", owner=owner, reason=reason)
         else:
-            return api_error_code("signature_required", 401)
+            log_event(rid, "rewards.claim.unauthenticated", owner=owner, had_signature=has_sig)
+            return aerr if aerr is not None else api_error_code("signature_required", 401)
 
         update_user_last_seen(owner, source=request.path)
 

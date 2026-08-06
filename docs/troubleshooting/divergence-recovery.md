@@ -626,7 +626,7 @@ lines per poll — this is the "what happened at 3am four months ago" source):
 ssh root@<sick-host> "docker exec mirage sh -c '
   F=/root/.mirage/logs/watchdog/watchdog-\$(date -u +%F).log
   echo \"== last poll ==\";    grep \"\\[POLL\\]\"     \"\$F\" | tail -3
-  echo \"== events ==\";       grep -E \"\\[(TRIGGER|PRECHECK|DISPATCH|INVOKE|POSTCHECK|ESCALATE|ALERT|CRASH)\\]\" \"\$F\" | tail -30'"
+  echo \"== events ==\";       grep -E \"\\[(TRIGGER|PRECHECK|DISPATCH|INVOKE|POSTCHECK|ESCALATE|ALERT|LAG|IO|CRASH)\\]\" \"\$F\" | tail -30'"
 ```
 
 Key fields to read: `[POLL] last_advance_age_s=` (how long stuck), `[PRECHECK]
@@ -634,6 +634,43 @@ match=true|false` (the app_hash decision), `[DISPATCH] action=restart|peer-pull`
 (what it chose and why). If the watchdog already restarted and recovered, you may
 be done — verify with §5. If `WATCHDOG_AUTORECOVER` is not `true` and the class
 is divergence, peer-pull was not run; proceed manually (§2B).
+
+### 1e. Behind the network but NOT stuck (`[LAG]` / `[IO]`)
+
+There is a failure mode that none of §1c's classes cover and that every trigger
+above is blind to, because they all require a **frozen** height: the node keeps
+committing blocks, just slower than the network. On **2026-08-06** mirage.talk ran
+~21 blocks (~75 s) behind for five minutes with `catching_up=false`. The chain
+rejected every relayed write (`envelope_timestamp in future`, because the ante
+handler compares against *our* stale block time), the backend returned 500s on
+`POST /api/core/post`, and users saw failed posts — while nothing alerted and no
+class in §1c applied. The cause was the droplet's volume degrading: 33 → 13 IOPS
+while average service time went 12 ms → **281 ms**. Our own I/O *fell*; the device
+got slow. It self-healed in ~13 minutes.
+
+The watchdog now names both halves, alert-only:
+
+```bash
+ssh root@<host> "docker exec mirage sh -c '
+  F=/root/.mirage/logs/watchdog/watchdog-\$(date -u +%F).log
+  grep -E \"\\[(LAG|IO)\\]\" \"\$F\" | tail -20
+  grep \"\\[POLL\\]\" \"\$F\" | tail -5   # io_await_ms= / io_busy_pct= every poll'"
+```
+
+`[LAG]` = behind healthy peers by `LAG_ALERT_BLOCKS` (10) for `LAG_ALERT_POLLS`
+(3) polls while still advancing. `[IO]` = host disk `await` above
+`IO_AWAIT_ALERT_MS` (100 ms; val1 normally sits at 3-4 ms).
+
+**Do not recover.** A slow node re-converges by itself, and every recovery action
+writes more to the disk that is already the bottleneck — a restart replays the WAL
+and can turn a five-minute lag into a real outage. Triage the host instead with
+`iostat -x 5`: latency up **with** IOPS up is our own workload (compaction,
+snapshot, vacuum); latency up with IOPS flat or falling is the volume degrading,
+which is a provider issue and not fixable from inside the box. Historical detail
+lives in the sysstat and PCP archives (`sar -d -f /var/log/sysstat/sa$(date +%d)`),
+which is how the 2026-08-06 numbers above were reconstructed after the fact.
+
+Tests: `scripts/tests/test_watchdog_lag_io_alert.py`.
 
 ---
 

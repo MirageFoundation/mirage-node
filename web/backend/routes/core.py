@@ -115,6 +115,7 @@ from chain import (
     get_pow_base_bits,
     is_node_catching_up,
     is_valid_recent_block_hash,
+    max_envelope_future_skew_seconds,
 )
 
 
@@ -153,7 +154,6 @@ def derive_address_from_pubkey(pub_dec: bytes) -> str:
 GAS_BUFFER_MULTIPLIER = 1.25  # C-1: simulate skips some sig-verify cost vs DeliverTx
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
-ENVELOPE_TIMESTAMP_SKEW_MS = 90 * 1000
 
 
 # ── Quest tracker (lazy singleton, backend-owned DB) ────────────────────────
@@ -399,11 +399,20 @@ def _guard_push_request(owner: str, action: str, timestamp_ms: int, nonce: int):
 
 
 def _validate_envelope_timestamp(timestamp_ms: int):
-    """Reject envelope timestamps outside the allowed window."""
+    """Reject envelope timestamps the ante handler is certain to refuse.
+
+    The chain allows max_envelope_age of age and half that (capped at 30s) of
+    future skew, measured against block time. Block time is never ahead of now,
+    so anything outside this window here is outside it there too — a wider relay
+    window only spends a simulate round trip to earn a rejection.
+    """
     if timestamp_ms < 10_000_000_000:
         return False, api_error_code("timestamp_must_be_millis")
+    max_age_ms = int(expect_params()["max_envelope_age"]) * 1000
     now_ms = int(time.time() * 1000)
-    if abs(now_ms - timestamp_ms) > ENVELOPE_TIMESTAMP_SKEW_MS:
+    if timestamp_ms - now_ms > max_envelope_future_skew_seconds() * 1000:
+        return False, api_error_code("timestamp_outside_window")
+    if now_ms - timestamp_ms > max_age_ms:
         return False, api_error_code("timestamp_outside_window")
     return True, None
 
@@ -478,8 +487,10 @@ def _client_timestamp(rid: str, action: str, data: Dict[str, Any]) -> int:
 
     follow_topic and unfollow_topic used to substitute `now` when the field was
     absent, which forwards to the chain an envelope_timestamp the user never
-    signed — latent breakage the moment signature verification is applied to
-    these endpoints (H-3). Absence is passed through as 0 and logged instead.
+    signed. The ante covers the timestamp (canon field 6), so the chain rejected
+    it as `invalid relay signature` and the real cause — the missing field — was
+    hidden (H-3). Absence is passed through as 0 and logged instead, which the
+    chain reports as `envelope_timestamp is required`.
     """
     timestamp = int(data.get("timestamp", 0) or 0)
     if not timestamp:
@@ -578,6 +589,16 @@ def _classify_exception(err_str: str):
         return "invalid input type", 400
     if "base64" in low or "incorrect padding" in low:
         return "invalid base64 encoding", 400
+    # Ante rejections arrive as HTTP 500 from the tx-service REST, so the 4xx
+    # branches below never see them and every one of them used to be reported as
+    # an internal error. _validate_envelope_timestamp already bounded the
+    # timestamp against our clock, so "in future" means our own block time is
+    # stale (the node trails the network) and the client should retry; "too old"
+    # means the envelope aged out in flight and must be re-signed.
+    if "envelope_timestamp in future" in low:
+        return get_message("node_catching_up"), 503
+    if "envelope_timestamp too old" in low:
+        return get_message("envelope_expired"), 400
     # Chain simulation / broadcast rejections (HTTP 400 from chain = client error)
     if "simulate_gas http 400" in low:
         return "transaction rejected", 400

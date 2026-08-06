@@ -66,6 +66,16 @@ Detection signals:
      process is gone. Peer health is logged and still required later by
      peer-pull, but it does not block a non-destructive restart.
 
+Alert-only warnings (never dispatch recovery, each with its own dedup marker):
+  [DISK] filesystem crossed DISK_ALERT_PCT.
+  [LAG]  the node is behind healthy peers by more than LAG_ALERT_BLOCKS while
+         STILL ADVANCING. Signal 2 above only fires on a FROZEN height, so a
+         node that keeps committing blocks a minute behind the network was
+         completely silent (2026-08-06: 21 blocks behind for ~5 min while the
+         chain rejected relayed writes as "envelope_timestamp in future").
+  [IO]   host disk latency above IO_AWAIT_ALERT_MS — the usual cause of the
+         above, and invisible from inside CometBFT.
+
 Safety guards:
   - Restart cool-down marker (~/.mirage/.restart_recovery_lock,
     RESTART_COOLDOWN_SECONDS default 15m) — separate from the destructive lock.
@@ -85,9 +95,9 @@ Every poll writes dense, tagged, greppable lines to BOTH stdout (for the tmux
 pane) AND a durable daily file /root/.mirage/logs/watchdog/watchdog-YYYY-MM-DD.log
 (90-day retention), so any incident is reconstructable months later. Tags:
 STARTUP, POLL, PEER, GATE, TRIGGER, PRECHECK, DISPATCH, INVOKE, POSTCHECK,
-COOLDOWN, ESCALATE, ALERT, CRASH, SHUTDOWN. One-liner to reconstruct every
-interesting event:
-  grep -E '\\[(TRIGGER|DISPATCH|INVOKE|POSTCHECK|ESCALATE|ALERT|CRASH)\\]' \\
+COOLDOWN, ESCALATE, ALERT, DISK, LAG, IO, CRASH, SHUTDOWN. One-liner to
+reconstruct every interesting event:
+  grep -E '\\[(TRIGGER|DISPATCH|INVOKE|POSTCHECK|ESCALATE|ALERT|LAG|IO|CRASH)\\]' \\
     /root/.mirage/logs/watchdog/watchdog-*.log
 """
 
@@ -148,6 +158,27 @@ ALERT_WEBHOOK_TIMEOUT = float(os.environ.get("ALERT_WEBHOOK_TIMEOUT", "5"))
 DISK_ALERT_PCT = int(os.environ.get("DISK_ALERT_PCT", "80"))
 DISK_ALERT_LOCK = Path(os.environ.get("DISK_ALERT_LOCK", "/root/.mirage/.disk_alert_lock"))
 DISK_ALERT_REPEAT_SECONDS = int(os.environ.get("DISK_ALERT_REPEAT_SECONDS", "21600"))  # 6h
+# Peer-lag warning: the node is BEHIND the network but still committing blocks.
+# The stall trigger cannot see this — it requires a frozen height — so on
+# 2026-08-06 mirage.talk ran 21 blocks (~75s) behind for five minutes with
+# catching_up=False and nothing alerted, while every relayed write was rejected
+# by the ante handler for a stale block time. ALERT-ONLY: see _lag_alert_once.
+# 10 blocks is ~36s at the observed 3.6s block time, well clear of the 1-3
+# blocks of skew normally seen between the local poll and the peer probe.
+LAG_ALERT_BLOCKS = int(os.environ.get("LAG_ALERT_BLOCKS", "10"))
+LAG_ALERT_POLLS = int(os.environ.get("LAG_ALERT_POLLS", "3"))
+LAG_ALERT_LOCK = Path(os.environ.get("LAG_ALERT_LOCK", "/root/.mirage/.lag_alert_lock"))
+LAG_ALERT_REPEAT_SECONDS = int(os.environ.get("LAG_ALERT_REPEAT_SECONDS", "1800"))  # 30 min
+# Host disk-latency warning. Consensus is fsync-bound, so storage latency is the
+# root cause the node itself cannot report. On val1 the average service time sits
+# at 3-4ms; during the 2026-08-06 stall it reached 281ms with the device busy 81%
+# of the time while our own IOPS FELL — i.e. the volume degraded under us. 100ms
+# sustained over two polls is far above anything healthy and far below the point
+# where blocks start slipping.
+IO_AWAIT_ALERT_MS = int(os.environ.get("IO_AWAIT_ALERT_MS", "100"))
+IO_ALERT_POLLS = int(os.environ.get("IO_ALERT_POLLS", "2"))
+IO_ALERT_LOCK = Path(os.environ.get("IO_ALERT_LOCK", "/root/.mirage/.io_alert_lock"))
+IO_ALERT_REPEAT_SECONDS = int(os.environ.get("IO_ALERT_REPEAT_SECONDS", "1800"))  # 30 min
 NODE_LABEL = os.environ.get("NODE_LABEL", "") or os.environ.get("MONIKER", "") or socket.gethostname()
 DISABLE_MARKER = Path(os.environ.get("DISABLE_MARKER", "/root/.mirage/.recovery_disabled"))
 RECOVERY_SCRIPT = Path(os.environ.get("RECOVERY_SCRIPT", "/opt/mirage/scripts/recover.sh"))
@@ -521,6 +552,59 @@ def disk_used_pct(path: Path) -> int | None:
         return None
 
 
+# Whole disks only. vda1 and vda both appear in /proc/diskstats, and summing a
+# partition with its parent double-counts every request.
+_WHOLE_DISK_RE = re.compile(r"^(?:vd[a-z]+|sd[a-z]+|nvme\d+n\d+|xvd[a-z]+)$")
+
+
+def read_disk_counters() -> tuple[int, int, int] | None:
+    """(completed_ios, service_ms, busy_ms) summed from /proc/diskstats.
+
+    diskstats is NOT namespaced, so inside the container these are the host's
+    numbers — which is the whole point: the volume, not the cgroup, is what goes
+    slow. Monotonic counters; meaningless until differenced by disk_pressure.
+    """
+    try:
+        lines = Path("/proc/diskstats").read_text().splitlines()
+    except OSError:
+        return None
+    ios = service_ms = busy_ms = 0
+    for line in lines:
+        f = line.split()
+        if len(f) < 14 or not _WHOLE_DISK_RE.match(f[2]):
+            continue
+        try:
+            ios += int(f[3]) + int(f[7])
+            service_ms += int(f[6]) + int(f[10])
+            busy_ms += int(f[12])
+        except ValueError:
+            continue
+    if ios == 0 and busy_ms == 0:
+        return None
+    return ios, service_ms, busy_ms
+
+
+def disk_pressure(
+    prev: tuple[int, int, int] | None,
+    cur: tuple[int, int, int] | None,
+    elapsed_s: float,
+) -> tuple[int, int] | None:
+    """(await_ms, busy_pct) between two read_disk_counters() samples.
+
+    PURE: no I/O, no clock — trivially unit-testable. await_ms is iostat's await
+    (mean time a request spent in flight, queueing included); busy_pct is %util.
+    None when a sample is missing, the interval completed no request (an average
+    over zero requests is not a latency reading), or a counter went backwards
+    because the host rebooted.
+    """
+    if prev is None or cur is None or elapsed_s <= 0:
+        return None
+    d_ios, d_service, d_busy = (cur[0] - prev[0], cur[1] - prev[1], cur[2] - prev[2])
+    if d_ios <= 0 or d_service < 0 or d_busy < 0:
+        return None
+    return round(d_service / d_ios), round(100 * d_busy / (elapsed_s * 1000))
+
+
 def read_priv_validator_step() -> tuple[int | None, int | None]:
     """step/round from priv_validator_state.json (~1KB). step=3 is prevote —
     exactly the value seen frozen during the 2026-06-14 stall."""
@@ -607,6 +691,23 @@ def is_catchup_divergence(
     PURE: no I/O, no clock — trivially unit-testable.
     """
     return bool(last_advance_age_s >= catchup_stall_s and div_hit and healthy_peers >= 2 and peer_max_height > local_h)
+
+
+def lag_warning_due(
+    consecutive_over_polls: int,
+    stall_n: int,
+    required_polls: int = LAG_ALERT_POLLS,
+    stall_blocks: int = STALL_BLOCKS,
+) -> bool:
+    """True when a trailing-peers warning is warranted (see _lag_alert_once).
+
+    The gap must hold for required_polls polls — a single poll can straddle a
+    block and read behind for no reason — and we stand down once the height has
+    been frozen long enough for the stall trigger to own the incident, so one
+    event never produces two competing alert streams.
+    PURE: no I/O, no clock — trivially unit-testable.
+    """
+    return consecutive_over_polls >= required_polls and stall_n < stall_blocks
 
 
 def decide_action(
@@ -952,6 +1053,84 @@ def _disk_alert_once(disk: int) -> None:
         pass
 
 
+def _lag_alert_once(local_h: int, peer_max: int, lag: int, polls: int) -> None:
+    """Warn when the node trails healthy peers while STILL COMMITTING blocks.
+
+    ALERT-ONLY, deliberately. This is the slow-but-alive case: the node is not
+    wedged and not diverged, it is losing a race, and it closes the gap by itself
+    once the pressure lifts. Restarting it would replay the WAL on the very disk
+    that is already the bottleneck, turning a five-minute lag into a real outage.
+    Recovery stays reserved for a FROZEN height (signal 2) — which this is not,
+    and which is exactly why this case had no detector before 2026-08-06.
+
+    Own dedup marker: sharing ALERT_LOCK would let a lag warning suppress a
+    genuine divergence alert (the 2026-06-12 shared-lock lesson).
+    """
+    age = marker_age_s(LAG_ALERT_LOCK)
+    if age is not None and age < LAG_ALERT_REPEAT_SECONDS:
+        emit("LAG", kind="warn-suppressed", lag=lag, re_alert_in_s=int(LAG_ALERT_REPEAT_SECONDS - age))
+        return
+    log("============================================================")
+    log(f"WARNING: {lag} blocks behind peers (local={local_h} peer_max={peer_max}).")
+    log(f"  Behind for {polls} consecutive polls but STILL ADVANCING, so this is")
+    log("  neither a stall nor a divergence: no recovery was dispatched, and none")
+    log("  should be forced. The node re-converges on its own.")
+    log("  It is NOT harmless, though: while the head is stale the chain rejects")
+    log("  relayed writes ('envelope_timestamp in future') and the backend answers")
+    log("  503 node_catching_up, so users see posts and votes fail.")
+    log("  Triage host disk latency first — [IO] and [POLL] io_await_ms in this")
+    log("  log, then `iostat -x 5`. On 2026-08-06 the droplet's disk went from 3ms")
+    log("  to 281ms average service time and the node fell 21 blocks behind.")
+    log("============================================================")
+    emit("LAG", kind="warn", local_h=local_h, peer_max=peer_max, lag=lag, polls=polls, threshold=LAG_ALERT_BLOCKS)
+    notify_external(
+        "node trailing peers",
+        f"{lag} blocks behind peers (local={local_h} peer_max={peer_max}) for {polls} polls; "
+        "still advancing so no recovery dispatched — writes are failing, check host disk latency",
+    )
+    try:
+        LAG_ALERT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        LAG_ALERT_LOCK.touch()
+    except OSError:
+        pass
+
+
+def _io_alert_once(await_ms: int, busy_pct: int, polls: int) -> None:
+    """Warn when host disk latency is high enough to threaten block commits.
+
+    ALERT-ONLY: nothing the watchdog can do to a managed volume makes it faster,
+    and every recovery action it owns writes MORE to that disk. This exists to
+    name the root cause in the same breath as its symptoms, because from inside
+    CometBFT a degraded volume looks like a mystery: /status keeps reporting
+    catching_up=false while blocks quietly take 20s instead of 3.6s.
+    """
+    age = marker_age_s(IO_ALERT_LOCK)
+    if age is not None and age < IO_ALERT_REPEAT_SECONDS:
+        emit("IO", kind="warn-suppressed", await_ms=await_ms, re_alert_in_s=int(IO_ALERT_REPEAT_SECONDS - age))
+        return
+    log("============================================================")
+    log(f"WARNING: host disk await {await_ms}ms (threshold {IO_AWAIT_ALERT_MS}ms), device busy {busy_pct}%.")
+    log(f"  Sustained for {polls} consecutive polls. Consensus is fsync-bound, so")
+    log("  this stalls block commits, Postgres checkpoints and the indexer at once.")
+    log("  Check whether the cause is US or the VOLUME:  iostat -x 5")
+    log("    IOPS up + latency up   -> our workload (compaction, snapshot, vacuum)")
+    log("    IOPS flat/down + latency up -> the volume degraded; a provider issue")
+    log("  2026-08-06 was the second kind: 33 -> 13 IOPS while await went 12 ->")
+    log("  281ms. Nothing was deleted or restarted, and it self-healed in ~13 min.")
+    log("============================================================")
+    emit("IO", kind="warn", await_ms=await_ms, busy_pct=busy_pct, polls=polls, threshold_ms=IO_AWAIT_ALERT_MS)
+    notify_external(
+        "host disk latency warning",
+        f"disk await {await_ms}ms (threshold {IO_AWAIT_ALERT_MS}ms), busy {busy_pct}%, {polls} polls; "
+        "block commits and Postgres are both fsync-bound on this volume",
+    )
+    try:
+        IO_ALERT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        IO_ALERT_LOCK.touch()
+    except OSError:
+        pass
+
+
 # ── Core loop ───────────────────────────────────────────────────────────
 def run(dry_run: bool) -> int:
     import signal
@@ -1052,6 +1231,10 @@ def run(dry_run: bool) -> int:
     last_advance_h: int | None = None
     last_advance_ts = start_ts
     last_cleanup_date = datetime.now(timezone.utc).date()
+    io_prev: tuple[int, int, int] | None = None
+    io_prev_ts = start_ts
+    io_slow_polls = 0
+    lag_polls = 0
 
     def recent_restart_count() -> int:
         cutoff = time.time() - RESTART_ESCALATE_WINDOW_SECONDS
@@ -1087,6 +1270,18 @@ def run(dry_run: bool) -> int:
             disk = disk_used_pct(NODE_HOME)
             if disk is not None:
                 _disk_alert_once(disk)
+            io_now = read_disk_counters()
+            io = disk_pressure(io_prev, io_now, time.time() - io_prev_ts)
+            io_prev, io_prev_ts = io_now, time.time()
+            io_await = io_busy = None
+            if io is not None:
+                io_await, io_busy = io
+                # An idle interval yields no reading at all (io is None), which
+                # must not reset the counter — absence of requests is not proof
+                # the volume recovered.
+                io_slow_polls = io_slow_polls + 1 if io_await > IO_AWAIT_ALERT_MS else 0
+                if io_slow_polls >= IO_ALERT_POLLS:
+                    _io_alert_once(io_await, io_busy, io_slow_polls)
             step, rnd = read_priv_validator_step()
 
             local = get_status(LOCAL_RPC)
@@ -1100,6 +1295,8 @@ def run(dry_run: bool) -> int:
                     miraged_pid=pid if pid else "none",
                     mem_rss_mb=rss if rss is not None else "n/a",
                     disk_used_pct=disk if disk is not None else "n/a",
+                    io_await_ms=io_await if io_await is not None else "n/a",
+                    io_busy_pct=io_busy if io_busy is not None else "n/a",
                 )
                 if consecutive_unreachable < DEAD_THRESHOLD:
                     time.sleep(POLL_SECONDS)
@@ -1218,6 +1415,8 @@ def run(dry_run: bool) -> int:
                             miraged_pid=pid if pid else "none",
                             mem_rss_mb=rss if rss is not None else "n/a",
                             disk_used_pct=disk if disk is not None else "n/a",
+                            io_await_ms=io_await if io_await is not None else "n/a",
+                            io_busy_pct=io_busy if io_busy is not None else "n/a",
                             note=(
                                 "catching_up; stuck but no divergence signal"
                                 if stuck
@@ -1243,12 +1442,21 @@ def run(dry_run: bool) -> int:
                         miraged_pid=pid if pid else "none",
                         mem_rss_mb=rss if rss is not None else "n/a",
                         disk_used_pct=disk if disk is not None else "n/a",
+                        io_await_ms=io_await if io_await is not None else "n/a",
+                        io_busy_pct=io_busy if io_busy is not None else "n/a",
                     )
 
                     peers = probe_peers()
                     for p in peers:
                         _emit_peer(p)
                     healthy, peer_max = healthy_summary(peers)
+
+                    # Behind the network but still advancing — invisible to every
+                    # trigger below, all of which need a frozen height.
+                    lag = peer_max - local_h if healthy >= 2 and peer_max > 0 else 0
+                    lag_polls = lag_polls + 1 if lag > LAG_ALERT_BLOCKS else 0
+                    if lag_warning_due(lag_polls, stall_n):
+                        _lag_alert_once(local_h, peer_max, lag, lag_polls)
                     emit(
                         "GATE",
                         watchdog_autorecover=WATCHDOG_AUTORECOVER,

@@ -171,21 +171,24 @@ def _do_post(
     return txh if txh else None
 
 
-def _do_post_with_nonce(
+def _do_post_at_timestamp(
     backend: str,
     wallet,
     topic: str,
     title: str,
     content: str,
-    nonce: int,
+    timestamp_ms: int,
+    nonce: int | None = None,
     target: str = "",
     tag: str = "",
     skip_pow: bool = False,
-) -> dict:
+) -> tuple[int, dict]:
+    """Create a post with an explicit envelope timestamp; return (status, body)."""
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
-    ts = _now_ms()
+    ts = int(timestamp_ms)
+    nonce = _fresh_nonce() if nonce is None else int(nonce)
     d = 0 if skip_pow else diff
 
     base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
@@ -210,8 +213,34 @@ def _do_post_with_nonce(
     }
     if not skip_pow:
         payload["pow"] = int(proof)
-    _, resp = _post(f"{backend}/api/core/post", payload)
-    return resp or {}
+    code, resp = _post(f"{backend}/api/core/post", payload)
+    return code, (resp or {})
+
+
+def _do_post_with_nonce(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    nonce: int,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    _, resp = _do_post_at_timestamp(
+        backend,
+        wallet,
+        topic,
+        title,
+        content,
+        _now_ms(),
+        nonce=nonce,
+        target=target,
+        tag=tag,
+        skip_pow=skip_pow,
+    )
+    return resp
 
 
 def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool = False) -> dict:

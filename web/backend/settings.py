@@ -94,15 +94,19 @@ AUTO_ENABLED_AGENTS = _parse_address_csv_env("AUTO_ENABLED_AGENTS")
 # Set to 0 to disable the feature entirely.
 NEW_USER_HIGHLIGHT_DAYS = int(os.environ.get("NEW_USER_HIGHLIGHT_DAYS", "7"))
 
-# Grace period for unsigned POST /api/rewards/claim while installed mobile builds
-# catch up. ISO date (YYYY-MM-DD, UTC). While today < this date, unsigned claims
-# are served but logged under authz.legacy_unsigned; on/after it, unsigned is 401.
+# Grace period for POST /api/rewards/claim while installed mobile builds catch
+# up. ISO date (YYYY-MM-DD, UTC). While today < this date, a claim whose identity
+# proof is absent OR fails verification is served but logged under
+# authz.legacy_unsigned; on/after it, either is a 401.
 # Self-expiring: removing the branch later does not change post-cutoff behaviour.
-LEGACY_UNSIGNED_UNTIL = os.environ.get("LEGACY_UNSIGNED_UNTIL", "2026-09-05").strip()
+# Extended from 2026-09-05 because the original window rejected any client that
+# sent a signature it could not verify, so no installed mobile build could claim
+# for the whole first month of it.
+LEGACY_UNSIGNED_UNTIL = os.environ.get("LEGACY_UNSIGNED_UNTIL", "2026-10-05").strip()
 
 
 def legacy_unsigned_claim_allowed(now_ts: float | None = None) -> bool:
-    """True while the rewards/claim unsigned grace period is still open."""
+    """True while the rewards/claim legacy-proof grace period is still open."""
     if not LEGACY_UNSIGNED_UNTIL:
         return False
     from datetime import datetime, timezone

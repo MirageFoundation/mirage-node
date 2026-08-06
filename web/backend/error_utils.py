@@ -63,6 +63,7 @@ ERRORS = {
     "timestamp_required": "timestamp required",
     "timestamp_must_be_millis": "timestamp must be milliseconds",
     "timestamp_outside_window": "timestamp outside allowed window",
+    "envelope_expired": "request expired, please retry",
     "invalid_nonce": "invalid envelope_nonce",
     "nonce_required": "envelope_nonce is required (v1.20.0)",
     "nonce_must_be_positive": "envelope_nonce must be > 0",

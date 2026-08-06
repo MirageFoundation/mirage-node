@@ -1798,8 +1798,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	// All changes here are code-level behavior changes with no new store keys
 	// and no new on-chain state. The handler is intentionally a no-op beyond
 	// RunMigrations so the coordinated binary switch happens atomically at
-	// the upgrade height. See docs/security/blockchain/review-2026-04-24.md
-	// for the full change list; highlights:
+	// the upgrade height. Highlights of the change list:
 	//   - BeginBlock, EndBlock, MintIfNeeded and GetParams never halt the
 	//     chain on internal failures — they log and continue (or fall back
 	//     to DefaultParams). Before: any such failure panicked.
