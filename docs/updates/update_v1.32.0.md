@@ -6,7 +6,7 @@ Every free-user action on Mirage is relayed by a validator that pays the gas. Th
 
 ### What changed
 
-Relay transactions now require a real outer signature from the gas payer, using unordered transactions so validators still never have to track sequence numbers. The gas payment itself is unchanged: the validator still pays for free users, paid users still burn from reserve, and a hostile node still pays its own gas per message. The only difference is that naming an account as the payer now means holding that account's key. An upper bound on the gas payment closes the drain path even if something else goes wrong later.
+Relay transactions now require a real outer signature from the gas payer, using unordered transactions so validators still never have to track sequence numbers. The gas payment itself is unchanged: the validator still pays for free users, paid users still burn from reserve, and a hostile node still pays its own gas per message. The only difference is that naming an account as the payer now means holding that account's key. We deliberately stopped short of also capping how much a node may pay: the payer signs the exact amount, so a ceiling would only stand between an operator and their own gas. An early version of this work included one, and it quietly made the longest posts unpublishable — the fee such a post legitimately needed sat above the cap. Requiring consent was the fix; limiting the amount was not.
 
 ### Honest limits
 

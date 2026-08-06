@@ -779,6 +779,19 @@ def test_content_limits(backend: str):
     else:
         _fail("content_limits.sub_1050_accepted")
 
+    # 23.3b Subscriber: content just under the 20000 limit must succeed.
+    # This brackets 23.4: a blanket relay failure would fail here too, so 23.4's
+    # rejection can only come from the content-length rule. The C-1 remediation
+    # briefly capped the relay fee at relay_max_gas_fee, which made every post
+    # over ~10.7k chars fail on gas — 23.3 (1050 chars) was too short to notice
+    # and 23.4 went green for the wrong reason.
+    near_max_content = "y" * 19900
+    txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", "Title", near_max_content, skip_pow=True)
+    if txh:
+        _pass("content_limits.sub_near_max_accepted")
+    else:
+        _fail("content_limits.sub_near_max_accepted", f"{len(near_max_content)} chars rejected, limit is 20000")
+
     # 23.4 Subscriber: content > 20000 should fail
     huge_content = "x" * 20050
     txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", "Title", huge_content, skip_pow=True)

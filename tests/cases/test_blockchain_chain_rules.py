@@ -169,7 +169,10 @@ def test_authority(backend: str) -> None:
     lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
     ts = _now_ms()
 
-    # 3.1 Fake authority with unfunded fee payer
+    # 3.1 Fake authority with unfunded fee payer.
+    # Since C-1 the outer signature is verified before the fee is deducted, so
+    # naming someone else as fee.payer is refused for lack of authorization
+    # rather than for lack of funds — the tx never reaches DeductFee.
     fake = LocalWallet(PrivateKey(), prefix="mirage")
     msg = _build_msg_post(
         wallet,
@@ -189,7 +192,7 @@ def test_authority(backend: str) -> None:
         str(fake.address()),
         wallet.public_key().public_key_bytes,
     )
-    _check_reject("authority.fake_authority", code, log, "insufficient funds")
+    _check_reject("authority.fake_authority", code, log, "pubkey")
 
     # 3.2 Governance authority spoof
     msg = _build_msg_post(
@@ -295,19 +298,20 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
 
     # The sharpest forgery: the victim's real (public) pubkey in SignerInfo with a
     # forged 64-byte signature. This passes SetPubKey, so only SigVerification can
-    # stop it. The victim is funded and the fee is exactly at the ceiling, so a
-    # rejection cannot come from insufficient funds or the fee bound instead.
+    # stop it. The victim is funded and the fee is exactly the expected gas
+    # payment, so a rejection cannot come from insufficient funds or the fee floor
+    # instead.
     funded_victim = LocalWallet(PrivateKey(), prefix="mirage")
     fv_addr = str(funded_victim.address())
     fv_pub = funded_victim.public_key().public_key_bytes
-    ceiling_fee = gas * int((_bh._get_chain_params().get("relay_min_gas_price")) or 0)
-    if not _faucet(backend, fv_addr, amount=ceiling_fee + 10_000_000):
+    expected_fee = gas * int((_bh._get_chain_params().get("relay_min_gas_price")) or 0)
+    if not _faucet(backend, fv_addr, amount=expected_fee + 10_000_000):
         _fail("c1.forged_signature_rejected", f"could not fund victim {fv_addr}")
         return
     time.sleep(2)
     balance_before = _get_spendable_balance(fv_addr)
-    if balance_before < ceiling_fee:
-        _fail("c1.forged_signature_rejected", f"victim underfunded: {balance_before} < {ceiling_fee}")
+    if balance_before < expected_fee:
+        _fail("c1.forged_signature_rejected", f"victim underfunded: {balance_before} < {expected_fee}")
         return
 
     msg4 = _build_msg_follow_topic(
@@ -319,7 +323,7 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
         gas,
         fee_payer=fv_addr,
         signer_pubkey=fv_pub,  # victim's real pubkey — matches the required signer
-        fee_amount=ceiling_fee,
+        fee_amount=expected_fee,
         sign_outer=False,
         outer_sig=b"\x11" * 64,  # forged signature of the right shape
         unordered=True,
@@ -338,30 +342,37 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
     else:
         _pass("c1.forged_signature_victim_unharmed")
 
-    # Over-ceiling gas payment with a *valid* outer signature must still be rejected.
+    # A signed relay tx above relay_max_gas_fee/relay_min_gas_price gas must be
+    # payable. The C-1 remediation briefly capped the fee at
+    # min(gas*relay_min_gas_price, relay_max_gas_fee), which crossed the CheckTx
+    # minimum-gas-price floor at 500k gas and made every larger relay tx
+    # unsubmittable — including posts over ~10.7k chars, inside the 20k tier
+    # limit. The payer signs the fee, so magnitude needs no ante bound.
     fee_payer = _bh._VALIDATOR_ADDR or ""
-    msg3 = _build_msg_follow_topic(
-        wallet, lb, 0, ts, str(wallet.address()), f"c1c{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
-    )
     params = _bh._get_chain_params()
     relay_min = int(params.get("relay_min_gas_price") or 0)
     relay_max = int(params.get("relay_max_gas_fee") or 0)
     if relay_min <= 0:
-        _fail("c1.over_ceiling_fee_rejected", "relay_min_gas_price missing from chain params")
+        _fail("c1.high_gas_relay_accepted", "relay_min_gas_price missing from chain params")
         return
-    ceiling = gas * relay_min
-    if relay_max > 0 and ceiling > relay_max:
-        ceiling = relay_max
-    over = ceiling + 1
-    _, code3, log3, _, _ = _submit_tx(
+    high_gas = (relay_max // relay_min) * 2 if relay_max > 0 else gas * 5
+    high_fee = high_gas * relay_min
+    msg3 = _build_msg_follow_topic(
+        wallet, lb, 0, ts, str(wallet.address()), f"c1c{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    )
+    _, code3, log3, dcode3, dlog3 = _submit_tx(
         [(msg3, "/mirage.core.v1.MsgFollowTopic")],
-        gas,
+        high_gas,
         fee_payer,
         signer_pub,
-        fee_amount=over,
+        fee_amount=high_fee,
+        wait_deliver=True,
     )
-    _debug(f"c1 over-ceiling attempt over={over} ceiling={ceiling} code={code3} log={log3[:200]}")
-    _check_reject("c1.over_ceiling_fee_rejected", code3, log3, "fee too high")
+    _debug(
+        f"c1 high-gas relay gas={high_gas} fee={high_fee} relay_max_gas_fee={relay_max} "
+        f"check={code3} log={log3[:200]} deliver={dcode3}"
+    )
+    _check_deliver_accept("c1.high_gas_relay_accepted", code3, dcode3, dlog3)
 
 
 def test_staking(backend: str) -> None:

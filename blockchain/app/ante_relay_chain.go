@@ -24,6 +24,18 @@ import (
 //   - IncrementSequenceDecorator is deliberately absent: relay txs are
 //     unordered, so there is no sequence to increment.
 //
+// DeductFee uses the SDK default fee checker (nil), which enforces only the
+// minimum-gas-price floor during CheckTx. There is deliberately no fee ceiling:
+// SigVerification has already proven the payer signed the SignDoc, and the
+// SignDoc covers auth_info (fee amount, gas, payer), so the payer consented to
+// the exact amount. C-1 was an authorization hole, not a magnitude problem. An
+// added ceiling of min(gas*relay_min_gas_price, relay_max_gas_fee) crosses the
+// floor at relay_max_gas_fee/min_gas_price gas — at the current 500 MIRAGE cap
+// that made every relay tx above 500k gas (posts over ~10.7k chars, well inside
+// the 20k tier limit) unpayable, because the required fee exceeded the allowed
+// one. Do not reintroduce it. relay_max_gas_fee still bounds the separate
+// deduction from a paid user's own reserve in x/core/module.
+//
 // Construction lives here together with the ordering so that
 // TestRelayAnteDecoratorOrder pins the chain the app actually installs. Keep
 // them together: a test over a separately-built slice would not catch a
@@ -45,7 +57,7 @@ func relayAnteDecorators(
 		authante.NewSetPubKeyDecorator(ak),
 		authante.NewSigGasConsumeDecorator(ak, authante.DefaultSigVerificationGasConsumer),
 		authante.NewSigVerificationDecorator(ak, signModeHandler),
-		authante.NewDeductFeeDecorator(ak, bk, nil, makeRelayTxFeeChecker(ck)),
+		authante.NewDeductFeeDecorator(ak, bk, nil, nil),
 		RelaySigDecorator{Keeper: ck},
 		// MinFee is zero: PoW is never skipped based on the SDK fee, the node
 		// pays gas separately.
