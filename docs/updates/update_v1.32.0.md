@@ -11,3 +11,15 @@ Relay transactions now require a real outer signature from the gas payer, using 
 ### Honest limits
 
 This is a consensus-breaking upgrade. Every validator must cross the same height on the same binary; mixed versions will diverge. Public chain RPC and REST endpoints remain reachable, so an attacker can still talk to the chain directly — they just cannot make someone else pay for it anymore. Closing that broadcast surface is separate hardening, not part of this release.
+
+### Claiming rewards is yours alone
+
+Claiming pending rewards now requires a signature from the account that owns them, and concurrent claims cannot pay the same reward twice. That also stops a stranger from locking in your payout multiplier early. Installed mobile builds keep working without a signature until September 5, 2026 while the app update ships; after that cutoff, unsigned claims are refused.
+
+### Moderation actions prove who called them
+
+Reading the report queue, clearing a report, and suspending or unsuspending a user from rewards now require signed proof from an admin key. Naming an admin's public address is no longer enough. The web interface already sends those signatures; the mobile app has no moderation screens, so nothing changes there.
+
+### Safer platform boundaries
+
+Invite-code endpoints now stay hidden while open registration is enabled; if invite codes return, listing them will require a signature and validation will no longer reveal who issued one. Upload limits are enforced before files enter application memory, client hashing requires a stable server salt, and locality checks no longer trust client-supplied forwarding headers.

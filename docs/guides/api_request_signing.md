@@ -1,7 +1,7 @@
 # API Request Signing (Mobile)
 
 This guide is for the external mobile developer. It covers the **one endpoint**
-you must change for the v1.33.0 backend auth hardening:
+you must change for the v1.32.0 backend auth hardening:
 `POST /api/rewards/claim`.
 
 The signing scheme is the same one already used for `mark_inbox_viewed`,

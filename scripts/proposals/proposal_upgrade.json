@@ -1,6 +1,6 @@
 {
     "title": "Upgrade to v1.32.0 (authorize relay gas payer)",
-    "summary": "Consensus-breaking ante fix for C-1. Relay transactions must carry a real outer unordered signature from the gas payer; the hand-rolled RelayGasFeeDecorator that deducted from fee.payer without authorization is replaced by the SDK SigVerification and DeductFee decorators with a floor and ceiling on the gas payment. Validator still pays gas for free-user relays; paid users still burn from reserve. No store or param migration — binary swap only. Mixed binaries diverge immediately: every validator must cross this single coordinated height on the v1.32.0 binary.",
+    "summary": "Consensus-breaking ante fix for C-1. Relay transactions must carry a real outer unordered signature from the gas payer; the hand-rolled RelayGasFeeDecorator that deducted from fee.payer without authorization is replaced by the SDK SigVerification and DeductFee decorators with a minimum gas-price floor and no fee ceiling. Validator still pays gas for free-user relays; paid users still burn from reserve. No store or param migration — binary swap only. Mixed binaries diverge immediately: every validator must cross this single coordinated height on the v1.32.0 binary.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
