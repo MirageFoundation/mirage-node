@@ -1221,16 +1221,16 @@ FROM meta WHERE key IN ('chain_id', 'last_block_hash', 'last_height');\\" 2>&1" 
 
     # M-8: net_votes must equal the sum of the user's current canonical vote
     # signs in that topic. Re-votes and cleared votes are what used to break it.
-    # Skip until the v1_32_4 rebuild migration has actually run on this DB.
+    # Skip until the v1_33_0 rebuild migration has actually run on this DB.
     rc_mig, out_mig = _docker_exec(
-        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT value FROM meta WHERE key='migration_v1.32.4_rebuild_derived_stats';\\" 2>&1" """,
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT value FROM meta WHERE key='migration_v1.33.0_rebuild_derived_stats';\\" 2>&1" """,
         timeout=10,
     )
     migration_done = rc_mig == 0 and out_mig.strip() not in ("",)
     if not migration_done:
         _skip(
             "indexer_hardening.net_votes_matches_canonical_votes",
-            "v1_32_4_rebuild_derived_stats not applied on this database yet",
+            "v1_33_0_rebuild_derived_stats not applied on this database yet",
         )
         return
 

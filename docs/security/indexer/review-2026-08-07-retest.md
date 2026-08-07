@@ -2,7 +2,7 @@
 
 **Retest of:** [`review-2026-08-07.md`](review-2026-08-07.md) — first dedicated indexer security/correctness review (5 High, 9 Medium, 3 Low, 3 Informational).
 **Review baseline:** `dev` at `d9dbf87a` (`v1.32.4`).
-**Retest state:** remediation implemented on the working tree against tag **v1.32.4** (migrations keyed `v1_32_4_*`). Not yet tagged as a separate release at retest time.
+**Retest state:** remediation implemented against baseline tag **v1.32.4** and shipped as **v1.33.0** (migrations keyed `v1_33_0_*`).
 **Scope of this document:** status of every finding, evidence, and residuals that remain accepted or deferred.
 
 ---
@@ -39,7 +39,7 @@ The remediation contract now matches the operator decisions from the plan:
 | M-5 | Migration discovery/locking soft-fail | **Fixed** | fail-closed discovery; session-held advisory lock; checksum pinning; `run_db_migration` atomicity |
 | M-6 | Credentialful DB URL in logs | **Fixed** | `format_db_target`; `indexer_hardening.db_target_redacted`, `.db_target_default_port`, `.db_target_fails_hard` |
 | M-7 | Post-consensus admission revalidation | **Fixed** | size gates removed from successful-tx projection; missing vote/edit/annotate targets and out-of-range vote directions log and skip instead of failing the block |
-| M-8 | Vote `net_votes` uses direction not delta | **Fixed** | `net_votes_delta`; `v1_32_4_rebuild_derived_stats`; `indexer_hardening.net_votes_delta_signature`, `.vote_direction_normalized`, `.net_votes_matches_canonical_votes` |
+| M-8 | Vote `net_votes` uses direction not delta | **Fixed** | `net_votes_delta`; `v1_33_0_rebuild_derived_stats`; `indexer_hardening.net_votes_delta_signature`, `.vote_direction_normalized`, `.net_votes_matches_canonical_votes` |
 | M-9 | Vote-weight / required write fallbacks | **Fixed** | weight errors re-raise; preference/stat paths re-raise |
 | L-1 | Media `w`/`h` query meta dropped | **Fixed** | `_sanitize_wh` via `_extract_media_meta`; `indexer_hardening.media_meta_extraction`, `.sanitize_wh_bounds` |
 | L-2 | Catch-up logs success in `finally` | **Fixed** | completion logged only after normal loop exit |
@@ -76,7 +76,7 @@ Outbound OG/image probing removed. Thumbnails are deterministic transforms for r
 
 ### M-2 / M-3 / M-5 / M-6 / M-7 / M-8 / M-9 / L-1 / L-2 / L-3 / I-2
 
-As in the status table. Derived-stat repair ships as `indexer/migrations/v1_32_4_rebuild_derived_stats.py`, which recomputes `net_votes` and topic content stats from the canonical `votes` and `posts` rows for databases written by the old direction-based arithmetic. Its dominant-tag rebuild mirrors `DatabaseManager._compute_dominant_tag` exactly, including the `ratio >= 0.5` threshold and the empty-string default.
+As in the status table. Derived-stat repair ships as `indexer/migrations/v1_33_0_rebuild_derived_stats.py`, which recomputes `net_votes` and topic content stats from the canonical `votes` and `posts` rows for databases written by the old direction-based arithmetic. Its dominant-tag rebuild mirrors `DatabaseManager._compute_dominant_tag` exactly, including the `ratio >= 0.5` threshold and the empty-string default.
 
 ---
 
@@ -120,11 +120,11 @@ python tests/test_backend.py --category indexer_fail_hard
 
 Primary regression category: `indexer_hardening` in `tests/cases/test_backend_indexer.py` (credential redaction, media meta, deterministic thumbnails, envelope owner precedence, foreign-edit stub rejection, `block_results` retry/deadline, history-gap merge, obsolete-surface removal, plus optional live-DB provenance/`net_votes`/rollback checks).
 
-**Retest evidence (2026-08-07 local):** `test_indexer_hardening` → **22 pass / 0 fail / 3 skip**. All 22 passing checks are unit-style and need neither docker nor a chain.
+**Retest evidence (2026-08-07 local docker, restored from the latest UAT backup):** `indexer_hardening` **36/36**, `tests/test_backend.py` **783/783**, `tests/test_blockchain.py` **280/280**. The docker-gated checks (`checkpoint_has_provenance`, `net_votes_matches_canonical_votes`, `block_transaction_rolls_back`) were observed green against a real database, not skipped.
 
-The 3 skips are the docker-gated checks (`checkpoint_has_provenance`, `net_votes_matches_canonical_votes`, `block_transaction_rolls_back`). They skip when the local testnet is not running, and skip again — with a distinct message — when it is running but still on pre-remediation indexer code, detected by the absent `v1_32_4_rebuild_derived_stats` marker and missing `meta.chain_id` / `meta.last_block_hash`. A stale environment therefore cannot be mistaken for a pass, but it also means **these three assertions have not yet been observed green against a real database** and must be re-run once the upgraded indexer is deployed.
+Run the suites **inside the container**. From the host, `_docker_exec` shells out to `docker exec bash -lc`, which does not source `/root/.mirage/env/*.env`, so probes that import `client_ip` or read `BACKEND_DB_URL` fail on a missing variable rather than on what they test, and the live-DB checks cannot reach PostgreSQL. Submit `scripts/proposals/proposal_set_pow_message_limit_9999999.json` first or PoW difficulty makes the backend suite impractically slow.
 
-The category was exercised by invoking `test_indexer_hardening` directly. Running it through `tests/test_backend.py` currently aborts during shared wallet setup because the local validator's faucet balance is drained; that is an environment issue unrelated to these changes, and it also blocked re-running the broader backend suites end-to-end.
+The end-to-end run also exercised the deployment path the unit checks cannot: continuity `adopted` on the first start against a database with no recorded provenance, then `verified` on the next; the `v1_33_0` rebuild applied to real rows; and passed-proposal resolution over gov v1 gRPC with a params reload.
 
 ### Follow-up review fixes (same day)
 

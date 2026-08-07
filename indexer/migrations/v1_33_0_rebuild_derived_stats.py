@@ -10,7 +10,7 @@ transaction when DatabaseManager.transaction is available.
 
 from __future__ import annotations
 
-MIGRATION_KEY = "v1.32.4_rebuild_derived_stats"
+MIGRATION_KEY = "v1.33.0_rebuild_derived_stats"
 
 # Must match indexer/database.py update_preference DECAY.
 _PREFERENCE_DECAY = 0.9
@@ -21,9 +21,9 @@ def run(db, chain, logger):
     del chain  # unused; signature required by migration runner
 
     if not hasattr(db, "transaction"):
-        raise RuntimeError("DatabaseManager.transaction required for v1.32.4_rebuild_derived_stats")
+        raise RuntimeError("DatabaseManager.transaction required for v1.33.0_rebuild_derived_stats")
 
-    with db.transaction(label="migration:v1.32.4_rebuild_derived_stats"):
+    with db.transaction(label="migration:v1.33.0_rebuild_derived_stats"):
         with db._connect() as conn:
             with conn.cursor() as cur:
                 before = _snapshot_counts(cur)

@@ -903,7 +903,7 @@ When the checkpoint sits below the node's earliest retained block there is nothi
 Replay is only supported against an empty indexer database.
 ```
 
-Cumulative rows — `user_topic_stats` (`vote_count`, `net_votes`, `post_count`), `topic_content_stats`, and the decaying `preferences` weights — have no per-message idempotency guard. Replaying blocks into a populated database double-counts them. The flag exists for rebuilding an empty database from a chosen height, nothing else. If the derived tables are already suspect, rebuild them from the canonical `posts`/`votes` tables with the `v1.32.4_rebuild_derived_stats` migration rather than replaying blocks.
+Cumulative rows — `user_topic_stats` (`vote_count`, `net_votes`, `post_count`), `topic_content_stats`, and the decaying `preferences` weights — have no per-message idempotency guard. Replaying blocks into a populated database double-counts them. The flag exists for rebuilding an empty database from a chosen height, nothing else. If the derived tables are already suspect, rebuild them from the canonical `posts`/`votes` tables with the `v1.33.0_rebuild_derived_stats` migration rather than replaying blocks.
 
 ### Database Migrations
 
