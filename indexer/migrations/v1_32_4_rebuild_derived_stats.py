@@ -176,41 +176,35 @@ def _rebuild_topic_content_stats(cur, logger) -> None:
         """
     )
 
-    # Dominant tag: highest count among safety tags when ratio >= 0.5 of total
+    # Mirrors DatabaseManager._compute_dominant_tag: a tag only becomes dominant at
+    # ratio >= 0.5, and ties go to the first tag in that method's iteration order.
     cur.execute(
         """
         UPDATE _tmp_topic_content_stats SET
             dominant_tag = sub.tag,
             dominant_ratio = sub.ratio
         FROM (
-            SELECT
-                topic,
-                tag,
-                CASE WHEN total_posts > 0 THEN cnt::float / total_posts ELSE 0 END AS ratio
+            SELECT DISTINCT ON (topic) topic, tag, ratio
             FROM (
-                SELECT topic, total_posts, 'sensitive' AS tag, sensitive_count AS cnt FROM _tmp_topic_content_stats
+                SELECT topic, 'sensitive' AS tag, 1 AS rank, sensitive_count::float / total_posts AS ratio
+                    FROM _tmp_topic_content_stats WHERE total_posts > 0
                 UNION ALL
-                SELECT topic, total_posts, 'gore', gore_count FROM _tmp_topic_content_stats
+                SELECT topic, 'gore', 2, gore_count::float / total_posts
+                    FROM _tmp_topic_content_stats WHERE total_posts > 0
                 UNION ALL
-                SELECT topic, total_posts, 'violence', violence_count FROM _tmp_topic_content_stats
+                SELECT topic, 'violence', 3, violence_count::float / total_posts
+                    FROM _tmp_topic_content_stats WHERE total_posts > 0
                 UNION ALL
-                SELECT topic, total_posts, 'death', death_count FROM _tmp_topic_content_stats
+                SELECT topic, 'death', 4, death_count::float / total_posts
+                    FROM _tmp_topic_content_stats WHERE total_posts > 0
                 UNION ALL
-                SELECT topic, total_posts, 'adult', adult_count FROM _tmp_topic_content_stats
+                SELECT topic, 'adult', 5, adult_count::float / total_posts
+                    FROM _tmp_topic_content_stats WHERE total_posts > 0
             ) x
-            WHERE cnt > 0
+            WHERE ratio >= 0.5
+            ORDER BY topic, ratio DESC, rank
         ) sub
         WHERE _tmp_topic_content_stats.topic = sub.topic
-          AND sub.ratio = (
-              SELECT MAX(CASE WHEN total_posts > 0 THEN cnt::float / total_posts ELSE 0 END)
-              FROM (
-                  SELECT sensitive_count AS cnt, total_posts FROM _tmp_topic_content_stats t2 WHERE t2.topic = sub.topic
-                  UNION ALL SELECT gore_count, total_posts FROM _tmp_topic_content_stats t2 WHERE t2.topic = sub.topic
-                  UNION ALL SELECT violence_count, total_posts FROM _tmp_topic_content_stats t2 WHERE t2.topic = sub.topic
-                  UNION ALL SELECT death_count, total_posts FROM _tmp_topic_content_stats t2 WHERE t2.topic = sub.topic
-                  UNION ALL SELECT adult_count, total_posts FROM _tmp_topic_content_stats t2 WHERE t2.topic = sub.topic
-              ) m
-          )
         """
     )
 
@@ -223,7 +217,7 @@ def _rebuild_topic_content_stats(cur, logger) -> None:
         )
         SELECT
             topic, total_posts, sensitive_count, gore_count, violence_count,
-            death_count, adult_count, dominant_tag, COALESCE(dominant_ratio, 0)
+            death_count, adult_count, COALESCE(dominant_tag, ''), COALESCE(dominant_ratio, 0)
         FROM _tmp_topic_content_stats
         """
     )

@@ -818,6 +818,66 @@ def test_indexer_hardening(backend: str):
         _skip("indexer_hardening.foreign_edit_rejected", "could not derive test address")
         _skip("indexer_hardening.owner_edit_applied", "could not derive test address")
 
+    # ── M-7: a message the chain accepted must never be able to halt a node ──
+    #
+    # The chain only checks that a vote target is well-formed hex, and does not
+    # constrain direction at all, so both reach the indexer with code=0. If either
+    # raised, the block could never be projected and every indexer on the network
+    # would stop at that height — a one-transaction kill switch.
+
+    class _NoTargetDB(_StubEditDB):
+        def get_post(self, txhash: str):
+            return None
+
+        def post_exists(self, txhash: str) -> bool:
+            return False
+
+    if envelope_addr:
+        from shared.datatypes import MsgVote
+
+        def _vote_bytes(target: str, direction: int) -> bytes:
+            msg = MsgVote()
+            msg.envelope_pubkey = pubkey
+            msg.target = target
+            msg.direction = direction
+            return msg.SerializeToString()
+
+        missing_db = _NoTargetDB(stored_owner=envelope_addr)
+        missing_proc = MessageProcessor(missing_db, None, lambda *a, **k: None, lambda t: "")
+        try:
+            missing_proc._handle_vote("/mirage.core.v1.MsgVote", _vote_bytes("b" * 64, 1), "e" * 64, 1234, 99)
+            if missing_db.writes:
+                _fail("indexer_hardening.vote_missing_target_skipped", f"wrote {sorted(set(missing_db.writes))}")
+            else:
+                _pass("indexer_hardening.vote_missing_target_skipped")
+        except Exception as e:
+            _fail("indexer_hardening.vote_missing_target_skipped", f"raised {type(e).__name__}: {e}")
+
+        bad_dir_db = _StubEditDB(stored_owner=envelope_addr)
+        bad_dir_proc = MessageProcessor(bad_dir_db, None, lambda *a, **k: None, lambda t: "")
+        try:
+            bad_dir_proc._handle_vote("/mirage.core.v1.MsgVote", _vote_bytes("a" * 64, 7), "f" * 64, 1234, 99)
+            _pass("indexer_hardening.vote_bad_direction_skipped")
+        except Exception as e:
+            _fail("indexer_hardening.vote_bad_direction_skipped", f"raised {type(e).__name__}: {e}")
+
+        missing_edit_db = _NoTargetDB(stored_owner=envelope_addr)
+        missing_edit_proc = MessageProcessor(missing_edit_db, None, lambda *a, **k: None, lambda t: "")
+        try:
+            missing_edit_proc._handle_edit(
+                "/mirage.core.v1.MsgEdit", _edit_msg_bytes(pubkey, "b" * 64), "0" * 64, 1234, 99
+            )
+            if missing_edit_db.writes:
+                _fail("indexer_hardening.edit_missing_override_skipped", f"wrote {sorted(set(missing_edit_db.writes))}")
+            else:
+                _pass("indexer_hardening.edit_missing_override_skipped")
+        except Exception as e:
+            _fail("indexer_hardening.edit_missing_override_skipped", f"raised {type(e).__name__}: {e}")
+    else:
+        _skip("indexer_hardening.vote_missing_target_skipped", "could not derive test address")
+        _skip("indexer_hardening.vote_bad_direction_skipped", "could not derive test address")
+        _skip("indexer_hardening.edit_missing_override_skipped", "could not derive test address")
+
     # ── H-1: the checkpoint may only be written inside a block txn ───────
 
     bare_db = DatabaseManager.__new__(DatabaseManager)
@@ -893,6 +953,129 @@ def test_indexer_hardening(backend: str):
         _fail("indexer_hardening.history_gap_validation", "inverted range did not raise")
     except RuntimeError:
         _pass("indexer_hardening.history_gap_validation")
+
+    # ── H-2: continuity adopts node-confirmed provenance, refuses the rest ────
+
+    class _ContinuityDB:
+        def __init__(self, meta, height, recent):
+            self.meta = dict(meta)
+            self.height = height
+            self.recent = dict(recent)
+
+        def get_meta(self, key):
+            return self.meta.get(key)
+
+        def set_meta(self, key, value):
+            self.meta[key] = value
+
+        def get_last_height(self):
+            return self.height
+
+        def get_recent_block_hashes(self, limit=500):
+            return [{"height": h, "hash": v} for h, v in sorted(self.recent.items())][-limit:]
+
+    class _ContinuityChain:
+        def __init__(self, chain_id, head, earliest, hashes):
+            self.chain_id = chain_id
+            self.head = head
+            self.earliest = earliest
+            self.hashes = dict(hashes)
+
+        def get_chain_id(self):
+            return self.chain_id
+
+        def get_current_height(self):
+            return self.head
+
+        def get_earliest_height(self):
+            return self.earliest
+
+        def get_block(self, height):
+            return {"result": {"block_id": {"hash": self.hashes.get(height, "")}}}
+
+    def _continuity(db, chain):
+        idx = indexer_main.Indexer.__new__(indexer_main.Indexer)
+        idx.db = db
+        idx.chain = chain
+        idx._verify_chain_continuity()
+        return db.meta
+
+    node_hashes = {100: "AA", 101: "BB", 102: "CC"}
+
+    # A pre-provenance database whose recent_blocks the node confirms is adopted.
+    adopt_db = _ContinuityDB({}, 102, {100: "AA", 101: "BB", 102: "CC"})
+    try:
+        meta_after = _continuity(adopt_db, _ContinuityChain("mirage-1", 102, 90, node_hashes))
+        if (
+            meta_after.get("chain_id") == "mirage-1"
+            and meta_after.get("last_block_hash") == "CC"
+            and meta_after.get("continuity_status") == "adopted"
+        ):
+            _pass("indexer_hardening.continuity_adopts_confirmed_provenance")
+        else:
+            _fail("indexer_hardening.continuity_adopts_confirmed_provenance", f"meta={meta_after}")
+    except Exception as e:
+        _fail("indexer_hardening.continuity_adopts_confirmed_provenance", f"{type(e).__name__}: {e}")
+
+    # Adoption must not launder a diverged database: the hashes still have to match.
+    diverged_db = _ContinuityDB({}, 102, {100: "AA", 101: "BB", 102: "ZZ"})
+    try:
+        _continuity(diverged_db, _ContinuityChain("mirage-1", 102, 90, node_hashes))
+        _fail("indexer_hardening.continuity_adoption_rejects_diverged", "mismatch was adopted")
+    except RuntimeError as e:
+        if "MISMATCH" in str(e) and "chain_id" not in diverged_db.meta:
+            _pass("indexer_hardening.continuity_adoption_rejects_diverged")
+        else:
+            _fail("indexer_hardening.continuity_adoption_rejects_diverged", f"{e} meta={diverged_db.meta}")
+
+    # No provenance and no confirmable row at the checkpoint height stays fatal.
+    unconfirmable_db = _ContinuityDB({}, 102, {100: "AA", 101: "BB"})
+    try:
+        _continuity(unconfirmable_db, _ContinuityChain("mirage-1", 102, 90, node_hashes))
+        _fail("indexer_hardening.continuity_requires_checkpoint_evidence", "unconfirmable DB was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.continuity_requires_checkpoint_evidence")
+
+    # Below the retained window nothing can be confirmed, so chain_id must already be recorded.
+    pruned_bare_db = _ContinuityDB({}, 50, {})
+    try:
+        _continuity(pruned_bare_db, _ContinuityChain("mirage-1", 102, 90, node_hashes))
+        _fail("indexer_hardening.continuity_pruned_requires_chain_id", "bare pruned DB was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.continuity_pruned_requires_chain_id")
+
+    pruned_stamped_db = _ContinuityDB({"chain_id": "mirage-1"}, 50, {})
+    try:
+        meta_after = _continuity(pruned_stamped_db, _ContinuityChain("mirage-1", 102, 90, node_hashes))
+        gaps = json.loads(meta_after.get("history_gaps") or "[]")
+        if (
+            meta_after.get("continuity_status") == "unverified_pruned_gap"
+            and gaps
+            and gaps[0]["start"] == 51
+            and gaps[0]["end"] == 89
+        ):
+            _pass("indexer_hardening.continuity_pruned_records_gap")
+        else:
+            _fail("indexer_hardening.continuity_pruned_records_gap", f"meta={meta_after}")
+    except Exception as e:
+        _fail("indexer_hardening.continuity_pruned_records_gap", f"{type(e).__name__}: {e}")
+
+    # A stamped chain_id from another network is still fatal.
+    wrong_net_db = _ContinuityDB({"chain_id": "mirage-testnet"}, 102, {102: "CC"})
+    try:
+        _continuity(wrong_net_db, _ContinuityChain("mirage-1", 102, 90, node_hashes))
+        _fail("indexer_hardening.continuity_rejects_wrong_network", "wrong chain_id was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.continuity_rejects_wrong_network")
+
+    # reset_local_testnet stamps the chain it just built, otherwise the restore cannot start.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    with open(os.path.join(repo_root, "scripts", "reset_local_testnet.py"), "r", encoding="utf-8") as fh:
+        reset_src = fh.read()
+    if 'restore_indexer_database(json.loads(genesis_json)["chain_id"]' in reset_src and "'chain_id'" in reset_src:
+        _pass("indexer_hardening.reset_stamps_chain_id")
+    else:
+        _fail("indexer_hardening.reset_stamps_chain_id", "reset_local_testnet.py does not stamp meta.chain_id")
 
     # ── H-3: a short block_results is retried, never read as success ─────
 

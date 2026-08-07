@@ -620,20 +620,10 @@ class Indexer:
             logger.info("Continuity: fresh database, chain_id=%s", node_chain_id)
             return
 
-        if not stored_chain_id:
-            raise RuntimeError(
-                f"database holds {META_LAST_HEIGHT}={stored_height} but no {META_CHAIN_ID} in meta. "
-                "Its provenance cannot be verified; restore a trusted dump or start from an empty database."
-            )
-        if stored_chain_id != node_chain_id:
+        if stored_chain_id and stored_chain_id != node_chain_id:
             raise RuntimeError(
                 f"chain identity mismatch at checkpoint height {stored_height}: database chain_id "
                 f"{stored_chain_id!r} vs node chain_id {node_chain_id!r}. Refusing to index."
-            )
-        if not stored_hash:
-            raise RuntimeError(
-                f"database holds {META_LAST_HEIGHT}={stored_height} but no {META_LAST_BLOCK_HASH} in meta. "
-                "Its provenance cannot be verified; restore a trusted dump or start from an empty database."
             )
 
         current_height = self.chain.get_current_height()
@@ -645,6 +635,12 @@ class Indexer:
 
         earliest = self.chain.get_earliest_height()
         if stored_height < earliest:
+            if not stored_chain_id:
+                raise RuntimeError(
+                    f"database holds {META_LAST_HEIGHT}={stored_height} but no {META_CHAIN_ID}, and every block "
+                    f"that could identify the chain it was built from has been pruned (node retains from "
+                    f"{earliest}). Restore a trusted dump or start from an empty database."
+                )
             self.db.set_meta(META_CONTINUITY_STATUS, "unverified_pruned_gap")
             self._record_history_gap(stored_height + 1, earliest - 1, "pruned_before_verification")
             logger.warning(
@@ -657,6 +653,7 @@ class Indexer:
 
         # Compare every retained recent_blocks row against the node BEFORE any
         # startup upsert can overwrite the evidence of a divergence.
+        verified_hashes: dict[int, str] = {}
         for row in self.db.get_recent_block_hashes(limit=500):
             h = int(row.get("height") or 0)
             stored_row_hash = str(row.get("hash") or "")
@@ -671,6 +668,32 @@ class Indexer:
                     f"BLOCK HASH MISMATCH in recent_blocks at height {h}: database has {stored_row_hash} but the node "
                     f"has {node_row_hash}. Leaving evidence untouched; restore a trusted dump or rebuild."
                 )
+            verified_hashes[h] = node_row_hash
+
+        if not stored_hash:
+            # A database written before the checkpoint carried provenance holds the same
+            # evidence in recent_blocks: the hash the old indexer recorded for the
+            # checkpoint block as it projected it. Adopt it only when the node confirms
+            # that hash, so a diverged database is still refused.
+            adopted_hash = verified_hashes.get(stored_height)
+            if not adopted_hash:
+                raise RuntimeError(
+                    f"database holds {META_LAST_HEIGHT}={stored_height} but neither {META_CHAIN_ID}/"
+                    f"{META_LAST_BLOCK_HASH} in meta nor a node-confirmed recent_blocks row at that height. "
+                    "Its provenance cannot be verified; restore a trusted dump or start from an empty database."
+                )
+            self.db.set_meta(META_CHAIN_ID, node_chain_id)
+            self.db.set_meta(META_LAST_BLOCK_HASH, adopted_hash)
+            self.db.set_meta(META_CONTINUITY_STATUS, "adopted")
+            logger.warning(
+                "Continuity ADOPTED: database carried no recorded provenance; %s recent_blocks rows match the node "
+                "and the checkpoint at height %s confirms as %s. Recording chain_id=%s.",
+                len(verified_hashes),
+                stored_height,
+                adopted_hash,
+                node_chain_id,
+            )
+            return
 
         blk = self.chain.get_block(stored_height)
         node_hash = str((((blk or {}).get("result") or {}).get("block_id") or {}).get("hash", "") or "")

@@ -1255,8 +1255,11 @@ class _Cur:
     def execute(self, sql, *a):
         self._last = sql
     def fetchall(self):
-        return [("last_processed_time", str(now)), ("last_processed_height", "100"), ("chain_head_height", "100")]
+        return [("last_processed_time", str(now)), ("chain_head_height", "100")]
     def fetchone(self):
+        # meta.last_height is the height authority; recent_blocks gives the head time.
+        if "meta" in self._last:
+            return ("100",)
         return (self._head_time,)
 
 class _Conn:

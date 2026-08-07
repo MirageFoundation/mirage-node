@@ -420,21 +420,21 @@ class MessageProcessor:
         )
         txhash = (tx_hash or "").lower()
 
+        # The chain does not constrain direction, so an out-of-range value reaches
+        # the indexer with code=0. Skip it rather than project a vote weight the
+        # rest of the schema has no meaning for.
         if raw_direction not in ALLOWED_DIRECTIONS:
-            raise RuntimeError(f"Rejected vote {txhash}: invalid direction {raw_direction}")
+            logger.warning("Skipping vote %s: direction %r is out of range", txhash, raw_direction)
+            return
 
-        # Reject votes for unknown targets (including neutral/clearing votes).
-        # Only tolerate a missing target when history is explicitly incomplete
-        # (pruning gap): the referenced post may live in a recorded gap.
+        # The chain accepts a vote without checking that its target exists, so an
+        # unindexed target is an expected on-chain state, not an indexer failure:
+        # the post may sit in a recorded history gap, or never have existed at all.
+        # Skipping keeps the projection consistent; raising here would let anyone
+        # halt every indexer on the network with one junk target.
         if not self.db.post_exists(target):
-            if self._history_incomplete():
-                logger.warning(
-                    "Skipping vote %s: target %s not found and history_complete=false (likely pruned gap)",
-                    txhash,
-                    target,
-                )
-                return
-            raise RuntimeError(f"Rejected vote {txhash}: target {target} not found")
+            logger.warning("Skipping vote %s: target %s is not in the index", txhash, target)
+            return
 
         if raw_direction == 0:
             # Neutral/clearing vote - zero-out this voter's vote and weight
@@ -789,14 +789,9 @@ class MessageProcessor:
             raise RuntimeError(f"Rejected edit {tx_hash}: invalid override {override!r}")
         existing = self.db.get_post(override)
         if not existing:
-            if self._history_incomplete():
-                logger.warning(
-                    "Skipping edit %s: override %s not found and history_complete=false (likely pruned gap)",
-                    tx_hash,
-                    override,
-                )
-                return
-            raise RuntimeError(f"Rejected edit {tx_hash}: override {override} not found")
+            # As with votes, the chain does not require the override to exist.
+            logger.warning("Skipping edit %s: override %s is not in the index", tx_hash, override)
+            return
 
         # Enforce ownership: only the original owner can edit (admins cannot).
         # Foreign edits are an accepted indexer visibility boundary — leave index unchanged.
@@ -809,9 +804,14 @@ class MessageProcessor:
         existing_topic, _, _, existing_target, _, _, existing_created_at, _existing_media_raw = existing
         is_root = not bool(existing_target)
 
-        # Target immutability: always use the stored target, reject mismatches
+        # Target immutability: the chain never compares the supplied target against
+        # the stored one, so a mismatch is user-reachable. Leave the index unchanged,
+        # the same visibility boundary a foreign edit gets.
         if target and (existing_target or "").lower() != target.lower():
-            raise RuntimeError(f"Rejected edit {tx_hash}: target mismatch (supplied={target} stored={existing_target})")
+            logger.warning(
+                "Rejected edit %s: target mismatch (supplied=%s stored=%s)", tx_hash, target, existing_target
+            )
+            return
         target = existing_target or ""
 
         media = list(msg_dict.get("media", []) or [])
@@ -910,14 +910,9 @@ class MessageProcessor:
                 raise RuntimeError(f"Rejected annotate {tx_hash}: invalid override {override!r}")
             existing = self.db.get_post(override)
             if not existing:
-                if self._history_incomplete():
-                    logger.warning(
-                        "Skipping annotate %s: override %s not found and history_complete=false (likely pruned gap)",
-                        tx_hash,
-                        override,
-                    )
-                    return
-                raise RuntimeError(f"Rejected annotate {tx_hash}: override {override} not found")
+                # As with votes, the chain does not require the override to exist.
+                logger.warning("Skipping annotate %s: override %s is not in the index", tx_hash, override)
+                return
 
             # Enforce agent tier
             agent_level = self.db.get_user_level(agent)
@@ -1086,13 +1081,6 @@ class MessageProcessor:
         from indexer.params import get_award_configs
 
         return get_award_configs()
-
-    def _history_incomplete(self) -> bool:
-        """True when meta.history_complete has been flipped false by a recorded pruning gap."""
-        raw = self.db.get_meta("history_complete")
-        if raw is None:
-            return False
-        return str(raw).lower() in ("false", "0", "")
 
     def _require_chain_profile(self, addr: str) -> dict:
         """Fetch the authoritative chain profile via gRPC. Never soft-fails."""

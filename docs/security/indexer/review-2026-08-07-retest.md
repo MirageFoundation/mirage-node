@@ -38,7 +38,7 @@ The remediation contract now matches the operator decisions from the plan:
 | M-4 | Catch-up difficulty/supply claims | **Fixed** (reclassified as head telemetry) | Samples taken only at real queried heads and skipped during catch-up; docs no longer claim per-block history; historical backfill out of scope |
 | M-5 | Migration discovery/locking soft-fail | **Fixed** | fail-closed discovery; session-held advisory lock; checksum pinning; `run_db_migration` atomicity |
 | M-6 | Credentialful DB URL in logs | **Fixed** | `format_db_target`; `indexer_hardening.db_target_redacted`, `.db_target_default_port`, `.db_target_fails_hard` |
-| M-7 | Post-consensus admission revalidation | **Fixed** | size gates removed from successful-tx projection |
+| M-7 | Post-consensus admission revalidation | **Fixed** | size gates removed from successful-tx projection; missing vote/edit/annotate targets and out-of-range vote directions log and skip instead of failing the block |
 | M-8 | Vote `net_votes` uses direction not delta | **Fixed** | `net_votes_delta`; `v1_32_4_rebuild_derived_stats`; `indexer_hardening.net_votes_delta_signature`, `.vote_direction_normalized`, `.net_votes_matches_canonical_votes` |
 | M-9 | Vote-weight / required write fallbacks | **Fixed** | weight errors re-raise; preference/stat paths re-raise |
 | L-1 | Media `w`/`h` query meta dropped | **Fixed** | `_sanitize_wh` via `_extract_media_meta`; `indexer_hardening.media_meta_extraction`, `.sanitize_wh_bounds` |
@@ -56,9 +56,11 @@ The remediation contract now matches the operator decisions from the plan:
 
 `_process_block` fetches/validates block results outside the DB, then applies all required writes and `set_checkpoint(height, hash, chain_id)` inside one `db.transaction()`. `set_checkpoint` refuses to run without an active transaction. Required handler exceptions propagate. `_seen_txs` and unsafe non-empty `--height` replay are gone.
 
+Aborting the block is scoped to indexer failures, never to the content of a message the chain accepted — see M-7. The chain validates only that a vote target is well-formed hex, never that it exists, and does not constrain `direction`; `MsgEdit` may disagree with the stored post's target. Those cases log and skip. Raising on them was verified during local testing to halt the indexer permanently at the offending height, which any user could trigger with one transaction against every node on the network.
+
 ### H-2 — continuity
 
-The checkpoint stores chain ID and block hash alongside the height. Before projecting anything, startup compares `meta.chain_id` against the node's chain ID and `meta.last_block_hash` against the node's hash at `meta.last_height`; either mismatch is fatal and leaves the database untouched for the operator. If the checkpoint height sits below the node's earliest retained block the hash cannot be compared at all, so continuity is recorded as `unverified_pruned_gap` rather than claimed verified. `scripts/recover.sh` documents that PostgreSQL is never auto-wiped and that the operator must restore a trusted `pg_dump` whose checkpoint matches the recovered chain.
+The checkpoint stores chain ID and block hash alongside the height. Before projecting anything, startup compares `meta.chain_id` against the node's chain ID, every retained `recent_blocks` hash against the node's hash at that height, and `meta.last_block_hash` against the node's hash at `meta.last_height`; any mismatch is fatal and leaves the database untouched for the operator. A database indexed before those meta keys existed is adopted rather than rejected, but only once the node confirms its `recent_blocks` row at the checkpoint height — a diverged database fails that same comparison. If the checkpoint height sits below the node's earliest retained block the hash cannot be compared at all, so continuity is recorded as `unverified_pruned_gap` rather than claimed verified, and a database with no recorded provenance is refused outright in that case. `scripts/recover.sh` documents that PostgreSQL is never auto-wiped and that the operator must restore a trusted `pg_dump` whose checkpoint matches the recovered chain.
 
 ### H-3 — result cardinality
 
@@ -74,7 +76,7 @@ Outbound OG/image probing removed. Thumbnails are deterministic transforms for r
 
 ### M-2 / M-3 / M-5 / M-6 / M-7 / M-8 / M-9 / L-1 / L-2 / L-3 / I-2
 
-As in the status table. Derived-stat repair ships as `indexer/migrations/v1_32_4_rebuild_derived_stats.py`, which recomputes `net_votes` and topic content stats from the canonical `votes` and `posts` rows for databases written by the old direction-based arithmetic.
+As in the status table. Derived-stat repair ships as `indexer/migrations/v1_32_4_rebuild_derived_stats.py`, which recomputes `net_votes` and topic content stats from the canonical `votes` and `posts` rows for databases written by the old direction-based arithmetic. Its dominant-tag rebuild mirrors `DatabaseManager._compute_dominant_tag` exactly, including the `ratio >= 0.5` threshold and the empty-string default.
 
 ---
 

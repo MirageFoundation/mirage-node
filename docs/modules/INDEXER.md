@@ -197,6 +197,8 @@ For each block, the processing pipeline is:
 
 **Required vs. optional writes.** Everything inside the transaction is required: a failure in any handler, governance resolution, or balance refresh aborts the whole block. Everything in step 7 (difficulty/supply samples, peer list, observed chain head, block pruning) is optional telemetry and only logs a warning on failure.
 
+**A message the chain accepted is never fatal.** Aborting the block is for *indexer* failures — a dead database, an unresolvable proposal, a decode error. It is not for message content, because the chain's admission rules are looser than the index's shape. `MsgVote` only has to carry a well-formed 64-hex target, so the chain happily accepts a vote on a target that was never posted, and it does not constrain `direction` at all; `MsgEdit` does not have to agree with the stored post's target. Handlers log a warning and skip in those cases. Raising instead would hand any user a one-transaction kill switch for every indexer on the network: the block can never be projected, so no node could ever advance past that height.
+
 ---
 
 ## Component Structure
@@ -872,11 +874,18 @@ Recovery deliberately preserves PostgreSQL (see `scripts/recover.sh`), which mea
 |-----------|---------|
 | Empty database | `continuity_status = fresh`; proceed |
 | `meta.chain_id` != node `node_info.network` | **Fatal.** Refuse to index |
-| Checkpoint present but no `chain_id` / `last_block_hash` | **Fatal.** Provenance unverifiable |
 | Checkpoint height above the node head | **Fatal.** Node was rolled back or reset |
-| Checkpoint below earliest retained height | `continuity_status = unverified_pruned_gap`; record a `history_gaps` entry and continue |
+| Checkpoint below earliest retained height, `meta.chain_id` present | `continuity_status = unverified_pruned_gap`; record a `history_gaps` entry and continue |
+| Checkpoint below earliest retained height, no `meta.chain_id` | **Fatal.** Nothing remains that could identify the chain the rows came from |
+| Any retained `recent_blocks` hash != the node's hash at that height | **Fatal.** Rows come from a diverged chain |
+| No `chain_id` / `last_block_hash`, but the node confirms `recent_blocks` at the checkpoint height | `continuity_status = adopted`; record the confirmed provenance and proceed |
+| No `chain_id` / `last_block_hash` and no node-confirmed `recent_blocks` row at the checkpoint height | **Fatal.** Provenance unverifiable |
 | Node's hash at the checkpoint height != `meta.last_block_hash` | **Fatal.** Rows come from a diverged chain |
 | Hashes match | `continuity_status = verified`; proceed |
+
+**Adoption of pre-provenance databases.** `meta.chain_id` and `meta.last_block_hash` are only written by `set_checkpoint`, so a database indexed before those keys existed carries a height and nothing else. That is not the same as unverifiable: the old indexer already recorded a hash per block in `recent_blocks`, including one for the checkpoint block itself. Startup verifies every retained `recent_blocks` row against the node first, and only when the row at the checkpoint height is confirmed does it adopt that hash and the node's chain ID as the recorded provenance. A database from a diverged chain fails the same hash comparison and is still refused, so the adoption path does not weaken the check — it just avoids demanding a dump restore for a database whose provenance the node can confirm. It happens once; every later start takes the `verified` path.
+
+When the checkpoint sits below the node's earliest retained block there is nothing left to confirm, so adoption is not available and `meta.chain_id` must already be present. `scripts/reset_local_testnet.py` hits exactly that case — it restores a backup's indexer dump next to a freshly exported single-validator genesis whose `initial_height` is above the dump's checkpoint — so it stamps `meta.chain_id` from the genesis it just built. That stamp is an explicit operator decision made by a script that knows the answer, not something the indexer infers.
 
 > **Recovery warning — read before wiping anything.**
 >

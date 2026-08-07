@@ -459,8 +459,15 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
     return local_export
 
 
-def restore_indexer_database():
-    """Restore local indexer PostgreSQL database from the backup dump, if present."""
+def restore_indexer_database(chain_id: str):
+    """Restore local indexer PostgreSQL database from the backup dump, if present.
+
+    The dump's checkpoint sits just below the new chain's initial_height, so the
+    indexer can never hash-compare it. Stamp meta.chain_id here — this script is
+    the operator action that decides the restored rows belong to the chain it
+    just built — otherwise startup refuses to index a database whose lineage it
+    cannot establish.
+    """
     status("Restoring indexer PostgreSQL database from dump (if present)...")
 
     # Use a small shell script inside the container to avoid complex quoting here
@@ -512,8 +519,14 @@ else
     echo "No backend dump found, backend DB will be initialized by the application"
 fi
 
+su - postgres -c "psql -d mirage_indexer -c \\"INSERT INTO meta (key, value) VALUES ('chain_id', '__CHAIN_ID__') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value\\""
+echo "Stamped indexer provenance: chain_id=__CHAIN_ID__"
+
 echo "Databases restored"
 """
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", chain_id):
+        raise RuntimeError(f"refusing to stamp unexpected chain_id: {chain_id!r}")
+    script = script.replace("__CHAIN_ID__", chain_id)
 
     ensure_mirage_tmp()
     tmp = Path(tempfile.mkdtemp(prefix="restore-indexer-", dir=str(MIRAGE_TMP)))
@@ -1057,7 +1070,7 @@ def prepare_local_node(genesis_json: str):
     )
 
     reinitialize_postgres()
-    restore_indexer_database()
+    restore_indexer_database(json.loads(genesis_json)["chain_id"])
 
 
 def start_with_entrypoint(image_ref: str):

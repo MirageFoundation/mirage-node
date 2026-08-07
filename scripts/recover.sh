@@ -85,9 +85,10 @@
 # -------------------------------
 # Peer-pull / state-sync deliberately leave mirage_indexer alone, and that DB is
 # not reconstructable from a pruned chain (blocked-list history exceeds what the
-# chain retains). On the next start the indexer compares meta.chain_id and
-# meta.last_block_hash against the recovered node at meta.last_height, BEFORE it
-# writes anything. A mismatch is fatal: the process refuses to start and leaves
+# chain retains). On the next start the indexer compares meta.chain_id,
+# meta.last_block_hash and every retained recent_blocks hash against the
+# recovered node, BEFORE it writes anything. A mismatch is fatal: the process
+# refuses to start and leaves
 # the evidence intact — never auto-wipe PostgreSQL, and never clear meta to get
 # past it. The operator must restore a trusted pg_dump whose checkpoint matches
 # the recovered chain, or start from an empty indexer DB and accept the recorded
