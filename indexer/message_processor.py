@@ -3,12 +3,9 @@ Message processing logic for the indexer.
 """
 
 import base64
-import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, wait
 from google.protobuf.json_format import MessageToDict
-from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
 from shared.datatypes import (
     MsgPost,
     MsgEdit,
@@ -38,19 +35,9 @@ from shared.datatypes import (
     MsgAnnotate,
 )
 from indexer.address_utils import addr_from_pubkey, derive_owner_from_msg, derive_owner_from_dict
-from indexer.params import (
-    get_max_topic_size,
-    get_max_content_size,
-    get_min_content_size,
-    get_max_title_size,
-    get_min_title_size,
-    get_max_username_size,
-    get_min_username_size,
-    get_vote_weight,
-)
+from indexer.params import get_vote_weight
 from indexer.settings import (
     ALLOWED_DIRECTIONS,
-    HTTP_TIMEOUT_SHORT,
     WEIGHTED_VOTES,
     COMMUNITY_VOTE_BASELINE,
     COMMUNITY_VOTE_MAX_TOPIC_VOTES,
@@ -63,13 +50,7 @@ from indexer.settings import (
 )
 from indexer.database import DatabaseManager
 import re
-import socket
-import ipaddress
-import requests
-from urllib.parse import urlparse, urljoin
-from bs4 import BeautifulSoup  # type: ignore
-from io import BytesIO
-from PIL import Image  # type: ignore
+from urllib.parse import urlparse
 
 # Regex to match @username mentions (not preceded by a word character)
 _MENTION_RE = re.compile(r"(?<!\w)@([A-Za-z0-9-]+)")
@@ -78,6 +59,17 @@ _FENCED_CODE_RE = re.compile(r"```[\s\S]*?```")
 _INLINE_CODE_RE = re.compile(r"`[^`]+`")
 
 logger = logging.getLogger(__name__)
+
+
+def _vote_direction(value) -> int:
+    """Normalize a stored vote value (float) to a direction in {-1, 0, 1}."""
+    v = float(value or 0.0)
+    if v > 0:
+        return 1
+    if v < 0:
+        return -1
+    return 0
+
 
 TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgPost": MsgPost,
@@ -236,38 +228,15 @@ class MessageProcessor:
         logger.debug("MsgPost media count=%d tx=%s", len(media), (tx_hash or "")[:12])
 
         txhash = (tx_hash or "").lower()
-        # Derive paid flag: true if no PoW used (subscribers)
-        try:
-            paid = not (
-                int(msg_dict.get("envelope_difficulty", 0) or 0) > 0 or int(msg_dict.get("envelope_pow", 0) or 0) > 0
-            )
-        except Exception:
-            paid = True
+        # Derive paid flag: true if no PoW used (subscribers). Malformed envelope
+        # difficulty/pow on a consensus-accepted tx is a projection invariant.
+        paid = not (
+            int(msg_dict.get("envelope_difficulty", 0) or 0) > 0 or int(msg_dict.get("envelope_pow", 0) or 0) > 0
+        )
 
-        reason = None
-        max_topic = get_max_topic_size()
-        if len(topic) > max_topic:
-            reason = f"invalid topic length {len(topic)} > {max_topic}"
-
-        if not reason:
-            if target:
-                # Comments don't require titles
-                pass
-            else:
-                min_title = get_min_title_size()
-                max_title = get_max_title_size()
-                if not (min_title <= len(title) <= max_title):
-                    reason = f"invalid title length {len(title)}"
-
-        if not reason:
-            min_content = get_min_content_size()
-            max_content = get_max_content_size()
-            if not (min_content <= len(content) <= max_content):
-                reason = f"invalid content length {len(content)}"
-
-        if reason:
-            logger.warning("Rejected post %s: %s", txhash, reason)
-            return
+        # No topic/title/content size gates here: those are consensus rules the chain has
+        # already enforced. Re-checking them against current params would silently drop
+        # committed posts whenever the params change, leaving the DB behind chain state.
 
         existing = self.db.get_post(txhash)
 
@@ -298,12 +267,24 @@ class MessageProcessor:
             media=media,
         )
 
-        # Update user topic stats for new posts (not edits)
+        # Update user topic stats for new posts (not edits). Required projection: any
+        # failure must abort the block rather than leave post_count silently short.
+        # Auto-upvote also contributes +1 to net_votes so rebuild and live paths agree.
         if not existing and owner and root_topic:
-            try:
-                self.db.update_user_topic_stats(owner, root_topic, 0, root_post_id, is_new_vote=False, post_increment=1)
-            except Exception:
-                logger.exception("Failed to update user_topic_stats post_count for %s", txhash)
+            self.db.update_user_topic_stats(
+                owner,
+                root_topic,
+                net_votes_delta=1,
+                root_post_id=root_post_id,
+                is_new_vote=True,
+                post_increment=1,
+            )
+            logger.debug(
+                "user_topic_stats post+auto_upvote owner=%s topic=%s tx=%s",
+                owner,
+                root_topic,
+                txhash[:12],
+            )
 
         # Increment comment_count for all ancestors when a new comment is indexed
         if not existing and target:
@@ -311,13 +292,16 @@ class MessageProcessor:
                 self.db.increment_ancestor_comment_counts(target)
             except Exception:
                 logger.exception("Failed to increment ancestor comment_counts for %s", txhash)
+                raise
 
-        # Update topic safety stats for root posts only
-        try:
-            if not target:
+        # Update topic safety stats for root posts only, and only on first index —
+        # replaying an already-indexed post must not double-count the tag.
+        if not existing and not target:
+            try:
                 self.db.update_topic_content_stats(root_topic or topic, tag)
-        except Exception:
-            logger.exception("Failed to update topic_content_stats for %s", txhash)
+            except Exception:
+                logger.exception("Failed to update topic_content_stats for %s", txhash)
+                raise
 
         if owner:
             autohash = f"auto_{txhash}"
@@ -329,9 +313,10 @@ class MessageProcessor:
                 community_weight = get_vote_weight(level)
             self.db.upsert_auto_vote(autohash, owner, ts, txhash, paid, 1.0, community_weight)
 
-        # Thumbnail discovery for root posts only
-        try:
-            if not target:
+        # Thumbnail discovery for root posts only. Purely deterministic URL derivation —
+        # no network I/O, so every node computes the same value from the same block.
+        if not target:
+            try:
                 # v1.12.0: prefer media[0] for thumbnail if available
                 thumb = None
                 if media:
@@ -340,25 +325,12 @@ class MessageProcessor:
                     # LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
                     # Remove after March 2026 when all old posts have been migrated or expired.
                     thumb = self.discover_post_thumbnail(content)
+                logger.debug("thumb derived tx=%s thumb=%s", txhash[:12], thumb)
                 if thumb:
                     self.db.update_post_thumbnail(txhash, thumb)
-        except Exception:
-            pass
-
-        # Dimension probing for posts with media or content-embedded media URLs
-        try:
-            probe_urls = media if media else []
-            if not probe_urls and content:
-                first_url = self._extract_first_url(content)
-                if first_url:
-                    probe_urls = [first_url]
-            if probe_urls:
-                probed_meta = self.discover_media_dimensions(probe_urls)
-                if any(m for m in probed_meta if m):
-                    self.db.update_post_media_meta(txhash, probed_meta)
-                    logger.debug("media_meta probed tx=%s meta=%s", txhash[:12], probed_meta)
-        except Exception:
-            pass
+            except Exception:
+                logger.exception("Failed to derive thumbnail for post %s", txhash)
+                raise
 
         # existing shape may differ; always log insert/update
         if not existing or existing[:4] != (topic, title, content, target):
@@ -387,6 +359,7 @@ class MessageProcessor:
                 self._extract_and_store_mentions(content, txhash, owner, ts)
             except Exception:
                 logger.exception("Failed to extract mentions for post %s", txhash)
+                raise
 
         # Push notifications handled by backend (indexer must not write backend tables)
 
@@ -442,22 +415,26 @@ class MessageProcessor:
 
         target = str(payload.get("target", "")).lower()
         raw_direction = payload.get("direction")
-        try:
-            paid = not (
-                int(msg_dict.get("envelope_difficulty", 0) or 0) > 0 or int(msg_dict.get("envelope_pow", 0) or 0) > 0
-            )
-        except Exception:
-            paid = True
+        paid = not (
+            int(msg_dict.get("envelope_difficulty", 0) or 0) > 0 or int(msg_dict.get("envelope_pow", 0) or 0) > 0
+        )
         txhash = (tx_hash or "").lower()
 
         if raw_direction not in ALLOWED_DIRECTIONS:
-            logger.warning("Rejected vote %s: invalid direction %s", txhash, raw_direction)
-            return
+            raise RuntimeError(f"Rejected vote {txhash}: invalid direction {raw_direction}")
 
-        # Reject votes for unknown targets (including neutral/clearing votes)
+        # Reject votes for unknown targets (including neutral/clearing votes).
+        # Only tolerate a missing target when history is explicitly incomplete
+        # (pruning gap): the referenced post may live in a recorded gap.
         if not self.db.post_exists(target):
-            logger.warning("Rejected vote %s: target not found", txhash)
-            return
+            if self._history_incomplete():
+                logger.warning(
+                    "Skipping vote %s: target %s not found and history_complete=false (likely pruned gap)",
+                    txhash,
+                    target,
+                )
+                return
+            raise RuntimeError(f"Rejected vote {txhash}: target {target} not found")
 
         if raw_direction == 0:
             # Neutral/clearing vote - zero-out this voter's vote and weight
@@ -467,44 +444,64 @@ class MessageProcessor:
             prev_vote = 0.0
             if previous_vote:
                 _, prev_vote, _ = previous_vote
-                if prev_vote != 0:
-                    reverse_topic_delta = -0.5 if prev_vote > 0 else 0.5
-                    reverse_author_delta = -1.0 if prev_vote > 0 else 1.0
+            prev_direction = _vote_direction(prev_vote)
+            root_topic, root_post_id = self.db.get_root_topic_for_post(target)
 
-                    # Reverse topic preference - only for root posts, not comments
-                    root_topic, root_post_id = self.db.get_root_topic_for_post(target)
-                    is_root_post = root_post_id and target == root_post_id
-                    if root_topic and owner and is_root_post:
-                        try:
-                            self.db.update_preference(owner, "topic", root_topic, reverse_topic_delta, ts)
-                            logger.debug(
-                                "Reversed topic preference for cleared vote: owner=%s topic=%s delta=%s",
-                                owner,
-                                root_topic,
-                                reverse_topic_delta,
-                            )
-                        except Exception as e:
-                            logger.error(
-                                "Error reversing topic preference for cleared vote %s: %s", txhash, e, exc_info=True
-                            )
+            if prev_direction != 0:
+                reverse_topic_delta = -0.5 if prev_direction > 0 else 0.5
+                reverse_author_delta = -1.0 if prev_direction > 0 else 1.0
 
-                    # Reverse author preference
+                # Reverse topic preference - only for root posts, not comments
+                is_root_post = root_post_id and target == root_post_id
+                if root_topic and owner and is_root_post:
                     try:
-                        post_owner = self.db.get_post_owner(target)
-                        if post_owner:
-                            target_author = post_owner.strip().lower()
-                            if target_author and owner.lower() != target_author:
-                                self.db.update_preference(owner, "author", target_author, reverse_author_delta, ts)
-                                logger.debug(
-                                    "Reversed author preference for cleared vote: owner=%s author=%s delta=%s",
-                                    owner,
-                                    target_author,
-                                    reverse_author_delta,
-                                )
+                        self.db.update_preference(owner, "topic", root_topic, reverse_topic_delta, ts)
+                        logger.debug(
+                            "Reversed topic preference for cleared vote: owner=%s topic=%s delta=%s",
+                            owner,
+                            root_topic,
+                            reverse_topic_delta,
+                        )
                     except Exception as e:
                         logger.error(
-                            "Error reversing author preference for cleared vote %s: %s", txhash, e, exc_info=True
+                            "Error reversing topic preference for cleared vote %s: %s", txhash, e, exc_info=True
                         )
+                        raise
+
+                # Reverse author preference
+                try:
+                    post_owner = self.db.get_post_owner(target)
+                    if post_owner:
+                        target_author = post_owner.strip().lower()
+                        if target_author and owner.lower() != target_author:
+                            self.db.update_preference(owner, "author", target_author, reverse_author_delta, ts)
+                            logger.debug(
+                                "Reversed author preference for cleared vote: owner=%s author=%s delta=%s",
+                                owner,
+                                target_author,
+                                reverse_author_delta,
+                            )
+                except Exception as e:
+                    logger.error("Error reversing author preference for cleared vote %s: %s", txhash, e, exc_info=True)
+                    raise
+
+            # Reverse the cleared vote's contribution to net_votes. Without this the
+            # topic standing earned by a vote survives the vote being withdrawn.
+            if owner and root_topic and prev_direction != 0:
+                self.db.update_user_topic_stats(
+                    owner,
+                    root_topic,
+                    net_votes_delta=-prev_direction,
+                    root_post_id=root_post_id,
+                    is_new_vote=False,
+                )
+                logger.debug(
+                    "user_topic_stats net_votes cleared owner=%s topic=%s delta=%d tx=%s",
+                    owner,
+                    root_topic,
+                    -prev_direction,
+                    txhash[:12],
+                )
 
             self.db.upsert_vote(txhash, owner, ts, target, 0.0, 0.0, paid, relayer=relayer)
             self.log_yaml(
@@ -539,6 +536,8 @@ class MessageProcessor:
                 target_author = post_owner.strip().lower()
         except Exception as e:
             logger.error("Error getting post author for vote %s: %s", txhash, e, exc_info=True)
+
+            raise
 
         # user_vote: simple -1/0/+1, no weighting (for personal recommendations)
         user_vote = float(raw_direction)
@@ -639,13 +638,32 @@ class MessageProcessor:
 
                     user_weight = weight * raw_direction  # negative for downvotes
 
-                # Update user topic stats AFTER calculating (so current vote uses pre-vote stats)
+                # Update user topic stats AFTER calculating (so current vote uses pre-vote stats).
+                # net_votes tracks the standing signal, so a re-vote must apply the delta
+                # against the previous direction rather than the raw new direction.
                 is_new_vote = previous_vote is None
-                self.db.update_user_topic_stats(owner, root_topic, raw_direction, root_post_id, is_new_vote)
+                prev_direction = _vote_direction(prev_vote)
+                net_votes_delta = int(raw_direction) - prev_direction
+                logger.debug(
+                    "user_topic_stats vote owner=%s topic=%s prev=%d new=%d delta=%d new_vote=%s tx=%s",
+                    owner,
+                    root_topic,
+                    prev_direction,
+                    int(raw_direction),
+                    net_votes_delta,
+                    is_new_vote,
+                    txhash[:12],
+                )
+                self.db.update_user_topic_stats(
+                    owner,
+                    root_topic,
+                    net_votes_delta=net_votes_delta,
+                    root_post_id=root_post_id,
+                    is_new_vote=is_new_vote,
+                )
             except Exception as e:
                 logger.error("Error calculating vote weight for %s: %s", txhash, e, exc_info=True)
-                # Fallback: upvotes get 1.0, downvotes get baseline (0)
-                user_weight = 1.0 if raw_direction > 0 else (COMMUNITY_VOTE_BASELINE * raw_direction)
+                raise
 
         # Update per-user topic preference weights for personalization.
         # Only update topic prefs when voting on ROOT posts, not comments.
@@ -674,6 +692,7 @@ class MessageProcessor:
                     e,
                     exc_info=True,
                 )
+                raise
 
         # Update per-user author preference weights for personalization.
         if owner and target_author and owner.lower() != target_author:
@@ -695,6 +714,7 @@ class MessageProcessor:
                     e,
                     exc_info=True,
                 )
+                raise
 
         # Persist both the user vote and the weighted contribution.
         self.db.upsert_vote(txhash, owner, ts, target, user_vote, user_weight, paid, relayer=relayer)
@@ -766,14 +786,20 @@ class MessageProcessor:
 
         # Must reference an existing post/comment
         if not override or len(override) != 64:
-            logger.warning("Rejected edit %s: invalid override", tx_hash)
-            return
+            raise RuntimeError(f"Rejected edit {tx_hash}: invalid override {override!r}")
         existing = self.db.get_post(override)
         if not existing:
-            logger.warning("Rejected edit %s: override not found", tx_hash)
-            return
+            if self._history_incomplete():
+                logger.warning(
+                    "Skipping edit %s: override %s not found and history_complete=false (likely pruned gap)",
+                    tx_hash,
+                    override,
+                )
+                return
+            raise RuntimeError(f"Rejected edit {tx_hash}: override {override} not found")
 
-        # Enforce ownership: only the original owner can edit (admins cannot)
+        # Enforce ownership: only the original owner can edit (admins cannot).
+        # Foreign edits are an accepted indexer visibility boundary — leave index unchanged.
         db_owner = self.db.get_post_owner(override)
         if not db_owner or db_owner.lower() != (owner or "").lower():
             logger.warning("Rejected edit %s: owner mismatch", tx_hash)
@@ -785,10 +811,7 @@ class MessageProcessor:
 
         # Target immutability: always use the stored target, reject mismatches
         if target and (existing_target or "").lower() != target.lower():
-            logger.warning(
-                "Rejected edit %s: target mismatch (supplied=%s stored=%s)", tx_hash, target, existing_target
-            )
-            return
+            raise RuntimeError(f"Rejected edit {tx_hash}: target mismatch (supplied={target} stored={existing_target})")
         target = existing_target or ""
 
         media = list(msg_dict.get("media", []) or [])
@@ -807,10 +830,9 @@ class MessageProcessor:
             # For comments, inherit root topic/id from target/override
             root_topic, root_post_id = self.db.get_root_topic_for_post(target or override)
         new_content = content
-        try:
-            paid_flag = bool(existing[4])
-        except Exception:
-            paid_flag = True
+        if len(existing) <= 4:
+            raise RuntimeError(f"Rejected edit {tx_hash}: stored post row missing paid flag")
+        paid_flag = bool(existing[4])
         logger.info("MsgEdit upsert: override=%s new_topic=%s new_title=%s", override, new_topic, new_title)
         self.db.upsert_post(
             override,
@@ -838,28 +860,17 @@ class MessageProcessor:
                     self.db.recompute_topic_content_stats(new_topic)
             except Exception:
                 logger.exception("Failed to recompute topic_content_stats for edit %s", tx_hash)
+                raise
 
-        # Recompute thumbnail on root edits (content change)
-        try:
-            if is_root:
+        # Recompute thumbnail on root edits (content change). Deterministic derivation only.
+        if is_root:
+            try:
                 thumb = self.discover_post_thumbnail(content)
+                logger.debug("thumb recomputed on edit override=%s thumb=%s", override, thumb)
                 self.db.update_post_thumbnail(override, thumb)
-        except Exception:
-            pass
-
-        # Recompute media dimensions on edit
-        try:
-            probe_urls = media if media else []
-            if not probe_urls and content:
-                first_url = self._extract_first_url(content)
-                if first_url:
-                    probe_urls = [first_url]
-            if probe_urls:
-                probed_meta = self.discover_media_dimensions(probe_urls)
-                if any(m for m in probed_meta if m):
-                    self.db.update_post_media_meta(override, probed_meta)
-        except Exception:
-            pass
+            except Exception:
+                logger.exception("Failed to derive thumbnail for edit %s", tx_hash)
+                raise
 
         # Re-extract @mentions on edit (delete old, insert new)
         if owner and content:
@@ -868,6 +879,7 @@ class MessageProcessor:
                 self._extract_and_store_mentions(content, override, owner, ts)
             except Exception:
                 logger.exception("Failed to re-extract mentions for edit %s", tx_hash)
+                raise
 
         # Log update
         self.log_yaml(
@@ -891,17 +903,21 @@ class MessageProcessor:
             parsed.ParseFromString(value)
             agent = addr_from_pubkey(parsed.envelope_pubkey)
             if not agent:
-                logger.warning("Rejected annotate %s: invalid envelope_pubkey", tx_hash)
-                return
+                raise RuntimeError(f"Rejected annotate {tx_hash}: invalid envelope_pubkey")
             override = str(parsed.override or "").strip().lower()
 
             if not override or len(override) != 64:
-                logger.warning("Rejected annotate %s: invalid override", tx_hash)
-                return
+                raise RuntimeError(f"Rejected annotate {tx_hash}: invalid override {override!r}")
             existing = self.db.get_post(override)
             if not existing:
-                logger.warning("Rejected annotate %s: override not found", tx_hash)
-                return
+                if self._history_incomplete():
+                    logger.warning(
+                        "Skipping annotate %s: override %s not found and history_complete=false (likely pruned gap)",
+                        tx_hash,
+                        override,
+                    )
+                    return
+                raise RuntimeError(f"Rejected annotate {tx_hash}: override {override} not found")
 
             # Enforce agent tier
             agent_level = self.db.get_user_level(agent)
@@ -997,6 +1013,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgAnnotate %s: %s", tx_hash, e, exc_info=True)
 
+            raise
+
     def _handle_award(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgAward — store one award per owner+target."""
         try:
@@ -1009,10 +1027,9 @@ class MessageProcessor:
             award_type = str(msg_dict.get("award_type", "")).strip()
 
             if not owner or not target or not award_type:
-                logger.warning(
-                    "Award %s: missing fields owner=%s target=%s type=%s", tx_hash, owner, target, award_type
+                raise RuntimeError(
+                    f"Award {tx_hash}: missing fields owner={owner!r} target={target!r} type={award_type!r}"
                 )
-                return
 
             user_level = self.db.get_profile_level(owner) or 0
             is_admin = user_level >= 100
@@ -1041,7 +1058,7 @@ class MessageProcessor:
                             return
             except Exception as e:
                 logger.error("Award %s: DB error: %s", tx_hash, e, exc_info=True)
-                return
+                raise
 
             self.log_yaml(
                 "Stored award",
@@ -1062,14 +1079,27 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgAward %s: %s", tx_hash, e, exc_info=True)
 
-    def _get_award_configs(self) -> list:
-        """Get award configs from cached chain params."""
-        try:
-            from indexer.params import get_award_configs
+            raise
 
-            return get_award_configs()
-        except Exception:
-            return []
+    def _get_award_configs(self) -> list:
+        """Get award configs from cached chain params. Missing params fail hard."""
+        from indexer.params import get_award_configs
+
+        return get_award_configs()
+
+    def _history_incomplete(self) -> bool:
+        """True when meta.history_complete has been flipped false by a recorded pruning gap."""
+        raw = self.db.get_meta("history_complete")
+        if raw is None:
+            return False
+        return str(raw).lower() in ("false", "0", "")
+
+    def _require_chain_profile(self, addr: str) -> dict:
+        """Fetch the authoritative chain profile via gRPC. Never soft-fails."""
+        profile = self.chain.query_profile_full(addr)
+        if not isinstance(profile, dict) or not profile:
+            raise RuntimeError(f"empty profile response for {addr}")
+        return profile
 
     def _handle_set_username(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetUsername."""
@@ -1086,17 +1116,6 @@ class MessageProcessor:
             if not addr:
                 return
             username = str(msg.get("username", ""))
-
-            min_username = get_min_username_size()
-            max_username = get_max_username_size()
-            if len(username) < min_username or len(username) > max_username:
-                logger.warning(
-                    "Rejected set_username: invalid username length %s (min=%s, max=%s)",
-                    len(username),
-                    min_username,
-                    max_username,
-                )
-                return
 
             level = 0
             agents = []
@@ -1135,6 +1154,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgSetUsername: %s", e, exc_info=True)
 
+            raise
+
     def _handle_set_biography(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetBiography — update biography in profiles table."""
         try:
@@ -1144,13 +1165,10 @@ class MessageProcessor:
 
             addr = str(msg_dict.get("target", ""))
             if not addr:
-                return
-            biography = str(msg_dict.get("biography", ""))
-
-            # Query chain for the authoritative profile (biography is persisted in ProfileCore)
-            profile_data = self._query_chain_profile(addr)
-            if profile_data:
-                biography = profile_data.get("biography", "") or ""
+                raise RuntimeError("Rejected set_biography: missing target")
+            # Authoritative biography comes from chain state after the tx applied.
+            profile_data = self._require_chain_profile(addr)
+            biography = str(profile_data.get("biography", "") or "")
 
             self.db.update_profile_biography(addr, biography, ts)
             self.log_yaml(
@@ -1165,8 +1183,10 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgSetBiography: %s", e, exc_info=True)
 
+            raise
+
     def _refresh_enabled_agents(self, addr: str, ts: int):
-        """Query full profile via REST and replace enabled_agents in DB."""
+        """Query full profile via gRPC and replace enabled_agents in DB."""
         profile = self.chain.query_profile_full(addr)
         if "enabled_agents" not in profile:
             raise RuntimeError(f"missing enabled_agents for {addr}")
@@ -1187,7 +1207,7 @@ class MessageProcessor:
         )
 
     def _refresh_followed_users(self, addr: str, ts: int):
-        """Query full profile via REST and replace followed_users in DB."""
+        """Query full profile via gRPC and replace followed_users in DB."""
         profile = self.chain.query_profile_full(addr)
         if "followed_users" not in profile:
             raise RuntimeError(f"missing followed_users for {addr}")
@@ -1208,7 +1228,7 @@ class MessageProcessor:
         )
 
     def _refresh_followed_topics(self, addr: str, ts: int):
-        """Query full profile via REST and replace followed_topics in DB."""
+        """Query full profile via gRPC and replace followed_topics in DB."""
         profile = self.chain.query_profile_full(addr)
         if "followed_topics" not in profile:
             raise RuntimeError(f"missing followed_topics for {addr}")
@@ -1242,6 +1262,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgEnableAgent: %s", e, exc_info=True)
 
+            raise
+
     def _handle_disable_agent(self, type_url: str, value: bytes, ts: int):
         """Handle MsgDisableAgent."""
         try:
@@ -1256,6 +1278,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgDisableAgent: %s", e, exc_info=True)
 
+            raise
+
     def _handle_set_agents(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetAgents."""
         try:
@@ -1269,6 +1293,8 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgSetAgents: %s", e, exc_info=True)
+
+            raise
 
     def _handle_follow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowUser."""
@@ -1293,6 +1319,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgFollowUser: %s", e, exc_info=True)
 
+            raise
+
     def _handle_unfollow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnfollowUser."""
         try:
@@ -1313,6 +1341,8 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnfollowUser: %s", e, exc_info=True)
+
+            raise
 
     def _handle_follow_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowTopic."""
@@ -1338,6 +1368,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgFollowTopic: %s", e, exc_info=True)
 
+            raise
+
     def _handle_unfollow_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnfollowTopic."""
         try:
@@ -1358,6 +1390,8 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnfollowTopic: %s", e, exc_info=True)
+
+            raise
 
     def _handle_block_post(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockPost."""
@@ -1380,6 +1414,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgBlockPost: %s", e, exc_info=True)
 
+            raise
+
     def _handle_unblock_post(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnblockPost."""
         try:
@@ -1400,6 +1436,8 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnblockPost: %s", e, exc_info=True)
+
+            raise
 
     def _handle_block_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockUser."""
@@ -1424,6 +1462,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgBlockUser: %s", e, exc_info=True)
 
+            raise
+
     def _handle_unblock_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnblockUser."""
         try:
@@ -1444,6 +1484,8 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnblockUser: %s", e, exc_info=True)
+
+            raise
 
     def _handle_block_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockTopic."""
@@ -1469,6 +1511,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgBlockTopic: %s", e, exc_info=True)
 
+            raise
+
     def _handle_unblock_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnblockTopic."""
         try:
@@ -1489,6 +1533,8 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnblockTopic: %s", e, exc_info=True)
+
+            raise
 
     def _handle_delete(self, type_url: str, value: bytes, ts: int):
         """Handle MsgDelete.
@@ -1574,6 +1620,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling MsgDelete: %s", e, exc_info=True)
 
+            raise
+
     def _handle_delete_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgDeleteUser - soft-delete the user's profile.
 
@@ -1605,6 +1653,8 @@ class MessageProcessor:
                 logger.warning("DeleteUser: profile not found or already deleted for %s", target)
         except Exception as e:
             logger.error("Error handling MsgDeleteUser: %s", e, exc_info=True)
+
+            raise
 
     def _handle_set_level(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetLevel."""
@@ -1647,6 +1697,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling set_level: %s", e, exc_info=True)
 
+            raise
+
     def _handle_subscribe(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSubscribe (self or gift subscription)."""
         try:
@@ -1661,66 +1713,49 @@ class MessageProcessor:
             requested_level = int(msg_dict.get("level", 0) or 0)
 
             if not owner:
-                logger.warning("Rejected subscribe: could not derive owner")
-                return
+                raise RuntimeError("Rejected subscribe: could not derive owner")
 
-            # Query the chain for the updated profile (includes subscription_expiry, auto_renew)
-            profile_data = self._query_chain_profile(owner)
-            if profile_data:
-                level = int(profile_data.get("level", requested_level))
-                subscription_expiry = int(profile_data.get("subscription_expiry", 0) or 0)
-                auto_renew = bool(profile_data.get("auto_renew", False))
-                username = profile_data.get("username") or None
-                created_at = int(profile_data.get("created_at", 0) or 0)
-                biography = profile_data.get("biography", "") or ""
-                avatar = profile_data.get("avatar", "") or ""
-                banner = profile_data.get("banner", "") or ""
-                flair = profile_data.get("flair", "") or ""
-                reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
+            profile_data = self._require_chain_profile(owner)
+            level = int(profile_data.get("level", requested_level))
+            subscription_expiry = int(profile_data.get("subscription_expiry", 0) or 0)
+            auto_renew = bool(profile_data.get("auto_renew", False))
+            username = profile_data.get("username") or None
+            created_at = int(profile_data.get("created_at", 0) or 0)
+            biography = profile_data.get("biography", "") or ""
+            avatar = profile_data.get("avatar", "") or ""
+            banner = profile_data.get("banner", "") or ""
+            flair = profile_data.get("flair", "") or ""
+            reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
 
-                self.db.upsert_profile_full(
-                    owner,
-                    username,
-                    level,
-                    created_at,
-                    subscription_expiry,
-                    auto_renew,
-                    biography,
-                    avatar,
-                    banner,
-                    flair,
-                    ts,
-                    reserve_funds=reserve_funds,
-                )
-                self.log_yaml(
-                    "User subscribed",
-                    {
-                        "owner": owner,
-                        "level": level,
-                        "subscription_expiry": subscription_expiry,
-                        "auto_renew": auto_renew,
-                        "timestamp": int(ts),
-                        "time_iso": self.iso_timestamp(ts),
-                    },
-                )
-            else:
-                # Fallback: just update level
-                existing = self.db.get_profile(owner)
-                if existing:
-                    self.db.update_profile_subscription(owner, requested_level, 0, False, ts)
-                else:
-                    self.db.upsert_profile(owner, None, requested_level, ts)
-                self.log_yaml(
-                    "User subscribed (chain query failed)",
-                    {
-                        "owner": owner,
-                        "level": requested_level,
-                        "timestamp": int(ts),
-                        "time_iso": self.iso_timestamp(ts),
-                    },
-                )
+            self.db.upsert_profile_full(
+                owner,
+                username,
+                level,
+                created_at,
+                subscription_expiry,
+                auto_renew,
+                biography,
+                avatar,
+                banner,
+                flair,
+                ts,
+                reserve_funds=reserve_funds,
+            )
+            self.log_yaml(
+                "User subscribed",
+                {
+                    "owner": owner,
+                    "level": level,
+                    "subscription_expiry": subscription_expiry,
+                    "auto_renew": auto_renew,
+                    "timestamp": int(ts),
+                    "time_iso": self.iso_timestamp(ts),
+                },
+            )
         except Exception as e:
             logger.error("Error handling subscribe: %s", e, exc_info=True)
+
+            raise
 
     def _handle_set_auto_renewal(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetAutoRenewal (user-initiated auto_renew toggle)."""
@@ -1733,71 +1768,49 @@ class MessageProcessor:
             requested_flag = bool(msg_dict.get("auto_renew", False))
 
             if not owner:
-                logger.warning("Rejected set_auto_renewal: could not derive owner")
-                return
+                raise RuntimeError("Rejected set_auto_renewal: could not derive owner")
 
-            # Query the chain for the updated profile (includes subscription_expiry, auto_renew)
-            profile_data = self._query_chain_profile(owner)
-            if profile_data:
-                level = int(profile_data.get("level", 0) or 0)
-                subscription_expiry = int(profile_data.get("subscription_expiry", 0) or 0)
-                auto_renew = bool(profile_data.get("auto_renew", requested_flag))
-                username = profile_data.get("username") or None
-                created_at = int(profile_data.get("created_at", 0) or 0)
-                biography = profile_data.get("biography", "") or ""
-                avatar = profile_data.get("avatar", "") or ""
-                banner = profile_data.get("banner", "") or ""
-                flair = profile_data.get("flair", "") or ""
-                reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
+            profile_data = self._require_chain_profile(owner)
+            level = int(profile_data.get("level", 0) or 0)
+            subscription_expiry = int(profile_data.get("subscription_expiry", 0) or 0)
+            auto_renew = bool(profile_data.get("auto_renew", requested_flag))
+            username = profile_data.get("username") or None
+            created_at = int(profile_data.get("created_at", 0) or 0)
+            biography = profile_data.get("biography", "") or ""
+            avatar = profile_data.get("avatar", "") or ""
+            banner = profile_data.get("banner", "") or ""
+            flair = profile_data.get("flair", "") or ""
+            reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
 
-                self.db.upsert_profile_full(
-                    owner,
-                    username,
-                    level,
-                    created_at,
-                    subscription_expiry,
-                    auto_renew,
-                    biography,
-                    avatar,
-                    banner,
-                    flair,
-                    ts,
-                    reserve_funds=reserve_funds,
-                )
-                self.log_yaml(
-                    "User set auto_renewal",
-                    {
-                        "owner": owner,
-                        "level": level,
-                        "subscription_expiry": subscription_expiry,
-                        "auto_renew": auto_renew,
-                        "timestamp": int(ts),
-                        "time_iso": self.iso_timestamp(ts),
-                    },
-                )
-            else:
-                existing = self.db.get_profile(owner)
-                if existing:
-                    # Fallback: only toggle auto_renew flag when chain query fails
-                    level = existing[1] if len(existing) > 1 else 0
-                    self.db.update_profile_subscription(
-                        owner,
-                        level,
-                        0,
-                        requested_flag,
-                        ts,
-                    )
-                self.log_yaml(
-                    "User set auto_renewal (chain query failed)",
-                    {
-                        "owner": owner,
-                        "requested_auto_renew": requested_flag,
-                        "timestamp": int(ts),
-                        "time_iso": self.iso_timestamp(ts),
-                    },
-                )
+            self.db.upsert_profile_full(
+                owner,
+                username,
+                level,
+                created_at,
+                subscription_expiry,
+                auto_renew,
+                biography,
+                avatar,
+                banner,
+                flair,
+                ts,
+                reserve_funds=reserve_funds,
+            )
+            self.log_yaml(
+                "User set auto_renewal",
+                {
+                    "owner": owner,
+                    "level": level,
+                    "subscription_expiry": subscription_expiry,
+                    "auto_renew": auto_renew,
+                    "timestamp": int(ts),
+                    "time_iso": self.iso_timestamp(ts),
+                },
+            )
         except Exception as e:
             logger.error("Error handling set_auto_renewal: %s", e, exc_info=True)
+
+            raise
 
     def _handle_update_params(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUpdateParams (governance parameter changes)."""
@@ -1814,6 +1827,8 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error handling update_params: %s", e, exc_info=True)
 
+            raise
+
     def update_profile_level(self, addr: str, level: int, ts: int):
         """Update profile level from subscription events (EndBlock)."""
         try:
@@ -1824,6 +1839,7 @@ class MessageProcessor:
                 logger.warning("No profile found to update level for %s", addr)
         except Exception as e:
             logger.error("Error updating profile level for %s: %s", addr, e, exc_info=True)
+            raise
 
     def update_profile_subscription(self, addr: str, level: int, subscription_expiry: int, ts: int):
         """Update profile level and subscription_expiry from renewal events (EndBlock)."""
@@ -1841,22 +1857,7 @@ class MessageProcessor:
                 logger.warning("No profile found to update subscription for %s", addr)
         except Exception as e:
             logger.error("Error updating profile subscription for %s: %s", addr, e, exc_info=True)
-
-    def _query_chain_profile(self, addr: str) -> dict | None:
-        """Query the chain for a profile's current state."""
-        try:
-            key_hex = (f"profiles/{addr}").encode().hex()
-            resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-            result = resp_data.get("result")
-            if result:
-                response = result.get("response")
-                if response:
-                    val_b64 = response.get("value")
-                    if val_b64:
-                        return json.loads(base64.b64decode(val_b64).decode())
-        except Exception as e:
-            logger.warning("Failed to query chain profile for %s: %s", addr, e)
-        return None
+            raise
 
     # ------------------------------
     # Thumbnail discovery helpers
@@ -1869,34 +1870,6 @@ class MessageProcessor:
             return ""
         m = re.search(r"https?://[^\s<>'\"]+", text)
         return m.group(0) if m else ""
-
-    @staticmethod
-    def _is_public_http_url(raw: str) -> bool:
-        try:
-            u = urlparse(raw)
-            if u.scheme not in ("http", "https"):
-                return False
-            host = (u.hostname or "").strip()
-            if not host:
-                return False
-            infos = socket.getaddrinfo(host, 80, proto=socket.IPPROTO_TCP)
-            if not infos:
-                return False
-            for info in infos:
-                ip_str = info[4][0]
-                ip = ipaddress.ip_address(ip_str)
-                if (
-                    ip.is_private
-                    or ip.is_loopback
-                    or ip.is_link_local
-                    or ip.is_multicast
-                    or ip.is_reserved
-                    or ip.is_unspecified
-                ):
-                    return False
-            return True
-        except Exception:
-            return False
 
     @staticmethod
     def _is_raster_image_url(raw: str) -> bool:
@@ -1990,184 +1963,20 @@ class MessageProcessor:
             return None
         return None
 
-    @staticmethod
-    def _fetch_html(url: str) -> str | None:
-        # Impersonate a real Chrome browser navigating from a Google search result.
-        # Bare User-Agent is enough for most sites, but publisher sites behind Akamai/Cloudflare
-        # bot-fight (Telegraph, WSJ, etc.) also check Accept-Language, Referer, and sec-fetch-* /
-        # sec-ch-ua client hints. These extra headers bypass the easier WAFs; the hard ones
-        # (Akamai JA3 fingerprinting) will still 403.
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate",
-            "Referer": "https://www.google.com/",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Site": "cross-site",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-User": "?1",
-            "Sec-Fetch-Dest": "document",
-            "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-        }
-        try:
-            resp = requests.get(url, headers=headers, timeout=5, allow_redirects=True)
-        except Exception as e:
-            logger.debug("[thumb] fetch_html request failed url=%s err=%s", url, e)
-            return None
-        if resp.status_code != 200:
-            logger.debug("[thumb] fetch_html non-200 status=%d url=%s", resp.status_code, url)
-            return None
-        ct = resp.headers.get("content-type", "")
-        if "text/html" not in ct and "application/xhtml+xml" not in ct:
-            logger.debug("[thumb] fetch_html non-html content-type=%s url=%s", ct, url)
-            return None
-        return resp.text[:1_500_000]
-
-    @staticmethod
-    def _probe_dimensions(url: str, max_bytes: int = 2_000_000) -> tuple[int, int] | None:
-        try:
-            headers = {"User-Agent": "MirageIndexer/1.0", "Accept": "*/*"}
-            resp = requests.get(url, headers=headers, timeout=5, stream=True)
-            if resp.status_code != 200:
-                return None
-            total = 0
-            buf = BytesIO()
-            for chunk in resp.iter_content(chunk_size=65536):
-                if not chunk:
-                    break
-                buf.write(chunk)
-                total += len(chunk)
-                if total >= max_bytes:
-                    break
-            buf.seek(0)
-            with Image.open(buf) as im:
-                return int(im.width), int(im.height)
-        except Exception:
-            return None
-
-    @staticmethod
-    def _normalize(base: str, href: str | None) -> str | None:
-        if not href:
-            return None
-        try:
-            out = urljoin(base, href)
-            return out
-        except Exception:
-            return None
-
-    @staticmethod
-    def _extract_html_meta_dimensions(html: str) -> tuple[int, int] | None:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-        except Exception:
-            return None
-        meta_map = {}
-        for tag in soup.find_all("meta"):
-            prop = (tag.get("property") or tag.get("name") or "").lower()
-            if prop in ("og:video:width", "og:video:height", "og:image:width", "og:image:height"):
-                meta_map[prop] = tag.get("content")
-        try:
-            w = int(meta_map.get("og:video:width") or meta_map.get("og:image:width") or 0)
-            h = int(meta_map.get("og:video:height") or meta_map.get("og:image:height") or 0)
-            if w > 0 and h > 0:
-                return w, h
-        except Exception:
-            return None
-        return None
-
-    def _probe_media_dimensions(self, url: str) -> dict:
-        """Probe a single URL for dimensions. Returns {} if unknown."""
-        from urllib.parse import parse_qs
-
-        try:
-            parsed = urlparse(url or "")
-            host = (parsed.hostname or "").lower()
-
-            # Already encoded in query params (our upload flow)
-            qs = parse_qs(parsed.query)
-            w_raw = qs.get("w", [None])[0]
-            h_raw = qs.get("h", [None])[0]
-            if w_raw and h_raw:
-                return DatabaseManager._sanitize_wh(int(w_raw), int(h_raw))
-
-            # Cloudflare Stream → probe the auto-generated thumbnail
-            uid = self._extract_stream_uid(url)
-            if uid:
-                thumb_url = f"https://videodelivery.net/{uid}/thumbnails/thumbnail.jpg?time=1s"
-                dims = self._probe_dimensions(thumb_url)
-                if dims:
-                    return DatabaseManager._sanitize_wh(dims[0], dims[1])
-                return {}
-
-            # Bunny Stream → probe the auto-generated thumbnail
-            bunny_thumb = self._bunny_stream_thumbnail(url)
-            if bunny_thumb:
-                dims = self._probe_dimensions(bunny_thumb)
-                if dims:
-                    return DatabaseManager._sanitize_wh(dims[0], dims[1])
-                return {}
-
-            # Direct image → probe directly
-            if self._is_raster_image_url(url):
-                dims = self._probe_dimensions(url)
-                if dims:
-                    return DatabaseManager._sanitize_wh(dims[0], dims[1])
-                return {}
-
-            # YouTube → detect shorts vs standard
-            yt_id = self._extract_youtube_video_id(url)
-            if yt_id:
-                if parsed.path.startswith("/shorts/"):
-                    return DatabaseManager._sanitize_wh(1080, 1920)
-                return DatabaseManager._sanitize_wh(1280, 720)
-
-            # Redgifs → probe meta tags (og:video:width/height)
-            if "redgifs.com" in host:
-                html = self._fetch_html(url)
-                if html:
-                    dims = self._extract_html_meta_dimensions(html)
-                    if dims:
-                        return DatabaseManager._sanitize_wh(dims[0], dims[1])
-                return {}
-
-            return {}
-        except Exception:
-            logger.debug("[media_meta] probe failed for %s", url, exc_info=True)
-            return {}
-
-    def discover_media_dimensions(self, media_urls: list[str]) -> list[dict]:
-        """Probe dimensions for each media URL. Returns list parallel to media_urls."""
-        urls = list(media_urls or [])
-        if not urls:
-            return []
-        results = [{} for _ in urls]
-        max_workers = min(4, len(urls))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_idx = {executor.submit(self._probe_media_dimensions, url): idx for idx, url in enumerate(urls)}
-            done, not_done = wait(future_to_idx, timeout=10)
-            for fut in done:
-                idx = future_to_idx[fut]
-                try:
-                    results[idx] = fut.result() or {}
-                except Exception:
-                    results[idx] = {}
-            if not_done:
-                logger.debug("[media_meta] probe timeout urls=%d unfinished=%d", len(urls), len(not_done))
-                for fut in not_done:
-                    fut.cancel()
-        return results
-
     def discover_post_thumbnail(self, content: str) -> str | None:
-        """Discover a thumbnail for root post content. Returns absolute image URL or None."""
+        """Derive a thumbnail URL for root post content, or None.
+
+        Deterministic and offline: the thumbnail is derived from the post's own text and
+        never fetched. Fetching would make the indexed value depend on whatever a
+        third-party host served at index time, and would let a post author point the
+        indexer at hosts of their choosing. Unknown URL shapes yield no thumbnail.
+        """
         first = self._extract_first_url(content or "")
         if not first:
             logger.debug("[thumb] no URL found in content")
             return None
-        if not self._is_public_http_url(first):
-            logger.debug("[thumb] first URL not public http(s): %s", first)
+        if urlparse(first).scheme not in ("http", "https"):
+            logger.debug("[thumb] first URL not http(s): %s", first)
             return None
         # Direct image
         if self._is_raster_image_url(first):
@@ -2189,96 +1998,23 @@ class MessageProcessor:
         if yt_id:
             logger.debug("[thumb] derived youtube thumb for video_id=%s", yt_id)
             return f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
-        # Fetch and parse HTML
-        html = self._fetch_html(first)
-        if not html:
-            logger.debug("[thumb] fetch_html returned empty for %s", first)
-            return None
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-        except Exception:
-            logger.debug("[thumb] BeautifulSoup parse failed for %s", first)
-            return None
-
-        candidates: list[dict[str, str | None]] = []
-
-        def add(u: str | None, w: str | None = None, h: str | None = None):
-            if not u:
-                return
-            norm = self._normalize(first, u)
-            if not norm or not self._is_public_http_url(norm):
-                return
-            candidates.append({"url": norm, "w": w, "h": h})
-
-        for tag in soup.find_all("meta"):
-            prop = (tag.get("property") or tag.get("name") or "").lower()
-            if prop in ("og:image", "twitter:image", "og:image:url", "og:image:secure_url"):
-                add(tag.get("content"))
-        for link in soup.find_all("link"):
-            rel = (
-                " ".join((link.get("rel") or [])).lower()
-                if isinstance(link.get("rel"), list)
-                else str(link.get("rel") or "").lower()
-            )
-            if "image_src" in rel or rel == "image_src" or rel == "image":
-                add(link.get("href"))
-        for meta in soup.find_all(attrs={"itemprop": "image"}):
-            add(meta.get("content") or meta.get("src"))
-        for img in soup.find_all("img"):
-            add(
-                img.get("src") or img.get("data-src"),
-                img.get("width") or img.get("data-width"),
-                img.get("height") or img.get("data-height"),
-            )
-        # Fallback: scan raw HTML for direct image URLs (covers cases like Redgifs media.* jpgs)
-        try:
-            for m in re.findall(r'https?://[^\s"<>\']+\.(?:jpg|jpeg|png|webp)', html, flags=re.IGNORECASE):
-                add(m)
-        except Exception:
-            pass
-
-        # Unique
-        seen = set()
-        uniq = []
-        for c in candidates:
-            u = c.get("url")
-            if u and u not in seen:
-                seen.add(u)
-                uniq.append(c)
-
-        logger.debug("[thumb] candidate count=%d first=%s", len(uniq), (uniq[0]["url"] if uniq else ""))
-
-        # Prefer known large images
-        for c in uniq:
-            try:
-                w = int(c.get("w") or "0")
-                h = int(c.get("h") or "0")
-            except Exception:
-                w = h = 0
-            if w >= 600 and h >= 400:
-                return c["url"]  # type: ignore[index]
-
-        # Probe a few
-        for c in uniq[:6]:
-            u = c.get("url")
-            if not u:
-                continue
-            dims = self._probe_dimensions(u)
-            if dims and dims[0] >= 600 and dims[1] >= 400:
-                return u
-
-        return uniq[0].get("url") if uniq else None
+        logger.debug("[thumb] no deterministic thumbnail for %s", first)
+        return None
 
     @staticmethod
-    def extract_inner_messages(parsed: MsgSubmitProposal) -> list:
-        """Extract inner messages from MsgSubmitProposal with fallback for different proto versions."""
-        try:
-            return parsed.messages
-        except AttributeError:
-            try:
-                return parsed.msgs
-            except AttributeError:
-                return []
+    def extract_inner_anys(parsed) -> list:
+        """Extract the inner Any messages carried by a decoded MsgSubmitProposal.
+
+        gov v1 carries them in `messages`; gov v1beta1 carries a single `content` Any.
+        The caller decides which proto version to parse with, so accept either shape.
+        """
+        messages = getattr(parsed, "messages", None)
+        if messages is not None:
+            return list(messages)
+        content = getattr(parsed, "content", None)
+        if content is not None and getattr(content, "type_url", ""):
+            return [content]
+        return []
 
     @staticmethod
     def extract_proposal_id(attrs: dict) -> int | None:

@@ -90,32 +90,6 @@ def _build_cache_from_params(p: dict) -> dict[str, Any]:
         raise RuntimeError("missing or empty tiers in chain params")
     result["tiers"] = tiers
 
-    # Derive content/title limits from tiers:
-    # - Max values come from highest tier (so we accept content up to that limit)
-    # - Min values are 0 for content (comments can be empty-ish), 3 for titles
-    max_title = 0
-    max_content = 0
-    for tier in tiers:
-        t_title = int(tier.get("max_title_length", 0) or 0)
-        t_content = int(tier.get("max_content_length", 0) or 0)
-        if t_title > max_title:
-            max_title = t_title
-        if t_content > max_content:
-            max_content = t_content
-
-    if max_title == 0:
-        raise RuntimeError("all tiers have max_title_length=0")
-    if max_content == 0:
-        raise RuntimeError("all tiers have max_content_length=0")
-
-    result["max_title_size"] = max_title
-    result["max_content_size"] = max_content
-    # Min title size: chain doesn't explicitly define this, but root posts require titles
-    # Use 1 as minimum (empty title = invalid)
-    result["min_title_size"] = 1
-    # Min content size: 0 (content can be empty for certain cases)
-    result["min_content_size"] = 0
-
     # Build vote weight lookup: {level: weight}
     # Tier index → user level: 0→0, 1→1, 2→10
     _idx_to_level = {0: 0, 1: 1, 2: 10}
@@ -211,26 +185,6 @@ def get_min_username_size() -> int:
     return expect_params()["min_username_size"]
 
 
-def get_max_title_size() -> int:
-    """Get max title size (from highest tier)."""
-    return expect_params()["max_title_size"]
-
-
-def get_min_title_size() -> int:
-    """Get min title size."""
-    return expect_params()["min_title_size"]
-
-
-def get_max_content_size() -> int:
-    """Get max content size (from highest tier)."""
-    return expect_params()["max_content_size"]
-
-
-def get_min_content_size() -> int:
-    """Get min content size."""
-    return expect_params()["min_content_size"]
-
-
 def get_vote_weight(level: int) -> float:
     """Get vote weight for tier level. Cached at startup."""
     weights = expect_params()["vote_weights"]
@@ -252,10 +206,6 @@ __all__ = [
     "get_min_topic_size",
     "get_max_username_size",
     "get_min_username_size",
-    "get_max_title_size",
-    "get_min_title_size",
-    "get_max_content_size",
-    "get_min_content_size",
     "get_vote_weight",
     "get_award_configs",
 ]

@@ -81,6 +81,21 @@
 #   - env files except in `state-sync` mode, where STATESYNC_* values must be
 #     written temporarily and STATESYNC_ENABLE is reset to false afterwards.
 #
+# Indexer DB after chain recovery
+# -------------------------------
+# Peer-pull / state-sync deliberately leave mirage_indexer alone, and that DB is
+# not reconstructable from a pruned chain (blocked-list history exceeds what the
+# chain retains). On the next start the indexer compares meta.chain_id and
+# meta.last_block_hash against the recovered node at meta.last_height, BEFORE it
+# writes anything. A mismatch is fatal: the process refuses to start and leaves
+# the evidence intact — never auto-wipe PostgreSQL, and never clear meta to get
+# past it. The operator must restore a trusted pg_dump whose checkpoint matches
+# the recovered chain, or start from an empty indexer DB and accept the recorded
+# history gap. A checkpoint below the node's earliest retained height cannot be
+# hash-compared at all; that sets meta.continuity_status=unverified_pruned_gap,
+# records the range in meta.history_gaps, and continues — it does not pretend
+# continuity was verified.
+#
 # The crucial file is priv_validator_state.json. This is the validator signing
 # watermark. If we copy another peer's watermark or wipe ours permanently, we
 # can double-sign. Every destructive recovery mode backs it up before wiping DBs

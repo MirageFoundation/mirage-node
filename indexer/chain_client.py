@@ -3,18 +3,15 @@ Chain client for HTTP, gRPC, and WebSocket operations.
 """
 
 import base64
-import json
 import logging
 import time
 import requests
 import websocket
 import grpc
 from datetime import datetime, timezone
-import urllib.parse as _up
 from indexer.settings import (
     HTTP_TIMEOUT_SHORT,
     HTTP_TIMEOUT_MEDIUM,
-    HTTP_TIMEOUT_LONG,
     GRPC_TIMEOUT,
     WS_PING_INTERVAL,
     WS_PING_TIMEOUT,
@@ -22,6 +19,17 @@ from indexer.settings import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Profile listing pages are far larger than a normal point query, so they get
+# their own (longer) budget instead of the 3s GRPC_TIMEOUT.
+# The chain caps a page at keeper.MaxProfilesQueryLimit (100); asking for more
+# is silently clamped server-side.
+PROFILES_PAGE_LIMIT = 100
+PROFILES_PAGE_TIMEOUT = 30
+PROFILES_SYNC_DEADLINE = 120.0
+
+# Delay between block_results polls when waiting for the expected tx count.
+BLOCK_RESULTS_RETRY_DELAY = 0.25
 
 
 class ChainClient:
@@ -49,20 +57,6 @@ class ChainClient:
         else:
             return base_rpc.replace(":26657", ":9090")
 
-    @staticmethod
-    def _derive_rest_url(jsonrpc_url: str) -> str:
-        """Derive REST API URL from RPC URL (same host, port 1317)."""
-        base_rpc = jsonrpc_url
-        for path in ["/block_results", "/block", "/status", "/abci_query"]:
-            if path in base_rpc:
-                base_rpc = base_rpc.replace(path, "")
-        parsed = _up.urlparse(base_rpc)
-        if not parsed.scheme:
-            raise ValueError(f"RPC URL missing scheme: {jsonrpc_url}")
-        if not parsed.hostname:
-            raise ValueError(f"RPC URL missing host: {jsonrpc_url}")
-        return f"{parsed.scheme}://{parsed.hostname}:1317"
-
     def get_status(self) -> dict:
         """Get chain status."""
         r = requests.get(f"{self.jsonrpc_url}/status", timeout=HTTP_TIMEOUT_SHORT)
@@ -83,11 +77,24 @@ class ChainClient:
     def get_earliest_height(self) -> int:
         """Get earliest block height retained by the node (for pruned nodes)."""
         data = self.get_status()
+        raw = (((data or {}).get("result") or {}).get("sync_info") or {}).get("earliest_block_height")
+        if raw is None:
+            raise RuntimeError("/status is missing sync_info.earliest_block_height")
         try:
-            return int(data["result"]["sync_info"]["earliest_block_height"])
-        except Exception:
-            # Fallback: if field missing, assume 1
-            return 1
+            earliest = int(raw)
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(f"/status returned unparseable earliest_block_height {raw!r}") from e
+        logger.debug("get_earliest_height earliest=%d", earliest)
+        return earliest
+
+    def get_chain_id(self) -> str:
+        """Return node_info.network from /status. Fails hard if missing."""
+        data = self.get_status()
+        network = (((data or {}).get("result") or {}).get("node_info") or {}).get("network")
+        if not network:
+            raise RuntimeError("/status is missing node_info.network")
+        logger.debug("get_chain_id chain_id=%s", network)
+        return str(network)
 
     def get_block(self, height: int) -> dict:
         """Get block data."""
@@ -104,6 +111,60 @@ class ChainClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def get_block_results_matching(self, height: int, expected_tx_count: int, deadline_s: float = 15.0) -> dict:
+        """
+        Get block results for `height`, retrying until the node reports exactly
+        `expected_tx_count` tx results. Guards against a node that has committed
+        the block but not yet exposed complete results.
+        """
+        expected = int(expected_tx_count)
+        started = time.monotonic()
+        deadline = started + float(deadline_s)
+        attempt = 0
+        got: int | None = None
+
+        while True:
+            attempt += 1
+            data = self.get_block_results(height)
+            txs = ((data or {}).get("result") or {}).get("txs_results")
+            if txs is None:
+                # A missing list is only equivalent to "no txs" when none are expected.
+                if expected == 0:
+                    logger.debug(
+                        "get_block_results_matching height=%s expected=0 txs_results=null attempt=%d matched",
+                        height,
+                        attempt,
+                    )
+                    return data
+                got = None
+            else:
+                got = len(txs)
+                if got == expected:
+                    logger.debug(
+                        "get_block_results_matching height=%s expected=%d attempt=%d matched",
+                        height,
+                        expected,
+                        attempt,
+                    )
+                    return data
+
+            elapsed = time.monotonic() - started
+            if elapsed >= float(deadline_s):
+                raise RuntimeError(
+                    f"block_results for height {height} never reached expected tx count: "
+                    f"expected={expected} got={'missing' if got is None else got} "
+                    f"attempts={attempt} elapsed={elapsed:.2f}s"
+                )
+            logger.debug(
+                "get_block_results_matching height=%s expected=%d got=%s attempt=%d elapsed=%.2fs retrying",
+                height,
+                expected,
+                "missing" if got is None else got,
+                attempt,
+                elapsed,
+            )
+            time.sleep(min(BLOCK_RESULTS_RETRY_DELAY, max(0.0, deadline - time.monotonic())))
 
     def abci_query(self, path: str, data: str, timeout: int = HTTP_TIMEOUT_SHORT) -> dict:
         """Perform ABCI query."""
@@ -127,7 +188,20 @@ class ChainClient:
             )
             resp = method(QueryProfileRequest(address=str(addr).lower()), timeout=timeout)
 
-        profile = {
+        profile = self._profile_to_dict(resp)
+        logger.debug(
+            "query_profile_full grpc addr=%s agents=%d users=%d topics=%d",
+            addr,
+            len(profile["enabled_agents"]),
+            len(profile["followed_users"]),
+            len(profile["followed_topics"]),
+        )
+        return profile
+
+    @staticmethod
+    def _profile_to_dict(resp) -> dict:
+        """Convert a mirage.core.v1.QueryProfileResponse message to a plain dict."""
+        return {
             "owner": str(resp.owner),
             "username": str(resp.username),
             "level": int(resp.level),
@@ -146,138 +220,153 @@ class ChainClient:
             "blocked_posts": list(resp.blocked_posts),
             "blocked_topics": list(resp.blocked_topics),
         }
-        logger.debug(
-            "query_profile_full grpc addr=%s agents=%d users=%d topics=%d",
-            addr,
-            len(profile["enabled_agents"]),
-            len(profile["followed_users"]),
-            len(profile["followed_topics"]),
+
+    def list_profiles_paginated(self) -> list[dict]:
+        """
+        List every profile via /mirage.core.v1.Query/GetProfiles, walking the
+        pagination cursor until it is exhausted. Returns dicts with the same
+        shape as query_profile_full.
+        """
+        from shared.datatypes import QueryProfilesRequest, QueryProfilesResponse
+
+        started = time.monotonic()
+        deadline = started + PROFILES_SYNC_DEADLINE
+        results: list[dict] = []
+        seen: set[str] = set()
+        next_key = b""
+        page = 0
+
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/GetProfiles",
+                request_serializer=QueryProfilesRequest.SerializeToString,
+                response_deserializer=QueryProfilesResponse.FromString,
+            )
+            while True:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"GetProfiles pagination exceeded {PROFILES_SYNC_DEADLINE}s "
+                        f"after {page} page(s) / {len(results)} profile(s)"
+                    )
+
+                req = QueryProfilesRequest()
+                req.pagination.key = next_key
+                req.pagination.limit = PROFILES_PAGE_LIMIT
+                try:
+                    resp = method(req, timeout=PROFILES_PAGE_TIMEOUT)
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"GetProfiles gRPC failed on page {page + 1}: {e}") from e
+
+                page += 1
+                page_new = 0
+                for prof in resp.profiles:
+                    owner = str(prof.owner).strip().lower()
+                    if not owner:
+                        raise RuntimeError(f"GetProfiles page {page} returned a profile with an empty owner")
+                    if owner in seen:
+                        continue
+                    seen.add(owner)
+                    results.append(self._profile_to_dict(prof))
+                    page_new += 1
+
+                next_key = bytes(resp.pagination.next_key)
+                logger.debug(
+                    "list_profiles_paginated page=%d returned=%d new=%d total=%d next_key=%s",
+                    page,
+                    len(resp.profiles),
+                    page_new,
+                    len(results),
+                    next_key.hex() or "<end>",
+                )
+                if not next_key:
+                    break
+
+        logger.info(
+            "Fetched %d profiles via gRPC GetProfiles in %d page(s) (%.1fs)",
+            len(results),
+            page,
+            time.monotonic() - started,
         )
-        return profile
+        return results
 
     def list_profiles_subspace(self) -> list[dict]:
-        """
-        List all profiles stored in the chain KV.
-        Tries ABCI subspace query first, falls back to REST API pagination.
-        Returns list of dicts: { owner, username, level, subscription_expiry, auto_renew, biography, avatar, banner, flair }
-        """
-        # Try ABCI subspace query first
-        try:
-            results = self._list_profiles_via_abci()
-            if results:
-                logger.info("Fetched %d profiles via ABCI subspace", len(results))
-                return results
-        except Exception as e:
-            logger.debug("ABCI subspace query failed: %s, trying REST API", e)
-
-        # Fall back to REST API
-        results = self._list_profiles_via_rest()
-        logger.info("Fetched %d profiles via REST API", len(results))
-        return results
-
-    def _list_profiles_via_abci(self) -> list[dict]:
-        """List profiles via ABCI subspace query."""
-        prefix = "profiles/".encode()
-        data_hex = prefix.hex()
-        path = _up.quote('"/store/core/subspace"')
-        resp = self.abci_query(path, f"0x{data_hex}", timeout=HTTP_TIMEOUT_LONG)
-
-        response = ((resp or {}).get("result") or {}).get("response") or {}
-        kvs = response.get("kvs") or response.get("Kvs") or []
-        results: list[dict] = []
-
-        for kv in kvs:
-            key_b64 = kv.get("key")
-            val_b64 = kv.get("value")
-            if not key_b64 or not val_b64:
-                continue
-            key_bytes = base64.b64decode(key_b64)
-            key_str = key_bytes.decode("utf-8", errors="ignore")
-            if not key_str.startswith("profiles/"):
-                continue
-            owner = key_str.split("/", 1)[1]
-            value_json = base64.b64decode(val_b64).decode("utf-8", errors="ignore")
-            try:
-                prof = json.loads(value_json)
-                prof["owner"] = owner
-                results.append(prof)
-            except Exception:
-                continue
-        return results
-
-    def _list_profiles_via_rest(self) -> list[dict]:
-        """List profiles via REST API with pagination."""
-        rest_url = self._derive_rest_url(self.jsonrpc_url)
-        profiles: list[dict] = []
-        next_key: str | None = None
-
-        while True:
-            url = f"{rest_url}/mirage/core/v1/profiles?pagination.limit=5000"
-            if next_key:
-                url += f"&pagination.key={_up.quote(next_key)}"
-
-            r = requests.get(url, timeout=HTTP_TIMEOUT_LONG)
-            r.raise_for_status()
-            data = r.json()
-
-            page_profiles = data.get("profiles", [])
-            profiles.extend(page_profiles)
-
-            pagination = data.get("pagination") or {}
-            next_key = pagination.get("next_key")
-            if not next_key:
-                break
-
-        return profiles
+        """Alias for list_profiles_paginated."""
+        return self.list_profiles_paginated()
 
     def fetch_proposal_messages(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
-        """Fetch proposal messages via REST gov/v1 (multi-message friendly)."""
-        return self._fetch_proposal_messages_rest(proposal_id, type_url_to_proto)
+        """Fetch proposal messages via cosmos.gov.v1.Query/Proposal gRPC."""
+        from cosmpy.protos.cosmos.gov.v1 import query_pb2 as gov_query_pb2
+        from cosmpy.protos.cosmos.gov.v1 import query_pb2_grpc as gov_query_pb2_grpc
 
-    def _fetch_proposal_messages_rest(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
-        """Fetch proposal via REST gov/v1 and convert JSON messages to protobuf bytes."""
-        from google.protobuf import json_format
+        try:
+            with grpc.insecure_channel(self.grpc_target) as channel:
+                stub = gov_query_pb2_grpc.QueryStub(channel)
+                resp = stub.Proposal(
+                    gov_query_pb2.QueryProposalRequest(proposal_id=int(proposal_id)),
+                    timeout=GRPC_TIMEOUT,
+                )
+        except grpc.RpcError as e:
+            raise RuntimeError(f"gov v1 Query/Proposal failed for proposal {proposal_id}: {e}") from e
 
-        rest_url = self._derive_rest_url(self.jsonrpc_url)
-        url = f"{rest_url}/cosmos/gov/v1/proposals/{proposal_id}"
-        r = requests.get(url, timeout=HTTP_TIMEOUT_MEDIUM)
-        r.raise_for_status()
-        data = r.json()
+        raw_messages = list(resp.proposal.messages)
+        messages = self._filter_trackable_anys(raw_messages, type_url_to_proto)
+        logger.debug(
+            "fetch_proposal_messages proposal_id=%s messages=%d trackable=%d",
+            proposal_id,
+            len(raw_messages),
+            len(messages),
+        )
 
-        proposal = data.get("proposal") or {}
-        raw_messages = proposal.get("messages") or []
         if not raw_messages:
-            raise RuntimeError(
-                f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTokens or MsgBurnTokens)"
-            )
-
-        messages: list[dict] = []
-        for msg_json in raw_messages:
-            type_url = msg_json.get("@type", "")
-            if type_url not in type_url_to_proto:
-                continue
-            proto_cls = type_url_to_proto[type_url]
-            fields = {k: v for k, v in msg_json.items() if k != "@type" and v is not None}
-            msg = json_format.ParseDict(fields, proto_cls())
-            serialized = msg.SerializeToString()
-            messages.append(
-                {
-                    "type_url": type_url,
-                    "value": base64.b64encode(serialized).decode("ascii"),
-                }
-            )
+            # v1 proposals wrapping a legacy v1beta1 content are exposed with an
+            # empty messages list; the content Any is only visible on v1beta1.
+            messages = self._fetch_legacy_proposal_content(proposal_id, type_url_to_proto)
 
         if not messages:
             raise RuntimeError(
                 f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTokens or MsgBurnTokens)"
             )
 
-        logger.info(
-            "REST gov/v1 resolved proposal %s: %d message(s)",
+        logger.info("gov v1 gRPC resolved proposal %s: %d message(s)", proposal_id, len(messages))
+        return messages
+
+    def _fetch_legacy_proposal_content(self, proposal_id: int, type_url_to_proto: dict) -> list[dict]:
+        """Fetch the legacy content Any via cosmos.gov.v1beta1.Query/Proposal gRPC."""
+        from cosmpy.protos.cosmos.gov.v1beta1 import query_pb2 as gov_beta_query_pb2
+        from cosmpy.protos.cosmos.gov.v1beta1 import query_pb2_grpc as gov_beta_query_pb2_grpc
+
+        try:
+            with grpc.insecure_channel(self.grpc_target) as channel:
+                stub = gov_beta_query_pb2_grpc.QueryStub(channel)
+                resp = stub.Proposal(
+                    gov_beta_query_pb2.QueryProposalRequest(proposal_id=int(proposal_id)),
+                    timeout=GRPC_TIMEOUT,
+                )
+        except grpc.RpcError as e:
+            raise RuntimeError(f"gov v1beta1 Query/Proposal failed for proposal {proposal_id}: {e}") from e
+
+        content = resp.proposal.content
+        raw_messages = [content] if content.type_url else []
+        messages = self._filter_trackable_anys(raw_messages, type_url_to_proto)
+        logger.debug(
+            "fetch_proposal_messages v1beta1 proposal_id=%s messages=%d trackable=%d",
             proposal_id,
+            len(raw_messages),
             len(messages),
         )
         return messages
+
+    @staticmethod
+    def _filter_trackable_anys(anys, type_url_to_proto: dict) -> list[dict]:
+        """Keep only the Anys the indexer knows how to decode, as base64 payloads."""
+        return [
+            {
+                "type_url": any_msg.type_url,
+                "value": base64.b64encode(any_msg.value).decode("ascii"),
+            }
+            for any_msg in anys
+            if any_msg.type_url in type_url_to_proto
+        ]
 
     @staticmethod
     def parse_header_time(ts_str: str) -> int:
@@ -347,52 +436,81 @@ class ChainClient:
 
     def get_total_supply(self) -> int:
         """Get total supply of umirage tokens via gRPC."""
-        try:
-            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
-            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
+        from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
+        from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
 
+        try:
             with grpc.insecure_channel(self.grpc_target) as channel:
                 stub = bank_query_pb2_grpc.QueryStub(channel)
                 req = bank_query_pb2.QuerySupplyOfRequest(denom="umirage")
                 resp = stub.SupplyOf(req, timeout=GRPC_TIMEOUT)
-                amt = (resp.amount.amount if resp and resp.amount else "0") or "0"
-                return int(amt)
+                amt = resp.amount.amount or "0"
+                supply = int(amt)
         except Exception as e:
-            logger.warning("Failed to query total supply: %s", e)
-            return 0
+            raise RuntimeError(f"Failed to query total supply of umirage: {e}") from e
+        logger.debug("get_total_supply supply=%d", supply)
+        return supply
 
     def get_tx_size_cost_per_byte(self) -> int:
         """Get auth param tx_size_cost_per_byte via gRPC."""
-        try:
-            from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2 as auth_query_pb2
-            from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2_grpc as auth_query_pb2_grpc
+        from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2 as auth_query_pb2
+        from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2_grpc as auth_query_pb2_grpc
 
+        try:
             with grpc.insecure_channel(self.grpc_target) as channel:
                 stub = auth_query_pb2_grpc.QueryStub(channel)
                 req = auth_query_pb2.QueryParamsRequest()
                 resp = stub.Params(req, timeout=GRPC_TIMEOUT)
-                params = getattr(resp, "params", None)
-                value = getattr(params, "tx_size_cost_per_byte", 0) if params is not None else 0
-                v = int(value or 0)
-                return v if v > 0 else 0
+                value = int(resp.params.tx_size_cost_per_byte)
         except Exception as e:
-            logger.warning("Failed to query tx_size_cost_per_byte: %s", e)
-            return 0
+            raise RuntimeError(f"Failed to query auth param tx_size_cost_per_byte: {e}") from e
+        logger.debug("get_tx_size_cost_per_byte value=%d", value)
+        return value
 
     def get_balance(self, address: str) -> int:
         """Get umirage balance for a specific address via gRPC."""
         if not address:
-            return 0
-        try:
-            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
-            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
+            raise RuntimeError("get_balance requires a non-empty address")
 
+        from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
+        from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
+
+        try:
             with grpc.insecure_channel(self.grpc_target) as channel:
                 stub = bank_query_pb2_grpc.QueryStub(channel)
                 req = bank_query_pb2.QueryBalanceRequest(address=str(address), denom="umirage")
                 resp = stub.Balance(req, timeout=GRPC_TIMEOUT)
-                amt = (resp.balance.amount if resp and resp.balance else "0") or "0"
-                return int(amt)
+                balance = int(resp.balance.amount or "0")
         except Exception as e:
-            logger.warning("Failed to query balance for %s: %s", address, e)
-            return 0
+            raise RuntimeError(f"Failed to query umirage balance for {address}: {e}") from e
+        logger.debug("get_balance address=%s balance=%d", address, balance)
+        return balance
+
+    def get_balances_batch(self, addresses: list[str], timeout: float | None = None) -> dict[str, int]:
+        """
+        Get umirage balances for many addresses over a single gRPC channel.
+        Any failure raises — callers must never persist a zero they did not read.
+        """
+        from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
+        from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
+
+        per_call_timeout = GRPC_TIMEOUT if timeout is None else float(timeout)
+        balances: dict[str, int] = {}
+
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            stub = bank_query_pb2_grpc.QueryStub(channel)
+            for address in addresses:
+                if not address:
+                    raise RuntimeError("get_balances_batch received an empty address")
+                key = str(address).lower()
+                if key in balances:
+                    continue
+                try:
+                    req = bank_query_pb2.QueryBalanceRequest(address=str(address), denom="umirage")
+                    resp = stub.Balance(req, timeout=per_call_timeout)
+                    balances[key] = int(resp.balance.amount or "0")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to query umirage balance for {address}: {e}") from e
+
+        logger.debug("get_balances_batch requested=%d resolved=%d", len(addresses), len(balances))
+        return balances

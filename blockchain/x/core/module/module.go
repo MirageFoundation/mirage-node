@@ -1173,21 +1173,36 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 	}
 
 	var profiles []*types.QueryProfileResponse
-	var skippedCorrupt int
 	for _, data := range profilesData {
 		var core types.ProfileCore
 		if err := json.Unmarshal(data, &core); err != nil {
-			skippedCorrupt++
-			continue // Skip invalid profiles
+			return nil, fmt.Errorf("GetProfiles: corrupt profile JSON: %w", err)
 		}
 
-		// Load all lists via per-entry iterators
-		agents, _ := am.k.ListEnabledAgentsOrdered(sdkCtx, core.Owner)
-		users, _ := am.k.ListFollowedUsers(sdkCtx, core.Owner)
-		topics, _ := am.k.ListFollowedTopics(sdkCtx, core.Owner)
-		blockedUsers, _ := am.k.ListBlockedUsers(sdkCtx, core.Owner)
-		blockedPosts, _ := am.k.ListBlockedPosts(sdkCtx, core.Owner)
-		blockedTopics, _ := am.k.ListBlockedTopics(sdkCtx, core.Owner)
+		agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, core.Owner)
+		if err != nil {
+			return nil, fmt.Errorf("GetProfiles: enabled_agents for %s: %w", core.Owner, err)
+		}
+		users, err := am.k.ListFollowedUsers(sdkCtx, core.Owner)
+		if err != nil {
+			return nil, fmt.Errorf("GetProfiles: followed_users for %s: %w", core.Owner, err)
+		}
+		topics, err := am.k.ListFollowedTopics(sdkCtx, core.Owner)
+		if err != nil {
+			return nil, fmt.Errorf("GetProfiles: followed_topics for %s: %w", core.Owner, err)
+		}
+		blockedUsers, err := am.k.ListBlockedUsers(sdkCtx, core.Owner)
+		if err != nil {
+			return nil, fmt.Errorf("GetProfiles: blocked_users for %s: %w", core.Owner, err)
+		}
+		blockedPosts, err := am.k.ListBlockedPosts(sdkCtx, core.Owner)
+		if err != nil {
+			return nil, fmt.Errorf("GetProfiles: blocked_posts for %s: %w", core.Owner, err)
+		}
+		blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, core.Owner)
+		if err != nil {
+			return nil, fmt.Errorf("GetProfiles: blocked_topics for %s: %w", core.Owner, err)
+		}
 
 		profiles = append(profiles, &types.QueryProfileResponse{
 			Owner:              core.Owner,
@@ -1208,10 +1223,6 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			BlockedPosts:       blockedPosts,
 			BlockedTopics:      blockedTopics,
 		})
-	}
-
-	if skippedCorrupt > 0 {
-		sdkCtx.Logger().Error("GetProfiles: skipped corrupt profile rows", "count", skippedCorrupt)
 	}
 
 	// Build pagination response

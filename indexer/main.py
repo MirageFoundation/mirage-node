@@ -6,44 +6,69 @@ IMPORTANT: API USAGE POLICY
 - Use gRPC (port 9090) for all chain queries (governance, bank, etc.)
 - Use RPC/HTTP (port 26657) only for Tendermint-specific queries (status, block_results, websocket)
 - NEVER use REST API (port 1317) - it is not enabled and not used by the backend
+
+Correctness contract:
+- Every required write for a block plus its checkpoint happen in ONE PostgreSQL
+  transaction. A failure rolls the whole block back; the checkpoint never moves
+  past a partially applied block.
+- Optional telemetry (difficulty/supply samples, peers, head height) runs OUTSIDE
+  that transaction and is warn-only.
+- History is never silently skipped. When blocks are unreachable (pruning), the
+  gap is recorded in meta.history_gaps and meta.history_complete flips to false.
 """
+import atexit
 import base64
+import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
+import signal
 import subprocess
 import sys
-import os
-import fcntl
-import signal
-import atexit
 import time
-import logging
-from pathlib import Path
 
 # Add parent directory to path for shared imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from indexer.database import DatabaseManager
+from indexer.database import (
+    DatabaseManager,
+    format_db_target,
+    META_CHAIN_ID,
+    META_LAST_BLOCK_HASH,
+    META_LAST_HEIGHT,
+)
 from indexer.chain_client import ChainClient
 from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO
 from indexer.migrations import run_migrations
-from indexer.params import load_params as load_chain_params
+from indexer.params import load_params as load_chain_params, get_raw_params
 from indexer.settings import (
-    SEEN_TXS_MAX_SIZE,
-    SEEN_TXS_CLEANUP_BATCH,
     CATCHUP_PROGRESS_INTERVAL,
     WS_RECONNECT_DELAY,
-    HTTP_TIMEOUT_LONG,
     RPC_READY_MAX_WAIT,
     RPC_READY_RETRY_DELAY,
 )
 from shared.config import get_config
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxRaw, TxBody
-from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
 
 logger = logging.getLogger(__name__)
+
+LOCK_PATH = "/tmp/mirage-indexer.lock"
+
+# Non-checkpoint meta keys describing how trustworthy the indexed history is.
+META_CONTINUITY_STATUS = "continuity_status"
+META_HISTORY_GAPS = "history_gaps"
+META_HISTORY_COMPLETE = "history_complete"
+
+TYPE_URL_UPDATE_PARAMS = "/mirage.core.v1.MsgUpdateParams"
+
+# Telemetry sampling intervals (blocks)
+SUPPLY_SAMPLE_INTERVAL = 200
+HEAD_HEIGHT_SAMPLE_INTERVAL = 10
+PEERS_SAMPLE_INTERVAL = 20
+BLOCK_PRUNE_INTERVAL = 1000
+RECENT_BLOCKS_KEEP = 1000
 
 
 def _synthesize_raw_log(tx_result: dict, height: int, tx_hash: str) -> str:
@@ -116,13 +141,16 @@ class Indexer:
     """Mirage Blockchain Indexer."""
 
     def __init__(self, start_height: int | None = None):
+        # The instance lock is taken before anything else touches the database:
+        # a second process must never run migrations or write blocks concurrently.
+        self._lock_file = None
+        self._acquire_instance_lock()
+
         config = get_config()
         indexer_config = config.get_indexer_config()
 
         if not indexer_config["enabled"]:
             raise RuntimeError("Indexer disabled")
-
-        self._start_height_override = start_height
 
         jsonrpc_url = indexer_config["jsonrpc_url"]
         db_url = indexer_config["database_url"]
@@ -137,10 +165,8 @@ class Indexer:
         else:
             logger.warning("Validator address not resolved; node balance tracking disabled")
 
-        # Run pending migrations before processing begins
-        migration_count = run_migrations(self.db, self.chain)
-        if migration_count > 0:
-            logger.info(f"Completed {migration_count} migrations")
+        # Migrations run in start() AFTER continuity verification so a diverged
+        # or wrong-network database cannot be rewritten before we refuse to index.
 
         self.processor = MessageProcessor(
             self.db,
@@ -149,29 +175,20 @@ class Indexer:
             self.chain.iso_timestamp,
         )
 
-        self.running = False
-        self.ws = None
-        self._seen_txs: set[str] = set()
-        self._proposal_cache: dict[int, list[dict]] = {}
-        self._skipped_proposals: set[int] = set()  # Track proposals we've already logged as skipped
-        self._catch_up_mode: bool = False
         self._last_height = self.db.get_last_height()
 
-        self._lock_file = None
-        try:
-            # Use /tmp for lock file - ephemeral, cleared on container restart
-            lock_path = "/tmp/mirage-indexer.lock"
-            self._lock_file = open(lock_path, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self._lock_file.write(str(os.getpid()))
-            self._lock_file.flush()
-            self._lock_path = lock_path
-            atexit.register(self._release_lock)
-            signal.signal(signal.SIGINT, self._handle_signal)
-            signal.signal(signal.SIGTERM, self._handle_signal)
-        except BlockingIOError:
-            logger.error("Another indexer instance already running for this node; exiting.")
-            sys.exit(0)
+        # Replay into a populated database would double-apply cumulative rows
+        # (topic stats, preferences, vote deltas). Only allowed on an empty DB.
+        self._start_height_override = None if start_height is None else int(start_height)
+        if self._start_height_override is not None and self._last_height > 0:
+            raise RuntimeError(
+                f"--height {self._start_height_override} rejected: database already holds checkpoint height "
+                f"{self._last_height}. Replay is only supported against an empty indexer database."
+            )
+
+        self.running = False
+        self.ws = None
+        self._catch_up_mode: bool = False
 
         try:
             import yaml as _yaml  # type: ignore
@@ -180,44 +197,68 @@ class Indexer:
         except Exception:
             self._yaml = None
 
-    def _release_lock(self):
+    def _acquire_instance_lock(self):
+        """Take the exclusive single-instance lock or exit non-zero."""
+        self._lock_path = LOCK_PATH
+        self._lock_file = open(LOCK_PATH, "a+")
         try:
-            if getattr(self, "_lock_file", None):
-                try:
-                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                except Exception:
-                    pass
-                try:
-                    self._lock_file.close()
-                except Exception:
-                    pass
-            if getattr(self, "_lock_path", None) and os.path.exists(self._lock_path):
-                try:
-                    os.remove(self._lock_path)
-                except Exception:
-                    pass
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = ""
+            try:
+                self._lock_file.seek(0)
+                holder = self._lock_file.read().strip()
+            except Exception:
+                pass
+            try:
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+            logger.error(
+                "Another indexer instance already holds %s (pid=%s); refusing to start.",
+                LOCK_PATH,
+                holder or "unknown",
+            )
+            sys.exit(1)
+
+        self._lock_file.seek(0)
+        self._lock_file.truncate()
+        self._lock_file.write(str(os.getpid()))
+        self._lock_file.flush()
+        atexit.register(self._release_lock)
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+        logger.debug("instance_lock.acquired path=%s pid=%s", LOCK_PATH, os.getpid())
+
+    def _release_lock(self):
+        # The lock file itself is left in place: unlinking it would drop the
+        # lock a newly started instance may already hold.
+        lock_file = getattr(self, "_lock_file", None)
+        if lock_file is None:
+            return
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
+        try:
+            lock_file.close()
+        except Exception:
+            pass
+        self._lock_file = None
+        logger.debug("instance_lock.released path=%s", getattr(self, "_lock_path", LOCK_PATH))
 
     def _handle_signal(self, signum, _frame):
         logger.info("Signal %s received; cleaning up lock and exiting.", signum)
-        try:
-            self.running = False
-        except Exception:
-            pass
-        try:
-            if getattr(self, "ws", None) is not None:
-                try:
-                    self.ws.close()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        self.running = False
+        ws = getattr(self, "ws", None)
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
         self._release_lock()
-        try:
-            sys.exit(0)
-        except SystemExit:
-            raise
+        sys.exit(0)
 
     def _log_yaml(self, title: str, data: dict):
         try:
@@ -234,177 +275,115 @@ class Indexer:
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Block processing
+    # ------------------------------------------------------------------
+
     def _process_block(self, height: int):
-        """Decode transactions in a block and process core messages."""
-        try:
-            blk = self.chain.get_block(height)
-            result = blk.get("result")
-            if not result:
-                raise RuntimeError(f"Missing 'result' in block response at height {height}")
-            block = result.get("block")
-            if not block:
-                raise RuntimeError(f"Missing 'block' in result at height {height}")
-            block_hash = (result.get("block_id") or {}).get("hash", "") or ""
-            header = block.get("header")
-            if not header:
-                raise RuntimeError(f"Missing 'header' in block at height {height}")
-            block_data = block.get("data", {})
-            txs = block_data.get("txs", [])
-            ts = self.chain.parse_header_time(str(header.get("time", "")))
+        """Project one block into PostgreSQL atomically, then advance the checkpoint."""
+        blk = self.chain.get_block(height)
+        result = blk.get("result")
+        if not result:
+            raise RuntimeError(f"Missing 'result' in block response at height {height}")
+        block = result.get("block")
+        if not block:
+            raise RuntimeError(f"Missing 'block' in result at height {height}")
+        header = block.get("header")
+        if not header:
+            raise RuntimeError(f"Missing 'header' in block at height {height}")
+        block_hash = str((result.get("block_id") or {}).get("hash", "") or "")
+        if not block_hash:
+            raise RuntimeError(f"Missing block_id.hash at height {height}")
+        chain_id = str(header.get("chain_id", "") or "")
+        if not chain_id:
+            raise RuntimeError(f"Missing header.chain_id at height {height}")
+        txs = (block.get("data") or {}).get("txs") or []
+        ts = self.chain.parse_header_time(str(header.get("time", "")))
 
-            results = self.chain.get_block_results(height)
-            result_obj = results.get("result")
-            if not result_obj:
-                raise RuntimeError(f"Missing 'result' in block_results at height {height}")
-            txs_results = result_obj.get("txs_results", [])
+        results = self.chain.get_block_results_matching(height, len(txs))
+        result_obj = results.get("result")
+        if not result_obj:
+            raise RuntimeError(f"Missing 'result' in block_results at height {height}")
+        txs_results = result_obj.get("txs_results") or []
+        if len(txs_results) != len(txs):
+            raise RuntimeError(
+                f"block/result cardinality mismatch at height {height}: txs={len(txs)} txs_results={len(txs_results)}"
+            )
 
+        now = int(time.time())
+        logger.debug("block.begin height=%s txs=%d chain_id=%s hash=%s", height, len(txs), chain_id, block_hash)
+
+        # Prefetch required balance reads BEFORE opening the block transaction so
+        # a slow/failed gRPC call cannot hold row locks against other DB users.
+        touched = self._collect_touched_addresses(result_obj)
+        balances = self.chain.get_balances_batch(sorted(touched)) if touched else None
+
+        with self.db.transaction(label="block", height=height):
             for idx, tx_b64 in enumerate(txs):
                 try:
-                    raw_tx_bytes = base64.b64decode(tx_b64)
-                    tx_hash = hashlib.sha256(raw_tx_bytes).hexdigest().lower()
-                    if tx_hash in self._seen_txs:
-                        continue
-
-                    tx_raw = TxRaw()
-                    tx_raw.ParseFromString(raw_tx_bytes)
-                    tx_body = TxBody()
-                    tx_body.ParseFromString(tx_raw.body_bytes)
-
-                    if idx < len(txs_results):
-                        code = int(txs_results[idx].get("code", 0))
-                        if code != 0:
-                            from indexer.message_processor import type_url_to_tx_type
-
-                            tx_type = "unknown"
-                            for any_msg in tx_body.messages:
-                                if any_msg.type_url.startswith("/mirage.core.v1."):
-                                    tx_type = type_url_to_tx_type(any_msg.type_url)
-                                    break
-                            raw_log = str(txs_results[idx].get("log", "") or "")
-                            self.db.upsert_tx_index(
-                                tx_hash,
-                                tx_type,
-                                code,
-                                raw_log,
-                                height,
-                                ts,
-                            )
-                            logger.debug(
-                                "Recorded failed tx (height=%s code=%s tx_type=%s txhash=%s)",
-                                height,
-                                code,
-                                tx_type,
-                                tx_hash,
-                            )
-                            continue
-
-                    # Successful tx: record once in tx_index using the first core message type.
-                    from indexer.message_processor import type_url_to_tx_type
-
-                    core_types = [
-                        any_msg.type_url
-                        for any_msg in tx_body.messages
-                        if any_msg.type_url.startswith("/mirage.core.v1.")
-                    ]
-                    if core_types:
-                        if len(core_types) == 1:
-                            tx_type = type_url_to_tx_type(core_types[0])
-                        else:
-                            tx_type = "multi"
-                        raw_entry = None
-                        if idx < len(txs_results):
-                            raw_entry = txs_results[idx].get("log")
-                        raw_log = "" if raw_entry is None else str(raw_entry)
-                        if tx_type in ("send_tokens", "multi"):
-                            if idx >= len(txs_results):
-                                logger.error(
-                                    "tx_index.raw_log_missing no_tx_result height=%s txhash=%s type=%s",
-                                    height,
-                                    tx_hash,
-                                    tx_type,
-                                )
-                                raise RuntimeError(
-                                    f"tx_index raw_log missing (no tx_result) height={height} txhash={tx_hash}"
-                                )
-                            if raw_log == "":
-                                raw_log = _synthesize_raw_log(txs_results[idx], height, tx_hash)
-                        self.db.upsert_tx_index(
-                            tx_hash,
-                            tx_type,
-                            0,
-                            raw_log,
-                            height,
-                            ts,
-                        )
-
-                    pending_proposals: list[list[dict]] = []
-                    for any_msg in tx_body.messages:
-                        if any_msg.type_url in (
-                            "/cosmos.gov.v1beta1.MsgSubmitProposal",
-                            "/cosmos.gov.v1.MsgSubmitProposal",
-                        ):
-                            parsed = MsgSubmitProposal()
-                            parsed.ParseFromString(any_msg.value)
-                            payloads: list[dict] = []
-                            inner_msgs = MessageProcessor.extract_inner_messages(parsed)
-                            for inner in inner_msgs:
-                                if not inner.type_url:
-                                    raise RuntimeError("Inner message missing type_url in proposal")
-                                if not inner.value:
-                                    raise RuntimeError("Inner message missing value in proposal")
-                                payloads.append(
-                                    {
-                                        "type_url": inner.type_url,
-                                        "value": base64.b64encode(inner.value).decode("ascii"),
-                                    }
-                                )
-                            if payloads:
-                                pending_proposals.append(payloads)
-                            continue
-
-                        if any_msg.type_url.startswith("/cosmos.gov."):
-                            continue
-
-                        if not any_msg.type_url.startswith("/mirage.core.v1."):
-                            continue
-
-                        self.processor.process_core_message(any_msg.type_url, any_msg.value, tx_hash, ts, height)
-
-                    tx_events = txs_results[idx].get("events", []) if idx < len(txs_results) else []
-
-                    if pending_proposals:
-                        proposal_ids_set: set[int] = set()
-                        for ev_type, attrs in MessageProcessor.decode_events(tx_events):
-                            pid = MessageProcessor.extract_proposal_id(attrs)
-                            if pid is not None:
-                                proposal_ids_set.add(pid)
-                        for proposal_id in sorted(proposal_ids_set):
-                            if not pending_proposals:
-                                break
-                            payloads = pending_proposals.pop(0)
-                            self._proposal_cache[int(proposal_id)] = payloads
-
-                    self._seen_txs.add(tx_hash)
-                    if len(self._seen_txs) > SEEN_TXS_MAX_SIZE:
-                        for _ in range(SEEN_TXS_CLEANUP_BATCH):
-                            try:
-                                self._seen_txs.pop()
-                            except KeyError:
-                                break
-
+                    self._process_tx(idx, tx_b64, txs_results[idx], height, ts)
                 except Exception as tx_err:
-                    raise RuntimeError(f"Error processing tx at height {height}: {tx_err}") from tx_err
+                    raise RuntimeError(f"Error processing tx {idx} at height {height}: {tx_err}") from tx_err
 
             self._process_governance_events(result_obj, ts, height)
             self._process_subscription_events(result_obj, ts, height)
 
-            # Per-block state updates: balances, recent blocks, indexer state
-            try:
-                self._update_per_block_state(height, header, result_obj, ts, block_hash)
-            except Exception as state_err:
-                logger.warning("Per-block state update failed at height %s: %s", height, state_err)
-        except Exception as e:
-            raise RuntimeError(f"Error processing block {height}: {e}") from e
+            self.db.upsert_recent_block(height, block_hash, ts)
+            if balances is not None:
+                self.db.upsert_balances_batch(sorted(balances.items()), now)
+                logger.debug("balances.refreshed height=%s addresses=%d", height, len(balances))
+            self.db.set_indexer_state("last_processed_time", str(now), now)
+            self.db.set_checkpoint(height, block_hash, chain_id)
+
+        self._last_height = height
+        logger.debug("block.committed height=%s", height)
+
+        self._record_optional_telemetry(height)
+
+    def _process_tx(self, idx: int, tx_b64: str, tx_result: dict, height: int, ts: int):
+        """Decode and project one transaction. Must run inside the block transaction."""
+        raw_tx_bytes = base64.b64decode(tx_b64)
+        tx_hash = hashlib.sha256(raw_tx_bytes).hexdigest().lower()
+
+        tx_raw = TxRaw()
+        tx_raw.ParseFromString(raw_tx_bytes)
+        tx_body = TxBody()
+        tx_body.ParseFromString(tx_raw.body_bytes)
+
+        from indexer.message_processor import type_url_to_tx_type
+
+        core_types = [m.type_url for m in tx_body.messages if m.type_url.startswith("/mirage.core.v1.")]
+        code = int(tx_result.get("code", 0) or 0)
+
+        if code != 0:
+            tx_type = type_url_to_tx_type(core_types[0]) if core_types else "unknown"
+            raw_log = str(tx_result.get("log", "") or "")
+            self.db.upsert_tx_index(tx_hash, tx_type, code, raw_log, height, ts)
+            logger.debug(
+                "tx.failed height=%s code=%s tx_type=%s txhash=%s",
+                height,
+                code,
+                tx_type,
+                tx_hash,
+            )
+            return
+
+        if core_types:
+            tx_type = type_url_to_tx_type(core_types[0]) if len(core_types) == 1 else "multi"
+            raw_entry = tx_result.get("log")
+            raw_log = "" if raw_entry is None else str(raw_entry)
+            if tx_type in ("send_tokens", "multi") and raw_log == "":
+                raw_log = _synthesize_raw_log(tx_result, height, tx_hash)
+            self.db.upsert_tx_index(tx_hash, tx_type, 0, raw_log, height, ts)
+
+        for any_msg in tx_body.messages:
+            # Governance traffic is resolved from passed-proposal events, never
+            # from the submitting tx: a submitted proposal is not an applied one.
+            if any_msg.type_url.startswith("/cosmos.gov."):
+                continue
+            if not any_msg.type_url.startswith("/mirage.core.v1."):
+                continue
+            self.processor.process_core_message(any_msg.type_url, any_msg.value, tx_hash, ts, height)
 
     def _process_subscription_events(self, result_obj: dict, ts: int, height: int):
         """Process subscription expiration/renewal events from EndBlock."""
@@ -414,231 +393,402 @@ class Indexer:
 
         for event in events:
             event_type = event.get("type", "")
+            if event_type not in ("subscription_expired", "subscription_renewed"):
+                continue
+            attrs = {a["key"]: a.get("value", "") for a in event.get("attributes", [])}
+            address = attrs.get("address", "")
+            if not address:
+                raise RuntimeError(f"{event_type} event without address at height {height}")
+
             if event_type == "subscription_expired":
-                attrs = {a["key"]: a.get("value", "") for a in event.get("attributes", [])}
-                address = attrs.get("address", "")
-                if address:
-                    logger.info("Subscription expired for %s (reason: %s)", address, attrs.get("reason", "unknown"))
-                    self.processor.update_profile_level(address, 0, ts)
-            elif event_type == "subscription_renewed":
-                attrs = {a["key"]: a.get("value", "") for a in event.get("attributes", [])}
-                address = attrs.get("address", "")
-                level_str = attrs.get("level", "0")
-                new_expiry_str = attrs.get("new_expiry", "0")
-                if address:
-                    try:
-                        level = int(level_str)
-                    except ValueError:
-                        level = 0
-                    try:
-                        new_expiry = int(new_expiry_str)
-                    except ValueError:
-                        new_expiry = 0
-                    logger.info(
-                        "Subscription renewed for %s (level: %d, new_expiry: %d)",
-                        address,
-                        level,
-                        new_expiry,
-                    )
-                    self.processor.update_profile_subscription(address, level, new_expiry, ts)
+                logger.info("Subscription expired for %s (reason: %s)", address, attrs.get("reason", "unknown"))
+                self.processor.update_profile_level(address, 0, ts)
+            else:
+                level = int(attrs.get("level", "0") or 0)
+                new_expiry = int(attrs.get("new_expiry", "0") or 0)
+                logger.info(
+                    "Subscription renewed for %s (level: %d, new_expiry: %d)",
+                    address,
+                    level,
+                    new_expiry,
+                )
+                self.processor.update_profile_subscription(address, level, new_expiry, ts)
 
     def _process_governance_events(self, result_obj: dict, ts: int, height: int):
-        """Process governance events for passed proposals.
+        """Apply the messages of every proposal that passed in this block.
 
-        Resolution order: proposal cache → gRPC query.
-        No tx_search fallback — indexer="null" means tx_search is unavailable.
+        Fails closed: an unresolvable passed proposal rolls the block back rather
+        than advancing the checkpoint past a governance action that was never applied.
+        The one tolerated case is a proposal whose messages the indexer does not
+        track at all (e.g. governance-only mint/burn).
         """
-        events = result_obj.get("end_block_events") or result_obj.get("finalize_block_events")
-        if events is None:
-            events = []
+        events = result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or []
         if not events:
             return
 
         passed_ids = self.processor.extract_passed_proposals(events)
-        for proposal_id in passed_ids:
-            if proposal_id in self._skipped_proposals:
-                continue
-            try:
-                messages = self._proposal_cache.pop(proposal_id, None)
-                if not messages:
-                    try:
-                        messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
-                    except RuntimeError as grpc_err:
-                        if "no trackable messages" in str(grpc_err).lower():
-                            logger.warning(
-                                "Skipping proposal %s — governance-only messages (not tracked by indexer)",
-                                proposal_id,
-                            )
-                        else:
-                            logger.error(
-                                "Failed to resolve proposal %s via gRPC: %s",
-                                proposal_id,
-                                grpc_err,
-                            )
-                        self._skipped_proposals.add(proposal_id)
-                        continue
+        if not passed_ids:
+            return
+        logger.debug("governance.passed height=%s proposals=%s", height, passed_ids)
 
-                for entry in messages or []:
-                    type_url = entry.get("type_url")
-                    value_b64 = entry.get("value")
-                    if not type_url or not value_b64:
-                        logger.warning("Skipping invalid message entry for proposal %s", proposal_id)
-                        continue
-                    value_bytes = base64.b64decode(value_b64)
-                    self.processor.process_core_message(type_url, value_bytes, f"proposal-{proposal_id}", ts, height)
+        params_updated = False
+        for proposal_id in passed_ids:
+            try:
+                messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
+            except RuntimeError as grpc_err:
+                if "no trackable messages" in str(grpc_err).lower():
+                    logger.warning(
+                        "Proposal %s carries no indexer-tracked messages; nothing to project (height=%s)",
+                        proposal_id,
+                        height,
+                    )
+                    continue
+                raise
+
+            for entry in messages:
+                type_url = entry.get("type_url")
+                value_b64 = entry.get("value")
+                if not type_url or not value_b64:
+                    raise RuntimeError(f"Proposal {proposal_id} returned a message without type_url/value")
+                value_bytes = base64.b64decode(value_b64)
+                self.processor.process_core_message(type_url, value_bytes, f"proposal-{proposal_id}", ts, height)
+                if type_url == TYPE_URL_UPDATE_PARAMS:
+                    params_updated = True
+
+        if params_updated:
+            load_chain_params(self.chain.grpc_target, force=True)
+            self.db.set_chain_stat("chain_params", get_raw_params(), int(time.time()))
+            logger.info("Chain params reloaded after governance update at height %s", height)
+
+    @staticmethod
+    def _collect_touched_addresses(result_obj: dict) -> set[str]:
+        """Addresses whose balance may have changed in this block."""
+        all_events: list[dict] = []
+        for tx_result in result_obj.get("txs_results") or []:
+            all_events.extend(tx_result.get("events") or [])
+        all_events.extend(result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [])
+        all_events.extend(result_obj.get("begin_block_events") or [])
+
+        touched: set[str] = set()
+        for ev in all_events:
+            if ev.get("type", "") not in ("transfer", "coin_spent", "coin_received"):
+                continue
+            for attr in ev.get("attributes") or []:
+                key = attr.get("key", "")
+                val = attr.get("value", "")
+                try:
+                    key = base64.b64decode(key).decode("utf-8")
+                except Exception:
+                    pass
+                try:
+                    val = base64.b64decode(val).decode("utf-8")
+                except Exception:
+                    pass
+                if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
+                    touched.add(val.lower())
+        return touched
+
+    def _record_optional_telemetry(self, height: int):
+        """Chart/ops samples taken after the block is committed. Never fatal.
+
+        These read the CURRENT chain head, so they are only meaningful in live
+        mode where head and the just-committed height coincide.
+        """
+        now = int(time.time())
+
+        if height % BLOCK_PRUNE_INTERVAL == 0:
+            try:
+                self.db.prune_old_blocks(RECENT_BLOCKS_KEEP)
             except Exception as e:
-                logger.warning("Non-fatal governance processing error for proposal %s: %s", proposal_id, e)
+                logger.warning("Telemetry: prune_old_blocks failed at height %s: %s", height, e)
+
+        if self._catch_up_mode:
+            return
+
+        try:
+            info = self.chain.get_difficulty_info()
+            self.db.upsert_difficulty(
+                height,
+                int(info.get("current_difficulty", 0)),
+                int(info.get("pow_message_count", 0)),
+                now,
+            )
+            self.db.set_chain_stat("difficulty_info", info, now)
+        except Exception as e:
+            logger.warning("Telemetry: difficulty sample failed at height %s: %s", height, e)
+
+        if height % SUPPLY_SAMPLE_INTERVAL == 0:
+            try:
+                supply = self.chain.get_total_supply()
+                node_balance = self.chain.get_balance(self._validator_address) if self._validator_address else None
+                self.db.upsert_supply(height, supply, now, node_balance=node_balance)
+                self.db.set_chain_stat("total_supply", supply, now)
+            except Exception as e:
+                logger.warning("Telemetry: supply sample failed at height %s: %s", height, e)
+
+        if height % HEAD_HEIGHT_SAMPLE_INTERVAL == 0:
+            try:
+                self.db.set_indexer_state("chain_head_height", str(self.chain.get_current_height()), now)
+            except Exception as e:
+                logger.warning("Telemetry: chain head refresh failed at height %s: %s", height, e)
+
+        if height % PEERS_SAMPLE_INTERVAL == 0:
+            try:
+                self._sync_connected_peers()
+            except Exception as e:
+                logger.warning("Telemetry: connected peers refresh failed at height %s: %s", height, e)
+
+    # ------------------------------------------------------------------
+    # Continuity / history bookkeeping
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _merge_history_gaps(gaps: list[dict]) -> list[dict]:
+        """Normalize and merge overlapping/adjacent gap ranges.
+
+        Reasons may differ for the same span (continuity vs catch-up); overlapping
+        or adjacent ranges are coalesced and reasons are unioned.
+        """
+        normalized: list[dict] = []
+        for gap in gaps:
+            start = int(gap.get("start", 0) or 0)
+            end = int(gap.get("end", 0) or 0)
+            if start < 1 or end < start:
+                raise RuntimeError(f"invalid history gap record start={start} end={end}")
+            normalized.append({"start": start, "end": end, "reason": str(gap.get("reason", "") or "unknown")})
+
+        normalized.sort(key=lambda g: (g["start"], g["end"]))
+        merged: list[dict] = []
+        for gap in normalized:
+            if merged and gap["start"] <= merged[-1]["end"] + 1:
+                merged[-1]["end"] = max(merged[-1]["end"], gap["end"])
+                if gap["reason"] != merged[-1]["reason"]:
+                    reasons = {r for r in merged[-1]["reason"].split("|") if r} | {gap["reason"]}
+                    merged[-1]["reason"] = "|".join(sorted(reasons))
+                continue
+            merged.append(dict(gap))
+        return merged
+
+    def _record_history_gap(self, start: int, end: int, reason: str):
+        """Persist a range of blocks this indexer will never have indexed."""
+        if end < start:
+            raise RuntimeError(f"history gap end {end} precedes start {start}")
+        raw = self.db.get_meta(META_HISTORY_GAPS) or "[]"
+        try:
+            existing = json.loads(raw)
+        except Exception as e:
+            raise RuntimeError(f"meta.{META_HISTORY_GAPS} is not valid JSON: {raw!r}") from e
+        if not isinstance(existing, list):
+            raise RuntimeError(f"meta.{META_HISTORY_GAPS} is not a list: {raw!r}")
+
+        merged = self._merge_history_gaps(existing + [{"start": int(start), "end": int(end), "reason": reason}])
+        self.db.set_meta(META_HISTORY_GAPS, json.dumps(merged))
+        self.db.set_meta(META_HISTORY_COMPLETE, "false")
+        logger.warning(
+            "HISTORY GAP recorded: blocks %s-%s will never be indexed (reason=%s, total_gaps=%d)",
+            start,
+            end,
+            reason,
+            len(merged),
+        )
+
+    def _verify_chain_continuity(self):
+        """Refuse to keep indexing onto a chain that is not the one already in the DB.
+
+        Recovery preserves PostgreSQL, so a diverged/reset/wrong-network node would
+        otherwise keep serving rows from blocks that are not on the canonical chain.
+        """
+        node_chain_id = self.chain.get_chain_id()
+        stored_chain_id = self.db.get_meta(META_CHAIN_ID)
+        stored_height = self.db.get_last_height()
+        stored_hash = self.db.get_meta(META_LAST_BLOCK_HASH)
+        logger.debug(
+            "continuity.check node_chain_id=%s stored_chain_id=%s stored_height=%s stored_hash=%s",
+            node_chain_id,
+            stored_chain_id,
+            stored_height,
+            stored_hash,
+        )
+
+        if stored_height <= 0:
+            if stored_chain_id and stored_chain_id != node_chain_id:
+                raise RuntimeError(
+                    f"chain identity mismatch: database was built against chain_id {stored_chain_id!r} "
+                    f"but the node reports {node_chain_id!r}. Refusing to index."
+                )
+            self.db.set_meta(META_CONTINUITY_STATUS, "fresh")
+            logger.info("Continuity: fresh database, chain_id=%s", node_chain_id)
+            return
+
+        if not stored_chain_id:
+            raise RuntimeError(
+                f"database holds {META_LAST_HEIGHT}={stored_height} but no {META_CHAIN_ID} in meta. "
+                "Its provenance cannot be verified; restore a trusted dump or start from an empty database."
+            )
+        if stored_chain_id != node_chain_id:
+            raise RuntimeError(
+                f"chain identity mismatch at checkpoint height {stored_height}: database chain_id "
+                f"{stored_chain_id!r} vs node chain_id {node_chain_id!r}. Refusing to index."
+            )
+        if not stored_hash:
+            raise RuntimeError(
+                f"database holds {META_LAST_HEIGHT}={stored_height} but no {META_LAST_BLOCK_HASH} in meta. "
+                "Its provenance cannot be verified; restore a trusted dump or start from an empty database."
+            )
+
+        current_height = self.chain.get_current_height()
+        if stored_height > current_height:
+            raise RuntimeError(
+                f"checkpoint height {stored_height} is ahead of the node head {current_height}. "
+                "The node was rolled back or reset; the indexed rows above the head are not canonical."
+            )
+
+        earliest = self.chain.get_earliest_height()
+        if stored_height < earliest:
+            self.db.set_meta(META_CONTINUITY_STATUS, "unverified_pruned_gap")
+            self._record_history_gap(stored_height + 1, earliest - 1, "pruned_before_verification")
+            logger.warning(
+                "Continuity UNVERIFIED: checkpoint height %s is below the node's earliest retained height %s. "
+                "The overlap needed to compare block hashes was pruned; continuing with a recorded gap.",
+                stored_height,
+                earliest,
+            )
+            return
+
+        # Compare every retained recent_blocks row against the node BEFORE any
+        # startup upsert can overwrite the evidence of a divergence.
+        for row in self.db.get_recent_block_hashes(limit=500):
+            h = int(row.get("height") or 0)
+            stored_row_hash = str(row.get("hash") or "")
+            if h < earliest or h > current_height or not stored_row_hash:
+                continue
+            blk_row = self.chain.get_block(h)
+            node_row_hash = str((((blk_row or {}).get("result") or {}).get("block_id") or {}).get("hash", "") or "")
+            if not node_row_hash:
+                raise RuntimeError(f"node returned no block_id.hash for recent_blocks height {h}")
+            if node_row_hash.lower() != stored_row_hash.lower():
+                raise RuntimeError(
+                    f"BLOCK HASH MISMATCH in recent_blocks at height {h}: database has {stored_row_hash} but the node "
+                    f"has {node_row_hash}. Leaving evidence untouched; restore a trusted dump or rebuild."
+                )
+
+        blk = self.chain.get_block(stored_height)
+        node_hash = str((((blk or {}).get("result") or {}).get("block_id") or {}).get("hash", "") or "")
+        if not node_hash:
+            raise RuntimeError(f"node returned no block_id.hash for checkpoint height {stored_height}")
+        if node_hash.lower() != stored_hash.lower():
+            raise RuntimeError(
+                f"BLOCK HASH MISMATCH at checkpoint height {stored_height}: database has {stored_hash} but the node "
+                f"has {node_hash}. The indexed rows come from a diverged chain. Restore a trusted PostgreSQL dump "
+                "or rebuild from an empty database; do NOT keep indexing."
+            )
+
+        self.db.set_meta(META_CONTINUITY_STATUS, "verified")
+        logger.info(
+            "Continuity verified: chain_id=%s checkpoint height=%s hash=%s",
+            node_chain_id,
+            stored_height,
+            stored_hash,
+        )
+
+    # ------------------------------------------------------------------
+    # Catch-up and live mode
+    # ------------------------------------------------------------------
 
     def _catch_up(self):
-        """Catch up to current block height."""
+        """Replay every block from the checkpoint to the head. Gaps are recorded, never hidden."""
         logger.info("=" * 60)
         logger.info("INDEXER CATCHUP: Starting catchup process")
         logger.info("=" * 60)
 
         current_height = self.chain.get_current_height()
-        logger.info("Current chain height: %s", current_height)
+        earliest = max(1, self.chain.get_earliest_height())
+        last_height = self.db.get_last_height()
+        logger.info(
+            "Chain head=%s earliest retained=%s database checkpoint=%s",
+            current_height,
+            earliest,
+            last_height,
+        )
 
-        # Determine safe starting height considering node pruning window
-        earliest = self.chain.get_earliest_height()
-        if earliest < 1:
-            earliest = 1
         if self._start_height_override is not None:
-            requested = int(self._start_height_override)
-            start = requested if requested >= earliest else earliest
-            logger.info(
-                "Starting from height %s (override specified, clamped to earliest available %s)",
-                start,
-                earliest,
-            )
+            start = max(1, self._start_height_override)
+            gap_reason = "height_override"
+            logger.info("Starting from height %s (--height override)", start)
+        elif last_height > 0:
+            start = last_height + 1
+            gap_reason = "checkpoint_behind_pruning_window"
         else:
-            last_height = self.db.get_last_height()
-            logger.info("Database last processed height: %s", last_height)
+            start = 1
+            gap_reason = "fresh_start_pruned"
 
-            # Max lookback (default 7 days, ~100,800 blocks at 6 sec/block)
-            # Values > 7 days unlikely to work due to aggressive node pruning
-            max_lookback_days = int(os.environ.get("INDEXER_MAX_LOOKBACK_DAYS", "7") or "7")
-            blocks_per_day = 14_400  # ~6 sec/block
-            max_lookback_blocks = max_lookback_days * blocks_per_day
-            max_lookback_height = max(current_height - max_lookback_blocks, 1)
-
-            if last_height > 0:
-                # Continue from where we left off
-                start = last_height + 1
-            else:
-                # Fresh DB: start from earliest available, but no more than 7 days back
-                start = max(earliest, max_lookback_height)
-
-            # Clamp to node's pruning window
-            if start < earliest:
-                logger.info(
-                    "Adjusting start height from %s to earliest available %s due to pruning",
-                    start,
-                    earliest,
-                )
-                start = earliest
-
-            # Clamp to max lookback
-            if start < max_lookback_height:
-                logger.info(
-                    "Clamping start height from %s to %s (max %d-day lookback)",
-                    start,
-                    max_lookback_height,
-                    max_lookback_days,
-                )
-                start = max_lookback_height
-
-            logger.info("Starting from height %s", start)
+        if start < earliest:
+            self._record_history_gap(start, earliest - 1, gap_reason)
+            start = earliest
 
         end = current_height
-
-        if start <= end:
-            total_blocks = end - start + 1
-            logger.info("Catchup range: blocks %s to %s (total: %s blocks)", start, end, total_blocks)
-            logger.info("Catchup started at: %s", self.chain.iso_timestamp(int(time.time())))
-            self._catch_up_mode = True
-            catchup_start_time = time.time()
-            try:
-                for height in range(start, end + 1):
-                    self._process_block(height)
-                    self.db.set_last_height(height)
-                    self._last_height = height
-                    if height % CATCHUP_PROGRESS_INTERVAL == 0:
-                        processed = height - start + 1
-                        elapsed = time.time() - catchup_start_time
-                        rate = processed / elapsed if elapsed > 0 else 0
-                        remaining = end - height
-                        eta_seconds = remaining / rate if rate > 0 else 0
-                        logger.info(
-                            "Catchup progress: processed %s / %s blocks (%.1f blocks/sec, ~%.0f seconds remaining)",
-                            processed,
-                            total_blocks,
-                            rate,
-                            eta_seconds,
-                        )
-            finally:
-                self._catch_up_mode = False
-                catchup_end_time = time.time()
-                elapsed_total = catchup_end_time - catchup_start_time
-                logger.info("=" * 60)
-                logger.info("INDEXER CATCHUP: Completed successfully")
-                logger.info(
-                    "Processed %s blocks in %.1f seconds (%.1f blocks/sec)",
-                    total_blocks,
-                    elapsed_total,
-                    total_blocks / elapsed_total if elapsed_total > 0 else 0,
-                )
-                logger.info("Caught up to height: %s", end)
-                logger.info("=" * 60)
-        else:
+        if start > end:
             logger.info("No catchup needed: already at current height %s", current_height)
+            return current_height
 
+        total_blocks = end - start + 1
+        logger.info("Catchup range: blocks %s to %s (total: %s blocks)", start, end, total_blocks)
+        logger.info("Catchup started at: %s", self.chain.iso_timestamp(int(time.time())))
+        self._catch_up_mode = True
+        catchup_start_time = time.time()
+        try:
+            for height in range(start, end + 1):
+                self._process_block(height)
+                if height % CATCHUP_PROGRESS_INTERVAL == 0:
+                    processed = height - start + 1
+                    elapsed = time.time() - catchup_start_time
+                    rate = processed / elapsed if elapsed > 0 else 0
+                    eta_seconds = (end - height) / rate if rate > 0 else 0
+                    logger.info(
+                        "Catchup progress: processed %s / %s blocks (%.1f blocks/sec, ~%.0f seconds remaining)",
+                        processed,
+                        total_blocks,
+                        rate,
+                        eta_seconds,
+                    )
+        finally:
+            self._catch_up_mode = False
+
+        elapsed_total = time.time() - catchup_start_time
+        logger.info("=" * 60)
+        logger.info("INDEXER CATCHUP: Completed successfully")
+        logger.info(
+            "Processed %s blocks in %.1f seconds (%.1f blocks/sec)",
+            total_blocks,
+            elapsed_total,
+            total_blocks / elapsed_total if elapsed_total > 0 else 0,
+        )
+        logger.info("Caught up to height: %s", end)
+        logger.info("=" * 60)
         return current_height
 
     def on_message(self, ws, message):
-        """Handle WebSocket message."""
+        """Handle WebSocket message. Projection failure exits non-zero — never leave a stuck live loop."""
         try:
             data = json.loads(message)
-            if "result" in data and "data" in data["result"]:
-                result_data = data["result"]["data"]
-                if "value" in result_data and "block" in result_data["value"]:
-                    block_data = result_data["value"]["block"]
-                    height = int(block_data.get("header", {}).get("height", 0))
-                    if height > 0:
-                        if height <= self._last_height:
-                            return
-                        for h in range(self._last_height + 1, height + 1):
-                            self._process_block(h)
-                        self.db.set_last_height(height)
-                        self._last_height = height
-                        # Record difficulty and msg_count in live mode (accurate data)
-                        try:
-                            info = self.chain.get_difficulty_info()
-                            self.db.upsert_difficulty(
-                                height,
-                                int(info.get("current_difficulty", 0)),
-                                int(info.get("pow_message_count", 0)),
-                                int(time.time()),
-                            )
-                            self.db.set_chain_stat("difficulty_info", info, int(time.time()))
-                        except Exception as diff_err:
-                            logger.warning("Failed to record difficulty at height %s: %s", height, diff_err)
-                        # Record supply (and node balance) every 200 blocks (aligns with mint interval)
-                        if height % 200 == 0:
-                            try:
-                                supply = self.chain.get_total_supply()
-                                node_bal = None
-                                if self._validator_address:
-                                    try:
-                                        node_bal = self.chain.get_balance(self._validator_address)
-                                    except Exception:
-                                        pass
-                                if supply > 0:
-                                    self.db.upsert_supply(height, supply, int(time.time()), node_balance=node_bal)
-                                    self.db.set_chain_stat("total_supply", supply, int(time.time()))
-                            except Exception as supply_err:
-                                logger.warning("Failed to record supply at height %s: %s", height, supply_err)
+            block_data = (((data.get("result") or {}).get("data") or {}).get("value") or {}).get("block")
+            if not block_data:
+                return
+            height = int((block_data.get("header") or {}).get("height", 0) or 0)
+            if height <= 0 or height <= self._last_height:
+                return
+            # Close any gap the socket skipped; _process_block advances the checkpoint.
+            for h in range(self._last_height + 1, height + 1):
+                self._process_block(h)
         except Exception as e:
-            logger.error("Error processing message: %s", e, exc_info=True)
+            logger.error("Fatal error processing live block message: %s", e, exc_info=True)
+            self.running = False
+            try:
+                ws.close()
+            except Exception:
+                pass
+            self._release_lock()
+            sys.exit(1)
 
     def on_error(self, ws, error):
         logger.error("WebSocket error: %s", error)
@@ -685,7 +835,7 @@ class Indexer:
     def start(self):
         """Start the indexer."""
         logger.info("Starting indexer for %s", self.chain.jsonrpc_url)
-        logger.info("Database URL: %s", getattr(self.db, "database_url", "unknown"))
+        logger.info("Indexer database: %s", format_db_target(self.db.database_url))
 
         # Wait for RPC readiness before starting (internalized, no external wrapper script)
         waited = 0
@@ -699,21 +849,19 @@ class Indexer:
         logger.info("Loading chain params from %s...", self.chain.grpc_target)
         load_chain_params(self.chain.grpc_target)
 
-        # Perform KV sync for profiles once RPC is ready (ensures DB reflects on-chain KV)
-        try:
-            self._sync_profiles_from_chain()
-        except Exception as e:
-            logger.warning("KV Sync skipped (profiles): %s", e)
+        # Identity/continuity must be settled before migrations or recent-block
+        # overwrites can destroy the evidence of a divergence.
+        self._verify_chain_continuity()
 
-        # Startup resync: refresh mutable chain state (balances, supply, validators, params)
-        try:
-            self._startup_resync()
-        except Exception as e:
-            logger.warning("Startup resync failed: %s", e, exc_info=True)
+        migration_count = run_migrations(self.db, self.chain)
+        if migration_count > 0:
+            logger.info("Completed %d migrations", migration_count)
+
+        self._sync_profiles_from_chain()
+        self._startup_resync()
 
         self.running = True
-
-        current_height = self._catch_up()
+        self._catch_up()
 
         logger.info("Transitioning to live mode (WebSocket)")
         try:
@@ -722,158 +870,82 @@ class Indexer:
             pass
 
     def _startup_resync(self):
-        """Refresh mutable chain state on startup — block replay may be incomplete."""
+        """Refresh mutable chain state on startup. Required — a failure aborts startup."""
         now = int(time.time())
         logger.info("Startup resync: refreshing chain stats, params, balances...")
 
-        # 1. Chain params (store RAW gRPC dict so backend gets all fields)
-        try:
-            from indexer.params import get_raw_params
+        self.db.set_chain_stat("chain_params", get_raw_params(), now)
 
-            params_dict = get_raw_params()
-            if params_dict:
-                self.db.set_chain_stat("chain_params", params_dict, now)
-                logger.info("Startup resync: chain_params stored")
-        except Exception as e:
-            logger.warning("Startup resync: chain_params failed: %s", e)
+        supply = self.chain.get_total_supply()
+        self.db.set_chain_stat("total_supply", supply, now)
+        logger.info("Startup resync: total_supply=%d", supply)
 
-        # 2. Total supply
-        try:
-            supply = self.chain.get_total_supply()
-            if supply > 0:
-                self.db.set_chain_stat("total_supply", supply, now)
-                logger.info("Startup resync: total_supply=%d", supply)
-        except Exception as e:
-            logger.warning("Startup resync: total_supply failed: %s", e)
+        self.db.set_chain_stat("tx_size_cost_per_byte", int(self.chain.get_tx_size_cost_per_byte()), now)
 
-        # 2b. Auth params (tx_size_cost_per_byte)
-        try:
-            tx_size_ppb = int(self.chain.get_tx_size_cost_per_byte() or 0)
-            if tx_size_ppb > 0:
-                self.db.set_chain_stat("tx_size_cost_per_byte", tx_size_ppb, now)
-        except Exception as e:
-            logger.warning("Startup resync: tx_size_cost_per_byte failed: %s", e)
+        self._sync_validator_info(now)
+        self.db.set_chain_stat("difficulty_info", self.chain.get_difficulty_info(), now)
+        self._snapshot_all_balances(now)
+        self._sync_recent_blocks()
+        self._sync_connected_peers()
 
-        # 3. Validator info (moniker, staked balance)
-        try:
-            self._sync_validator_info(now)
-        except Exception as e:
-            logger.warning("Startup resync: validator_info failed: %s", e)
-
-        # 4. Difficulty snapshot
-        try:
-            diff_info = self.chain.get_difficulty_info()
-            if diff_info:
-                self.db.set_chain_stat("difficulty_info", diff_info, now)
-        except Exception as e:
-            logger.warning("Startup resync: difficulty_info failed: %s", e)
-
-        # 5. Balance snapshot for all profiles + system wallets
-        try:
-            self._snapshot_all_balances(now)
-        except Exception as e:
-            logger.warning("Startup resync: balance snapshot failed: %s", e)
-
-        # 6. Recent blocks (last 100)
-        try:
-            self._sync_recent_blocks()
-        except Exception as e:
-            logger.warning("Startup resync: recent blocks failed: %s", e)
-
-        # 6b. Connected peers
-        try:
-            self._sync_connected_peers()
-        except Exception as e:
-            logger.warning("Startup resync: connected peers failed: %s", e)
-
-        # 7. Indexer state
-        status = self.chain.get_status()
-        chain_height = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
-        self.db.set_indexer_state("chain_head_height", str(chain_height), now)
+        self.db.set_indexer_state("chain_head_height", str(self.chain.get_current_height()), now)
         logger.info("Startup resync complete")
 
     def _sync_validator_info(self, now: int):
         """Query validator info from chain and store in chain_stats."""
-        try:
-            from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
-            from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
-            import grpc as _grpc
+        from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
+        from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
+        import grpc as _grpc
 
-            with _grpc.insecure_channel(self.chain.grpc_target) as channel:
-                stub = staking_query_pb2_grpc.QueryStub(channel)
-                resp = stub.Validators(staking_query_pb2.QueryValidatorsRequest(), timeout=10)
-                validators = []
-                for v in resp.validators or []:
-                    moniker = v.description.moniker if v.description else ""
-                    tokens = str(v.tokens) if v.tokens else "0"
-                    status = int(v.status)
-                    oper_addr = v.operator_address or ""
-                    validators.append(
-                        {
-                            "moniker": moniker,
-                            "tokens": tokens,
-                            "status": status,
-                            "operator_address": oper_addr,
-                        }
-                    )
-                self.db.set_chain_stat("validators", validators, now)
-                logger.info("Startup resync: %d validators stored", len(validators))
+        with _grpc.insecure_channel(self.chain.grpc_target) as channel:
+            stub = staking_query_pb2_grpc.QueryStub(channel)
+            resp = stub.Validators(staking_query_pb2.QueryValidatorsRequest(), timeout=10)
 
-                # Store total staked across all validators
-                total_staked = sum(int(v.get("tokens") or 0) for v in validators)
-                self.db.set_chain_stat("total_staked", total_staked, now)
-        except Exception as e:
-            logger.warning("_sync_validator_info failed: %s", e)
+        validators = []
+        for v in resp.validators or []:
+            validators.append(
+                {
+                    "moniker": v.description.moniker if v.description else "",
+                    "tokens": str(v.tokens) if v.tokens else "0",
+                    "status": int(v.status),
+                    "operator_address": v.operator_address or "",
+                }
+            )
+        self.db.set_chain_stat("validators", validators, now)
+        self.db.set_chain_stat("total_staked", sum(int(v["tokens"] or 0) for v in validators), now)
+        logger.info("Startup resync: %d validators stored", len(validators))
 
     def _snapshot_all_balances(self, now: int):
         """Snapshot balances for all profile owners + system wallets."""
-        import os
-
-        owners = []
         with self.db._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT owner FROM profiles")
                 owners = [r[0] for r in cur.fetchall()]
 
-        # Add system wallets from env or hardcoded
         system_wallets = [w.strip() for w in os.environ.get("INDEXER_SYSTEM_WALLETS", "").split(",") if w.strip()]
-        all_addrs = list(set(owners + system_wallets))
+        if self._validator_address:
+            system_wallets.append(self._validator_address)
+        all_addrs = sorted({str(a).lower() for a in owners + system_wallets if a})
         logger.info("Balance snapshot: querying %d addresses...", len(all_addrs))
 
-        batch = []
-        errors = 0
-        for addr in all_addrs:
-            try:
-                bal = self.chain.get_balance(addr)
-                batch.append((addr, bal))
-            except Exception:
-                errors += 1
-                batch.append((addr, 0))
-
-        self.db.upsert_balances_batch(batch, now)
-        logger.info("Balance snapshot: upserted %d balances (%d errors)", len(batch), errors)
+        balances = self.chain.get_balances_batch(all_addrs)
+        self.db.upsert_balances_batch(sorted(balances.items()), now)
+        logger.info("Balance snapshot: upserted %d balances", len(balances))
 
     def _sync_recent_blocks(self):
         """Fetch recent blocks from RPC and store hashes."""
-        try:
-            status = self.chain.get_status()
-            latest = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
-            if latest <= 0:
-                return
-            start = max(1, latest - 99)
-            for h in range(start, latest + 1):
-                try:
-                    blk = self.chain.get_block(h)
-                    result = blk.get("result", {})
-                    block = result.get("block", {})
-                    header = block.get("header", {})
-                    block_hash = result.get("block_id", {}).get("hash", "")
-                    block_time = self.chain.parse_header_time(str(header.get("time", "")))
-                    self.db.upsert_recent_block(h, block_hash, block_time)
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.warning("_sync_recent_blocks failed: %s", e)
+        latest = self.chain.get_current_height()
+        earliest = max(1, self.chain.get_earliest_height())
+        start = max(earliest, latest - 99)
+        for h in range(start, latest + 1):
+            blk = self.chain.get_block(h)
+            result = blk.get("result") or {}
+            header = (result.get("block") or {}).get("header") or {}
+            block_hash = str((result.get("block_id") or {}).get("hash", "") or "")
+            if not block_hash:
+                raise RuntimeError(f"recent block sync: missing block_id.hash at height {h}")
+            self.db.upsert_recent_block(h, block_hash, self.chain.parse_header_time(str(header.get("time", ""))))
+        logger.debug("recent_blocks.synced start=%s end=%s", start, latest)
 
     def _sync_connected_peers(self):
         """Fetch connected peers from RPC and store in chain_stats."""
@@ -886,105 +958,31 @@ class Indexer:
             if not ip or ip in seen_ips:
                 continue
             node_info = peer.get("node_info") or {}
-            moniker = str(node_info.get("moniker", "") or "").strip()
-            peers.append({"ip": ip, "moniker": moniker})
+            peers.append({"ip": ip, "moniker": str(node_info.get("moniker", "") or "").strip()})
             seen_ips.add(ip)
         self.db.set_chain_stat("connected_peers", peers, int(time.time()))
 
-    def _update_per_block_state(self, height: int, header: dict, result_obj: dict, ts: int, block_hash: str):
-        """Per-block updates: recent blocks, balances for touched addresses, indexer state."""
-        now = int(time.time())
-
-        # Store block hash (block_id.hash)
-        try:
-            self.db.upsert_recent_block(height, block_hash, ts)
-            if height % 1000 == 0:
-                self.db.prune_old_blocks(1000)
-        except Exception:
-            pass
-
-        # Collect addresses touched by bank events from all event sources:
-        # - txs_results: regular transactions
-        # - end_block_events/finalize_block_events: governance execution (mints, burns, etc.)
-        touched = set()
-
-        all_events = []
-        for tx_result in result_obj.get("txs_results") or []:
-            all_events.extend(tx_result.get("events") or [])
-        all_events.extend(result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [])
-        all_events.extend(result_obj.get("begin_block_events") or [])
-
-        for ev in all_events:
-            ev_type = ev.get("type", "")
-            if ev_type in ("transfer", "coin_spent", "coin_received"):
-                for attr in ev.get("attributes") or []:
-                    key = attr.get("key", "")
-                    val = attr.get("value", "")
-                    try:
-                        key = base64.b64decode(key).decode("utf-8")
-                    except Exception:
-                        pass
-                    try:
-                        val = base64.b64decode(val).decode("utf-8")
-                    except Exception:
-                        pass
-                    if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
-                        touched.add(val.lower())
-
-        # Refresh balances for touched addresses (bounded)
-        MAX_BALANCE_REFRESH_PER_BLOCK = 200
-        if touched:
-            addrs = list(touched)[:MAX_BALANCE_REFRESH_PER_BLOCK]
-            batch = []
-            for addr in addrs:
-                try:
-                    bal = self.chain.get_balance(addr)
-                    batch.append((addr, bal))
-                except Exception:
-                    pass
-            if batch:
-                self.db.upsert_balances_batch(batch, now)
-
-        # Update indexer state
-        self.db.set_indexer_state("last_processed_height", str(height), now)
-        self.db.set_indexer_state("last_processed_time", str(now), now)
-
-        # Periodically update chain head height
-        if height % 10 == 0:
-            try:
-                status = self.chain.get_status()
-                chain_height = int(((status.get("result") or {}).get("sync_info") or {}).get("latest_block_height", 0))
-                if chain_height > 0:
-                    self.db.set_indexer_state("chain_head_height", str(chain_height), now)
-            except Exception:
-                pass
-
-        # Periodically refresh connected peers
-        if height % 20 == 0:
-            try:
-                self._sync_connected_peers()
-            except Exception as e:
-                logger.warning("Connected peers refresh failed at height %s: %s", height, e)
-
-        # Push summary flush handled by backend
-
     def _sync_profiles_from_chain(self):
+        """Reconcile the profile tables against chain state. Required — a failure aborts startup.
+
+        Scalars and hard-capped lists (agents, follows) are authoritative from the
+        chain. Blocked lists are merged, never cleared: the chain keeps a small
+        deque while the indexer intentionally retains the full history.
         """
-        Full KV reload for profiles from the blockchain at startup.
-        Only profiles (not list tables like enabled_agents/blocked_*).
-        """
-        logger.info("KV Sync: Fetching profiles subspace from chain...")
+        logger.info("KV Sync: Fetching profiles from chain...")
         t0 = time.time()
-        profiles = self.chain.list_profiles_subspace()
+        profiles = self.chain.list_profiles_paginated()
         t_fetch = time.time()
         logger.info("KV Sync: Fetched %d profiles in %.1fs", len(profiles), t_fetch - t0)
 
         now = int(time.time())
+        chain_owners: set[str] = set()
         batch = []
         for p in profiles:
             owner = str(p.get("owner", "")).strip().lower()
             if not owner:
-                continue
+                raise RuntimeError("chain returned a profile with an empty owner")
+            chain_owners.add(owner)
             batch.append(
                 (
                     owner,
@@ -1001,11 +999,60 @@ class Indexer:
                 )
             )
 
-        self.db.upsert_profiles_batch(batch, now)
-        t_upsert = time.time()
+        with self.db.transaction(label="profile_sync"):
+            self.db.upsert_profiles_batch(batch, now)
+
+            for p in profiles:
+                owner = str(p.get("owner", "")).strip().lower()
+                self.db.set_enabled_agents(owner, [str(a).lower() for a in p.get("enabled_agents") or []])
+                self.db.set_followed_users(owner, [str(u).lower() for u in p.get("followed_users") or []])
+                self.db.set_followed_topics(owner, [str(t) for t in p.get("followed_topics") or []])
+                for target in p.get("blocked_users") or []:
+                    self.db.block_user(owner, str(target).lower(), now)
+                for target in p.get("blocked_posts") or []:
+                    self.db.block_post(owner, str(target).lower(), now)
+                for target in p.get("blocked_topics") or []:
+                    self.db.block_topic(owner, str(target), now)
+
+            absent = self._soft_delete_absent_owners(chain_owners, now)
+
+        t_done = time.time()
         logger.info(
-            "KV Sync: Upserted %d profiles in %.1fs (total %.1fs)", len(batch), t_upsert - t_fetch, t_upsert - t0
+            "KV Sync: reconciled %d profiles in %.1fs (soft-deleted %d absent, total %.1fs)",
+            len(batch),
+            t_done - t_fetch,
+            absent,
+            t_done - t0,
         )
+
+    def _soft_delete_absent_owners(self, chain_owners: set[str], now: int) -> int:
+        """Soft-delete profiles the chain no longer has and drop their list rows."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT owner FROM profiles WHERE deleted_at IS NULL")
+                db_owners = [str(r[0]) for r in cur.fetchall()]
+
+        absent = [o for o in db_owners if o.strip().lower() not in chain_owners]
+        if not absent:
+            return 0
+
+        for owner in absent:
+            self.db.soft_delete_profile(owner, now)
+            with self.db._connect() as conn:
+                with conn.cursor() as cur:
+                    for table in (
+                        "enabled_agents",
+                        "followed_users",
+                        "followed_topics",
+                        "blocked_users",
+                        "blocked_posts",
+                        "blocked_topics",
+                    ):
+                        cur.execute(f"DELETE FROM {table} WHERE LOWER(owner) = LOWER(%s)", (owner,))
+            logger.debug("profile_sync.soft_deleted owner=%s", owner)
+
+        logger.warning("KV Sync: soft-deleted %d profile(s) absent from chain state", len(absent))
+        return len(absent)
 
 
 if __name__ == "__main__":
@@ -1016,7 +1063,7 @@ if __name__ == "__main__":
         "--height",
         type=int,
         default=None,
-        help="Start replaying from this block height (overrides database last_height)",
+        help="Replay from this block height. Only allowed against an empty indexer database.",
     )
     args = parser.parse_args()
 

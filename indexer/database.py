@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
+import time
+from contextlib import contextmanager
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 import psycopg
 
@@ -11,6 +15,26 @@ logger = logging.getLogger(__name__)
 
 INDEXER_LIST_CAP = 100_000
 TX_INDEX_CAP = 5000
+
+# Meta keys forming the atomic block checkpoint.
+META_LAST_HEIGHT = "last_height"
+META_LAST_BLOCK_HASH = "last_block_hash"
+META_CHAIN_ID = "chain_id"
+
+# Set for the duration of DatabaseManager.transaction(); every _connect() inside
+# the same context joins that connection instead of opening an autocommit one.
+_active_conn: contextvars.ContextVar[psycopg.Connection | None] = contextvars.ContextVar(
+    "indexer_active_conn", default=None
+)
+
+
+def format_db_target(url: str) -> str:
+    """Return host:port/database for logging; never credentials."""
+    parsed = urlparse(url)
+    if not parsed.hostname or not parsed.path or parsed.path == "/":
+        raise RuntimeError("database_url is not parseable into host/port/database")
+    port = parsed.port or 5432
+    return f"{parsed.hostname}:{port}{parsed.path}"
 
 
 class DatabaseManager:
@@ -28,9 +52,50 @@ class DatabaseManager:
         self.database_url = db_url
         self._init_db()
 
-    def _connect(self) -> psycopg.Connection:
-        """Create a new PostgreSQL connection with autocommit enabled."""
-        return psycopg.connect(self.database_url, autocommit=True)
+    @contextmanager
+    def _connect(self):
+        """Yield the active block transaction connection, or a short-lived autocommit connection."""
+        active = _active_conn.get()
+        if active is not None:
+            yield active
+            return
+        conn = psycopg.connect(self.database_url, autocommit=True)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self, label: str = "block", height: int | None = None):
+        """Run a unit of work in one PostgreSQL transaction. Nesting is rejected."""
+        if _active_conn.get() is not None:
+            raise RuntimeError(f"nested transaction rejected label={label} height={height}")
+        conn = psycopg.connect(self.database_url, autocommit=False)
+        token = _active_conn.set(conn)
+        t0 = time.time()
+        logger.debug("db.transaction.begin label=%s height=%s", label, height)
+        try:
+            yield conn
+            conn.commit()
+            logger.debug(
+                "db.transaction.commit label=%s height=%s elapsed_ms=%.1f",
+                label,
+                height,
+                (time.time() - t0) * 1000,
+            )
+        except Exception:
+            conn.rollback()
+            logger.error(
+                "db.transaction.rollback label=%s height=%s elapsed_ms=%.1f",
+                label,
+                height,
+                (time.time() - t0) * 1000,
+                exc_info=True,
+            )
+            raise
+        finally:
+            _active_conn.reset(token)
+            conn.close()
 
     def _init_db(self) -> None:
         """Initialize PostgreSQL schema (idempotent)."""
@@ -535,21 +600,6 @@ class DatabaseManager:
 
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS pending_txs (
-                        id BIGSERIAL PRIMARY KEY,
-                        tx_bytes BYTEA NOT NULL,
-                        tx_hash TEXT NOT NULL DEFAULT '',
-                        status TEXT NOT NULL DEFAULT 'pending',
-                        created_at BIGINT NOT NULL DEFAULT 0,
-                        broadcast_at BIGINT,
-                        error_log TEXT
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_pending_txs_status ON pending_txs(status)")
-
-                cur.execute(
-                    """
                     CREATE TABLE IF NOT EXISTS indexer_state (
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL DEFAULT '',
@@ -681,30 +731,66 @@ class DatabaseManager:
 
                 # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
-    def get_last_height(self) -> int:
-        """Get last processed height from meta table."""
+    def get_meta(self, key: str) -> str | None:
+        """Read a meta value. Returns None when the key is absent."""
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT value FROM meta WHERE key='last_height'")
+                cur.execute("SELECT value FROM meta WHERE key = %s", (key,))
                 row = cur.fetchone()
-                if not row or row[0] is None:
-                    return 0
-                try:
-                    return int(row[0])
-                except Exception:
-                    return 0
+                return row[0] if row else None
 
-    def set_last_height(self, height: int) -> None:
-        """Persist last processed height to meta table."""
+    def set_meta(self, key: str, value: str) -> None:
+        """Write a meta value."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO meta(key, value) VALUES('last_height', %s)
+                    INSERT INTO meta(key, value) VALUES(%s, %s)
                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
                     """,
-                    (str(int(height)),),
+                    (key, str(value)),
                 )
+
+    def set_checkpoint(self, height: int, block_hash: str, chain_id: str) -> None:
+        """Atomically set last_height, last_block_hash, chain_id in meta (must be inside transaction)."""
+        if _active_conn.get() is None:
+            raise RuntimeError(f"set_checkpoint must run inside a transaction height={height}")
+        if not block_hash or not chain_id:
+            raise RuntimeError(f"set_checkpoint requires block_hash and chain_id height={height}")
+        rows = [
+            (META_LAST_HEIGHT, str(int(height))),
+            (META_LAST_BLOCK_HASH, str(block_hash)),
+            (META_CHAIN_ID, str(chain_id)),
+        ]
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO meta(key, value) VALUES(%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    rows,
+                )
+        logger.debug(
+            "db.checkpoint.set height=%s block_hash=%s chain_id=%s",
+            height,
+            block_hash,
+            chain_id,
+        )
+
+    def get_last_height(self) -> int:
+        """Get last processed height from meta table."""
+        value = self.get_meta(META_LAST_HEIGHT)
+        if value is None:
+            return 0
+        return int(value)
+
+    def set_last_height(self, height: int) -> None:
+        """Removed as a public height cursor. Use set_checkpoint inside a block transaction."""
+        raise RuntimeError(
+            f"set_last_height({height}) is forbidden; write meta.last_height only via set_checkpoint "
+            "inside a block transaction so chain_id and block hash stay atomic with the height"
+        )
 
     def get_post(self, txhash: str):
         """Get post by txhash. Returns (topic, title, content, target, paid, thumbnail_url, created_at, media)."""
@@ -837,8 +923,8 @@ class DatabaseManager:
                 qs = parse_qs(parsed.query)
                 w = int(qs["w"][0]) if "w" in qs else 0
                 h = int(qs["h"][0]) if "h" in qs else 0
-                entry = Database._sanitize_wh(w, h)
-            except Exception:
+                entry = DatabaseManager._sanitize_wh(w, h)
+            except (TypeError, ValueError, KeyError, IndexError):
                 pass
             meta.append(entry)
         return meta
@@ -1102,7 +1188,12 @@ class DatabaseManager:
         return dominant_tag, dominant_ratio
 
     def update_topic_content_stats(self, topic: str, tag: str) -> None:
-        """Increment per-topic content stats based on a new root post tag."""
+        """Increment per-topic content stats based on a new root post tag.
+
+        Counters here are cumulative and have no per-post guard, so callers MUST invoke
+        this only for a root post that is genuinely new to the index. Calling it on an
+        edit or a replay double-counts the post.
+        """
         topic_norm = str(topic or "").strip().lower()
         if not topic_norm:
             return
@@ -1237,20 +1328,6 @@ class DatabaseManager:
                 cur.execute(
                     "UPDATE posts SET thumbnail_url = %s WHERE LOWER(txhash) = LOWER(%s)",
                     (thumbnail_url, txhash),
-                )
-
-    def update_post_media_meta(self, txhash: str, meta: list[dict]) -> None:
-        """Update media_meta JSON for a post (only if it contains real data)."""
-        import json as _json
-
-        sanitized = [self._sanitize_wh(m.get("w", 0), m.get("h", 0)) if m else {} for m in (meta or [])]
-        if not any(sanitized):
-            return
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE posts SET media_meta = %s WHERE LOWER(txhash) = LOWER(%s)",
-                    (_json.dumps(sanitized), txhash),
                 )
 
     def upsert_auto_vote(
@@ -1487,7 +1564,7 @@ class DatabaseManager:
         self,
         owner: str,
         topic: str,
-        direction: int,
+        net_votes_delta: int,
         root_post_id: str,
         is_new_vote: bool = True,
         post_increment: int = 0,
@@ -1497,7 +1574,9 @@ class DatabaseManager:
 
         vote_count: Only incremented for NEW votes (first vote on a target), not re-votes.
                     This prevents gaming by toggling votes on the same post.
-        score: Updated by direction for every vote (tracks overall sentiment).
+        net_votes: Shifted by net_votes_delta, which the caller MUST compute as
+                   (new_direction - previous_direction) so re-votes and cleared votes
+                   reverse their prior contribution. A repeated identical vote is delta 0.
         unique_root_posts: Incremented if this is a new root post thread for this user.
         post_count: Incremented when post_increment > 0 (for new posts/comments).
         """
@@ -1531,11 +1610,11 @@ class DatabaseManager:
                         owner_norm,
                         topic_norm,
                         vote_increment,
-                        direction,
+                        net_votes_delta,
                         root_increment,
                         post_increment,
                         vote_increment,
-                        direction,
+                        net_votes_delta,
                         root_increment,
                         post_increment,
                     ),
@@ -1607,8 +1686,7 @@ class DatabaseManager:
                     ON CONFLICT(owner) DO UPDATE SET
                       username=EXCLUDED.username,
                       level=EXCLUDED.level,
-                      updated_at=EXCLUDED.updated_at,
-                      deleted_at=NULL
+                      updated_at=EXCLUDED.updated_at
                     """,
                     (owner, username, int(level), int(updated_at), int(updated_at)),
                 )
@@ -1714,8 +1792,7 @@ class DatabaseManager:
                       banner=EXCLUDED.banner,
                       flair=EXCLUDED.flair,
                       updated_at=EXCLUDED.updated_at,
-                      reserve_funds=EXCLUDED.reserve_funds,
-                      deleted_at=NULL
+                      reserve_funds=EXCLUDED.reserve_funds
                     """,
                     (
                         owner,
@@ -1782,8 +1859,7 @@ class DatabaseManager:
                       banner=EXCLUDED.banner,
                       flair=EXCLUDED.flair,
                       updated_at=EXCLUDED.updated_at,
-                      reserve_funds=EXCLUDED.reserve_funds,
-                      deleted_at=NULL
+                      reserve_funds=EXCLUDED.reserve_funds
                     """,
                     rows,
                 )
@@ -2323,41 +2399,6 @@ class DatabaseManager:
                     (limit,),
                 )
                 return [{"height": r[0], "hash": r[1], "block_time": r[2]} for r in cur.fetchall()]
-
-    # ========== Pending Txs Methods ==========
-
-    def insert_pending_tx(self, tx_bytes: bytes, tx_hash: str, created_at: int) -> int:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO pending_txs(tx_bytes, tx_hash, status, created_at)
-                    VALUES(%s, %s, 'pending', %s)
-                    RETURNING id
-                    """,
-                    (tx_bytes, tx_hash, int(created_at)),
-                )
-                row = cur.fetchone()
-                return int(row[0]) if row else 0
-
-    def get_pending_txs(self, limit: int = 50) -> list[dict]:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, tx_bytes, tx_hash FROM pending_txs WHERE status = 'pending' ORDER BY id LIMIT %s",
-                    (limit,),
-                )
-                return [{"id": r[0], "tx_bytes": bytes(r[1]), "tx_hash": r[2]} for r in cur.fetchall()]
-
-    def update_pending_tx_status(self, tx_id: int, status: str, error_log: str | None = None) -> None:
-        import time as _time
-
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE pending_txs SET status = %s, broadcast_at = %s, error_log = %s WHERE id = %s",
-                    (status, int(_time.time()), error_log, tx_id),
-                )
 
     # ========== Indexer State Methods ==========
 

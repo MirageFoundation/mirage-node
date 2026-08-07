@@ -63,27 +63,35 @@ Blockchain (KV Store)          →      Indexer      →      PostgreSQL (Relati
                                                            └────────────────────────┘
 ```
 
-### Eventual Consistency Model
+### Consistency Model
 
-The indexer operates on an eventual consistency model:
+The indexer operates on an eventual consistency model, bounded by an atomic per-block commit:
 
-- **Blockchain is authoritative:** If the indexer database is lost, it can be rebuilt from the chain
-- **Indexer may lag:** During catch-up or network issues, the database trails the chain
-- **Idempotent processing:** Re-processing a block produces identical results (safe for restarts)
-- **Best-effort enrichment:** Some operations (thumbnail discovery, chain queries) may fail without blocking indexing
+- **Blockchain is authoritative for current state, not for history:** the chain is pruned, and the indexer deliberately retains more than the chain does (blocked lists keep up to `INDEXER_LIST_CAP` = 100,000 entries per user while the chain keeps a small deque). PostgreSQL is therefore a **long-history artifact, not a disposable cache** — it cannot be fully rebuilt from a pruned chain.
+- **Indexer may lag:** during catch-up or network issues, the database trails the chain.
+- **Atomic per-block projection:** every required write for a block plus its checkpoint (`meta.last_height`, `meta.last_block_hash`, `meta.chain_id`) commit in **one** PostgreSQL transaction. A failure rolls the whole block back and the checkpoint never moves past a partially applied block.
+- **Replay is not idempotent against a populated database:** cumulative rows (topic stats, `user_topic_stats`, preferences) would be double-applied. `--height` is rejected outright when the database already holds a checkpoint; see [Replay and `--height`](#replay-and---height).
+- **Required vs. optional:** required projection writes fail the block. Optional telemetry (difficulty/supply samples, peers, observed chain head) runs *outside* the block transaction and is warn-only.
+- **No remote enrichment:** thumbnail derivation is deterministic and offline. The indexer issues no outbound requests on behalf of post content.
+
+### History Completeness
+
+History is never silently skipped. When blocks between the checkpoint and the head are unreachable (node pruning, an override start height), the range is recorded in `meta.history_gaps` and `meta.history_complete` flips to `false`. Both are exposed through the backend's indexer health payload (`get_indexer_health()` in `web/backend/chain.py`), together with `meta.continuity_status`.
+
+This is an **accepted, guard-railed** behavior rather than a hard stop: indexing auto-continues from the earliest retained height so a node that was offline past the pruning window still comes back, but it can no longer claim complete history. Recovering the missing range requires restoring a PostgreSQL dump that covers it.
 
 ### Single-Instance Execution
 
 The indexer enforces single-instance execution per node using a file lock (`/tmp/mirage-indexer.lock`). This prevents race conditions from duplicate indexers processing the same chain data:
 
 ```python
-# File lock ensures only one indexer runs per node
-lock_path = "/tmp/mirage-indexer.lock"
-self._lock_file = open(lock_path, "w")
+# File lock ensures only one indexer runs per node; taken before anything
+# touches the database, so a second process cannot run migrations concurrently.
+self._lock_file = open(LOCK_PATH, "a+")
 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 ```
 
-**Rationale:** Multiple indexers would cause duplicate writes, inconsistent vote counting, and database corruption. The lock is placed in `/tmp` so it clears automatically on container restart.
+**Rationale:** Multiple indexers would cause duplicate writes, inconsistent vote counting, and database corruption. The lock is placed in `/tmp` so it clears automatically on container restart. Failing to take the lock exits **non-zero** with the holder PID, so a supervisor cannot mistake it for a successful start. Migrations additionally serialize on a PostgreSQL advisory lock, which covers multiple hosts sharing one database.
 
 ---
 
@@ -99,27 +107,31 @@ The indexer operates in two distinct phases:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  1. Wait for RPC readiness (poll until node responds)                       │
 │  2. Load chain params (tier configs, limits, etc.)                          │
-│  3. KV Sync: Reload all profiles from chain state                           │
-│  4. Catch-up: Process blocks from last_height to current_height             │
-│  5. Transition to live mode (WebSocket subscription)                        │
+│  3. Continuity check: chain_id + checkpoint block hash must match the node  │
+│  4. KV Sync: Reload all profiles from chain state                           │
+│  5. Startup resync: supply, auth params, validators, balances, peers        │
+│  6. Catch-up: Process blocks from last_height to current_height             │
+│  7. Transition to live mode (WebSocket subscription)                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Step 3 runs **before** anything overwrites recent-block rows, because those rows are the evidence a mismatch is detected with. See [Continuity Verification](#continuity-verification).
+
 **Phase 1: Historical Catch-Up**
 
-During catch-up, the indexer processes blocks sequentially via JSON-RPC:
+During catch-up, the indexer processes blocks sequentially via JSON-RPC. `_process_block` advances the checkpoint itself, inside the block transaction:
 
 ```python
 for height in range(start, end + 1):
     self._process_block(height)
-    self.db.set_last_height(height)
 ```
 
 Key behaviors:
-- Respects node pruning window (can't fetch blocks older than ~7 days)
-- Configurable max lookback (`INDEXER_MAX_LOOKBACK_DAYS`)
+- Respects the node pruning window (can't fetch blocks older than the retained range)
+- Any range below the node's earliest retained height is recorded in `meta.history_gaps` rather than silently skipped
 - Progress logging every N blocks for monitoring
 - Proposal message resolution uses chain gRPC (live data still available)
+- The "Completed successfully" banner is only logged when the loop exits normally; a failing height propagates and exits non-zero
 
 **Phase 2: Live Streaming**
 
@@ -136,9 +148,20 @@ ws.send(json.dumps({
 
 Live mode features:
 - Processes blocks as they're produced (~6 second intervals)
-- Records difficulty and supply history at each block
+- Samples difficulty per delivered WebSocket event and supply every 200th block — head samples only, see [Telemetry Sampling](#telemetry-sampling)
 - Automatic reconnection with backoff on WebSocket disconnect
 - Gap detection: if WebSocket delivers height N but we're at N-5, process N-4 through N
+
+### Telemetry Sampling
+
+Difficulty and supply are **observational samples of the current chain head**, not per-historical-block records:
+
+- They are read from the live chain (`get_difficulty_info()`, `get_total_supply()`), which only reports head state.
+- They are recorded **outside** the block transaction and are warn-only; a sampling failure never fails a block.
+- They are **skipped entirely during catch-up** (`_catch_up_mode`), because sampling head state while replaying an old height would attribute today's difficulty to a block from days ago.
+- In live mode, when the WebSocket delivers height N after a gap, the blocks N-4..N-1 are fully projected but only one difficulty sample is taken.
+
+The consequence is intentional: difficulty and supply charts have holes after every disconnect and across every catch-up window. They are operational telemetry, not a reconstructable historical series.
 
 ### Block Processing Pipeline
 
@@ -148,20 +171,31 @@ For each block, the processing pipeline is:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         BLOCK PROCESSING PIPELINE                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  1. Fetch block via /block?height=N                                         │
-│  2. Fetch block_results via /block_results?height=N                         │
-│  3. For each transaction:                                                    │
-│     a. Decode TxRaw protobuf                                                │
-│     b. Check tx_results.code == 0 (skip failed txs)                         │
-│     c. For each message in tx_body:                                         │
-│        - Route to appropriate handler by type_url                           │
-│  4. Process end_block_events:                                               │
-│     - Governance proposals (passed/executed)                                │
-│     - Subscription events (expired/renewed)                                 │
+│  1. Fetch block via /block?height=N (hash and chain_id are required)        │
+│  2. Fetch block_results, retrying until len(txs_results) == len(txs)        │
+│  ┌── BEGIN ONE POSTGRESQL TRANSACTION ───────────────────────────────────┐  │
+│  │  3. For each transaction:                                             │  │
+│  │     a. Decode TxRaw protobuf                                          │  │
+│  │     b. Check tx_results.code == 0 (failed txs recorded, not applied)  │  │
+│  │     c. For each message in tx_body:                                   │  │
+│  │        - Route to appropriate handler by type_url                     │  │
+│  │  4. Process end_block_events:                                         │  │
+│  │     - Governance proposals (passed/executed)                          │  │
+│  │     - Subscription events (expired/renewed)                           │  │
+│  │  5. Upsert recent block, refresh touched balances                     │  │
+│  │  6. Set checkpoint: last_height + last_block_hash + chain_id          │  │
+│  └── COMMIT (or roll the entire block back) ─────────────────────────────┘  │
+│  7. Optional telemetry outside the transaction (warn-only)                  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Critical Detail:** Failed transactions (code != 0) are skipped entirely. The blockchain accepted the transaction but the message handler rejected it. Including these would create inconsistent state.
+**Critical Detail:** Failed transactions (code != 0) are recorded in `tx_index` but never reach a message handler. The blockchain accepted the transaction but the message handler rejected it; applying it would create inconsistent state.
+
+**Result cardinality is enforced.** A node can commit a block before exposing complete `txs_results`. A short results list is *not* treated as "these transactions succeeded": `get_block_results_matching()` retries until the count matches, within a bounded deadline, and a final mismatch raises rather than advancing the height.
+
+**Atomic checkpoint semantics.** `set_checkpoint(height, block_hash, chain_id)` writes all three `meta` keys through the block's connection and refuses to run outside a transaction. So the checkpoint is only ever observable together with the writes it describes, and it always carries enough provenance (which chain, which block hash) to verify on the next startup. There is no separate `set_last_height` call in the block path, and `indexer_state.last_processed_height` no longer exists — `meta.last_height` is the single height authority, which is what the backend health check reads.
+
+**Required vs. optional writes.** Everything inside the transaction is required: a failure in any handler, governance resolution, or balance refresh aborts the whole block. Everything in step 7 (difficulty/supply samples, peer list, observed chain head, block pruning) is optional telemetry and only logs a warning on failure.
 
 ---
 
@@ -191,12 +225,14 @@ indexer/
 
 **MessageProcessor (message_processor.py)**
 - Message type routing (`/mirage.core.v1.MsgPost` → `_handle_post`)
-- Business logic validation (content length, topic format)
+- Authorization the chain delegates (edit ownership, delete rights)
+- Denormalization and derived-stat updates
 - Database operations via DatabaseManager
 - Event processing for subscription updates
 
 **DatabaseManager (database.py)**
 - Schema initialization (idempotent CREATE TABLE IF NOT EXISTS)
+- Block-scoped transactions (`transaction()`) and the atomic checkpoint (`set_checkpoint()`)
 - UPSERT operations for posts, votes, profiles
 - Complex queries for denormalization
 - Migration management
@@ -225,7 +261,7 @@ TYPE_URL_TO_PROTO = {
 
 Post handling involves several transformations:
 
-1. **Validation:** Content length, topic format, title requirements
+1. **No re-validation of consensus rules:** topic/title/content size limits are chain admission rules that the transaction has already passed with `code=0`. The indexer used to re-check them against *current-head* params, which silently dropped committed posts (it also invented a `min_title_size = 1` the chain does not have) and made the result depend on when indexing ran. Only database-safety checks that cannot disagree with consensus remain.
 2. **Owner derivation:** Extract from `envelope_pubkey` field
 3. **Paid flag derivation:** `paid = not (envelope_difficulty > 0 or envelope_pow > 0)`
 4. **Root resolution:** For comments, resolve `root_topic` and `root_post_id`
@@ -523,7 +559,7 @@ user_topic_stats:
 
 Stats are updated after each vote:
 - `vote_count` only increments for new votes (not re-votes on same target)
-- `net_votes` adjusts by vote direction for every vote
+- `net_votes` shifts by `new_direction - previous_direction`, **not** by the new direction. Re-casting the same vote is a no-op (delta 0), flipping `+1 → -1` applies `-2`, and clearing a vote reverses its earlier contribution. `net_votes` gates downvote power, so applying the raw direction let a user inflate their standing by re-voting.
 - `unique_root_posts` tracks distinct thread engagement
 
 ---
@@ -532,27 +568,36 @@ Stats are updated after each vote:
 
 ### KV Sync on Startup
 
-At startup, the indexer performs a full profile sync from chain KV storage:
+At startup, the indexer reconciles profiles against chain state by paginating `mirage.core.v1.Query/GetProfiles` over gRPC:
 
 ```python
 def _sync_profiles_from_chain(self):
-    """Full KV reload for profiles from blockchain at startup."""
-    profiles = self.chain.list_profiles_subspace()
-    for p in profiles:
-        self.db.upsert_profile_full(
-            owner=p.owner,
-            username=p.username,
-            level=p.level,
-            subscription_expiry=p.subscription_expiry,
-            # ... all fields
-        )
+    profiles = self.chain.list_profiles_paginated()
+    with self.db.transaction(label="profile_sync"):
+        self.db.upsert_profiles_batch(batch, now)
+        for p in profiles:
+            self.db.set_enabled_agents(owner, p["enabled_agents"])
+            self.db.set_followed_users(owner, p["followed_users"])
+            self.db.set_followed_topics(owner, p["followed_topics"])
+            # blocked_* are merged, never cleared
+        self._soft_delete_absent_owners(chain_owners, now)
 ```
 
 **Why sync on startup?**
 - Indexer database could have stale data from delayed processing
 - Profile updates via governance proposals might not emit events
 - Ensures consistency after indexer downtime
-- Lists (followed users/topics/agents) are NOT synced (tracked via messages)
+
+**What is reconciled, and how:**
+
+| Data | Treatment |
+|------|-----------|
+| Scalars (username, level, expiry, bio, avatar, banner, flair) | Authoritative from chain; overwritten |
+| `enabled_agents`, `followed_users`, `followed_topics` | Authoritative from chain (hard-capped lists); replaced wholesale |
+| `blocked_users`, `blocked_posts`, `blocked_topics` | **Merged, never cleared.** The chain keeps a small deque; the indexer intentionally retains the full history, so a sync must not truncate it to the chain's window |
+| Profiles present in the DB but absent from chain | Soft-deleted, and their list rows removed |
+
+The whole reconciliation runs in one transaction, and **a failure aborts startup** rather than logging "KV Sync skipped" and continuing with stale profile state. Because chain-side profile listing is authoritative here, `GetProfiles` on the chain no longer skips profiles whose JSON or list reads fail — it returns an error, so a partial response cannot be mistaken for a complete owner inventory and trigger spurious soft-deletes.
 
 ### Subscription Event Handling
 
@@ -581,26 +626,36 @@ When a governance proposal passes, the indexer needs to process its messages:
 
 ```
 Proposal Lifecycle:
-                                                 
+
  MsgSubmitProposal  ──►  Voting Period  ──►  EndBlock: proposal_passed event
-      │                                              │
-      │ Cache messages                               │ Process messages
-      ▼                                              ▼
- _proposal_cache[pid] = messages           process_core_message(type_url, value, ...)
+                                                       │
+                                                       │ Resolve + process
+                                                       ▼
+                                      cosmos.gov.v1.Query/Proposal (gRPC)
+                                                       │
+                                                       ▼
+                                  process_core_message(type_url, value, ...)
 ```
 
-**Challenge:** By the time a proposal passes, the submission transaction may be pruned from node history. The indexer uses two resolution strategies:
+**Challenge:** By the time a proposal passes, the submission transaction may be pruned from node history, so the messages cannot be recovered from the block that submitted them.
 
-1. **Cache on submission:** During live mode, cache proposal messages when `MsgSubmitProposal` is seen in a block
-2. **gRPC query:** Fetch proposal content via governance gRPC endpoint (works in both live and catch-up modes)
+**Resolution is a single strategy: governance gRPC.** When a `proposal_passed` event appears, the indexer calls `cosmos.gov.v1.Query/Proposal` and reads `proposal.messages`. A v1 proposal wrapping a legacy v1beta1 `content` reports an empty `messages` list, so that case falls through to `cosmos.gov.v1beta1.Query/Proposal` and uses the single `content` Any. Both paths are gRPC on port 9090; REST (1317) is never used.
 
-> **Since v1.20.0:** CometBFT tx indexing is disabled (`indexer = "null"`), so `tx_search` is no longer available. Proposal resolution is gRPC-only when the cache is empty. The `tx_search` fallback has been removed.
+There is **no submission-time cache**. The earlier `_proposal_cache` was populated by parsing `MsgSubmitProposal` with the v1beta1 generated type, which has only `content` / `initial_deposit` / `proposer` and no `messages` field — the cache could never be populated, and the code silently fell back to REST. Both the cache and the `_skipped_proposals` no-retry set have been removed.
 
 ```python
-messages = self._proposal_cache.pop(proposal_id, None)
-if not messages:
-    messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
+messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
+for entry in messages:
+    self.processor.process_core_message(
+        entry["type_url"], base64.b64decode(entry["value"]), f"proposal-{proposal_id}", ts, height
+    )
 ```
+
+**Failure is fatal to the block.** An unresolvable passed proposal raises inside the block transaction, so the block rolls back and the checkpoint does not advance past a governance action that was never applied. The one tolerated case is a proposal whose messages the indexer does not track at all (governance-only mint/burn), which logs a warning and continues.
+
+When a resolved proposal contains `MsgUpdateParams`, the param cache is reloaded from chain gRPC and re-stored in `chain_stats` after the block commits, so later blocks are weighted against the new governance values.
+
+> **Since v1.20.0:** CometBFT tx indexing is disabled (`indexer = "null"`), so `tx_search` is not available and its fallback has been removed.
 
 ---
 
@@ -608,37 +663,41 @@ if not messages:
 
 ### Thumbnail Discovery
 
-For root posts, the indexer attempts to extract a preview thumbnail from content URLs:
+For root posts, the indexer derives a preview thumbnail from content URLs. The derivation is **purely deterministic and offline** — the indexer makes no outbound request on behalf of post content:
 
 ```python
 def discover_post_thumbnail(self, content: str) -> str | None:
-    """Discover thumbnail for root post content."""
+    """Derive a thumbnail URL for root post content, or None."""
     first_url = self._extract_first_url(content)
-    
+
     # Direct image URL
     if self._is_raster_image_url(first_url):
         return first_url
-        
+
     # Cloudflare Stream video
     uid = self._extract_stream_uid(first_url)
     if uid:
         return f"https://videodelivery.net/{uid}/thumbnails/thumbnail.jpg"
-        
+
+    # Bunny Stream playlist → sibling poster on the same pull zone
+    bunny = self._bunny_stream_thumbnail(first_url)
+    if bunny:
+        return bunny
+
     # YouTube video
     yt_id = self._extract_youtube_video_id(first_url)
     if yt_id:
         return f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
-        
-    # Fetch and parse HTML for og:image
-    html = self._fetch_html(first_url)
-    # ... parse meta tags, probe image dimensions
+
+    # Unknown URL shape → no thumbnail
+    return None
 ```
 
-**Security considerations:**
-- Only public HTTP(S) URLs are processed
-- Private/loopback IPs are rejected
-- HTML fetch has timeout and size limits
-- Image probing has byte limits
+**Why no fetching.** The removed HTML-fetch and image-probe paths made the validator host issue GET requests to arbitrary user-supplied URLs (blind SSRF, redirect-to-loopback, slow-drip stalls on the block path). They also made the indexed value depend on whatever a third-party host happened to serve at index time, so two nodes indexing the same block could store different thumbnails. Both problems are gone: the value is a pure function of the post's own text.
+
+Dimension metadata is likewise never probed. `DatabaseManager._extract_media_meta()` reads `?w=` / `?h=` from the upload URL's own query string and validates them through `_sanitize_wh` (both must be integers in `[1, 10000]`); anything else stores `{}` and the frontend lays out without a hint.
+
+**Consequence:** posts linking to a site whose preview image is only discoverable from its HTML get no thumbnail. That is the accepted trade for taking user-controlled network access off the validator.
 
 ### Topic Content Classification
 
@@ -799,29 +858,65 @@ The indexer requires:
 |---------|--------|----------|
 | Database unavailable | Indexer exits | Auto-restart via supervisor |
 | Node RPC unavailable | Indexer waits/retries | Automatic reconnection |
-| WebSocket disconnect | Falls back to polling | Automatic reconnection |
-| Message processing error | Block skipped | Manual investigation required |
+| WebSocket disconnect | Live loop reconnects with backoff | Automatic reconnection |
+| Message processing error (live or catch-up) | Block rolled back, checkpoint unchanged, process exits **non-zero** | Manual investigation required |
+| Another indexer holds the lock | Process exits **non-zero** with the holder PID | Stop the duplicate |
+| Checkpoint `chain_id` / block hash mismatch | Startup **aborts before any write** | Restore a trusted PostgreSQL dump — see below |
+| Blocks below the checkpoint were pruned | Gap recorded, indexing continues from earliest retained | Restore a dump covering the gap |
+
+### Continuity Verification
+
+Recovery deliberately preserves PostgreSQL (see `scripts/recover.sh`), which means rows indexed from a *diverged* chain would otherwise survive a divergence recovery and keep being served as chain truth. `_verify_chain_continuity()` runs at startup, before profile sync or any recent-block upsert, and refuses to keep indexing onto a chain that is not the one already in the database:
+
+| Condition | Outcome |
+|-----------|---------|
+| Empty database | `continuity_status = fresh`; proceed |
+| `meta.chain_id` != node `node_info.network` | **Fatal.** Refuse to index |
+| Checkpoint present but no `chain_id` / `last_block_hash` | **Fatal.** Provenance unverifiable |
+| Checkpoint height above the node head | **Fatal.** Node was rolled back or reset |
+| Checkpoint below earliest retained height | `continuity_status = unverified_pruned_gap`; record a `history_gaps` entry and continue |
+| Node's hash at the checkpoint height != `meta.last_block_hash` | **Fatal.** Rows come from a diverged chain |
+| Hashes match | `continuity_status = verified`; proceed |
+
+> **Recovery warning — read before wiping anything.**
+>
+> - **Preserve the indexer PostgreSQL database.** It is not reconstructable from a pruned chain: blocked-list history intentionally exceeds what the chain retains, and blocks outside the retention window cannot be replayed.
+> - **A hash or chain-ID mismatch is fatal, by design.** The indexer will not start. Do not "fix" it by clearing `meta` — that discards the only evidence of the divergence. The supported response is to restore a PostgreSQL dump whose checkpoint is known to be canonical (`scripts/backup_restore.py`), or to start from a genuinely empty database and accept the recorded history gap.
+> - **Pruned ranges are recorded, not hidden.** They appear in `meta.history_gaps`, flip `meta.history_complete` to `false`, and surface in the backend indexer health payload. A node with gaps serves an incomplete moderation/feed view even though every health check reads green on height.
+> - **`--height` is not a replay tool.** See below.
+
+### Replay and `--height`
+
+`--height N` is rejected at startup whenever the database already holds a checkpoint:
+
+```
+--height 100 rejected: database already holds checkpoint height 12345.
+Replay is only supported against an empty indexer database.
+```
+
+Cumulative rows — `user_topic_stats` (`vote_count`, `net_votes`, `post_count`), `topic_content_stats`, and the decaying `preferences` weights — have no per-message idempotency guard. Replaying blocks into a populated database double-counts them. The flag exists for rebuilding an empty database from a chosen height, nothing else. If the derived tables are already suspect, rebuild them from the canonical `posts`/`votes` tables with the `v1.32.4_rebuild_derived_stats` migration rather than replaying blocks.
 
 ### Database Migrations
 
-Migrations run automatically on startup:
+Migrations run automatically on startup, before any block is processed:
 
 ```python
 migration_count = run_migrations(self.db, self.chain)
 if migration_count > 0:
-    logger.info(f"Completed {migration_count} migrations")
+    logger.info("Completed %d migrations", migration_count)
 ```
 
-Migrations are idempotent and versioned. The `meta` table tracks migration state.
+The `meta` table tracks migration state (`migration_<key>`), plus a `migration_<key>_checksum` for each applied file. The runner is fail-closed:
+
+- Discovery/import errors, a missing `MIGRATION_KEY` or `run()`, and duplicate keys are **fatal** — never skipped with a warning.
+- A failure reading the completed set is **fatal** — never treated as "nothing applied".
+- The whole run is serialized on a PostgreSQL advisory lock, so two hosts sharing one database cannot migrate concurrently.
+- Editing an already-applied migration file fails startup on the checksum mismatch.
+- Database-only migrations should use `run_db_migration()`, which commits the migration's work and its completion marker in one transaction so a crash cannot leave a partially applied migration with no marker. Migrations that do RPC work must be resumable via `meta` progress keys and write the marker only when finished.
 
 ### Memory Considerations
 
-The indexer maintains several in-memory structures:
-- `_seen_txs`: Set of processed transaction hashes (bounded to ~10K entries)
-- `_proposal_cache`: Pending proposal messages (cleared on execution)
-- `_skipped_proposals`: Proposals that couldn't be resolved
-
-For very long catch-up periods, memory usage remains bounded due to cleanup routines.
+The indexer keeps no unbounded per-transaction or per-proposal state in memory. The former `_seen_txs`, `_proposal_cache`, and `_skipped_proposals` structures were all removed: transaction-level deduplication is now the database's job (`tx_index` upserts, capped at `TX_INDEX_CAP`), and proposals are resolved from gRPC at the moment they pass rather than cached from submission. Memory usage is flat across arbitrarily long catch-up runs.
 
 ---
 
@@ -836,3 +931,5 @@ The indexer follows a strict API usage policy:
 ```
 
 This ensures consistency across all services querying the blockchain.
+
+The policy is now actually true in code. Three REST paths existed and have been removed: governance proposal resolution (`/cosmos/gov/v1/proposals/{id}` → `cosmos.gov.v1.Query/Proposal`), profile listing (`/mirage/core/v1/profiles` → `mirage.core.v1.Query/GetProfiles` with pagination), and the `_derive_rest_url()` helper that built port-1317 URLs. Nothing in `indexer/` constructs a 1317 URL, and `indexer/message_processor.py` no longer imports `requests` at all.

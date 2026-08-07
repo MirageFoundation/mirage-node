@@ -32,10 +32,6 @@ WS_PING_INTERVAL = 20
 WS_PING_TIMEOUT = 10
 WS_RECONNECT_DELAY = 5
 
-# Transaction deduplication
-SEEN_TXS_MAX_SIZE = 5000
-SEEN_TXS_CLEANUP_BATCH = 500
-
 # Progress reporting
 CATCHUP_PROGRESS_INTERVAL = 1000
 
@@ -45,16 +41,6 @@ GRPC_TIMEOUT = 3
 # RPC readiness wait
 RPC_READY_MAX_WAIT = 60
 RPC_READY_RETRY_DELAY = 1
-
-# DB list caps (can be higher than on-chain caps)
-# These are multipliers over the tier-based on-chain cap
-DB_LIST_CAP_MULTIPLIER = 2  # Store 2x the on-chain cap
-# Absolute limits for lists stored in DB
-DB_MAX_FOLLOWED_USERS = 2000
-DB_MAX_FOLLOWED_TOPICS = 2000
-DB_MAX_BLOCKED_USERS = 2000
-DB_MAX_BLOCKED_POSTS = 1000
-DB_MAX_BLOCKED_TOPICS = 2000
 
 # ========== Moderation Settings ==========
 # Show all posts, regardless of whether they are marked as deleted

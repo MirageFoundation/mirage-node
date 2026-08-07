@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -36,6 +37,7 @@ from tests.backend_helpers import (
     _do_follow_user,
     _do_follow_user_with_nonce,
     _do_set_biography,
+    _wait_indexed,
     _wait_tx_deliver,
     _wait_tx_status,
     _wait_tx_status_failure,
@@ -574,6 +576,555 @@ def _test_indexer_ws_reconnect_loop() -> None:
         _pass("indexer.ws_reconnect_loop", runs=runs, closes=closes)
     else:
         _fail("indexer.ws_reconnect_loop", f"runs={runs} closes={closes}")
+
+
+class _StubEditDB:
+    """Minimal DatabaseManager stand-in for driving MessageProcessor._handle_edit.
+
+    Records every write so a test can assert that a rejected edit writes nothing.
+    """
+
+    def __init__(self, stored_owner: str):
+        self._stored_owner = stored_owner
+        self.writes: list[str] = []
+
+    def get_post(self, txhash: str):
+        # (topic, title, content, target, paid, thumbnail_url, created_at, media)
+        return ("technology", "original title", "original content", "", True, None, 1000, None)
+
+    def get_post_owner(self, txhash: str) -> str:
+        return self._stored_owner
+
+    def __getattr__(self, name: str):
+        def _record(*_args, **_kwargs):
+            self.writes.append(name)
+            return None
+
+        return _record
+
+
+def _edit_msg_bytes(pubkey: bytes, override: str) -> bytes:
+    from shared.datatypes import MsgEdit
+
+    msg = MsgEdit()
+    msg.envelope_pubkey = pubkey
+    msg.override = override
+    msg.topic = "technology"
+    msg.title = "hijacked title"
+    msg.content = "hijacked content"
+    return msg.SerializeToString()
+
+
+def test_indexer_hardening(backend: str):
+    """Regression checks for the 2026-08-07 indexer review remediation.
+
+    Mostly unit-style so it runs without a provisioned chain; the checks that need
+    real indexer rows are gated on local docker and skip cleanly otherwise.
+    """
+
+    _debug(f"indexer_hardening: begin backend={backend}")
+
+    import indexer.main as indexer_main
+    import indexer.message_processor as mp_module
+    import indexer.settings as indexer_settings
+    from indexer.address_utils import addr_from_pubkey, derive_owner_from_dict
+    from indexer.database import DatabaseManager, format_db_target
+    from indexer.message_processor import MessageProcessor, _vote_direction
+
+    # ── M-6: the database URL must never be logged with credentials ──────
+
+    redacted = format_db_target("postgresql://indexer_rw:s3kr3t@127.0.0.1:5432/mirage_indexer")
+    if redacted == "127.0.0.1:5432/mirage_indexer" and "s3kr3t" not in redacted and "@" not in redacted:
+        _pass("indexer_hardening.db_target_redacted", target=redacted)
+    else:
+        _fail("indexer_hardening.db_target_redacted", f"got {redacted!r}")
+
+    if format_db_target("postgresql://u:p@db.internal/mirage_indexer") == "db.internal:5432/mirage_indexer":
+        _pass("indexer_hardening.db_target_default_port")
+    else:
+        _fail(
+            "indexer_hardening.db_target_default_port", format_db_target("postgresql://u:p@db.internal/mirage_indexer")
+        )
+
+    try:
+        format_db_target("mirage_indexer")
+        _fail("indexer_hardening.db_target_fails_hard", "unparseable URL did not raise")
+    except RuntimeError:
+        _pass("indexer_hardening.db_target_fails_hard")
+
+    # ── L-1: width/height metadata survives insert ───────────────────────
+
+    meta = DatabaseManager._extract_media_meta(
+        [
+            "https://cdn.example.com/a.jpg?w=640&h=480",
+            "https://cdn.example.com/b.jpg",
+            "https://cdn.example.com/c.jpg?w=0&h=480",
+            "https://cdn.example.com/d.jpg?w=abc&h=480",
+            "https://cdn.example.com/e.jpg?w=99999&h=480",
+        ]
+    )
+    if meta == [{"w": 640, "h": 480}, {}, {}, {}, {}]:
+        _pass("indexer_hardening.media_meta_extraction", meta=meta)
+    else:
+        _fail("indexer_hardening.media_meta_extraction", f"got {meta}")
+
+    if DatabaseManager._sanitize_wh(1, 10000) == {"w": 1, "h": 10000} and DatabaseManager._sanitize_wh(0, 5) == {}:
+        _pass("indexer_hardening.sanitize_wh_bounds")
+    else:
+        _fail("indexer_hardening.sanitize_wh_bounds", "bounds check wrong")
+
+    # ── H-5: thumbnails are derived offline and deterministically ────────
+
+    proc = MessageProcessor(None, None, lambda *a, **k: None, lambda t: "")
+    thumb_cases = [
+        (
+            "watch https://www.youtube.com/watch?v=dQw4w9WgXcQ now",
+            "https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+        ),
+        ("https://youtu.be/dQw4w9WgXcQ", "https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg"),
+        (
+            "https://vz-abc123.b-cdn.net/9f1e2d3c/playlist.m3u8",
+            "https://vz-abc123.b-cdn.net/9f1e2d3c/thumbnail.jpg",
+        ),
+        (
+            "https://videodelivery.net/abc123def/manifest/video.m3u8",
+            "https://videodelivery.net/abc123def/thumbnails/thumbnail.jpg?time=1s",
+        ),
+        ("https://cdn.example.com/pic.png", "https://cdn.example.com/pic.png"),
+        ("https://news.example.com/some-article", None),
+        ("no url at all here", None),
+        ("ftp://example.com/pic.png", None),
+    ]
+    bad_thumbs = []
+    for content, expected in thumb_cases:
+        got = proc.discover_post_thumbnail(content)
+        again = proc.discover_post_thumbnail(content)
+        if got != expected:
+            bad_thumbs.append(f"{content!r} -> {got!r} (want {expected!r})")
+        elif got != again:
+            bad_thumbs.append(f"{content!r} not deterministic: {got!r} then {again!r}")
+    if bad_thumbs:
+        _fail("indexer_hardening.thumbnail_deterministic", "; ".join(bad_thumbs))
+    else:
+        _pass("indexer_hardening.thumbnail_deterministic", cases=len(thumb_cases))
+
+    # The point of H-5 is that no fetch happens at all, so assert the capability
+    # is absent rather than trying to observe a request that should never occur.
+    leaked_modules = [
+        n for n in ("requests", "socket", "ipaddress", "httpx", "BeautifulSoup", "Image") if hasattr(mp_module, n)
+    ]
+    leaked_helpers = [
+        n
+        for n in (
+            "_fetch_html",
+            "_probe_dimensions",
+            "_probe_media_dimensions",
+            "discover_media_dimensions",
+            "_extract_html_meta_dimensions",
+            "_is_public_http_url",
+        )
+        if hasattr(MessageProcessor, n)
+    ]
+    if leaked_modules or leaked_helpers:
+        _fail(
+            "indexer_hardening.no_remote_media",
+            f"modules={leaked_modules} helpers={leaked_helpers}",
+        )
+    else:
+        _pass("indexer_hardening.no_remote_media")
+
+    # ── H-4: proposal Any extraction handles gov v1 and v1beta1 ──────────
+
+    class _Any:
+        def __init__(self, type_url: str):
+            self.type_url = type_url
+            self.value = b"\x00"
+
+    class _V1:
+        messages = [_Any("/mirage.core.v1.MsgUpdateParams"), _Any("/mirage.core.v1.MsgSetLevel")]
+
+    class _V1Beta1:
+        content = _Any("/mirage.core.v1.MsgUpdateParams")
+
+    class _EmptyContent:
+        content = _Any("")
+
+    class _Neither:
+        pass
+
+    extraction_ok = (
+        len(MessageProcessor.extract_inner_anys(_V1())) == 2
+        and len(MessageProcessor.extract_inner_anys(_V1Beta1())) == 1
+        and MessageProcessor.extract_inner_anys(_EmptyContent()) == []
+        and MessageProcessor.extract_inner_anys(_Neither()) == []
+    )
+    if extraction_ok:
+        _pass("indexer_hardening.extract_inner_anys")
+    else:
+        _fail("indexer_hardening.extract_inner_anys", "v1/v1beta1/empty handling wrong")
+
+    # ── I-1: envelope signer beats an unsigned owner field ───────────────
+
+    pubkey = bytes([2]) + bytes(range(32))
+    envelope_addr = addr_from_pubkey(pubkey)
+    pub_b64 = base64.b64encode(pubkey).decode("ascii")
+    if not envelope_addr:
+        _fail("indexer_hardening.derive_owner_envelope_first", "could not derive test address")
+    else:
+        derived = derive_owner_from_dict(
+            {"envelope_pubkey": pub_b64, "owner": "mirage1attacker", "authority": "mirage1relay"}
+        )
+        if derived == envelope_addr:
+            _pass("indexer_hardening.derive_owner_envelope_first", owner=envelope_addr[:16])
+        else:
+            _fail("indexer_hardening.derive_owner_envelope_first", f"got {derived!r} want {envelope_addr!r}")
+
+    fallbacks_ok = (
+        derive_owner_from_dict({"owner": "Mirage1Owner"}) == "mirage1owner"
+        and derive_owner_from_dict({"authority": "Mirage1Gov"}) == "mirage1gov"
+    )
+    try:
+        derive_owner_from_dict({})
+        raised = False
+    except RuntimeError:
+        raised = True
+    if fallbacks_ok and raised:
+        _pass("indexer_hardening.derive_owner_fallbacks")
+    else:
+        _fail("indexer_hardening.derive_owner_fallbacks", f"fallbacks_ok={fallbacks_ok} raised={raised}")
+
+    # ── I-1: a foreign edit must not touch indexed content ───────────────
+
+    override = "a" * 64
+    if envelope_addr:
+        foreign_db = _StubEditDB(stored_owner="mirage1someoneelse")
+        foreign_proc = MessageProcessor(foreign_db, None, lambda *a, **k: None, lambda t: "")
+        foreign_proc._handle_edit("/mirage.core.v1.MsgEdit", _edit_msg_bytes(pubkey, override), "b" * 64, 1234, 99)
+        if foreign_db.writes:
+            _fail("indexer_hardening.foreign_edit_rejected", f"wrote {sorted(set(foreign_db.writes))}")
+        else:
+            _pass("indexer_hardening.foreign_edit_rejected")
+
+        # Control: the real owner's edit must still be applied, otherwise the
+        # rejection above would pass for the wrong reason.
+        own_db = _StubEditDB(stored_owner=envelope_addr)
+        own_proc = MessageProcessor(own_db, None, lambda *a, **k: None, lambda t: "")
+        own_proc._handle_edit("/mirage.core.v1.MsgEdit", _edit_msg_bytes(pubkey, override), "c" * 64, 1234, 99)
+        if "upsert_post" in own_db.writes:
+            _pass("indexer_hardening.owner_edit_applied")
+        else:
+            _fail("indexer_hardening.owner_edit_applied", f"wrote {sorted(set(own_db.writes))}")
+    else:
+        _skip("indexer_hardening.foreign_edit_rejected", "could not derive test address")
+        _skip("indexer_hardening.owner_edit_applied", "could not derive test address")
+
+    # ── H-1: the checkpoint may only be written inside a block txn ───────
+
+    bare_db = DatabaseManager.__new__(DatabaseManager)
+    try:
+        bare_db.set_checkpoint(10, "d" * 64, "mirage-local")
+        _fail("indexer_hardening.checkpoint_requires_txn", "set_checkpoint ran outside a transaction")
+    except RuntimeError:
+        _pass("indexer_hardening.checkpoint_requires_txn")
+
+    # ── M-8: the stats writer takes a delta, not a raw direction ─────────
+
+    import inspect
+
+    stats_params = inspect.signature(DatabaseManager.update_user_topic_stats).parameters
+    if "net_votes_delta" in stats_params and "direction" not in stats_params:
+        _pass("indexer_hardening.net_votes_delta_signature")
+    else:
+        _fail("indexer_hardening.net_votes_delta_signature", f"params={list(stats_params)}")
+
+    direction_cases = {1.0: 1, 0.15: 1, -1.0: -1, -0.15: -1, 0.0: 0, None: 0}
+    bad_dirs = {k: _vote_direction(k) for k, v in direction_cases.items() if _vote_direction(k) != v}
+    if bad_dirs:
+        _fail("indexer_hardening.vote_direction_normalized", f"wrong: {bad_dirs}")
+    else:
+        # Same arithmetic the handler applies: delta = new - previous.
+        transitions = {(0, 1): 1, (1, 1): 0, (1, -1): -2, (-1, 0): 1, (-1, 1): 2}
+        bad_tr = {k: v for k, v in transitions.items() if (k[1] - k[0]) != v}
+        if bad_tr:
+            _fail("indexer_hardening.vote_direction_normalized", f"delta table wrong: {bad_tr}")
+        else:
+            _pass("indexer_hardening.vote_direction_normalized")
+
+    # ── M-1: history gaps are normalized, merged, and validated ──────────
+
+    merge = indexer_main.Indexer._merge_history_gaps
+    merged = merge(
+        [
+            {"start": 10, "end": 20, "reason": "pruned"},
+            {"start": 21, "end": 30, "reason": "pruned"},
+            {"start": 40, "end": 50, "reason": "height_override"},
+            {"start": 1, "end": 5, "reason": "pruned"},
+        ]
+    )
+    expected_merge = [
+        {"start": 1, "end": 5, "reason": "pruned"},
+        {"start": 10, "end": 30, "reason": "pruned"},
+        {"start": 40, "end": 50, "reason": "height_override"},
+    ]
+    if merged == expected_merge:
+        _pass("indexer_hardening.history_gap_merge", gaps=len(merged))
+    else:
+        _fail("indexer_hardening.history_gap_merge", f"got {merged}")
+
+    cross = merge(
+        [
+            {"start": 10, "end": 20, "reason": "pruned_before_verification"},
+            {"start": 11, "end": 25, "reason": "checkpoint_behind_pruning_window"},
+        ]
+    )
+    if (
+        len(cross) == 1
+        and cross[0]["start"] == 10
+        and cross[0]["end"] == 25
+        and "pruned_before_verification" in cross[0]["reason"]
+        and "checkpoint_behind_pruning_window" in cross[0]["reason"]
+    ):
+        _pass("indexer_hardening.history_gap_merge_cross_reason")
+    else:
+        _fail("indexer_hardening.history_gap_merge_cross_reason", f"got {cross}")
+
+    try:
+        merge([{"start": 10, "end": 5, "reason": "pruned"}])
+        _fail("indexer_hardening.history_gap_validation", "inverted range did not raise")
+    except RuntimeError:
+        _pass("indexer_hardening.history_gap_validation")
+
+    # ── H-3: a short block_results is retried, never read as success ─────
+
+    from indexer.chain_client import ChainClient
+
+    class _LaggingResults(ChainClient):
+        def __init__(self):
+            self.calls = 0
+            self.jsonrpc_url = "http://unused"
+
+        def get_block_results(self, height: int) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                return {"result": {"txs_results": []}}
+            return {"result": {"txs_results": [{"code": 0}, {"code": 5}]}}
+
+    lagging = _LaggingResults()
+    try:
+        out = lagging.get_block_results_matching(42, 2, deadline_s=2.0)
+        codes = [int(r["code"]) for r in out["result"]["txs_results"]]
+        if codes == [0, 5] and lagging.calls >= 2:
+            _pass("indexer_hardening.block_results_retry", calls=lagging.calls)
+        else:
+            _fail("indexer_hardening.block_results_retry", f"codes={codes} calls={lagging.calls}")
+    except Exception as e:
+        _fail("indexer_hardening.block_results_retry", f"{type(e).__name__}: {e}")
+
+    class _NeverMatches(ChainClient):
+        def __init__(self):
+            self.jsonrpc_url = "http://unused"
+
+        def get_block_results(self, height: int) -> dict:
+            return {"result": {"txs_results": [{"code": 0}]}}
+
+    try:
+        _NeverMatches().get_block_results_matching(7, 2, deadline_s=0.3)
+        _fail("indexer_hardening.block_results_deadline", "a permanent mismatch did not raise")
+    except RuntimeError as e:
+        if "never reached expected tx count" in str(e):
+            _pass("indexer_hardening.block_results_deadline")
+        else:
+            _fail("indexer_hardening.block_results_deadline", str(e))
+    except Exception as e:
+        _fail("indexer_hardening.block_results_deadline", f"{type(e).__name__}: {e}")
+
+    # ── H-4 / policy: the indexer never speaks REST ──────────────────────
+
+    indexer_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "indexer")
+    rest_hits = []
+    for root, _dirs, files in os.walk(indexer_dir):
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            path = os.path.join(root, fname)
+            with open(path, "r", encoding="utf-8") as fh:
+                for lineno, line in enumerate(fh, 1):
+                    # ":1317" is how a REST base URL is actually built; the bare
+                    # number also appears in the policy docstring saying not to.
+                    if ":1317" in line:
+                        rest_hits.append(f"{fname}:{lineno}")
+    if rest_hits:
+        _fail("indexer_hardening.no_rest_port", f"port 1317 referenced at {rest_hits}")
+    else:
+        _pass("indexer_hardening.no_rest_port")
+
+    mp_path = os.path.join(indexer_dir, "message_processor.py")
+    with open(mp_path, "r", encoding="utf-8") as fh:
+        mp_src = fh.read()
+    http_imports = [tok for tok in ("import requests", "import httpx", "urllib.request") if tok in mp_src]
+    if http_imports:
+        _fail("indexer_hardening.message_processor_no_http", f"found {http_imports}")
+    else:
+        _pass("indexer_hardening.message_processor_no_http")
+
+    # ── I-3: obsolete queue/config surface is gone ───────────────────────
+
+    stale_settings = [
+        n
+        for n in (
+            "SEEN_TXS_MAX_SIZE",
+            "SEEN_TXS_CLEANUP_BATCH",
+            "DB_LIST_CAP_MULTIPLIER",
+            "DB_MAX_FOLLOWED_USERS",
+            "DB_MAX_FOLLOWED_TOPICS",
+            "DB_MAX_BLOCKED_USERS",
+            "DB_MAX_BLOCKED_POSTS",
+            "DB_MAX_BLOCKED_TOPICS",
+        )
+        if hasattr(indexer_settings, n)
+    ]
+    stale_db = [
+        n for n in ("insert_pending_tx", "get_pending_txs", "update_pending_tx_status") if hasattr(DatabaseManager, n)
+    ]
+    stale_indexer = [
+        n for n in ("_seen_txs", "_proposal_cache", "_skipped_proposals") if hasattr(indexer_main.Indexer, n)
+    ]
+    if stale_settings or stale_db or stale_indexer:
+        _fail(
+            "indexer_hardening.obsolete_surface_removed",
+            f"settings={stale_settings} db={stale_db} indexer={stale_indexer}",
+        )
+    else:
+        _pass("indexer_hardening.obsolete_surface_removed")
+
+    _indexer_hardening_db_checks()
+
+
+def _indexer_hardening_db_checks() -> None:
+    """Live indexer DB assertions. Skipped when local docker is unavailable."""
+
+    if not _check_local_docker():
+        _skip("indexer_hardening.checkpoint_has_provenance", "not running in local-docker")
+        _skip("indexer_hardening.net_votes_matches_canonical_votes", "not running in local-docker")
+        _skip("indexer_hardening.block_transaction_rolls_back", "not running in local-docker")
+        return
+
+    db_name = _get_indexer_db_name()
+    _indexer_hardening_txn_check()
+
+    # H-1/H-2: last_height is never written without the chain_id and block hash
+    # that let the next startup prove the rows belong to this chain.
+    rc, out = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT string_agg(key, ',' ORDER BY key)
+FROM meta WHERE key IN ('chain_id', 'last_block_hash', 'last_height');\\" 2>&1" """,
+        timeout=10,
+    )
+    if rc != 0:
+        _fail("indexer_hardening.checkpoint_has_provenance", f"db query failed rc={rc} out={out}")
+    else:
+        keys = out.strip()
+        if keys == "chain_id,last_block_hash,last_height":
+            _pass("indexer_hardening.checkpoint_has_provenance")
+        elif keys in ("", "last_height"):
+            # Pre-remediation DBs only store last_height until the upgraded indexer
+            # writes its first atomic checkpoint. That is not a regression of the
+            # new code path — just an undeployed runtime.
+            _skip(
+                "indexer_hardening.checkpoint_has_provenance",
+                f"legacy/incomplete checkpoint meta keys={keys!r}; redeploy indexer to populate",
+            )
+        else:
+            _fail("indexer_hardening.checkpoint_has_provenance", f"meta keys={keys!r}")
+
+    # M-8: net_votes must equal the sum of the user's current canonical vote
+    # signs in that topic. Re-votes and cleared votes are what used to break it.
+    # Skip until the v1_32_4 rebuild migration has actually run on this DB.
+    rc_mig, out_mig = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT value FROM meta WHERE key='migration_v1.32.4_rebuild_derived_stats';\\" 2>&1" """,
+        timeout=10,
+    )
+    migration_done = rc_mig == 0 and out_mig.strip() not in ("",)
+    if not migration_done:
+        _skip(
+            "indexer_hardening.net_votes_matches_canonical_votes",
+            "v1_32_4_rebuild_derived_stats not applied on this database yet",
+        )
+        return
+
+    rc2, out2 = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT count(*) FROM (
+SELECT s.owner, s.topic
+FROM user_topic_stats s
+LEFT JOIN (
+  SELECT LOWER(v.owner) AS owner,
+         LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) AS topic,
+         SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END)::int AS net
+  FROM votes v
+  JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
+  WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
+  GROUP BY 1, 2
+) d ON d.owner = s.owner AND d.topic = s.topic
+WHERE s.net_votes <> COALESCE(d.net, 0)
+) mismatched;\\" 2>&1" """,
+        timeout=20,
+    )
+    if rc2 != 0:
+        _fail("indexer_hardening.net_votes_matches_canonical_votes", f"db query failed rc={rc2} out={out2}")
+    else:
+        try:
+            mismatched = int(out2.strip())
+        except ValueError:
+            _fail("indexer_hardening.net_votes_matches_canonical_votes", f"non-numeric output: {out2}")
+            return
+        if mismatched == 0:
+            _pass("indexer_hardening.net_votes_matches_canonical_votes")
+        else:
+            _fail(
+                "indexer_hardening.net_votes_matches_canonical_votes",
+                f"{mismatched} (owner, topic) rows disagree with their canonical votes",
+            )
+
+
+def _indexer_hardening_txn_check() -> None:
+    """H-1: an exception inside a block transaction must leave nothing behind.
+
+    Needs a psycopg-reachable INDEXER_DB_URL, which only holds when the suite runs
+    inside the container. From the host the URL points at the container's own
+    loopback, so this skips rather than reporting a connection error as a failure.
+    """
+    from indexer.database import DatabaseManager
+
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        code, out = _docker_exec("printenv INDEXER_DB_URL")
+        if code == 0 and out:
+            db_url = out.strip()
+    if not db_url:
+        _skip("indexer_hardening.block_transaction_rolls_back", "INDEXER_DB_URL unavailable")
+        return
+
+    try:
+        db = DatabaseManager(db_url)
+    except Exception as e:
+        _skip("indexer_hardening.block_transaction_rolls_back", f"indexer DB not reachable from here: {e}")
+        return
+
+    probe_key = f"hardening_probe_{_rand_str(8)}"
+    try:
+        try:
+            with db.transaction(label="hardening_probe"):
+                db.set_meta(probe_key, "should_roll_back")
+                raise RuntimeError("injected failure after set_meta")
+        except RuntimeError as e:
+            if "injected failure" not in str(e):
+                raise
+        after = db.get_meta(probe_key)
+        if after is None:
+            _pass("indexer_hardening.block_transaction_rolls_back")
+        else:
+            _fail("indexer_hardening.block_transaction_rolls_back", f"meta survived rollback: {after!r}")
+    except Exception as e:
+        _fail("indexer_hardening.block_transaction_rolls_back", f"{type(e).__name__}: {e}")
 
 
 def test_tx_index(backend: str):

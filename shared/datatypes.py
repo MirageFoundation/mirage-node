@@ -576,6 +576,55 @@ def _build_pool():
     add_f(msg_profile_resp, "blocked_topics", 17, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
     add_f(msg_profile_resp, "flair", 18, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
+    # cosmos.base.query.v1beta1 pagination types, needed by Query/GetProfiles.
+    # Field numbers must match the upstream cosmos-sdk proto exactly.
+    page_file = descriptor_pb2.FileDescriptorProto()
+    page_file.name = "cosmos/base/query/v1beta1/pagination.proto"
+    page_file.package = "cosmos.base.query.v1beta1"
+    page_file.syntax = "proto3"
+
+    page_req = page_file.message_type.add()
+    page_req.name = "PageRequest"
+    add_f(page_req, "key", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(page_req, "offset", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(page_req, "limit", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(page_req, "count_total", 4, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(page_req, "reverse", 5, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+
+    page_resp = page_file.message_type.add()
+    page_resp.name = "PageResponse"
+    add_f(page_resp, "next_key", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(page_resp, "total", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+
+    pool.Add(page_file)
+    file_proto.dependency.append(page_file.name)
+
+    # QueryProfilesRequest
+    msg_profiles_req = file_proto.message_type.add()
+    msg_profiles_req.name = "QueryProfilesRequest"
+    f = msg_profiles_req.field.add()
+    f.name = "pagination"
+    f.number = 1
+    f.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+    f.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    f.type_name = ".cosmos.base.query.v1beta1.PageRequest"
+
+    # QueryProfilesResponse
+    msg_profiles_resp = file_proto.message_type.add()
+    msg_profiles_resp.name = "QueryProfilesResponse"
+    f = msg_profiles_resp.field.add()
+    f.name = "profiles"
+    f.number = 1
+    f.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
+    f.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    f.type_name = ".mirage.core.v1.QueryProfileResponse"
+    f = msg_profiles_resp.field.add()
+    f.name = "pagination"
+    f.number = 2
+    f.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+    f.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    f.type_name = ".cosmos.base.query.v1beta1.PageResponse"
+
     pool.Add(file_proto)
     return pool
 
@@ -637,3 +686,7 @@ QueryDifficultyRequest = _get_message_class("mirage.core.v1.QueryDifficultyReque
 QueryDifficultyResponse = _get_message_class("mirage.core.v1.QueryDifficultyResponse")
 QueryProfileRequest = _get_message_class("mirage.core.v1.QueryProfileRequest")
 QueryProfileResponse = _get_message_class("mirage.core.v1.QueryProfileResponse")
+QueryProfilesRequest = _get_message_class("mirage.core.v1.QueryProfilesRequest")
+QueryProfilesResponse = _get_message_class("mirage.core.v1.QueryProfilesResponse")
+PageRequest = _get_message_class("cosmos.base.query.v1beta1.PageRequest")
+PageResponse = _get_message_class("cosmos.base.query.v1beta1.PageResponse")

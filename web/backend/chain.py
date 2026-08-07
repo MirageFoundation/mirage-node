@@ -215,8 +215,12 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     Raises IndexerUnavailable if the DB cannot be read. An outage is not sync lag:
     reporting it as lag told clients to retry against a node that had no data at
     all, and hid the outage from every caller (M-6).
+
+    Height authority is meta.last_height (indexer checkpoint). indexer_state
+    retains timestamps and observed chain head only.
     """
     global _CATCHING_UP_CACHE, _CATCHING_UP_CACHE_TIME
+    del timeout_s  # retained for call-site compatibility
 
     now = time.monotonic()
     if _CATCHING_UP_CACHE is not None and (now - _CATCHING_UP_CACHE_TIME) < _CATCHING_UP_CACHE_TTL:
@@ -225,8 +229,11 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     try:
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
             cur = conn.cursor()
+            cur.execute("SELECT value FROM meta WHERE key = 'last_height'")
+            row = cur.fetchone()
+            last_height = int((row[0] if row else 0) or 0)
             cur.execute(
-                "SELECT key, value FROM indexer_state WHERE key IN ('last_processed_time', 'last_processed_height', 'chain_head_height')"
+                "SELECT key, value FROM indexer_state WHERE key IN ('last_processed_time', 'chain_head_height')"
             )
             state = {r[0]: r[1] for r in cur.fetchall()}
             cur.execute("SELECT MAX(block_time) FROM recent_blocks")
@@ -236,7 +243,6 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
         raise IndexerUnavailable(f"indexer_state unreadable: {e}") from e
 
     last_ts = int(state.get("last_processed_time", 0) or 0)
-    last_height = int(state.get("last_processed_height", 0) or 0)
     chain_head = int(state.get("chain_head_height", 0) or 0)
 
     if not last_ts:
@@ -244,12 +250,6 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     else:
         time_lag = int(time.time()) - last_ts > 30
         height_lag = chain_head > 0 and (chain_head - last_height) > 10
-        # A node trailing the network keeps committing blocks and reports
-        # catching_up=False, so neither check above fires — but simulate runs
-        # against that stale block time, and every relayed write past this window
-        # is rejected as "envelope_timestamp in future" (val1 fell 21 blocks
-        # behind during a disk stall on 2026-08-06 and dropped six posts).
-        # block_time is 0 only for rows written before the column existed.
         head_stale = False
         if head_block_time:
             head_stale_s = int(time.time()) - head_block_time
@@ -279,17 +279,41 @@ def get_indexer_health() -> Dict[str, Any]:
     try:
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
             cur = conn.cursor()
+            cur.execute(
+                "SELECT key, value FROM meta WHERE key IN ("
+                "'last_height', 'last_block_hash', 'chain_id', "
+                "'history_gaps', 'history_complete', 'continuity_status')"
+            )
+            meta = {r[0]: r[1] for r in cur.fetchall()}
             cur.execute("SELECT key, value, updated_at FROM indexer_state")
             rows = {r[0]: {"value": r[1], "updated_at": r[2]} for r in cur.fetchall()}
     except Exception as e:
-        raise IndexerUnavailable(f"indexer_state unreadable: {e}") from e
+        raise IndexerUnavailable(f"indexer health unreadable: {e}") from e
+
+    last_processed_time = int(rows.get("last_processed_time", {}).get("value", 0) or 0)
+    history_gaps_raw = meta.get("history_gaps") or "[]"
+    try:
+        history_gaps = json.loads(history_gaps_raw)
+    except Exception as e:
+        raise IndexerUnavailable(f"meta.history_gaps is not valid JSON: {history_gaps_raw!r}") from e
+    if not isinstance(history_gaps, list):
+        raise IndexerUnavailable(f"meta.history_gaps is not a list: {history_gaps_raw!r}")
+
+    history_complete = str(meta.get("history_complete", "true")).lower() not in ("false", "0", "")
+    if history_gaps:
+        history_complete = False
 
     return {
-        "last_processed_height": int(rows.get("last_processed_height", {}).get("value", 0) or 0),
-        "last_processed_time": int(rows.get("last_processed_time", {}).get("value", 0) or 0),
+        "last_processed_height": int(meta.get("last_height", 0) or 0),
+        "last_processed_time": last_processed_time,
         "chain_head_height": int(rows.get("chain_head_height", {}).get("value", 0) or 0),
+        "last_block_hash": str(meta.get("last_block_hash") or ""),
+        "chain_id": str(meta.get("chain_id") or ""),
+        "continuity_status": str(meta.get("continuity_status") or "unknown"),
+        "history_complete": history_complete,
+        "history_gaps": history_gaps,
         "catching_up": is_node_catching_up(),
-        "lag_seconds": int(time.time()) - int(rows.get("last_processed_time", {}).get("value", 0) or 0),
+        "lag_seconds": int(time.time()) - last_processed_time if last_processed_time else 0,
     }
 
 

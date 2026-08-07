@@ -82,17 +82,14 @@ def derive_owner_from_msg(msg_dict: dict) -> str:
 
 def derive_owner_from_dict(msg_dict: dict) -> str:
     """
-    Derive the acting user from a message dict.
+    Derive the acting user from a message dict, matching derive_owner_from_msg semantics.
     IMPORTANT:
     - Meta-signed user messages do NOT set authority/owner; only envelope_pubkey is trustworthy.
     - Governance/node relays set authority to the module account (or node), so never assume it is the user.
-    - Always prefer an explicit owner field (when handlers inject it), then fall back to the envelope signer,
-      and only finally use authority as a last resort.
+    - The envelope signer wins over any explicit owner field, because owner is unsigned message
+      content that a relayer can set freely. Only fall back to owner, then authority, when the
+      message carries no envelope at all.
     """
-    owner = (msg_dict.get("owner") or "").strip().lower()
-    if owner:
-        return owner
-
     pub_b64 = msg_dict.get("envelope_pubkey")
     if pub_b64:
         pb = base64.b64decode(str(pub_b64))
@@ -100,6 +97,10 @@ def derive_owner_from_dict(msg_dict: dict) -> str:
         if not addr:
             raise RuntimeError(f"Failed to derive address from envelope_pubkey: {str(pub_b64)[:20]}...")
         return addr
+
+    owner = (msg_dict.get("owner") or "").strip().lower()
+    if owner:
+        return owner
 
     authority = (msg_dict.get("authority") or "").strip().lower()
     if authority:
