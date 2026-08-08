@@ -39,10 +39,23 @@ if [ ! -f "$NODE_HOME/data/priv_validator_state.json" ]; then
   echo '{"height":"0","round":0,"step":0}' > "$NODE_HOME/data/priv_validator_state.json"
 fi
 
-# Initialize genesis if needed (only on first run)
+# First run is detected before `miraged init`, which always writes a genesis.
+FIRST_RUN=0
 if [ ! -f "$NODE_HOME/config/genesis.json" ]; then
-  echo "==> Running miraged init to create base config (genesis)..."
+  FIRST_RUN=1
+  echo "==> Running miraged init to create base config (node key, base config)..."
   $BIN init "validator" --chain-id "$CHAIN_ID" --home "$NODE_HOME"
+fi
+
+# The genesis `miraged init` just wrote describes a new single-validator chain,
+# never mirage-1. A joining node must replace it with the real one before it
+# can peer with anything. SKIP_PEERS=1 is the local testnet, which builds its
+# own genesis in reset_local_testnet.py and must not reach for the network.
+BOOTSTRAP_STATESYNC=""
+if [ "$FIRST_RUN" = "1" ] && [ "${SKIP_PEERS:-0}" != "1" ]; then
+  echo "==> Joining $CHAIN_ID: fetching network genesis and deriving state-sync trust..."
+  BOOTSTRAP_STATESYNC="$(NODE_HOME="$NODE_HOME" CHAIN_ID="$CHAIN_ID" \
+    python3 "$ROOT_DIR/deploy/bootstrap_join.py")"
 fi
 
 # Peer configuration (from node.env)
@@ -115,6 +128,13 @@ fi
 if ! [[ "$SNAPSHOT_KEEP_RECENT" =~ ^[0-9]+$ ]] || [ "$SNAPSHOT_KEEP_RECENT" -le 0 ]; then
   echo "ERROR: SNAPSHOT_KEEP_RECENT must be a positive integer" >&2
   exit 1
+fi
+
+# Derived state sync wins over the node.env defaults: those are static and
+# cannot carry a trust height, which is only valid relative to the live head.
+if [ -n "$BOOTSTRAP_STATESYNC" ]; then
+  eval "$BOOTSTRAP_STATESYNC"
+  echo "==> State sync enabled from trust height $STATESYNC_TRUST_HEIGHT"
 fi
 
 export MONIKER CHAIN_ID PERSISTENT_PEERS PEX_ENABLED MAX_INBOUND_PEERS MAX_OUTBOUND_PEERS RETENTION_BLOCKS PRUNING_KEEP_RECENT PRUNING_INTERVAL SNAPSHOT_INTERVAL SNAPSHOT_KEEP_RECENT APP_DB_BACKEND COMET_DB_BACKEND STATESYNC_ENABLE STATESYNC_RPC_SERVERS STATESYNC_TRUST_HEIGHT STATESYNC_TRUST_HASH

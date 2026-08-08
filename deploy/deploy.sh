@@ -661,6 +661,28 @@ if [ "$MODE" = "init" ]; then
       run_ssh "[ -f ~/.mirage/env/$fname ]" 2>/dev/null || run_scp "$f" "$REMOTE:~/.mirage/env/$fname"
     fi
   done
+  # A joining node needs the peer list and bootstrap RPCs, and neither is in
+  # this repo. They live in the operator's .env, which only exists here on the
+  # workstation, so seed them into the remote node.env now.
+  ENV_FILE="$(dirname "$0")/../.env"
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "ERROR: .env not found at $ENV_FILE. --init needs MIRAGE_REMOTE_RPC and MIRAGE_PERSISTENT_PEERS." >&2
+    exit 1
+  fi
+  for key in MIRAGE_REMOTE_RPC MIRAGE_PERSISTENT_PEERS; do
+    value="$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
+    if [ -z "$value" ]; then
+      echo "ERROR: $key is empty in $ENV_FILE; a joining node cannot reach the network without it." >&2
+      exit 1
+    fi
+    case "$key" in
+      MIRAGE_REMOTE_RPC) remote_key="BOOTSTRAP_RPC" ;;
+      MIRAGE_PERSISTENT_PEERS) remote_key="PERSISTENT_PEERS" ;;
+    esac
+    run_ssh "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^${remote_key}=\" \"\$FILE\"; then sed -i \"s|^${remote_key}=.*|${remote_key}=${value}|\" \"\$FILE\"; else echo ${remote_key}=${value} >> \"\$FILE\"; fi'"
+    echo "==> Seeded $remote_key on remote from $key"
+  done
+
   # Persist moniker during first-time init
   if [ -n "$MONIKER_VALUE" ]; then
     run_ssh "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"

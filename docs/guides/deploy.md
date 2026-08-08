@@ -52,7 +52,31 @@ git clone https://github.com/MirageFoundation/mirage-node.git
 cd mirage-node
 ```
 
-## Step 3: Deploy
+## Step 3: Point the node at the network
+
+A new node always joins the existing mirage-1 chain, so it needs to know where
+to fetch the genesis and which peers to dial. Neither is committed to this
+repo. Copy the template and fill in two entries:
+
+```bash
+cp .env.example .env
+```
+
+```bash
+MIRAGE_REMOTE_RPC=https://mirage.talk/chain/rpc,https://mirage.vote/chain/rpc
+MIRAGE_PERSISTENT_PEERS=<node_id>@<host>:26656,<node_id>@<host>:26656
+```
+
+`MIRAGE_REMOTE_RPC` needs at least two endpoints. The genesis they serve is
+verified against a hash pinned in `deploy/bootstrap_join.py`, so a wrong or
+tampered genesis is refused outright. The state-sync trust hash has no such
+pin, so it is accepted only when the endpoints agree on it — which is why one
+endpoint is not enough. Both are only read during `--init`.
+
+Get peer IDs from any running node with `scripts/get_persistent_peers.sh`, or
+ask in **#mirage**.
+
+## Step 4: Deploy
 
 Run the deploy script:
 
@@ -80,7 +104,7 @@ docker login ghcr.io
 
 Use your GitHub username and a Personal Access Token with `write:packages`.
 
-## Step 4: Enable HTTPS (optional)
+## Step 5: Enable HTTPS (optional)
 
 If you have a domain pointing to your server, enable TLS:
 
@@ -109,11 +133,26 @@ The script handles everything automatically:
 2. **Builds the Docker image** on your local machine and pushes to GHCR
 3. **Pulls the image** on your server (fast: only downloads changed layers)
 4. **Prompts for your mnemonic** and securely imports your validator keys
-5. **Sets up PostgreSQL** inside the container (no manual database config needed)
-6. **Starts all services** (blockchain node, indexer, web backend, frontend)
-7. **Creates your validator** on-chain
+5. **Fetches and verifies the mirage-1 genesis** from your bootstrap endpoints
+6. **Sets up PostgreSQL** inside the container (no manual database config needed)
+7. **Starts all services** (blockchain node, indexer, web backend, frontend)
+8. **Creates your validator** on-chain
 
 All data is persisted in `~/.mirage` on the server, so updates preserve your keys and state.
+
+### Your node starts from a state-sync snapshot
+
+Nodes retain roughly a week of blocks, and genesis begins at height 2096156, so
+there is no one left to serve the millions of blocks in between. A new node
+therefore state-syncs to a recent snapshot instead of replaying history, and
+`--init` derives the trust height for you.
+
+The consequence is worth expecting: your indexer starts at the snapshot height
+and records the blocks before it as a permanent gap, so node health reports
+`history_complete: false` with the missing range listed. That is accurate
+rather than broken — your node genuinely has no record of those blocks, and we
+would rather say so than let it imply a complete archive. It serves current
+traffic normally.
 
 ## Monitoring
 

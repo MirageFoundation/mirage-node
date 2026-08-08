@@ -8,6 +8,7 @@ import math
 import os
 import random
 import re
+import shutil
 import string
 import sys
 import time
@@ -1431,3 +1432,112 @@ def test_indexer_fail_hard(backend):
             "_classify_exception no longer maps IndexerUnavailable to a 503 indexer_unavailable, "
             "so an outage folds back into a generic 500",
         )
+
+
+def test_node_join_bootstrap(backend: str):
+    """A new node must join mirage-1 or refuse, never invent its own chain.
+
+    `miraged init` writes a single-validator genesis at height 1, so the join
+    path replaces it with the network genesis pinned by hash. These run fully
+    offline against a faked RPC: the point is the refusals, and a test that
+    needed a live chain would not run when it matters.
+    """
+    import hashlib as _hashlib
+    import importlib.util
+    import json as _json
+    import tempfile
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    module_path = os.path.join(repo_root, "deploy", "bootstrap_join.py")
+    spec = importlib.util.spec_from_file_location("bootstrap_join", module_path)
+    bj = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bj)
+
+    if re.fullmatch(r"[0-9a-f]{64}", bj.GENESIS_SHA256):
+        _pass("node_join.pin_is_sha256")
+    else:
+        _fail("node_join.pin_is_sha256", f"GENESIS_SHA256={bj.GENESIS_SHA256!r}")
+
+    fake_genesis = {"chain_id": "mirage-1", "initial_height": "2096156", "app_state": {"core": {}}}
+    genesis_digest = _hashlib.sha256(bj.canonical(fake_genesis)).hexdigest()
+
+    def _rpc_factory(genesis=fake_genesis, hashes=None):
+        hashes = hashes or {}
+
+        def _rpc(ep, path):
+            if path == "genesis":
+                return {"genesis": genesis}
+            if path == "status":
+                return {"sync_info": {"latest_block_height": "5000"}}
+            return {"block_id": {"hash": hashes.get(ep, "A" * 64)}}
+
+        return _rpc
+
+    original_rpc = bj.rpc
+    tmpdir = tempfile.mkdtemp(prefix="node-join-")
+    os.makedirs(os.path.join(tmpdir, "config"), exist_ok=True)
+    target = os.path.join(tmpdir, "config", "genesis.json")
+
+    try:
+        # A verified genesis must land on disk in the exact bytes that were
+        # hashed, so the pin stays checkable later with a plain sha256sum.
+        bj.rpc = _rpc_factory()
+        bj.GENESIS_SHA256 = genesis_digest
+        bj.install_genesis("http://a", "mirage-1", target)
+        on_disk = _hashlib.sha256(open(target, "rb").read()).hexdigest()
+        if on_disk == genesis_digest and _json.load(open(target))["chain_id"] == "mirage-1":
+            _pass("node_join.installs_verified_genesis")
+        else:
+            _fail("node_join.installs_verified_genesis", f"on_disk={on_disk} pin={genesis_digest}")
+
+        # The whole point of the pin: a genesis for any other chain is refused,
+        # and the refusal must not leave a half-written or replaced file.
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("SENTINEL")
+        bj.GENESIS_SHA256 = "0" * 64
+        try:
+            bj.install_genesis("http://a", "mirage-1", target)
+            _fail("node_join.rejects_wrong_genesis", "installed a genesis that did not match the pin")
+        except SystemExit:
+            if open(target, encoding="utf-8").read() == "SENTINEL":
+                _pass("node_join.rejects_wrong_genesis")
+            else:
+                _fail("node_join.rejects_wrong_genesis", "refused but overwrote genesis.json anyway")
+
+        # The trust hash has no pin, so its only protection is endpoints
+        # agreeing. One dissenting server must stop the join.
+        bj.rpc = _rpc_factory(hashes={"http://a": "A" * 64, "http://b": "B" * 64})
+        try:
+            bj.derive_trust(["http://a", "http://b"])
+            _fail("node_join.rejects_trust_disagreement", "accepted conflicting block hashes")
+        except SystemExit:
+            _pass("node_join.rejects_trust_disagreement")
+
+        bj.rpc = _rpc_factory()
+        height, thash = bj.derive_trust(["http://a", "http://b"])
+        if height == 5000 - bj.TRUST_LOOKBACK and thash == "A" * 64:
+            _pass("node_join.derives_trust_below_head", height=height)
+        else:
+            _fail("node_join.derives_trust_below_head", f"height={height} hash={thash}")
+
+        # A single endpoint cannot cross-check itself, so it is refused rather
+        # than silently duplicated into the light client's server list.
+        os.environ.update(BOOTSTRAP_RPC="http://only-one", CHAIN_ID="mirage-1", NODE_HOME=tmpdir)
+        try:
+            bj.main()
+            _fail("node_join.requires_two_endpoints", "accepted a single bootstrap endpoint")
+        except SystemExit:
+            _pass("node_join.requires_two_endpoints")
+    finally:
+        bj.rpc = original_rpc
+        for key in ("BOOTSTRAP_RPC", "CHAIN_ID", "NODE_HOME"):
+            os.environ.pop(key, None)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # The local testnet builds its own genesis and must never reach for the
+    # network; the join path is gated on SKIP_PEERS for exactly that reason.
+    init_src = open(os.path.join(repo_root, "deploy", "init.sh"), encoding="utf-8").read()
+    if "SKIP_PEERS:-0" in init_src and "bootstrap_join.py" in init_src:
+        _pass("node_join.local_testnet_exempt")
+    else:
+        _fail("node_join.local_testnet_exempt", "init.sh no longer gates the join bootstrap on SKIP_PEERS")

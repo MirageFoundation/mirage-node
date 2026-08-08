@@ -27,6 +27,7 @@ from tests.cases.test_backend_infra import (
     test_failed_tx_non_post_vote,
     test_error_registry,
     test_indexer_fail_hard,
+    test_node_join_bootstrap,
 )
 from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_subscribe_validation
 from tests.cases.test_backend_content import (
@@ -89,6 +90,7 @@ ALL_CATEGORIES = {
     "envelope_window": test_envelope_timestamp_window,
     "error_registry": test_error_registry,
     "indexer_fail_hard": test_indexer_fail_hard,
+    "node_join": test_node_join_bootstrap,
     "route_authz": test_route_authz_parity,
     "admin_authz": test_admin_authz,
     "reward_claim_authz": test_reward_claim_authz,
