@@ -577,8 +577,6 @@ else
       docker rm mirage
     fi
   '
-  echo "==> Pruning old Docker images..."
-  run_ssh 'docker system prune -af && rm -rf /tmp/* 2>/dev/null || true'
 fi
 
 # For --init: enforce --moniker is provided
@@ -746,6 +744,14 @@ fi
 
 echo "==> Waiting briefly for container to become healthy..."
 sleep 2
+
+# Prune only once the new container holds a reference to the image. A stopped
+# container leaves its image unreferenced, so pruning before the start deletes
+# the image this deploy just loaded and leaves the host with nothing to run.
+if [ "$LOCAL_MODE" -eq 0 ]; then
+  echo "==> Pruning old Docker images..."
+  run_ssh 'docker image prune -af && rm -f /tmp/mirage-docker.tar.gz'
+fi
 
 # Ensure container is running and stable (handle restart loop) before docker exec
 echo "==> Waiting for container to be running and stable..."
