@@ -9,7 +9,7 @@
 
 ## Summary
 
-**17 findings fixed, 2 accepted, 1 partially fixed with its remaining step deferred on schema approval.** No High finding remains open in code.
+**18 findings fixed, 2 accepted.** No High finding remains open in code. I-3's table drop landed in v1.33.2 once schema approval was given; everything still outstanding is an accepted decision or an explicitly deferred plan item, listed below.
 
 The two accepted items are decisions, not oversights. **M-1** (long downtime skips irrecoverable history) was deliberately not implemented as the review specified: failing startup hard would leave a node that was offline past the pruning window with *no* index at all, and in practice would be worked around by wiping the database — losing the very blocked-list history the finding exists to protect. The shipped behavior continues indexing but records the exact missing range and can no longer report itself as complete. **I-1** remains the accepted architecture from the backend M-8 retest; only the concrete owner-precedence bug inside it was fixed.
 
@@ -46,7 +46,7 @@ The remediation contract now matches the operator decisions from the plan:
 | L-3 | Duplicate-instance lock exits 0 | **Fixed** | lock contention `sys.exit(1)` |
 | I-1 | Edit/delete trust boundary untested | **Accepted risk, bug fixed, now tested** | envelope-first `derive_owner_from_dict`; `indexer_hardening.derive_owner_envelope_first`, `.derive_owner_fallbacks`, `.foreign_edit_rejected`, `.owner_edit_applied` |
 | I-2 | INDEXER.md contradicted code | **Fixed** | `docs/modules/INDEXER.md` patched for atomic checkpoint, history gaps, gRPC-only, no-network media, head-sampled telemetry |
-| I-3 | Obsolete `pending_txs` surface | **Partially fixed / drop deferred** | Methods + fresh CREATE removed (`indexer_hardening.obsolete_surface_removed`); dropping the existing table waits on schema approval |
+| I-3 | Obsolete `pending_txs` surface | **Fixed** | Methods + fresh CREATE removed (`indexer_hardening.obsolete_surface_removed`); table dropped by `v1_33_2_drop_pending_txs` after schema approval |
 
 ---
 
@@ -96,7 +96,7 @@ Not planned. Difficulty and supply are now documented and implemented as head te
 
 ### I-3 — drop existing `pending_txs`
 
-**Deferred** pending explicit schema-change approval. The dead read/write API and the fresh-schema `CREATE TABLE` are already gone, so nothing writes to or reads from the table; deployed databases still carry it.
+**Closed in v1.33.2.** The dead read/write API and the fresh-schema `CREATE TABLE` went in v1.33.0; `indexer/migrations/v1_33_2_drop_pending_txs.py` removes the table itself from deployed databases, after schema-change approval. Both prod and UAT held zero rows at the time it was written. The migration counts before it drops and raises if the table is non-empty, since rows would mean something still writes to it and would invalidate the reason for dropping. On databases created after v1.33.0 the table never existed and the migration records itself as a no-op.
 
 ### Explicitly still deferred (plan)
 
@@ -135,5 +135,8 @@ Implementation review closed remaining soft-fail residuals before release:
 - Touched-balance gRPC reads are prefetched outside the block transaction.
 - Continuity compares retained `recent_blocks` hashes before any overwrite; migrations run only after continuity.
 - Auto-upvote contributes `net_votes_delta=+1`; preference rebuild excludes `auto_%` rows.
-- Missing vote/edit/annotate targets fail hard unless `history_complete=false`.
+- Missing vote/edit/annotate targets log and skip unconditionally. An earlier
+  round of this remediation gated that on `history_complete=false`, which local
+  testing showed would halt the indexer permanently on a vote for a post that
+  never existed — see M-7.
 - Corrupt `meta.history_gaps` raises `IndexerUnavailable`; `set_last_height` is forbidden.
