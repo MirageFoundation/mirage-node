@@ -91,10 +91,38 @@ def status(msg: str):
     print(f"==> {msg}", flush=True)
 
 
-def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120) -> None:
+def _rpc_curl_via_ssh(conn: str, path: str) -> subprocess.CompletedProcess:
+    """Hit CometBFT RPC on the node itself (bypasses CDN / public Caddy).
+
+    After backup we only care that miraged came back. Public
+    http(s)://{host}/chain/rpc is flaky during origin restart on Bunny-fronted
+    hosts (vote/talk), and the old 60s public poll was shorter than entrypoint's
+    120s localhost RPC wait — so healthy nodes were marked FAILED.
+    """
+    return subprocess.run(
+        [
+            "ssh",
+            conn,
+            "docker",
+            "exec",
+            "mirage",
+            "curl",
+            "-sf",
+            f"http://127.0.0.1:26657{path}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+
+def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 180) -> None:
     """Verify a server is fully healthy after backup.
 
-    Curls the real endpoints directly (no SSH) to test end-to-end connectivity.
+    Probes localhost RPC inside the container over SSH (same path entrypoint
+    uses). Matches entrypoint's up-to-120s RPC wait, with headroom for docker
+    start + postgres.
 
     Checks:
     - RPC is responding
@@ -104,42 +132,32 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     Raises exception if health check fails.
     """
     start_time = time.time()
+    conn = f"{ssh_user}@{host}"
+    deadline = start_time + timeout
 
-    rpc_status_url = f"http://{host}/chain/rpc/status"
-    rpc_net_info_url = f"http://{host}/chain/rpc/net_info"
-
-    # Wait for RPC to be available (max 60s)
-    status(f"  Waiting for RPC on {host} ({rpc_status_url})...")
+    status(f"  Waiting for localhost RPC on {host} via ssh (up to {timeout}s)...")
     rpc_ready = False
-    for _ in range(20):
+    last_err = ""
+    while time.time() < deadline:
         try:
-            result = subprocess.run(
-                ["curl", "-sfL", rpc_status_url],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            result = _rpc_curl_via_ssh(conn, "/status")
             if result.returncode == 0 and "latest_block_height" in result.stdout:
                 rpc_ready = True
                 break
-        except Exception:
-            pass
+            last_err = (result.stderr or result.stdout or f"exit {result.returncode}").strip()[:200]
+        except Exception as e:
+            last_err = str(e)
         time.sleep(3)
 
     if not rpc_ready:
-        raise RuntimeError(f"RPC not responding on {host} after 60s")
+        raise RuntimeError(f"RPC not responding on {host} after {timeout}s ({last_err})")
     status(f"  RPC is responding on {host}")
 
     # Check node has peers
     try:
-        result = subprocess.run(
-            ["curl", "-sfL", rpc_net_info_url],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        result = _rpc_curl_via_ssh(conn, "/net_info")
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"exit {result.returncode}")
         net_info = json.loads(result.stdout)
         n_peers = int(net_info.get("result", {}).get("n_peers", 0))
         if n_peers < 1:
@@ -151,25 +169,17 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
 
     # Check block height is increasing (node not stuck)
     try:
-        result1 = subprocess.run(
-            ["curl", "-sfL", rpc_status_url],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        result1 = _rpc_curl_via_ssh(conn, "/status")
+        if result1.returncode != 0:
+            raise RuntimeError(result1.stderr.strip() or f"exit {result1.returncode}")
         status1 = json.loads(result1.stdout)
         height1 = int(status1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
 
         time.sleep(6)  # Wait for at least 1 block
 
-        result2 = subprocess.run(
-            ["curl", "-sfL", rpc_status_url],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        result2 = _rpc_curl_via_ssh(conn, "/status")
+        if result2.returncode != 0:
+            raise RuntimeError(result2.stderr.strip() or f"exit {result2.returncode}")
         status2 = json.loads(result2.stdout)
         height2 = int(status2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
 
@@ -1267,21 +1277,30 @@ Examples:
                 print(f"\n{'='*60}")
                 print(f"[{i}/{len(all_servers)}] Backing up {server}")
                 print(f"{'='*60}\n")
+                backup_path = None
                 try:
                     backup_path = backup(server, args.user)
-                    results.append((server, "OK", backup_path))
-
-                    # Verify the server is healthy before proceeding
-                    status(f"Verifying {server} is healthy after backup...")
-                    verify_server_health(server, args.user)
-
-                    # Wait 2 minutes between servers to ensure stability
-                    if i < len(all_servers):
-                        status(f"Waiting 60 seconds before next backup...")
-                        time.sleep(60)
                 except Exception as e:
                     print(f"ERROR: Backup failed for {server}: {e}", file=sys.stderr)
                     results.append((server, "FAILED", str(e)))
+                else:
+                    try:
+                        # Verify the server is healthy before proceeding
+                        status(f"Verifying {server} is healthy after backup...")
+                        verify_server_health(server, args.user)
+                        results.append((server, "OK", backup_path))
+                    except Exception as e:
+                        # Tarball is good; node failed to come back — report distinctly
+                        print(
+                            f"ERROR: Backup saved but health check failed for {server}: {e}",
+                            file=sys.stderr,
+                        )
+                        results.append((server, "HEALTH_FAILED", (backup_path, str(e))))
+
+                # Always pause before taking down the next validator
+                if i < len(all_servers):
+                    status("Waiting 60 seconds before next backup...")
+                    time.sleep(60)
 
             # Summary
             print(f"\n{'='*60}")
@@ -1291,10 +1310,14 @@ Examples:
                 if status_str == "OK":
                     size_gb = path_or_error.stat().st_size / (1024**3)
                     print(f"  {server}: OK ({size_gb:.2f} GB)")
+                elif status_str == "HEALTH_FAILED":
+                    backup_path, err = path_or_error
+                    size_gb = backup_path.stat().st_size / (1024**3)
+                    print(f"  {server}: BACKUP OK ({size_gb:.2f} GB), HEALTH FAILED - {err}")
                 else:
                     print(f"  {server}: FAILED - {path_or_error}")
 
-            failed = [r for r in results if r[1] == "FAILED"]
+            failed = [r for r in results if r[1] != "OK"]
             if failed:
                 print(f"\n{len(failed)} backup(s) failed!")
                 sys.exit(1)
