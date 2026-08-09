@@ -3,11 +3,23 @@
 Mirage Backend Test Suite — comprehensive end-to-end tests.
 
 Run:
-    conda activate mirage-node
-    python tests/test_backend.py [--backend URL] [--category NAME]
+    docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in \
+    /root/.mirage/env/*.env; do . "$f"; done; set +a; PYTHONPATH=/opt/mirage \
+    python3 tests/test_backend.py [--category NAME]'
+
+Host execution is rejected by tests.common.run_suite.
 """
 import os
 import sys
+
+if __name__ == "__main__" and not os.path.isfile("/.dockerenv"):
+    print("ABORT: tests/test_backend.py can only run inside the local Docker testnet container.")
+    print(
+        "Run: docker exec mirage bash -lc 'cd /opt/mirage && set -a; "
+        'for f in /root/.mirage/env/*.env; do . "$f"; done; set +a; '
+        "PYTHONPATH=/opt/mirage python3 tests/test_backend.py'"
+    )
+    raise SystemExit(1)
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
@@ -28,6 +40,7 @@ from tests.cases.test_backend_infra import (
     test_error_registry,
     test_indexer_fail_hard,
     test_node_join_bootstrap,
+    test_runner_accounting,
 )
 from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_subscribe_validation
 from tests.cases.test_backend_content import (
@@ -62,6 +75,8 @@ from tests.cases.test_backend_security import (
     test_upload_body_bound,
     test_invite_code_hygiene,
     test_indexer_drift,
+    test_fleet_url_validation,
+    test_analytics_identity_trust,
 )
 from tests.cases.test_backend_authz import (
     test_route_authz_parity,
@@ -72,6 +87,21 @@ from tests.cases.test_backend_authz import (
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
 from tests.cases.test_backend_indexer import test_indexer, test_tx_index, test_indexer_hardening
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
+from tests.cases.test_backend_quests import test_quest_config, test_quest_assignment
+from tests.cases.test_backend_payouts import (
+    test_payout_schema,
+    test_payout_transport,
+    test_payout_reconciliation,
+    test_payout_release_rules,
+    test_payout_claim_gate,
+)
+from tests.cases.test_backend_push_outbox import (
+    test_push_outbox_schema,
+    test_push_outbox_enqueue,
+    test_push_outbox_delivery,
+    test_push_outbox_retry,
+    test_push_outbox_cleanup,
+)
 
 ALL_CATEGORIES = {
     "params": test_params,
@@ -91,6 +121,7 @@ ALL_CATEGORIES = {
     "error_registry": test_error_registry,
     "indexer_fail_hard": test_indexer_fail_hard,
     "node_join": test_node_join_bootstrap,
+    "runner_accounting": test_runner_accounting,
     "route_authz": test_route_authz_parity,
     "admin_authz": test_admin_authz,
     "reward_claim_authz": test_reward_claim_authz,
@@ -133,6 +164,20 @@ ALL_CATEGORIES = {
     "stats_admin_auth": test_stats_admin_auth,
     "stats_attribution": test_stats_attribution,
     "stats_pure": test_stats_pure,
+    "quest_config": test_quest_config,
+    "quest_assignment": test_quest_assignment,
+    "fleet_url": test_fleet_url_validation,
+    "analytics_identity": test_analytics_identity_trust,
+    "payout_schema": test_payout_schema,
+    "payout_transport": test_payout_transport,
+    "payout_reconciliation": test_payout_reconciliation,
+    "payout_release": test_payout_release_rules,
+    "payout_gate": test_payout_claim_gate,
+    "push_outbox_schema": test_push_outbox_schema,
+    "push_outbox_enqueue": test_push_outbox_enqueue,
+    "push_outbox_delivery": test_push_outbox_delivery,
+    "push_outbox_retry": test_push_outbox_retry,
+    "push_outbox_cleanup": test_push_outbox_cleanup,
 }
 
 STATELESS_CATEGORIES = {
@@ -156,11 +201,89 @@ STATELESS_CATEGORIES = {
     "upload_bound",
     "invite_code_hygiene",
     "indexer_drift",
+    "runner_accounting",
+    "quest_config",
+    "fleet_url",
+    "analytics_identity",
+    "payout_schema",
+    "payout_transport",
+    "payout_release",
+    "payout_gate",
+    # The other push outbox categories drive the shared outbox with their own
+    # tick clock, so they run sequentially and never lease each other's rows.
+    "push_outbox_schema",
+}
+
+# These categories use source probes, generated addresses, or direct database
+# fixtures only. Running one of them must not create five wallets and broadcast
+# setup transactions that the selected checks never consume.
+WALLETLESS_CATEGORIES = {
+    "stats_pure",
+    "error_registry",
+    "indexer_fail_hard",
+    "route_authz",
+    "client_ip_trust",
+    "hash_salt",
+    "upload_bound",
+    "invite_code_hygiene",
+    "runner_accounting",
+    "quest_config",
+    "quest_assignment",
+    "fleet_url",
+    "analytics_identity",
+    "payout_schema",
+    "payout_transport",
+    "payout_reconciliation",
+    "payout_release",
+    "payout_gate",
+    "push_outbox_schema",
+    "push_outbox_enqueue",
+    "push_outbox_delivery",
+    "push_outbox_retry",
+    "push_outbox_cleanup",
+}
+
+# Categories that guard a security or economic invariant. They must execute; a
+# skip here means the invariant went unchecked, which is a failure, not a pass.
+RELEASE_GATE_CATEGORIES = {
+    "route_authz",
+    "admin_authz",
+    "reward_claim_authz",
+    "cross_user_reads",
+    "relay_signing",
+    "envelope_window",
+    "client_ip_trust",
+    "hash_salt",
+    "error_registry",
+    "indexer_fail_hard",
+    "invite_code_hygiene",
+    "stats_pure",
+    "runner_accounting",
+    "quest_config",
+    "quest_assignment",
+    "fleet_url",
+    "analytics_identity",
+    "payout_schema",
+    "payout_transport",
+    "payout_reconciliation",
+    "payout_release",
+    "payout_gate",
+    "push_outbox_schema",
+    "push_outbox_enqueue",
+    "push_outbox_delivery",
+    "push_outbox_retry",
+    "push_outbox_cleanup",
 }
 
 
 def main() -> int:
-    return run_suite("Mirage Local Test Suite", ALL_CATEGORIES, STATELESS_CATEGORIES)
+    return run_suite(
+        "Mirage Local Test Suite",
+        ALL_CATEGORIES,
+        STATELESS_CATEGORIES,
+        no_skip_categories=RELEASE_GATE_CATEGORIES,
+        walletless_categories=WALLETLESS_CATEGORIES,
+    )
 
 
 if __name__ == "__main__":

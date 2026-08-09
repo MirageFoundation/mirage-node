@@ -9,6 +9,7 @@ import Api from '../utils/api';
 import Storage from '../utils/Storage';
 import { readBootstrapStashAfterBootstrap } from '../utils/bootstrapStash';
 import { signPlainPayload } from '../utils/signPlain';
+import { formatError } from '../utils/errorMessages';
 
 const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
 const OPTIMISTIC_CLAIM_TTL_MS = 45000;
@@ -34,6 +35,9 @@ export function useRewards() {
     const [totalAfterMultiplier, setTotalAfterMultiplier] = useState(0);
     const [pendingInviteCodes, setPendingInviteCodes] = useState(0);
     const [claimingAvailable, setClaimingAvailable] = useState(true);
+    // A payout the node has reserved but not yet settled. Claiming again while
+    // it is open would ask for a second payment for the same rewards.
+    const [payoutPending, setPayoutPending] = useState(false);
 
     // --- shared state ---
     const [loading, setLoading] = useState(true);
@@ -90,6 +94,7 @@ export function useRewards() {
             if (!res) {
                 res = await Api.get('/rewards/summary', { owner: userAddress });
             }
+            setPayoutPending(res.payout_pending === true);
 
             // --- disabled ---
             if (res.disabled) {
@@ -173,6 +178,9 @@ export function useRewards() {
     // ---- claim ----
     const claimRewards = useCallback(async () => {
         const hasClaimable = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+        if (payoutPending) {
+            return { success: false, error: 'payout_pending', message: formatError('payout_pending') };
+        }
         if (!userAddress || claiming || !hasClaimable) {
             return { success: false, error: 'nothing_to_claim' };
         }
@@ -195,6 +203,14 @@ export function useRewards() {
                     rewards: response.rewards,
                     txHash: response.tx_hash,
                 };
+            } else if (response.error_code === 'payout_pending') {
+                // The node has committed to this payment and may already have
+                // broadcast it. Lock claiming until it settles rather than
+                // inviting the user to ask for the same rewards again.
+                setPayoutPending(true);
+                clearOptimisticClaimBalance('payout_pending');
+                await fetchAll(true);
+                return { success: false, error: 'payout_pending', message: formatError('payout_pending') };
             } else {
                 clearOptimisticClaimBalance('claim_failed');
                 // Don't setError() here — claim failures are returned to the caller
@@ -220,7 +236,7 @@ export function useRewards() {
         } finally {
             setClaiming(false);
         }
-    }, [userAddress, claiming, totalAfterMultiplier, pendingInviteCodes, fetchAll, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
+    }, [userAddress, claiming, payoutPending, totalAfterMultiplier, pendingInviteCodes, fetchAll, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
 
     // ---- polling & event listeners ----
     useEffect(() => {
@@ -249,6 +265,12 @@ export function useRewards() {
             timeoutSet.clear();
         };
     }, [fetchAll]);
+
+    useEffect(() => {
+        if (!payoutPending) return undefined;
+        const interval = setInterval(() => fetchAll(true), 3000);
+        return () => clearInterval(interval);
+    }, [payoutPending, fetchAll]);
 
     // ---- countdown: daily reset ----
     useEffect(() => {
@@ -290,6 +312,7 @@ export function useRewards() {
         pendingInviteCodes,
         claimingAvailable,
         claiming,
+        payoutPending,
         // shared
         loading,
         error,

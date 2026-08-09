@@ -31,9 +31,15 @@ import time
 import threading
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request, has_request_context
+from flask import Blueprint, g, jsonify, request, has_request_context
 from client_ip import get_trusted_client_ip as _get_trusted_client_ip, hash_client_ip as _hash_client_ip
-from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED, PUSH_NOTIFICATIONS_ENABLED
+from settings import (
+    ACHIEVEMENTS_ENABLED,
+    QUESTS_ENABLED,
+    REGISTRATION_ENABLED,
+    REGISTRATION_INVITE_CODE_REQUIRED,
+    PUSH_NOTIFICATIONS_ENABLED,
+)
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
@@ -176,6 +182,9 @@ def _get_quest_tracker():
 
 def _track_quest_progress(user_addr: str, action_type: str, ts: int, **kwargs) -> None:
     """Fire-and-forget quest progress update after a successful tx."""
+    if not QUESTS_ENABLED and not ACHIEVEMENTS_ENABLED:
+        logger().debug("quest.tracker.skipped action=%s (quests and achievements disabled)", action_type)
+        return
     try:
         qt = _get_quest_tracker()
         qt.update_progress(user_addr, action_type, ts, **kwargs)
@@ -720,6 +729,8 @@ def _verify_signature(pub_dec: bytes, sig_dec: bytes, signed_bytes: bytes) -> bo
         der = bytes([0x30, 2 + len(r_b) + 2 + len(s_b), 0x02, len(r_b)]) + r_b + bytes([0x02, len(s_b)]) + s_b
         pub = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), pub_dec)
         pub.verify(der, digest, ec.ECDSA(_utils.Prehashed(hashes.SHA256())))
+        if has_request_context():
+            g.verified_request_address = _derive_address_from_pubkey(pub_dec)
         return True
     except Exception:
         return False

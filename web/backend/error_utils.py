@@ -190,6 +190,7 @@ ERRORS = {
     "no_rewards": "no rewards available",
     "pool_not_configured": "reward pool not configured",
     "payout_failed": "payout failed",
+    "payout_pending": "payout is still being confirmed",
     "stats_event_disabled": "stats events disabled",
     "retry": "please retry",
     "not_configured": "service not configured",

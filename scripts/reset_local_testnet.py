@@ -1221,6 +1221,8 @@ def enable_local_quests_payouts() -> str:
     settings = {
         "QUESTS_ENABLED": "true",
         "QUESTS_PAYOUTS_ENABLED": "true",
+        "ACHIEVEMENTS_ENABLED": "true",
+        "MEDIA_UPLOADS_ENABLED": "true",
         "BACKEND_DEBUG": "true",
         "QUESTS_REWARDS_POOL_ADDRESS": pool_addr,
     }

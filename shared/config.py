@@ -167,14 +167,16 @@ class MirageConfig:
 
         - JSON-RPC/GRPC resolved from node ports
         - Database URL must be provided via INDEXER_DB_URL (no fallbacks)
-        - Enabled defaults to True (override INDEXER_ENABLED)
+        - INDEXER_ENABLED must be an explicit "true" or "false"
         """
         # Resolve ports directly from loaded config
         rpc = int(self.get("ports", "rpc", default=26657))
         grpc = int(self.get("ports", "grpc", default=9090))
 
-        enabled_env = os.environ.get("INDEXER_ENABLED")
-        enabled = True if enabled_env is None else enabled_env.lower() in ("1", "true", "yes")
+        enabled_env = (os.environ.get("INDEXER_ENABLED") or "").strip().lower()
+        if enabled_env not in ("true", "false"):
+            raise RuntimeError(f"INDEXER_ENABLED must be 'true' or 'false', got '{enabled_env}'")
+        enabled = enabled_env == "true"
         db_url = os.environ.get("INDEXER_DB_URL", "").strip()
         if not db_url:
             raise RuntimeError("INDEXER_DB_URL is required (no fallbacks)")

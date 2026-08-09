@@ -43,6 +43,8 @@ from tests.common import (
     _run_miraged,
     _miraged_cmd,
     _keyring_backend,
+    TestResult,
+    summarize,
     _INSIDE_CONTAINER,
     _check_local_docker,
     DEFAULT_BACKEND,
@@ -1541,3 +1543,54 @@ def test_node_join_bootstrap(backend: str):
         _pass("node_join.local_testnet_exempt")
     else:
         _fail("node_join.local_testnet_exempt", "init.sh no longer gates the join bootstrap on SKIP_PEERS")
+
+
+def test_runner_accounting(backend: str):
+    """The runner must never report a skipped test as a pass.
+
+    `_skip()` used to set `passed=True`, so a suite that never executed a
+    category still printed ALL OK. That is how earlier reviews shipped green
+    while a security category was silently not running.
+    """
+    del backend  # pure accounting, no HTTP
+
+    sample = [
+        TestResult(name="a", status="pass", category="gate_cat"),
+        TestResult(name="b", status="skip", error="env missing", category="other_cat"),
+    ]
+
+    s = summarize(sample)
+    if (s["passed"], s["skipped"], s["failed"], s["total"]) == (1, 1, 0, 2):
+        _pass("runner.skip_is_not_a_pass")
+    else:
+        _fail("runner.skip_is_not_a_pass", f"summary={ {k: s[k] for k in ('passed', 'skipped', 'failed', 'total')} }")
+
+    if s["ok"]:
+        _pass("runner.non_gate_skip_still_green")
+    else:
+        _fail("runner.non_gate_skip_still_green", "a skip outside the release gate must not fail the run")
+
+    gated = summarize(
+        [TestResult(name="c", status="skip", error="env missing", category="gate_cat")],
+        no_skip_categories={"gate_cat"},
+    )
+    if not gated["ok"] and len(gated["gate_skips"]) == 1:
+        _pass("runner.gate_skip_fails_run")
+    else:
+        _fail("runner.gate_skip_fails_run", f"gate skip did not fail the run: ok={gated['ok']}")
+
+    failing = summarize([TestResult(name="d", status="fail", error="boom", category="gate_cat")])
+    if not failing["ok"] and failing["failed"] == 1 and failing["passed"] == 0:
+        _pass("runner.failure_fails_run")
+    else:
+        _fail("runner.failure_fails_run", f"summary={failing}")
+
+    # Every registered release-gate category must actually exist, otherwise the
+    # gate silently protects nothing.
+    from tests.test_backend import ALL_CATEGORIES, RELEASE_GATE_CATEGORIES
+
+    unknown = sorted(RELEASE_GATE_CATEGORIES - set(ALL_CATEGORIES))
+    if not unknown:
+        _pass("runner.gate_categories_registered", count=len(RELEASE_GATE_CATEGORIES))
+    else:
+        _fail("runner.gate_categories_registered", f"unknown gate categories: {unknown}")

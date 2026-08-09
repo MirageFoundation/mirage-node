@@ -5,9 +5,9 @@ Handles distribution of MIRAGE token rewards from the rewards pool to users.
 
 Configuration (via environment variables):
 - QUESTS_REWARDS_POOL_ADDRESS: The address holding reward tokens
-- QUESTS_PAYOUTS_ENABLED: Set to "true" to enable actual token transfers (default: false)
+- QUESTS_PAYOUTS_ENABLED: Set to "true" to enable actual token transfers
 
-When QUESTS_PAYOUTS_ENABLED != "true", rewards are logged but not sent.
+When QUESTS_PAYOUTS_ENABLED is false, rewards are logged but not sent.
 This allows testing the full flow without requiring a funded rewards pool.
 
 To set up the rewards pool:
@@ -17,15 +17,20 @@ To set up the rewards pool:
    miraged keys show rewards_pool --keyring-backend test -a
 3. Fund the address (governance proposal or direct transfer)
 4. Set QUESTS_REWARDS_POOL_ADDRESS and QUESTS_PAYOUTS_ENABLED=true in environment
+
+Payouts are a two-phase state machine (M-1 in the 2026-08-06 review). A claim
+first reserves the reward rows and persists the exact signed tx bytes, hash and
+unordered timeout in `reward_payouts`, and only then broadcasts. A crash at any
+point leaves a durable record: the next claim reconciles it by hash instead of
+paying again, and rows are released only when the tx is definitively dead.
 """
 
 from __future__ import annotations
 
-import json
+import hashlib
 import logging
-import os
+import math
 import secrets
-import subprocess
 import time
 from typing import List, Optional, Tuple
 
@@ -38,9 +43,8 @@ from quest_multiplier import get_reward_multiplier
 def is_valid_mirage_address(address: str) -> bool:
     """True only for a well-formed mirage1 bech32 account address.
 
-    The payout path passes the recipient to miraged as a positional argument, so
-    an unvalidated value could be read as a flag (L-6). Validating here means the
-    address is checked before it can reach an argv list.
+    The recipient ends up in a signed bank send, so it is validated before any
+    tx bytes are built (L-6).
     """
     addr = str(address or "").strip()
     if not addr or addr != addr.lower():
@@ -60,7 +64,17 @@ def get_balance(address) -> int:
         return int(row[0]) if row and row[0] is not None else 0
 
 
-from node import min_gas_price_umirage
+from node import require_runtime
+from settings import QUESTS_PAYOUTS_ENABLED, QUESTS_REWARDS_POOL_ADDRESS
+from tx import (
+    bank_send_body_bytes,
+    broadcast_tx,
+    build_signed_tx,
+    chain_head,
+    estimate_total_gas_limit,
+    resolve_tx_by_scan,
+    simulate_gas,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,168 +91,58 @@ def _generate_invite_code() -> str:
     return f"{part1}-{part2}"
 
 
-def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
-    """Generate unique invite codes and insert them into the database."""
-    codes = []
+def _generate_unique_invite_codes(cur, owner: str, count: int) -> List[str]:
+    """Generate unique invite codes on the caller's cursor.
+
+    Runs inside the claim transaction so codes and the `claimed_at` update
+    commit together: a rollback must not leave issued codes behind.
+    """
+    codes: List[str] = []
     now_ts = int(time.time())
 
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT code FROM invite_codes")
-            existing = {row[0] for row in cur.fetchall()}
+    cur.execute("SELECT code FROM invite_codes")
+    existing = {row[0] for row in cur.fetchall()}
 
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            for _ in range(count):
-                for attempt in range(100):
-                    code = _generate_invite_code()
-                    if code not in existing:
-                        break
-                else:
-                    logger.error("Failed to generate unique invite code after 100 attempts")
-                    continue
+    for _ in range(count):
+        for _attempt in range(100):
+            code = _generate_invite_code()
+            if code not in existing:
+                break
+        else:
+            raise RuntimeError("failed to generate a unique invite code after 100 attempts")
 
-                existing.add(code)
-                codes.append(code)
+        existing.add(code)
+        codes.append(code)
 
-                cur.execute(
-                    """
-                    INSERT INTO invite_codes (code, owner, created_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (code, owner, now_ts),
-                )
-                logger.info(f"Generated invite code {code} for {owner}")
+        cur.execute(
+            """
+            INSERT INTO invite_codes (code, owner, created_at)
+            VALUES (%s, %s, %s)
+            """,
+            (code, owner, now_ts),
+        )
+        logger.info(f"Generated invite code {code} for {owner}")
 
     return codes
 
 
-# Configuration from environment
-QUESTS_REWARDS_POOL_ADDRESS = os.environ.get("QUESTS_REWARDS_POOL_ADDRESS", "")
-QUESTS_PAYOUTS_ENABLED = os.environ.get("QUESTS_PAYOUTS_ENABLED", "").lower() == "true"
-
-# Node configuration
-NODE_HOME = os.environ.get("NODE_HOME", os.path.expanduser("~/.mirage/node"))
-KEYRING_BACKEND = "test"
-REWARDS_POOL_KEY_NAME = "rewards_pool"
-
-
-def _get_miraged_path() -> str:
-    """Get the path to the miraged binary."""
-    # Check if it's in PATH first
-    try:
-        result = subprocess.run(["which", "miraged"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-    # Fallback to expected location
-    return "/opt/mirage/blockchain/bin/miraged"
+# CheckTx rejections that prove the tx never entered a mempool, so the reserved
+# reward rows can be released back to the user.
+_DEFINITIVE_REJECT_CODES = {
+    2,  # tx decode error
+    4,  # unauthorized
+    5,  # insufficient funds
+    9,  # unknown address
+    11,  # out of gas at CheckTx
+    13,  # insufficient fee
+    30,  # tx timeout height / unordered timeout exceeded
+}
+# Simulation underestimates DeliverTx; same buffer the relay path uses.
+_PAYOUT_GAS_BUFFER = 1.25
 
 
-def _send_tokens_via_cli(
-    from_key: str,
-    to_address: str,
-    amount: int,
-    node_home: str,
-) -> Tuple[bool, Optional[str], Optional[str]]:
-    """
-    Send tokens using miraged CLI.
-
-    Returns:
-        (success, tx_hash, error_message)
-    """
-    miraged = _get_miraged_path()
-    amount_str = f"{amount}umirage"
-
-    # Last line of defence before argv: send_reward already validates, but this
-    # helper is the only place the address becomes a positional argument (L-6).
-    if not is_valid_mirage_address(to_address):
-        return False, None, "invalid_recipient_address"
-
-    # Get the actual minimum gas price from the node config
-    gas_price = int(min_gas_price_umirage())
-    logger.debug("reward_distributor: using min gas price %s umirage", gas_price)
-
-    cmd = [
-        miraged,
-        "tx",
-        "bank",
-        "send",
-        from_key,
-        to_address,
-        amount_str,
-        "--home",
-        node_home,
-        "--keyring-backend",
-        KEYRING_BACKEND,
-        "--chain-id",
-        "mirage-1",
-        "--gas",
-        "auto",
-        "--gas-adjustment",
-        "1.5",
-        "--gas-prices",
-        f"{gas_price}umirage",
-        "--yes",  # Skip confirmation
-        "--output",
-        "json",
-    ]
-
-    logger.info(f"Executing: {' '.join(cmd)}")
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        logger.info(f"miraged exit code: {result.returncode}")
-        logger.info(f"miraged stdout: {result.stdout[:500] if result.stdout else 'empty'}")
-        if result.stderr:
-            logger.warning(f"miraged stderr: {result.stderr[:500]}")
-
-        if result.returncode != 0:
-            raw_error = result.stderr or result.stdout or "Unknown error"
-            # Parse common errors into user-friendly messages
-            if "key not found" in raw_error.lower():
-                return False, None, "rewards_pool_key_not_configured"
-            if "insufficient funds" in raw_error.lower():
-                return False, None, "insufficient_pool_balance"
-            if "account sequence mismatch" in raw_error.lower():
-                return False, None, "sequence_mismatch_retry"
-            # Log the full error but return a sanitized version
-            logger.error(f"miraged tx failed: {raw_error[:500]}")
-            return False, None, "payout_transaction_failed"
-
-        # Parse the JSON output to get tx_hash
-        try:
-            output = json.loads(result.stdout)
-            tx_hash = output.get("txhash")
-            code = output.get("code", 0)
-
-            if code != 0:
-                raw_log = output.get("raw_log", "Transaction failed")
-                return False, tx_hash, raw_log
-
-            return True, tx_hash, None
-        except json.JSONDecodeError:
-            # If not JSON, try to extract tx hash from output
-            if "txhash" in result.stdout.lower():
-                # Try to find tx hash in output
-                for line in result.stdout.split("\n"):
-                    if "txhash" in line.lower():
-                        parts = line.split(":")
-                        if len(parts) >= 2:
-                            return True, parts[1].strip(), None
-            return True, None, None  # Assume success if no error code
-
-    except subprocess.TimeoutExpired:
-        return False, None, "Transaction timed out"
-    except Exception as e:
-        return False, None, str(e)
+class InsufficientPoolBalance(RuntimeError):
+    pass
 
 
 class RewardDistributor:
@@ -262,8 +166,7 @@ class RewardDistributor:
         self.enabled = enabled if enabled is not None else QUESTS_PAYOUTS_ENABLED
 
         if self.enabled and not self.pool_address:
-            logger.warning("QUESTS_PAYOUTS_ENABLED is true but QUESTS_REWARDS_POOL_ADDRESS is not set")
-            self.enabled = False
+            raise RuntimeError("payouts enabled without a rewards pool address")
 
     def is_configured(self) -> bool:
         """Check if the distributor is properly configured to send rewards."""
@@ -281,90 +184,213 @@ class RewardDistributor:
             return True  # Dry run always succeeds
         return self.get_pool_balance() >= amount
 
-    def send_reward(self, recipient: str, amount: int, reason: str) -> dict:
+    def build_payout_tx(self, recipient: str, amount: int) -> Tuple[bytes, str, int, int]:
+        """Sign an unordered bank send from the pool.
+
+        Returns (tx_bytes, tx_hash, timeout_at, scan_height). Nothing is
+        broadcast here — the caller persists these bytes first so a retry can
+        rebroadcast the exact same tx, which the chain accepts at most once, and
+        `scan_height` bounds where reconciliation has to look for it.
         """
-        Send tokens from the rewards pool to a recipient.
-
-        Args:
-            recipient: Recipient address
-            amount: Amount in umirage
-            reason: Human-readable reason (for logging)
-
-        Returns:
-            dict with:
-            - success: bool
-            - tx_hash: str or None
-            - amount: int (actual amount sent)
-            - error: str or None
-        """
-        if amount <= 0:
-            return {
-                "success": False,
-                "tx_hash": None,
-                "amount": 0,
-                "error": "amount must be positive",
-            }
-
+        rt = require_runtime()
+        if not rt.rewards_pool_privkey_bytes or not rt.rewards_pool_pubkey_bytes:
+            raise RuntimeError("rewards pool signer not loaded")
+        if rt.rewards_pool_addr != self.pool_address:
+            raise RuntimeError(f"rewards pool signer {rt.rewards_pool_addr} does not match pool {self.pool_address}")
         if not is_valid_mirage_address(recipient):
-            logger.warning("send_reward rejected malformed recipient: %r", str(recipient)[:64])
-            return {
-                "success": False,
-                "tx_hash": None,
-                "amount": 0,
-                "error": "invalid_recipient_address",
-            }
+            raise RuntimeError("invalid_recipient_address")
+        if int(amount) <= 0:
+            raise RuntimeError("payout amount must be > 0")
 
-        if not self.enabled:
-            # Payouts disabled - log but don't send
-            logger.info(
-                f"[PAYOUTS DISABLED] Would send {amount} umirage to {recipient} "
-                f"from {self.pool_address or 'NO_POOL'} ({reason})"
-            )
-            return {
-                "success": True,
-                "tx_hash": None,
-                "amount": amount,
-                "error": None,
-            }
-
-        # Check balance
-        pool_balance = self.get_pool_balance()
-        if pool_balance < amount:
-            logger.warning(f"Insufficient pool balance: have {pool_balance}, need {amount} for {recipient}")
-            return {
-                "success": False,
-                "tx_hash": None,
-                "amount": 0,
-                "error": "insufficient_pool_balance",
-            }
-
-        # Live mode - actually send tokens via miraged CLI
-        logger.info(f"[LIVE] Sending {amount} umirage to {recipient} from {self.pool_address} ({reason})")
-
-        success, tx_hash, error = _send_tokens_via_cli(
-            from_key=REWARDS_POOL_KEY_NAME,
-            to_address=recipient,
-            amount=amount,
-            node_home=NODE_HOME,
-        )
-
-        if not success:
-            logger.error(f"Failed to send tokens: {error}")
-            return {
-                "success": False,
-                "tx_hash": tx_hash,
-                "amount": 0,
-                "error": error or "transaction_failed",
-            }
-
-        logger.info(f"[LIVE] Successfully sent {amount} umirage to {recipient}, tx_hash={tx_hash}")
-
-        return {
-            "success": True,
-            "tx_hash": tx_hash,
-            "amount": amount,
-            "error": None,
+        body_bytes = bank_send_body_bytes(rt.rewards_pool_addr, recipient, int(amount))
+        signer = {
+            "privkey_bytes": rt.rewards_pool_privkey_bytes,
+            "pubkey_bytes": rt.rewards_pool_pubkey_bytes,
+            "account_number": int(rt.rewards_pool_account_number),
         }
+        gas_est = int(estimate_total_gas_limit(body_bytes, len(recipient)))
+        minimum_required = int(amount) + int(math.ceil(gas_est * rt.min_gas_price_umirage))
+        if self.get_pool_balance() < minimum_required:
+            raise InsufficientPoolBalance(
+                f"pool balance does not cover amount plus estimated fee: required={minimum_required}"
+            )
+        probe_bytes, _ = build_signed_tx(body_bytes, gas_est, **signer)
+        gas_used = int(simulate_gas(probe_bytes))
+        gas_limit = max(gas_est, int(gas_used * _PAYOUT_GAS_BUFFER))
+        required = int(amount) + int(math.ceil(gas_limit * rt.min_gas_price_umirage))
+        if self.get_pool_balance() < required:
+            raise InsufficientPoolBalance(f"pool balance does not cover amount plus fee: required={required}")
+        # Read the head before signing: the tx cannot appear in an earlier block.
+        scan_height, _head_time = chain_head()
+        tx_bytes, timeout_ns = build_signed_tx(body_bytes, gas_limit, **signer)
+        tx_hash = hashlib.sha256(tx_bytes).hexdigest().upper()
+        timeout_at = int(math.ceil(timeout_ns / 1_000_000_000))
+        logger.info(
+            "payout.tx.built recipient=%s amount=%d gas_limit=%d tx_hash=%s timeout_at=%d scan_height=%d",
+            recipient,
+            amount,
+            gas_limit,
+            tx_hash,
+            timeout_at,
+            scan_height,
+        )
+        return tx_bytes, tx_hash, timeout_at, scan_height
+
+    def reconcile_owner_payouts(self, owner: str) -> Optional[dict]:
+        """Resolve every open payout for an owner.
+
+        Returns the payout that is still in flight, or None when all of the
+        owner's payouts reached a terminal state.
+        """
+        owner_lc = (owner or "").strip().lower()
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, amount, status, tx_hash, tx_bytes, timeout_at, scan_height
+                    FROM reward_payouts
+                    WHERE owner = %s AND status IN ('reserved', 'broadcast')
+                    ORDER BY id
+                    """,
+                    (owner_lc,),
+                )
+                rows = cur.fetchall()
+
+        unresolved: Optional[dict] = None
+        for payout_id, amount, status, tx_hash, tx_bytes, timeout_at, scan_height in rows:
+            state = self._reconcile_payout(
+                int(payout_id), str(tx_hash), bytes(tx_bytes), int(timeout_at), int(scan_height)
+            )
+            logger.info("payout.reconcile id=%d was=%s now=%s hash=%s", payout_id, status, state, tx_hash)
+            if state == "pending":
+                unresolved = {"payout_id": int(payout_id), "tx_hash": str(tx_hash), "amount": int(amount)}
+        return unresolved
+
+    def _reconcile_payout(
+        self, payout_id: int, tx_hash: str, tx_bytes: bytes, timeout_at: int, scan_height: int
+    ) -> str:
+        """Drive one payout toward a terminal state. Returns confirmed/failed/pending."""
+        try:
+            verdict, code, scanned_to = resolve_tx_by_scan(tx_hash, scan_height, timeout_at)
+        except RuntimeError as e:
+            # Ambiguous: the chain may or may not hold this tx. Never release.
+            logger.error("payout.reconcile.scan_failed id=%d hash=%s err=%s", payout_id, tx_hash, e)
+            return "pending"
+
+        # `scan_height` is the next block to inspect, not the last one already
+        # checked, so retries do not re-fetch the previous head forever.
+        self._advance_scan(payout_id, scanned_to + 1)
+
+        if verdict == "found":
+            if code == 0:
+                self._settle_payout(payout_id, "confirmed", None)
+                logger.info("payout.confirmed id=%d hash=%s", payout_id, tx_hash)
+                return "confirmed"
+            # Included but rejected in execution: no tokens moved, and the
+            # unordered nonce is spent, so this tx can never pay out.
+            self._settle_payout(payout_id, "failed", f"chain_code_{code}")
+            return "failed"
+
+        if verdict == "expired":
+            self._settle_payout(payout_id, "failed", "expired_not_found")
+            return "failed"
+
+        try:
+            _hash, code, _height, raw_log = broadcast_tx(tx_bytes)
+        except RuntimeError as e:
+            logger.error("payout.reconcile.rebroadcast_failed id=%d hash=%s err=%s", payout_id, tx_hash, e)
+            return "pending"
+        # This may be a rebroadcast after the original HTTP response was lost.
+        # A peer could still hold the tx even if this node now rejects it, so
+        # only chain inclusion or expiry may release the rewards.
+        state = self._apply_broadcast_result(
+            payout_id,
+            tx_hash,
+            int(code),
+            raw_log,
+            release_definitive=False,
+        )
+        return "pending" if state == "broadcast" else state
+
+    def _advance_scan(self, payout_id: int, scanned_to: int) -> None:
+        """Move the reconciliation cursor forward so a retry re-reads less."""
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE reward_payouts SET scan_height = GREATEST(scan_height, %s) WHERE id = %s",
+                    (int(scanned_to), payout_id),
+                )
+
+    def _apply_broadcast_result(
+        self,
+        payout_id: int,
+        tx_hash: str,
+        code: int,
+        raw_log: str,
+        *,
+        release_definitive: bool = True,
+    ) -> str:
+        """Map a CheckTx result onto the payout state. Returns broadcast/failed/pending."""
+        if code == 0 or "tx already exists in cache" in raw_log.lower():
+            self._mark_broadcast(payout_id)
+            return "broadcast"
+        if release_definitive and int(code) in _DEFINITIVE_REJECT_CODES:
+            self._settle_payout(payout_id, "failed", f"checktx_code_{code}: {raw_log[:200]}")
+            return "failed"
+        # Unknown rejection: the tx might still be in someone's mempool.
+        logger.error("payout.broadcast.ambiguous id=%d hash=%s code=%d log=%s", payout_id, tx_hash, code, raw_log[:200])
+        return "pending"
+
+    def _mark_broadcast(self, payout_id: int) -> None:
+        now = int(time.time())
+        with connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE reward_payouts
+                    SET status = 'broadcast', attempts = attempts + 1, updated_at = %s
+                    WHERE id = %s AND status IN ('reserved', 'broadcast')
+                    """,
+                    (now, payout_id),
+                )
+
+    def _settle_payout(self, payout_id: int, status: str, error: Optional[str]) -> None:
+        """Move a payout to a terminal state, releasing rows only on failure."""
+        if status not in ("confirmed", "failed"):
+            raise RuntimeError(f"invalid terminal payout status: {status}")
+        now = int(time.time())
+        released = 0
+        with connect_backend_db() as conn:
+            prev_autocommit = conn.autocommit
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE reward_payouts
+                        SET status = %s, error = %s, updated_at = %s
+                        WHERE id = %s AND status IN ('reserved', 'broadcast')
+                        """,
+                        (status, error, now, payout_id),
+                    )
+                    if cur.rowcount == 1 and status == "failed":
+                        cur.execute(
+                            """
+                            UPDATE pending_rewards
+                            SET claimed_at = NULL, payout_amount = NULL, payout_batch_id = NULL
+                            WHERE payout_batch_id = %s AND reward_type = 'mirage'
+                            """,
+                            (payout_id,),
+                        )
+                        released = cur.rowcount
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.autocommit = prev_autocommit
+        if status == "failed":
+            logger.error("payout.failed id=%d error=%s released_rows=%d", payout_id, error, released)
 
     def claim_rewards(self, owner: str, ts: int) -> dict:
         """
@@ -372,9 +398,11 @@ class RewardDistributor:
 
         This is called from the /api/rewards/claim endpoint.
 
-        Serializes per-owner via pg_advisory_xact_lock so concurrent claims
-        cannot both read the same unclaimed rows and double-pay. The lock is
-        held across the payout subprocess and the claimed_at UPDATE.
+        Phase 1 reserves: under a per-owner pg_advisory_xact_lock it marks the
+        rows claimed, grants cosmetics/invite codes, and persists the signed
+        payout. Phase 2 broadcasts the persisted bytes. Anything that leaves the
+        payment ambiguous returns `payout_pending` and is retried by hash on the
+        next claim; only a definitively dead tx releases the rows.
 
         Args:
             owner: User address
@@ -388,6 +416,44 @@ class RewardDistributor:
             - error: str or None
         """
         owner_lc = (owner or "").strip().lower()
+        if not is_valid_mirage_address(owner_lc):
+            logger.warning("claim rejected malformed owner: %r", str(owner)[:64])
+            return {"success": False, "rewards": [], "tx_hash": None, "error": "invalid_recipient_address"}
+
+        if self.enabled:
+            unresolved = self.reconcile_owner_payouts(owner_lc)
+            if unresolved is not None:
+                logger.warning("claim blocked by unresolved payout id=%s", unresolved["payout_id"])
+                return {
+                    "success": False,
+                    "rewards": [],
+                    "tx_hash": unresolved["tx_hash"],
+                    "error": "payout_pending",
+                }
+
+        result, payout = self._reserve_claim(owner_lc, ts)
+        if not result["success"] or payout is None:
+            return result
+
+        payout_id, tx_bytes, tx_hash = payout
+        try:
+            _hash, code, _height, raw_log = broadcast_tx(tx_bytes)
+        except RuntimeError as e:
+            logger.error("payout.broadcast.transport_failed id=%d hash=%s err=%s", payout_id, tx_hash, e)
+            return {"success": False, "rewards": [], "tx_hash": tx_hash, "error": "payout_pending"}
+
+        state = self._apply_broadcast_result(payout_id, tx_hash, int(code), raw_log)
+        # BROADCAST_MODE_SYNC only reports CheckTx. Tokens have not moved until
+        # reconciliation finds a successful DeliverTx in a committed block.
+        error_code = "payout_failed" if state == "failed" else "payout_pending"
+        return {"success": False, "rewards": [], "tx_hash": tx_hash, "error": error_code}
+
+    def _reserve_claim(self, owner_lc: str, ts: int) -> Tuple[dict, Optional[Tuple[int, bytes, str]]]:
+        """Phase 1: claim the rows and persist the signed payout, atomically.
+
+        Returns (result, payout) where payout is (payout_id, tx_bytes, tx_hash)
+        when a token transfer still has to be broadcast.
+        """
         with connect_backend_db() as conn:
             # xact advisory locks require a real transaction; the helper opens
             # autocommit connections.
@@ -404,6 +470,7 @@ class RewardDistributor:
                         SELECT id, reward_type, reward_data, reason
                         FROM pending_rewards
                         WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
+                        ORDER BY id
                         """,
                         (owner_lc,),
                     )
@@ -411,12 +478,15 @@ class RewardDistributor:
 
                 if not rows:
                     conn.commit()
-                    return {
-                        "success": False,
-                        "rewards": [],
-                        "tx_hash": None,
-                        "error": "no_rewards",
-                    }
+                    return (
+                        {
+                            "success": False,
+                            "rewards": [],
+                            "tx_hash": None,
+                            "error": "no_rewards",
+                        },
+                        None,
+                    )
 
                 # Separate by type
                 mirage_rewards = []
@@ -432,6 +502,12 @@ class RewardDistributor:
                     if reward_type == "mirage":
                         amount = reward_data.get("amount", 0)
                         apply_multiplier = reward_data.get("apply_multiplier", True)
+                        if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+                            raise RuntimeError(f"invalid MIRAGE reward amount id={reward_id}: {amount!r}")
+                        if not isinstance(apply_multiplier, bool):
+                            raise RuntimeError(
+                                f"invalid MIRAGE reward apply_multiplier id={reward_id}: {apply_multiplier!r}"
+                            )
                         if apply_multiplier:
                             total_mirage_with_multiplier += amount
                         else:
@@ -445,10 +521,13 @@ class RewardDistributor:
                             }
                         )
                     elif reward_type == "invite_code":
+                        count = reward_data.get("amount", 1)
+                        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+                            raise RuntimeError(f"invalid invite-code reward amount id={reward_id}: {count!r}")
                         invite_code_rewards.append(
                             {
                                 "id": reward_id,
-                                "amount": reward_data.get("amount", 1),
+                                "amount": count,
                                 "reason": reason,
                             }
                         )
@@ -467,6 +546,21 @@ class RewardDistributor:
                 # Apply multiplier only to rewards that allow it
                 payout_amount = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
                 total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
+                reward_payouts = {
+                    reward["id"]: (
+                        int(reward["amount"] * multiplier) if reward["apply_multiplier"] else int(reward["amount"])
+                    )
+                    for reward in mirage_rewards
+                }
+                rounding_remainder = payout_amount - sum(reward_payouts.values())
+                if rounding_remainder:
+                    first_multiplied = next(
+                        (reward for reward in mirage_rewards if reward["apply_multiplier"]),
+                        None,
+                    )
+                    if first_multiplied is None:
+                        raise RuntimeError(f"payout rounding mismatch without multiplied reward owner={owner_lc}")
+                    reward_payouts[first_multiplied["id"]] += rounding_remainder
 
                 result = {
                     "success": True,
@@ -475,32 +569,63 @@ class RewardDistributor:
                     "error": None,
                 }
 
-                # Process MIRAGE rewards while the advisory lock is held so a
+                # Reserve the MIRAGE payout while the advisory lock is held so a
                 # concurrent claim waits and then finds nothing unclaimed.
+                payout: Optional[Tuple[int, bytes, str]] = None
+                payout_id: Optional[int] = None
                 if mirage_rewards and payout_amount > 0:
-                    send_result = self.send_reward(
-                        owner_lc, payout_amount, f"quest_rewards:{len(mirage_rewards)}_quests"
-                    )
-
-                    if send_result["success"]:
-                        result["tx_hash"] = send_result.get("tx_hash")
-                        result["rewards"].append(
-                            {
-                                "type": "mirage",
-                                "amount": payout_amount,
-                                "raw_amount": total_mirage,
-                                "multiplier": round(multiplier, 4),
-                            }
-                        )
+                    if self.enabled:
+                        try:
+                            tx_bytes, tx_hash, timeout_at, scan_height = self.build_payout_tx(
+                                owner_lc,
+                                payout_amount,
+                            )
+                        except InsufficientPoolBalance as exc:
+                            logger.warning(
+                                "insufficient pool balance for %s: %s",
+                                owner_lc,
+                                exc,
+                            )
+                            conn.rollback()
+                            return (
+                                {
+                                    "success": False,
+                                    "rewards": [],
+                                    "tx_hash": None,
+                                    "error": "insufficient_pool_balance",
+                                },
+                                None,
+                            )
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                INSERT INTO reward_payouts
+                                    (owner, amount, status, tx_hash, tx_bytes, timeout_at, scan_height,
+                                     attempts, error, created_at, updated_at)
+                                VALUES (%s, %s, 'reserved', %s, %s, %s, %s, 0, NULL, %s, %s)
+                                RETURNING id
+                                """,
+                                (owner_lc, payout_amount, tx_hash, tx_bytes, timeout_at, scan_height, ts, ts),
+                            )
+                            payout_id = int(cur.fetchone()[0])
+                        payout = (payout_id, tx_bytes, tx_hash)
+                        result["tx_hash"] = tx_hash
                     else:
-                        # Failed to send - don't mark as claimed
-                        logger.error(
-                            f"Failed to send MIRAGE rewards to {owner_lc}: {send_result.get('error')}"
+                        logger.info(
+                            "[PAYOUTS DISABLED] would send %d umirage to %s from %s",
+                            payout_amount,
+                            owner_lc,
+                            self.pool_address or "NO_POOL",
                         )
-                        conn.rollback()
-                        result["success"] = False
-                        result["error"] = send_result.get("error")
-                        return result
+
+                    result["rewards"].append(
+                        {
+                            "type": "mirage",
+                            "amount": payout_amount,
+                            "raw_amount": total_mirage,
+                            "multiplier": round(multiplier, 4),
+                        }
+                    )
 
                 # Process cosmetic rewards
                 for cosmetic in cosmetic_rewards:
@@ -528,7 +653,8 @@ class RewardDistributor:
                 # Process invite code rewards
                 for invite_reward in invite_code_rewards:
                     count = invite_reward.get("amount", 1)
-                    codes = _generate_unique_invite_codes(owner_lc, count)
+                    with conn.cursor() as cur:
+                        codes = _generate_unique_invite_codes(cur, owner_lc, count)
                     result["rewards"].append(
                         {
                             "type": "invite_code",
@@ -545,17 +671,13 @@ class RewardDistributor:
                 with conn.cursor() as cur:
                     if mirage_ids:
                         for reward in mirage_rewards:
-                            if reward.get("apply_multiplier", True):
-                                reward_payout = int(reward["amount"] * multiplier)
-                            else:
-                                reward_payout = reward["amount"]
                             cur.execute(
                                 """
                                 UPDATE pending_rewards
-                                SET claimed_at = %s, payout_amount = %s
+                                SET claimed_at = %s, payout_amount = %s, payout_batch_id = %s
                                 WHERE id = %s AND claimed_at IS NULL
                                 """,
-                                (ts, reward_payout, reward["id"]),
+                                (ts, reward_payouts[reward["id"]], payout_id, reward["id"]),
                             )
 
                     if cosmetic_ids:
@@ -579,7 +701,7 @@ class RewardDistributor:
                         )
 
                 conn.commit()
-                return result
+                return result, payout
             except Exception:
                 conn.rollback()
                 raise

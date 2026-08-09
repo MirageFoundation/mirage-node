@@ -221,6 +221,7 @@ const ERROR_MAP = {
     pool_not_configured: "Pool is not configured.",
     no_rewards: "No rewards available.",
     payout_failed: "Payout failed.",
+    payout_pending: "Your payout is being confirmed on chain. Your rewards are safe — check back in a moment.",
     retry: "Please retry the request.",
     stats_event_disabled: "Stats events are disabled on this node.",
     invalid_user_level: "Invalid user level.",

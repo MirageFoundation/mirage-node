@@ -31,6 +31,7 @@ import requests
 from flask import Blueprint, jsonify, request, has_request_context
 
 from error_utils import safe_error, api_error_code, api_error
+from fleet_url import post_json as fleet_post_json, validate_fleet_endpoint
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
@@ -57,7 +58,7 @@ import calendar
 from datetime import datetime as dt
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import urlencode, urlparse
 from auto_agents import merge_auto_enabled_agents
 from chain import (
     classify_reject as _classify_reject,
@@ -8147,12 +8148,16 @@ def admin_stats_aggregate():
         if base_url.rstrip("/") == local_norm:
             continue
         entry: Dict[str, Any] = {"server": base_url}
+        # Revalidate at send time: discovery may have run against different DNS,
+        # and this request carries the admin's signed proof.
+        endpoint = validate_fleet_endpoint(base_url, allow_ip_literal=True)
+        if endpoint is None:
+            entry["status"] = "rejected"
+            log_event(rid, "admin_stats_aggregate.rejected_destination", server=base_url)
+            servers.append(entry)
+            continue
         try:
-            resp = requests.post(
-                urljoin(base_url + "/", "api/admin/stats/export"),
-                json=proof,
-                timeout=6,
-            )
+            resp = fleet_post_json(endpoint, "api/admin/stats/export", proof, timeout=6)
             if resp.status_code == 200:
                 entry["status"] = "ok"
                 entry["stats"] = resp.json()
@@ -9789,12 +9794,6 @@ def referrals_summary():
 # =============================================================================
 
 
-def _is_main_site() -> bool:
-    """Check if request is from mirage.talk or localhost (where invite codes work)."""
-    host = request.host.split(":")[0].lower()
-    return host in ("mirage.talk", "localhost", "127.0.0.1")
-
-
 def _build_invite_codes(address: str) -> dict:
     """Pure helper: build the invite-codes payload for a given address.
 
@@ -9883,9 +9882,12 @@ def get_invite_codes():
 
 @public_bp.route("/api/validate_invite_code", methods=["POST"])
 def validate_invite_code():
-    """Validate that an invite code exists and is unused. Only works on mirage.talk/localhost.
+    """Validate that an invite code exists and is unused.
 
-    Feature-gated by REGISTRATION_INVITE_CODE_REQUIRED. When false, returns 404.
+    Gated by this node's own REGISTRATION_INVITE_CODE_REQUIRED. When false,
+    returns 404. There is no host check: `Host` is client-supplied, so a
+    hostname allowlist decided nothing an attacker could not flip by sending a
+    different header, while making the real gate look stronger than it is.
     Never returns the code owner's address — that disclosure is a leak if the
     feature is re-enabled.
     """
@@ -9894,10 +9896,6 @@ def validate_invite_code():
     if not REGISTRATION_INVITE_CODE_REQUIRED:
         log_event(rid, "invite.validate.disabled")
         return api_error_code("not_found", 404)
-
-    if not _is_main_site():
-        log_event(rid, "invite.validate.blocked", host=request.host)
-        return jsonify({"error": "invite codes only work on mirage.talk"}), 403
 
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip().upper()

@@ -8,11 +8,12 @@ import math
 import os
 import random
 import re
+import socket
 import string
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
-from urllib.parse import urlparse
 
 import requests
 from cosmpy.crypto.keypairs import PrivateKey
@@ -43,6 +44,7 @@ from tests.common import (
     _fetch_params,
     _do_subscribe,
     _docker_exec,
+    resolve_db_name,
     _run_miraged,
     _miraged_cmd,
     _keyring_backend,
@@ -115,20 +117,8 @@ from tests.backend_helpers import (
 )
 
 
-def _parse_db_name(db_url: str) -> str:
-    parsed = urlparse(db_url)
-    return parsed.path.lstrip("/")
-
-
 def _get_backend_db_name() -> str:
-    url = os.environ.get("BACKEND_DB_URL", "").strip()
-    if url:
-        return _parse_db_name(url)
-    if _check_local_docker():
-        code, out = _docker_exec("printenv BACKEND_DB_URL")
-        if code == 0 and out:
-            return _parse_db_name(out.strip())
-    return ""
+    return resolve_db_name("BACKEND_DB_URL")
 
 
 def test_security(backend: str):
@@ -1621,3 +1611,207 @@ def test_indexer_drift(backend):
     _compare("profile_level", _level_pair)
     _compare("profile_username", _username_pair)
     _compare("balance", _balance_pair)
+
+
+def test_fleet_url_validation(backend):
+    """A validator moniker must not be able to aim this node's requests.
+
+    Stats fan-out POSTs the admin's signed proof to every discovered server, and
+    a moniker is attacker-influenced text. A schemed moniker used to be accepted
+    verbatim, so `http://127.0.0.1` or a metadata address became an outbound
+    request from inside the container.
+    """
+    del backend
+
+    backend_src = _backend_src()
+    sys.path.insert(0, backend_src)
+    os.environ.setdefault("CLIENT_HASH_SALT", "00" * 16)
+    try:
+        import fleet_url
+    except Exception as e:
+        _fail("fleet_url.importable", f"fleet_url not importable: {e}")
+        return
+
+    # Resolution is stubbed so the assertions are about the policy, not about
+    # what the test host's DNS happens to answer today.
+    public_ip = "93.184.216.34"
+    dns_map = {
+        "mirage.talk": [public_ip],
+        "mirage.vote": [public_ip],
+        "evil.example": ["10.0.0.5"],
+        "split.example": [public_ip, "192.168.1.1"],
+        "gone.example": [],
+    }
+
+    def _fake_getaddrinfo(host, port, *_args, **_kwargs):
+        ips = dns_map.get(host)
+        if not ips:
+            raise socket.gaierror(-2, "Name or service not known")
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port)) for ip in ips]
+
+    original = fleet_url.socket.getaddrinfo
+    fleet_url.socket.getaddrinfo = _fake_getaddrinfo
+    try:
+        rejected = {
+            "http://127.0.0.1": "loopback via scheme",
+            "http://localhost": "loopback by name",
+            "https://169.254.169.254": "cloud metadata",
+            "http://10.0.0.5": "private address",
+            "https://evil.example": "name resolving to a private address",
+            "https://split.example": "name resolving to both public and private",
+            "https://gone.example": "name that does not resolve",
+            "file:///etc/passwd": "non-http scheme",
+            "https://user:pw@mirage.talk": "embedded credentials",
+            "https://mirage.talk/admin": "path outside the fan-out's own",
+            "https://mirage.talk:99999": "out-of-range port",
+            "https://mirage talk": "whitespace",
+            "no-dot": "not a hostname",
+            "192.0.2.1": "bare IP moniker",
+            "": "empty",
+        }
+        leaked = {
+            raw: fleet_url.validate_fleet_endpoint(raw)
+            for raw in rejected
+            if fleet_url.validate_fleet_endpoint(raw) is not None
+        }
+        if not leaked:
+            _pass("fleet_url.rejects_unsafe_destinations", checked=len(rejected))
+        else:
+            _fail("fleet_url.rejects_unsafe_destinations", f"accepted: { {k: v.url for k, v in leaked.items()} }")
+
+        accepted = {
+            "mirage.talk": "https://mirage.talk",
+            "https://mirage.vote": "https://mirage.vote",
+            "MIRAGE.TALK": "https://mirage.talk",
+        }
+        wrong = {}
+        for raw, expected in accepted.items():
+            got = fleet_url.validate_fleet_endpoint(raw)
+            if got is None or got.url != expected:
+                wrong[raw] = got.url if got else None
+        if not wrong:
+            _pass("fleet_url.accepts_public_endpoints")
+        else:
+            _fail("fleet_url.accepts_public_endpoints", f"mismatches: {wrong}")
+
+        # A peer's own address is the one place an IP literal is a destination,
+        # and only when it is globally routable.
+        peer_ok = fleet_url.validate_fleet_endpoint(f"http://{public_ip}", allow_ip_literal=True)
+        peer_private = fleet_url.validate_fleet_endpoint("http://10.0.0.5", allow_ip_literal=True)
+        if peer_ok is not None and peer_ok.ips == (public_ip,) and peer_private is None:
+            _pass("fleet_url.peer_ip_literals_must_be_global")
+        else:
+            _fail(
+                "fleet_url.peer_ip_literals_must_be_global",
+                f"global={peer_ok.url if peer_ok else None} private={peer_private.url if peer_private else None}",
+            )
+
+        # The request must go to an address that passed validation, so a name
+        # cannot resolve to something else between the check and the send.
+        endpoint = fleet_url.validate_fleet_endpoint("mirage.talk")
+        sent = {}
+
+        class _FakeSession:
+            def mount(self, prefix, _adapter):
+                sent["mount"] = prefix
+
+            def post(self, url, **kwargs):
+                sent["url"] = url
+                sent["headers"] = kwargs.get("headers") or {}
+                sent["allow_redirects"] = kwargs.get("allow_redirects")
+                return "response"
+
+            def close(self):
+                sent["closed"] = True
+
+        original_session = fleet_url.requests.Session
+        fleet_url.requests.Session = lambda: _FakeSession()
+        try:
+            fleet_url.post_json(endpoint, "api/admin/stats/export", {"proof": 1}, timeout=6)
+        finally:
+            fleet_url.requests.Session = original_session
+
+        if (
+            sent.get("url") == f"https://{public_ip}/api/admin/stats/export"
+            and sent.get("headers", {}).get("Host") == "mirage.talk"
+            and sent.get("allow_redirects") is False
+        ):
+            _pass("fleet_url.request_pinned_to_validated_ip")
+        else:
+            _fail("fleet_url.request_pinned_to_validated_ip", f"sent={sent}")
+    finally:
+        fleet_url.socket.getaddrinfo = original
+
+
+def test_analytics_identity_trust(backend):
+    """Analytics identity must come from a signature, not a query parameter.
+
+    An unverified `address` used to bind browsing to that account and refresh
+    its last-seen, so anyone could keep a dormant account looking active or
+    attribute their own traffic to someone else.
+    """
+    backend_src = _backend_src()
+    sys.path.insert(0, backend_src)
+    os.environ.setdefault("CLIENT_HASH_SALT", "00" * 16)
+    try:
+        import stats as st
+    except Exception as e:
+        _fail("analytics_identity.importable", f"stats not importable: {e}")
+        return
+
+    factory_src = open(os.path.join(backend_src, "factory.py"), encoding="utf-8").read()
+    middleware = factory_src.split("def _record_request_activity", 1)
+    if len(middleware) == 2 and "update_user_last_seen" not in middleware[1].split("@app.after_request", 1)[0]:
+        _pass("analytics_identity.middleware_writes_no_last_seen")
+    else:
+        _fail(
+            "analytics_identity.middleware_writes_no_last_seen",
+            "the /api/ middleware still writes last-seen from an unverified query address",
+        )
+
+    import inspect
+
+    identity_src = inspect.getsource(st.extract_identity)
+    if "request.args" not in identity_src:
+        _pass("analytics_identity.no_query_address_binding")
+    else:
+        _fail("analytics_identity.no_query_address_binding", "extract_identity still reads the query address")
+    core_src = open(os.path.join(backend_src, "routes", "core.py"), encoding="utf-8").read()
+    if (
+        "signed_request_verified: bool = False" in identity_src
+        and "if signed_request_verified else None" in identity_src
+        and "def _bind_verified_request_activity(response)" in factory_src
+        and 'getattr(g, "verified_request_address", None)' in factory_src
+        and "g.verified_request_address = _derive_address_from_pubkey(pub_dec)" in core_src
+    ):
+        _pass("analytics_identity.pubkey_requires_successful_signed_route")
+    else:
+        _fail(
+            "analytics_identity.pubkey_requires_successful_signed_route",
+            "an unverified public key can still be attributed as an authenticated address",
+        )
+
+    # The victim must not gain a last-seen record from someone else's request.
+    victim = f"mirage1victim{_rand_str(20)}".lower()
+    code, _ = _get(f"{backend}/api/get_posts", {"address": victim, "limit": 1})
+    if code != 200:
+        _fail("analytics_identity.unsigned_address_not_recorded", f"probe request failed: {code}")
+        return
+
+    db_name = _get_backend_db_name() if _check_local_docker() else ""
+    if not db_name:
+        _fail("analytics_identity.unsigned_address_not_recorded", "BACKEND_DB_URL not resolvable")
+        return
+
+    rc, out = _docker_exec(
+        f'su - postgres -c "psql -d {db_name} -tAc \\"SELECT count(*) FROM user_last_seen '
+        f"WHERE LOWER(owner) = '{victim}';\\\" 2>&1\"",
+        timeout=15,
+    )
+    if rc == 0 and out.strip() == "0":
+        _pass("analytics_identity.unsigned_address_not_recorded")
+    else:
+        _fail(
+            "analytics_identity.unsigned_address_not_recorded",
+            f"an unsigned query address produced last-seen state: rc={rc} out={out.strip()}",
+        )

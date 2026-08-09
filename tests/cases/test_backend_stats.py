@@ -114,11 +114,15 @@ def test_stats_pure(backend):
     )
     if backend_src not in sys.path:
         sys.path.insert(0, backend_src)
+    # client_ip fails hard without a salt, which used to skip this whole
+    # category on a host run. The salt only has to exist for these pure
+    # functions; the production fail-hard path is asserted by hash_salt.
+    os.environ.setdefault("CLIENT_HASH_SALT", "00" * 16)
     try:
         import stats as st
         from client_ip import hash_visitor_id
-    except Exception as e:  # backend source/env not importable in this harness
-        _skip("stats.pure", f"backend modules not importable: {e}")
+    except Exception as e:
+        _fail("stats.pure", f"backend modules not importable: {e}")
         return
 
     # Moniker -> URL normalization for server discovery.
@@ -151,25 +155,9 @@ def test_stats_pure(backend):
     else:
         _fail("stats.event_classification", f"mismatches: {cbad}")
 
-    # The ``address`` arg names the TARGET being viewed only on /api/get_profile;
-    # everywhere else it is the acting viewer. Crediting the target as the viewer
-    # is what inflated the logged-in (lurker) count, so the guard must be exact.
-    target_cases = {
-        "/api/get_profile": True,
-        "/api/get_profile/anything": True,
-        "/api/get_posts": False,
-        "/api/search": False,
-        "/api/core/vote": False,
-    }
-    tbad = {p: st._path_address_is_target(p) for p, exp in target_cases.items() if st._path_address_is_target(p) != exp}
-    if not tbad:
-        _pass("stats.address_is_target")
-    else:
-        _fail("stats.address_is_target", f"mismatches: {tbad}")
-
-    # The query-time CTE must null the profile-view address too, so rows recorded
-    # before the record-time fix self-correct instead of permanently inflating
-    # the logged-in counts with everyone who got viewed.
+    # The query-time CTE must still null the profile-view address, so rows
+    # recorded while a query address counted as identity self-correct instead of
+    # permanently inflating the logged-in counts with everyone who got viewed.
     cte = st._resolved_event_cte()
     if "/api/get_profile" in cte:
         _pass("stats.resolved_cte_profile_guard")

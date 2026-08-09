@@ -9,7 +9,7 @@ Functions:
 import json
 import os
 import sys
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -96,20 +96,27 @@ def create_app(init_runtime: bool = True) -> Flask:
         return response
 
     @app.before_request
-    def _track_last_seen_from_query():
+    def _record_request_activity():
         if not request.path.startswith("/api/"):
             return
         # Mirage-owned analytics: record visit/engagement for every client
         # (web + mobile) from the one place every request passes through.
+        #
+        # Last-seen is not written here. A query `address` is unverified, so
+        # anyone could keep another user's account looking active, or make a
+        # dormant account look alive. Last-seen is written only where the
+        # address came from a verified public key (see derive_address_from_pubkey).
         from stats import record_request_event
 
         record_request_event(request.path)
-        addr = request.args.get("address") or request.args.get("admin_address") or ""
-        if not addr:
-            return
-        from user_last_seen import update_user_last_seen
 
-        update_user_last_seen(addr, source=request.path)
+    @app.after_request
+    def _bind_verified_request_activity(response):
+        if response.status_code < 400 and getattr(g, "verified_request_address", None):
+            from stats import bind_verified_request_identity
+
+            bind_verified_request_identity(request.path)
+        return response
 
     # Middleware: inject new_inbox_items into every JSON response for logged-in users
     @app.after_request

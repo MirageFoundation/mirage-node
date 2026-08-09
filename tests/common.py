@@ -83,14 +83,37 @@ FAUCET_AMOUNTS: dict[str, int] = {}
 @dataclass
 class TestResult:
     name: str
-    passed: bool
+    status: str  # "pass" | "fail" | "skip"
     status_code: Optional[int] = None
     error: Optional[str] = None
     details: dict = field(default_factory=dict)
+    category: Optional[str] = None
+
+    @property
+    def passed(self) -> bool:
+        """A skip is not a pass. Counting it as one hid real gaps (backend L-6)."""
+        return self.status == "pass"
 
 
 RESULTS: list[TestResult] = []
 _RESULTS_LOCK = threading.Lock()
+
+# Category of the test currently running on each thread. Stateless categories run
+# in parallel, so a single global would misattribute skips.
+_CATEGORY_BY_THREAD: dict[int, str] = {}
+
+
+def _current_category() -> Optional[str]:
+    with _RESULTS_LOCK:
+        own = _CATEGORY_BY_THREAD.get(threading.get_ident())
+        if own is not None:
+            return own
+        # A helper thread spawned by a test inherits the category only when no
+        # other category could claim the result.
+        if len(_CATEGORY_BY_THREAD) == 1:
+            return next(iter(_CATEGORY_BY_THREAD.values()))
+    return None
+
 
 _COLOR_GREEN = "\033[92m"
 _COLOR_RED = "\033[91m"
@@ -100,7 +123,7 @@ _COLOR_BOLD = "\033[1m"
 
 
 def _pass(name: str, **details) -> TestResult:
-    r = TestResult(name=name, passed=True, details=details)
+    r = TestResult(name=name, status="pass", details=details, category=_current_category())
     with _RESULTS_LOCK:
         RESULTS.append(r)
     print(f"  {_COLOR_GREEN}PASS{_COLOR_RESET}  {name}")
@@ -108,7 +131,7 @@ def _pass(name: str, **details) -> TestResult:
 
 
 def _fail(name: str, error: str = "", **details) -> TestResult:
-    r = TestResult(name=name, passed=False, error=error, details=details)
+    r = TestResult(name=name, status="fail", error=error, details=details, category=_current_category())
     with _RESULTS_LOCK:
         RESULTS.append(r)
     err = f" — {error}" if error else ""
@@ -117,7 +140,13 @@ def _fail(name: str, error: str = "", **details) -> TestResult:
 
 
 def _skip(name: str, reason: str = "", **details) -> TestResult:
-    r = TestResult(name=name, passed=True, error=reason, details={"skipped": True, **details})
+    r = TestResult(
+        name=name,
+        status="skip",
+        error=reason,
+        details={"skipped": True, **details},
+        category=_current_category(),
+    )
     with _RESULTS_LOCK:
         RESULTS.append(r)
     err = f" — {reason}" if reason else ""
@@ -287,26 +316,73 @@ def _expect_http_error(label: str, resp: dict, status: int, contains: str | None
 # Local Docker testnet helpers
 # ---------------------------------------------------------------------------
 
-# Detect if we're already running inside the container.
-_INSIDE_CONTAINER = os.path.exists("/.dockerenv") or os.path.isfile("/opt/mirage/deploy/entrypoint.sh")
+# Test code must execute inside the local testnet container. Host-side
+# docker-exec fallback made it too easy to bypass the required environment and
+# accidentally run a transaction-heavy suite from the wrong execution surface.
+_INSIDE_CONTAINER = os.path.isfile("/.dockerenv")
 
 
 def _docker_exec(cmd: str, timeout: int = 30) -> Tuple[int, str]:
-    """Run a command inside the mirage environment.
-
-    If running inside the container, executes directly via bash.
-    If running on the host, uses ``docker exec mirage``.
-    Returns (exit_code, stdout).
-    """
-    if _INSIDE_CONTAINER:
-        argv = ["bash", "-lc", cmd]
-    else:
-        argv = ["docker", "exec", "mirage", "bash", "-lc", cmd]
+    """Run a command inside the local testnet container."""
+    if not _INSIDE_CONTAINER:
+        raise RuntimeError(
+            "test helpers cannot run outside the local Docker container; "
+            "use docker exec mirage bash -lc 'cd /opt/mirage && ...'"
+        )
+    argv = ["bash", "-lc", cmd]
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     out = result.stdout.strip()
     if result.returncode != 0 and not out:
         out = result.stderr.strip()
     return result.returncode, out
+
+
+# Load the node's own env the way the services see it. `docker exec` starts a
+# fresh shell that does not inherit the tmux session's environment.
+_LOAD_NODE_ENV = "set -a; for f in /root/.mirage/env/*.env; do . $f; done; set +a"
+
+
+def container_env(key: str) -> str:
+    """Value of an env var as the node's services see it, or "" if unset."""
+    value = os.environ.get(key, "").strip()
+    if value or not _check_local_docker():
+        return value
+    rc, out = _docker_exec(f"printenv {key}")
+    if rc == 0 and out.strip():
+        return out.strip()
+    rc, out = _docker_exec(f"{_LOAD_NODE_ENV}; printenv {key}")
+    return out.strip() if rc == 0 else ""
+
+
+def resolve_db_name(env_key: str) -> str:
+    """Database name behind a `*_DB_URL`, or "" when it cannot be resolved."""
+    url = container_env(env_key)
+    if not url:
+        return ""
+    from urllib.parse import urlparse
+
+    return urlparse(url).path.lstrip("/")
+
+
+def docker_python(code: str, mutation: str = "", timeout: int = 60) -> Tuple[int, str]:
+    """Run Python against the deployed backend with the node's env loaded.
+
+    Backend modules read required settings at import, so they are only
+    importable where that env exists. ENV_DIR is cleared so a probe can never
+    persist a value back into backend.env. Output ends with `rc=<exit code>`.
+    """
+    steps = f"cd /opt/mirage/web/backend; {_LOAD_NODE_ENV}"
+    if mutation:
+        steps += f"; {mutation}"
+    return _docker_exec(
+        f'{steps}; ENV_DIR= PYTHONPATH=/opt/mirage python3 -c "{code}" 2>&1; echo rc=$?',
+        timeout=timeout,
+    )
+
+
+def docker_import_probe(module: str, mutation: str = "", timeout: int = 60) -> Tuple[int, str]:
+    """Prove a module's import-time settings check fires under `mutation`."""
+    return docker_python(f"import {module}", mutation=mutation, timeout=timeout)
 
 
 def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
@@ -317,43 +393,29 @@ def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
     Returns (exit_code, stdout).  Stderr is only appended on failure
     so JSON output on stdout stays clean.
     """
+    if not _INSIDE_CONTAINER:
+        raise RuntimeError("miraged test commands require the local Docker container")
     miraged = _miraged_cmd()
-    if _INSIDE_CONTAINER:
-        argv = [miraged] + list(args)
-        # Inherit parent environment; ensure HOME is set for keyring access
-        env = os.environ.copy()
-        env["HOME"] = "/root"
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
-        out = result.stdout.strip()
-        if result.returncode != 0 and not out:
-            out = result.stderr.strip()
-        return result.returncode, out
-    else:
-        cmd = " ".join([miraged] + list(args))
-        return _docker_exec(cmd, timeout=timeout)
+    argv = [miraged] + list(args)
+    # Inherit parent environment; ensure HOME is set for keyring access
+    env = os.environ.copy()
+    env["HOME"] = "/root"
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
+    out = result.stdout.strip()
+    if result.returncode != 0 and not out:
+        out = result.stderr.strip()
+    return result.returncode, out
 
 
 def _miraged_cmd() -> str:
     """Return the miraged binary path inside the container."""
+    if not _INSIDE_CONTAINER:
+        raise RuntimeError("miraged test commands require the local Docker container")
     preferred = "/opt/mirage/blockchain/miraged"
     fallback = "/opt/mirage/blockchain/bin/miraged"
-    if _INSIDE_CONTAINER:
-        if os.path.isfile(preferred) and os.access(preferred, os.X_OK):
-            return preferred
-        if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
-            return fallback
+    if os.path.isfile(preferred) and os.access(preferred, os.X_OK):
         return preferred
-    # Host mode: query inside container and detect known paths robustly
-    code, out = _docker_exec(
-        "if [ -x /opt/mirage/blockchain/miraged ]; then "
-        "echo /opt/mirage/blockchain/miraged; "
-        "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then "
-        "echo /opt/mirage/blockchain/bin/miraged; fi"
-    )
-    text = out or ""
-    if preferred in text:
-        return preferred
-    if fallback in text:
+    if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
         return fallback
     return preferred
 
@@ -400,14 +462,32 @@ def _generate_wallet() -> LocalWallet:
 
 
 def _check_local_docker() -> bool:
-    """Verify we can execute commands in the mirage environment."""
-    if _INSIDE_CONTAINER:
-        return True
+    """Verify this process is inside the local testnet container."""
+    return _INSIDE_CONTAINER and socket.gethostname().strip().lower() == "testnet"
+
+
+def _check_test_pow_limit() -> tuple[bool, str]:
+    """Require the local anti-spam limit used by the transaction-heavy suites."""
+    code, out = _run_miraged(
+        ["q", "core", "params", "--home", "/root/.mirage/node", "--output", "json"],
+        timeout=15,
+    )
+    if code != 0:
+        return False, f"params query failed: {out[:200]}"
     try:
-        code, out = _docker_exec("echo ok", timeout=5)
-        return code == 0 and "ok" in out
-    except Exception:
-        return False
+        json_start = out.find("{")
+        if json_start < 0:
+            raise ValueError("no JSON object in output")
+        params = json.loads(out[json_start:])
+    except Exception as exc:
+        return False, f"params query returned invalid JSON: {exc}"
+    try:
+        value = int(params["pow_message_limit"])
+    except (KeyError, TypeError, ValueError):
+        return False, f"pow_message_limit missing or invalid: {str(params)[:200]}"
+    if value != 9_999_999:
+        return False, f"pow_message_limit={value}, expected 9999999"
+    return True, ""
 
 
 _VALIDATOR_KEY_ADDR: Optional[str] = None
@@ -912,22 +992,66 @@ def _fetch_params(backend: str, address: str | None = None) -> tuple:
     return lb, diff, base_bits, pow_factor, bal
 
 
+def summarize(results: list[TestResult], no_skip_categories: set[str] | frozenset = frozenset()) -> dict:
+    """Count outcomes and flag skips that a release-gate category may not have.
+
+    Pure so the runner's own accounting can be tested without a live backend.
+    """
+    passed = sum(1 for r in results if r.status == "pass")
+    failed = sum(1 for r in results if r.status == "fail")
+    skipped = sum(1 for r in results if r.status == "skip")
+    gate_skips = [r for r in results if r.status == "skip" and r.category in no_skip_categories]
+    return {
+        "total": len(results),
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "gate_skips": gate_skips,
+        "ok": failed == 0 and not gate_skips,
+    }
+
+
 def run_suite(
     name: str,
     categories: dict[str, callable],
     stateless: set[str],
     pre_run_hook: callable | None = None,
+    no_skip_categories: set[str] | frozenset = frozenset(),
+    walletless_categories: set[str] | frozenset = frozenset(),
 ) -> int:
     """Generic test suite runner.
 
-    Handles argparse, local-only guard, connectivity check, wallet setup,
+    Handles argparse, container-only guard, connectivity check, wallet setup,
     parallel/serial dispatch, and summary.
     """
+    if not _INSIDE_CONTAINER:
+        print(
+            f"\n{_COLOR_RED}ABORT: This suite can only run from inside "
+            f"the local Docker testnet container.{_COLOR_RESET}"
+        )
+        print("  Host execution is disabled. Run:")
+        print(
+            "  docker exec mirage bash -lc 'cd /opt/mirage && "
+            'set -a; for f in /root/.mirage/env/*.env; do . "$f"; done; '
+            "set +a; PYTHONPATH=/opt/mirage python3 tests/test_backend.py'"
+        )
+        return 1
+
     parser = argparse.ArgumentParser(description=name)
     parser.add_argument("--backend", default=DEFAULT_BACKEND, help=f"Backend URL (default: {DEFAULT_BACKEND})")
     parser.add_argument("--category", "-c", default=None, help=f"Run single category: {', '.join(categories.keys())}")
     args = parser.parse_args()
     backend = args.backend.rstrip("/")
+    if args.category:
+        cats = [c.strip() for c in args.category.split(",")]
+        for category in cats:
+            if category not in categories:
+                print(f"{_COLOR_RED}Unknown category: {category}{_COLOR_RESET}")
+                print(f"Available: {', '.join(categories.keys())}")
+                return 1
+        to_run = {category: categories[category] for category in cats}
+    else:
+        to_run = categories
 
     print("=" * 60)
     print(name)
@@ -947,23 +1071,15 @@ def run_suite(
         return 1
 
     if not _check_local_docker():
-        print(f"\n{_COLOR_RED}ABORT: Cannot execute commands in the mirage environment.{_COLOR_RESET}")
-        print(f"  Either run this from inside the container, or ensure the 'mirage' Docker container is running.")
+        print(f"\n{_COLOR_RED}ABORT: This is not the local Docker testnet container.{_COLOR_RESET}")
+        print("  Expected container hostname: testnet")
         return 1
 
-    # Hostname gate BEFORE any HTTP — prod/UAT Caddy redirects :80→:443 and
-    # would otherwise spam SSLError retries (and must never mutate live state).
+    # Hostname gate BEFORE any HTTP. This prevents a copied test tree inside a
+    # prod/UAT container from mutating that node.
     try:
-        if _INSIDE_CONTAINER:
-            ch = socket.gethostname().strip().lower()
-            print(f"  Running inside container (hostname={ch}).")
-        else:
-            print(f"  Docker container 'mirage' is running.")
-            rc, container_hostname = _docker_exec("hostname", timeout=5)
-            ch = container_hostname.strip().lower()
-            if rc != 0:
-                print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname (rc={rc}).{_COLOR_RESET}")
-                return 1
+        ch = socket.gethostname().strip().lower()
+        print(f"  Running inside container (hostname={ch}).")
         if ch != "testnet":
             print(f"\n{_COLOR_RED}ABORT: Container hostname is '{ch}', expected 'testnet'.{_COLOR_RESET}")
             print(f"  This suite must NEVER run against prod/UAT (e.g. mirage-talk, mirage.vote).")
@@ -982,7 +1098,20 @@ def run_suite(
         print(f"\n{_COLOR_RED}Cannot reach backend at {backend}: {e}{_COLOR_RESET}")
         return 1
 
-    if not setup_test_wallets(backend):
+    pow_ready, pow_error = _check_test_pow_limit()
+    if not pow_ready:
+        print(f"\n{_COLOR_RED}ABORT: Local test PoW limit is not configured.{_COLOR_RESET}")
+        print(f"  {pow_error}")
+        print("  From the host, submit this proposal first:")
+        print(
+            "  python3 scripts/submit_proposal.py local "
+            "scripts/proposals/proposal_set_pow_message_limit_9999999.json"
+        )
+        return 1
+
+    if set(to_run).issubset(walletless_categories):
+        _debug("selected categories require no test wallets")
+    elif not setup_test_wallets(backend):
         print(f"\n{_COLOR_RED}ABORT: Wallet setup failed.{_COLOR_RESET}")
         return 1
 
@@ -991,23 +1120,17 @@ def run_suite(
         if ret:
             return ret
 
-    if args.category:
-        cats = [c.strip() for c in args.category.split(",")]
-        for c in cats:
-            if c not in categories:
-                print(f"{_COLOR_RED}Unknown category: {c}{_COLOR_RESET}")
-                print(f"Available: {', '.join(categories.keys())}")
-                return 1
-        to_run = {c: categories[c] for c in cats}
-    else:
-        to_run = categories
-
     def _run_category(cat_name: str, fn) -> None:
         print(f"\n{_COLOR_BOLD}[{cat_name}]{_COLOR_RESET}")
+        with _RESULTS_LOCK:
+            _CATEGORY_BY_THREAD[threading.get_ident()] = cat_name
         try:
             fn(backend)
         except Exception as e:
             _fail(f"{cat_name}.UNEXPECTED_ERROR", str(e))
+        finally:
+            with _RESULTS_LOCK:
+                _CATEGORY_BY_THREAD.pop(threading.get_ident(), None)
 
     parallel_names = [n for n in to_run if n in stateless]
     serial_names = [n for n in to_run if n not in stateless]
@@ -1026,19 +1149,33 @@ def run_suite(
         for cat_name in serial_names:
             _run_category(cat_name, to_run[cat_name])
 
-    passed = sum(1 for r in RESULTS if r.passed)
-    failed = sum(1 for r in RESULTS if not r.passed)
-    total = len(RESULTS)
+    s = summarize(RESULTS, no_skip_categories)
+    tally = f"{s['passed']} passed, {s['skipped']} skipped, {s['failed']} failed (of {s['total']})"
 
     print(f"\n{'=' * 60}")
-    if failed:
-        print(f"{_COLOR_RED}{_COLOR_BOLD}RESULT: {passed}/{total} passed, {failed} FAILED{_COLOR_RESET}")
-        print(f"\nFailed tests:")
+    if s["failed"]:
+        print(f"{_COLOR_RED}{_COLOR_BOLD}RESULT: {tally}{_COLOR_RESET}")
+        print("\nFailed tests:")
         for r in RESULTS:
-            if not r.passed:
+            if r.status == "fail":
                 err = f" — {r.error}" if r.error else ""
                 print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {r.name}{err}")
+    elif s["gate_skips"]:
+        print(f"{_COLOR_RED}{_COLOR_BOLD}RESULT: {tally} — release-gate category skipped{_COLOR_RESET}")
     else:
-        print(f"{_COLOR_GREEN}{_COLOR_BOLD}RESULT: {passed}/{total} passed, ALL OK{_COLOR_RESET}")
+        print(f"{_COLOR_GREEN}{_COLOR_BOLD}RESULT: {tally}{_COLOR_RESET}")
 
-    return 1 if failed else 0
+    if s["skipped"]:
+        print("\nSkipped tests:")
+        for r in RESULTS:
+            if r.status == "skip":
+                reason = f" — {r.error}" if r.error else ""
+                cat = f"[{r.category}] " if r.category else ""
+                print(f"  {_COLOR_YELLOW}SKIP{_COLOR_RESET}  {cat}{r.name}{reason}")
+
+    if s["gate_skips"]:
+        print(f"\n{_COLOR_RED}Release-gate categories must not skip:{_COLOR_RESET}")
+        for r in s["gate_skips"]:
+            print(f"  {_COLOR_RED}GATE SKIP{_COLOR_RESET}  [{r.category}] {r.name} — {r.error or 'no reason given'}")
+
+    return 0 if s["ok"] else 1

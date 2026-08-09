@@ -389,8 +389,8 @@ def test_reward_claim_authz(backend):
     from cosmpy.crypto.keypairs import PrivateKey
     from shared.client import sign_canonical
 
-    # Read LEGACY_UNSIGNED_UNTIL from settings.py so the live probe stays in
-    # sync with the backend default without importing web/backend (wrong cwd).
+    # The cutoff is required configuration; the test process loads the same env
+    # files as the backend and must not invent a default when it is absent.
     settings_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "web",
@@ -398,14 +398,13 @@ def test_reward_claim_authz(backend):
         "settings.py",
     )
     settings_src = open(settings_path, encoding="utf-8").read()
-    m = re.search(
-        r'LEGACY_UNSIGNED_UNTIL\s*=\s*os\.environ\.get\(\s*"LEGACY_UNSIGNED_UNTIL"\s*,\s*"([^"]+)"\s*\)',
-        settings_src,
-    )
-    if not m:
-        _fail("reward_claim.grace_period_wired", "LEGACY_UNSIGNED_UNTIL default not found in settings.py")
+    if 'os.environ["LEGACY_UNSIGNED_UNTIL"]' not in settings_src:
+        _fail("reward_claim.grace_period_wired", "LEGACY_UNSIGNED_UNTIL is not required by settings.py")
         return
-    grace_until = os.environ.get("LEGACY_UNSIGNED_UNTIL", m.group(1)).strip() or m.group(1)
+    grace_until = os.environ.get("LEGACY_UNSIGNED_UNTIL", "").strip()
+    if not grace_until:
+        _fail("reward_claim.grace_period_wired", "LEGACY_UNSIGNED_UNTIL is missing from the test environment")
+        return
     cutoff = datetime.strptime(grace_until, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     in_grace = datetime.now(tz=timezone.utc) < cutoff
 
@@ -600,29 +599,34 @@ def test_reward_claim_authz(backend):
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(claim, range(4)))
 
-    paid = [
+    committed = [
         (code, body)
         for code, body in results
-        if code == 200 and isinstance(body, dict) and body.get("success") is True and body.get("rewards")
+        if isinstance(body, dict)
+        and (
+            (code == 200 and body.get("success") is True and body.get("rewards"))
+            or (code == 202 and body.get("error_code") == "payout_pending" and body.get("tx_hash"))
+        )
     ]
-    # Exactly one, not "at most one": a seeded reward that nobody is paid means the
-    # payout never ran (pool unfunded, payouts disabled), and `<= 1` reported that
-    # as proof the race was safe.
-    if len(paid) == 1:
-        _pass("reward_claim.no_double_pay", paid=len(paid), attempts=len(results))
-    elif len(paid) == 0:
+    tx_hashes = {str(body.get("tx_hash")).lower() for _code, body in committed if body.get("tx_hash")}
+    # CheckTx success is deliberately a 202 until DeliverTx confirms. Multiple
+    # callers may observe the same in-flight hash; only distinct payout hashes
+    # would prove that the same reward rows were reserved twice.
+    if committed and len(tx_hashes) == 1:
+        _pass("reward_claim.no_double_pay", committed=len(committed), attempts=len(results))
+    elif not committed:
         _fail(
             "reward_claim.no_double_pay",
             f"C-2 unproven: a pending reward was seeded but none of {len(results)} concurrent claims "
-            f"was paid, so the double-pay race never ran. Needs QUESTS_PAYOUTS_ENABLED=true and a "
+            f"reserved a payout, so the double-pay race never ran. Needs QUESTS_PAYOUTS_ENABLED=true and a "
             f"funded QUESTS_REWARDS_POOL_ADDRESS. responses={[(c, (b or {}).get('error_code') or (b or {}).get('error')) for c, b in results]}",
         )
     else:
         _fail(
             "reward_claim.no_double_pay",
-            f"C-2: {len(paid)} of {len(results)} concurrent claims were each paid for the same "
+            f"C-2: concurrent claims produced {len(tx_hashes)} payout hashes for the same "
             f"pending rows; the claim must be taken atomically under a per-owner advisory lock. "
-            f"tx_hashes={[b.get('tx_hash') for _c, b in paid]}",
+            f"tx_hashes={sorted(tx_hashes)}",
         )
 
 

@@ -240,6 +240,27 @@ const formatTopicStatus = useCallback((topic) => {
 
 ### Tests
 
+**BEFORE RUNNING `tests/test_backend.py` OR `tests/test_blockchain.py` — NON-NEGOTIABLE:**
+
+1. **RUN INSIDE LOCAL DOCKER ONLY.** Both suites submit real transactions. Host execution is disabled in `tests/common.py`; do not run either entry point with host Python. They may ONLY execute inside the local `mirage` container (`hostname=testnet`) against `127.0.0.1`. Never run them inside or against val1/val2/val3/val4 or any domain.
+2. **RAISE THE PoW LIMIT FIRST.** PoW difficulty scales with recent message volume, so a suite that submits hundreds of txs makes itself progressively slower until it crawls and times out. Submit the limit proposal before the run:
+
+```bash
+python3 scripts/submit_proposal.py local scripts/proposals/proposal_set_pow_message_limit_9999999.json
+```
+
+Do this after every `scripts/reset_local_testnet.py`, since the reset restores the original `pow_message_limit`. If a suite run is inexplicably slow or stalls on `[pow]` lines, this step was skipped.
+The suite runner queries the chain parameter and aborts before wallet setup unless it is exactly `9999999`.
+
+Then run a suite inside the container:
+
+```bash
+docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in /root/.mirage/env/*.env; do . "$f"; done; set +a; PYTHONPATH=/opt/mirage python3 tests/test_backend.py'
+docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in /root/.mirage/env/*.env; do . "$f"; done; set +a; PYTHONPATH=/opt/mirage python3 tests/test_blockchain.py'
+```
+
+When every selected backend category is walletless, the runner skips wallet provisioning automatically; use `--category` for focused source, schema, and database probes instead of generating unnecessary chain traffic.
+
 - **Two test suites**: `tests/test_backend.py` (backend API/integration) and `tests/test_blockchain.py` (direct chain-level tx submission). Both are thin entry points.
 - **Test cases** live in `tests/cases/`, prefixed by suite: `test_backend_*.py` and `test_blockchain_*.py`.
 - **Shared infrastructure** is in `tests/common.py`. Backend tx helpers in `tests/backend_helpers.py`. Blockchain gRPC helpers in `tests/blockchain_helpers.py`.

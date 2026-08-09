@@ -6,11 +6,23 @@ Exercises chain-level defenses by submitting relay-style transactions
 directly to the chain (bypassing the backend).
 
 Run:
-    conda activate mirage-node
-    python tests/test_blockchain.py [--backend URL] [--category NAME]
+    docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in \
+    /root/.mirage/env/*.env; do . "$f"; done; set +a; PYTHONPATH=/opt/mirage \
+    python3 tests/test_blockchain.py [--category NAME]'
+
+Host execution is rejected by tests.common.run_suite.
 """
 import os
 import sys
+
+if __name__ == "__main__" and not os.path.isfile("/.dockerenv"):
+    print("ABORT: tests/test_blockchain.py can only run inside the local Docker testnet container.")
+    print(
+        "Run: docker exec mirage bash -lc 'cd /opt/mirage && set -a; "
+        'for f in /root/.mirage/env/*.env; do . "$f"; done; set +a; '
+        "PYTHONPATH=/opt/mirage python3 tests/test_blockchain.py'"
+    )
+    raise SystemExit(1)
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))

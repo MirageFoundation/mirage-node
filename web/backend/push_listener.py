@@ -17,20 +17,29 @@ from settings import (
 )
 from shared.inbox import donation_event_key, record_inbox_event, trending_event_key
 from shared.push import (
-    send_push_for_award,
-    send_push_for_donation,
-    send_push_for_follow,
-    send_push_for_mentions,
-    send_push_for_reply,
-    send_push_for_subscription_gift,
+    PUSH_DISCARD,
+    PUSH_RETRY,
+    PUSH_SENT,
+    deliver_push_event,
     send_push_for_trending,
     _extract_mentions,
 )
-from push_events import award_event_key, mark_push_event_seen, mention_event_key, reply_event_key
+from push_events import (
+    PUSH_OUTBOX_MAX_AGE_SECONDS,
+    award_event_key,
+    enqueue_push_event,
+    fetch_due_push_events,
+    mark_push_event_discarded,
+    mark_push_event_sent,
+    mention_event_key,
+    reply_event_key,
+    reschedule_push_event,
+)
 
 
 PUSH_LISTENER_POLL_SECONDS = 5
 PUSH_LISTENER_BATCH_SIZE = 200
+PUSH_OUTBOX_BATCH_SIZE = 50
 PUSH_LISTENER_LOCK_PATH = os.environ.get("PUSH_LISTENER_LOCK_PATH", "/tmp/mirage_push_listener.lock")
 PUSH_EVENT_SEEN_TTL_SECONDS = 7 * 24 * 60 * 60
 PUSH_EVENT_SEEN_CLEANUP_INTERVAL = 60 * 60
@@ -68,8 +77,8 @@ def start_push_listener() -> None:
     if not _acquire_listener_lock():
         logger().info("push.listener.skipped lock_unavailable")
         return
-    t = threading.Thread(target=_run_listener, daemon=True)
-    t.start()
+    threading.Thread(target=_run_listener, daemon=True).start()
+    threading.Thread(target=_run_outbox_listener, daemon=True).start()
     logger().info("push.listener.started")
 
 
@@ -77,7 +86,7 @@ def _run_listener() -> None:
     logger().info("push.listener.run.begin")
     while True:
         try:
-            processed = _poll_once()
+            processed = _poll_sources_once()
         except Exception as exc:
             logger().error("push.listener.poll_err %s", exc)
             time.sleep(PUSH_LISTENER_POLL_SECONDS)
@@ -86,7 +95,20 @@ def _run_listener() -> None:
             time.sleep(PUSH_LISTENER_POLL_SECONDS)
 
 
-def _poll_once() -> int:
+def _run_outbox_listener() -> None:
+    logger().info("push.outbox.run.begin")
+    while True:
+        try:
+            processed = _process_outbox()
+        except Exception as exc:
+            logger().error("push.outbox.poll_err %s", exc)
+            time.sleep(PUSH_LISTENER_POLL_SECONDS)
+            continue
+        if processed == 0:
+            time.sleep(PUSH_LISTENER_POLL_SECONDS)
+
+
+def _poll_sources_once() -> int:
     global _last_trending_poll_ts
     total = 0
     total += _poll_posts()
@@ -100,6 +122,11 @@ def _poll_once() -> int:
     _maybe_cleanup_seen()
     logger().debug("push.listener.poll total=%d", total)
     return total
+
+
+def _poll_once() -> int:
+    """Run one combined tick for deterministic tests and manual diagnostics."""
+    return _poll_sources_once() + _process_outbox()
 
 
 def _load_cursor(event_type: str) -> tuple[int, str]:
@@ -191,18 +218,18 @@ def _bootstrap_cursor(event_type: str) -> tuple[int, str]:
     return 0, ""
 
 
-def _update_cursor(event_type: str, last_created_at: int, last_id: str) -> None:
-    now_ts = int(time.time())
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE push_event_cursor
-                SET last_created_at = %s, last_id = %s, updated_at = %s
-                WHERE event_type = %s
-                """,
-                (int(last_created_at), str(last_id or ""), now_ts, event_type),
-            )
+def _update_cursor(cur, event_type: str, last_created_at: int, last_id: str) -> None:
+    """Advance a source cursor on the caller's cursor. The caller commits it in
+    the same transaction as the outbox rows the batch produced, so a crash can
+    never skip past an event that was never queued."""
+    cur.execute(
+        """
+        UPDATE push_event_cursor
+        SET last_created_at = %s, last_id = %s, updated_at = %s
+        WHERE event_type = %s
+        """,
+        (int(last_created_at), str(last_id or ""), int(time.time()), event_type),
+    )
 
 
 def _poll_posts() -> int:
@@ -233,36 +260,67 @@ def _poll_posts() -> int:
         return 0
 
     processed = 0
-    for txhash, owner, content, target, created_at, username in rows:
-        txhash_lc = str(txhash or "").lower()
-        owner_lc = str(owner or "").lower()
-        if not txhash_lc or not owner_lc:
-            continue
-        target_hash = str(target or "").strip().lower()
-        poster_username = str(username or "").strip()
-        content_text = str(content or "")
+    with connect_backend_db() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                for txhash, owner, content, target, created_at, username in rows:
+                    txhash_lc = str(txhash or "").lower()
+                    owner_lc = str(owner or "").lower()
+                    if not txhash_lc or not owner_lc:
+                        logger().error(
+                            "push.listener.posts.invalid_source tx=%r owner=%r created_at=%r",
+                            txhash,
+                            owner,
+                            created_at,
+                        )
+                        processed += 1
+                        last_ts = int(created_at or last_ts)
+                        last_id = txhash_lc
+                        continue
+                    target_hash = str(target or "").strip().lower()
+                    poster_username = str(username or "").strip()
+                    content_text = str(content or "")
 
-        created_ts = int(created_at or 0)
+                    created_ts = int(created_at or 0)
 
-        if target_hash:
-            reply_key = reply_event_key(txhash_lc)
-            if mark_push_event_seen(reply_key, "reply", created_ts):
-                send_push_for_reply(
-                    owner_lc, poster_username, target_hash, content_text, txhash_lc, created_at=created_ts
-                )
+                    if target_hash:
+                        enqueue_push_event(
+                            cur,
+                            reply_event_key(txhash_lc),
+                            "reply",
+                            {
+                                "poster": owner_lc,
+                                "poster_username": poster_username,
+                                "target_txhash": target_hash,
+                                "content": content_text,
+                                "tx_hash": txhash_lc,
+                                "created_at": created_ts,
+                            },
+                            created_ts,
+                        )
 
-        if _extract_mentions(content_text):
-            mention_key = mention_event_key(txhash_lc)
-            if mark_push_event_seen(mention_key, "mention", created_ts):
-                send_push_for_mentions(
-                    owner_lc, poster_username, content_text, txhash_lc, target_hash, created_at=created_ts
-                )
+                    for mentioned_username in _extract_mentions(content_text):
+                        enqueue_push_event(
+                            cur,
+                            mention_event_key(txhash_lc, mentioned_username),
+                            "mention",
+                            {
+                                "poster": owner_lc,
+                                "poster_username": poster_username,
+                                "content": content_text,
+                                "tx_hash": txhash_lc,
+                                "target_txhash": target_hash,
+                                "mentioned_username": mentioned_username,
+                                "created_at": created_ts,
+                            },
+                            created_ts,
+                        )
 
-        processed += 1
-        last_ts = int(created_at or last_ts)
-        last_id = txhash_lc
+                    processed += 1
+                    last_ts = int(created_at or last_ts)
+                    last_id = txhash_lc
 
-    _update_cursor("posts", last_ts, last_id)
+                _update_cursor(cur, "posts", last_ts, last_id)
     logger().debug("push.listener.posts processed=%d last_ts=%d", processed, last_ts)
     return processed
 
@@ -297,25 +355,46 @@ def _poll_awards() -> int:
         return 0
 
     processed = 0
-    for award_id, owner, target, award_type, created_at, username, post_owner in rows:
-        owner_lc = str(owner or "").lower()
-        target_lc = str(target or "").lower()
-        post_owner_lc = str(post_owner or "").lower()
-        if not owner_lc or not target_lc or not post_owner_lc:
-            continue
-        created_ts = int(created_at or 0)
-        award_key = award_event_key(owner_lc, target_lc)
-        if mark_push_event_seen(award_key, "award", created_ts):
-            awarder_username = str(username or "").strip()
-            send_push_for_award(
-                owner_lc, awarder_username, post_owner_lc, target_lc, str(award_type or ""), created_at=created_ts
-            )
+    with connect_backend_db() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                for award_id, owner, target, award_type, created_at, username, post_owner in rows:
+                    owner_lc = str(owner or "").lower()
+                    target_lc = str(target or "").lower()
+                    post_owner_lc = str(post_owner or "").lower()
+                    if not owner_lc or not target_lc or not post_owner_lc:
+                        logger().error(
+                            "push.listener.awards.invalid_source id=%r owner=%r target=%r post_owner=%r",
+                            award_id,
+                            owner,
+                            target,
+                            post_owner,
+                        )
+                        processed += 1
+                        last_ts = int(created_at or last_ts)
+                        last_award_id = int(award_id or last_award_id)
+                        continue
+                    created_ts = int(created_at or 0)
+                    enqueue_push_event(
+                        cur,
+                        award_event_key(owner_lc, target_lc),
+                        "award",
+                        {
+                            "awarder": owner_lc,
+                            "awarder_username": str(username or "").strip(),
+                            "post_owner": post_owner_lc,
+                            "target_txhash": target_lc,
+                            "award_type": str(award_type or ""),
+                            "created_at": created_ts,
+                        },
+                        created_ts,
+                    )
 
-        processed += 1
-        last_ts = int(created_at or last_ts)
-        last_award_id = int(award_id or last_award_id)
+                    processed += 1
+                    last_ts = int(created_at or last_ts)
+                    last_award_id = int(award_id or last_award_id)
 
-    _update_cursor("awards", last_ts, str(last_award_id))
+                _update_cursor(cur, "awards", last_ts, str(last_award_id))
     logger().debug("push.listener.awards processed=%d last_ts=%d", processed, last_ts)
     return processed
 
@@ -462,65 +541,78 @@ def _poll_send_tokens() -> int:
 
     processed = 0
     username_cache: dict[str, str] = {}
-    for txhash, tx_type, raw_log, created_at in rows:
-        if txhash is None:
-            raise RuntimeError("send_tokens tx_index row missing txhash")
-        txhash_lc = str(txhash).strip().lower()
-        if not txhash_lc:
-            raise RuntimeError("send_tokens tx_index row missing txhash")
-        created_ts = int(created_at)
-        transfers = _extract_send_tokens_transfers(raw_log, txhash_lc)
-        if not transfers:
-            if str(tx_type).strip().lower() == "send_tokens":
-                raise RuntimeError(f"send_tokens log missing transfer tx={txhash_lc}")
-            logger().debug("push.listener.send_tokens.skip tx=%s type=%s", txhash_lc[:16], tx_type)
-            processed += 1
-            last_ts = created_ts
-            last_id = txhash_lc
-            continue
-        for transfer in transfers:
-            sender = transfer["sender"]
-            recipient = transfer["recipient"]
-            amount = int(transfer["amount"])
-            if sender == recipient:
-                continue
-            event_key = donation_event_key(sender, recipient, txhash_lc)
-            inserted = record_inbox_event(
-                event_key=event_key,
-                recipient=recipient,
-                actor=sender,
-                event_type="donation",
-                created_at=created_ts,
-                amount=amount,
-                tx_hash=txhash_lc,
-            )
-            logger().debug(
-                "push.listener.send_tokens.event sender=%s recipient=%s amount=%s inserted=%s tx=%s",
-                sender[:16],
-                recipient[:16],
-                amount,
-                inserted,
-                txhash_lc[:16],
-            )
-            if inserted:
-                sender_username = _get_username_for_owner(sender, username_cache)
-                if mark_push_event_seen(event_key, "donation", created_ts):
-                    send_push_for_donation(
-                        sender,
-                        sender_username,
-                        recipient,
-                        amount,
-                        event_key=event_key,
-                        created_at=created_ts,
-                    )
-                from routes.public import _invalidate_inbox_cache
+    touched_recipients: list[str] = []
+    with connect_backend_db() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                for txhash, tx_type, raw_log, created_at in rows:
+                    if txhash is None:
+                        raise RuntimeError("send_tokens tx_index row missing txhash")
+                    txhash_lc = str(txhash).strip().lower()
+                    if not txhash_lc:
+                        raise RuntimeError("send_tokens tx_index row missing txhash")
+                    created_ts = int(created_at)
+                    transfers = _extract_send_tokens_transfers(raw_log, txhash_lc)
+                    if not transfers:
+                        if str(tx_type).strip().lower() == "send_tokens":
+                            raise RuntimeError(f"send_tokens log missing transfer tx={txhash_lc}")
+                        logger().debug("push.listener.send_tokens.skip tx=%s type=%s", txhash_lc[:16], tx_type)
+                        processed += 1
+                        last_ts = created_ts
+                        last_id = txhash_lc
+                        continue
+                    for transfer in transfers:
+                        sender = transfer["sender"]
+                        recipient = transfer["recipient"]
+                        amount = int(transfer["amount"])
+                        if sender == recipient:
+                            continue
+                        event_key = donation_event_key(sender, recipient, txhash_lc)
+                        inserted = record_inbox_event(
+                            event_key=event_key,
+                            recipient=recipient,
+                            actor=sender,
+                            event_type="donation",
+                            created_at=created_ts,
+                            amount=amount,
+                            tx_hash=txhash_lc,
+                            cur=cur,
+                        )
+                        logger().debug(
+                            "push.listener.send_tokens.event sender=%s recipient=%s amount=%s inserted=%s tx=%s",
+                            sender[:16],
+                            recipient[:16],
+                            amount,
+                            inserted,
+                            txhash_lc[:16],
+                        )
+                        if inserted:
+                            enqueue_push_event(
+                                cur,
+                                event_key,
+                                "donation",
+                                {
+                                    "sender": sender,
+                                    "sender_username": _get_username_for_owner(sender, username_cache),
+                                    "recipient": recipient,
+                                    "amount": amount,
+                                    "event_key": event_key,
+                                    "created_at": created_ts,
+                                },
+                                created_ts,
+                            )
+                            touched_recipients.append(recipient)
+                    processed += 1
+                    last_ts = created_ts
+                    last_id = txhash_lc
 
-                _invalidate_inbox_cache(recipient)
-        processed += 1
-        last_ts = created_ts
-        last_id = txhash_lc
+                _update_cursor(cur, "send_tokens", last_ts, last_id)
 
-    _update_cursor("send_tokens", last_ts, last_id)
+    if touched_recipients:
+        from routes.public import _invalidate_inbox_cache
+
+        for recipient in touched_recipients:
+            _invalidate_inbox_cache(recipient)
     logger().debug("push.listener.send_tokens processed=%d last_ts=%d", processed, last_ts)
     return processed
 
@@ -548,79 +640,136 @@ def _poll_inbox_events() -> int:
 
     processed = 0
     username_cache: dict[str, str] = {}
-    for event_key, recipient, actor, event_type, created_at, amount, tx_hash in rows:
-        event_key_str = str(event_key or "").strip()
-        recipient_lc = str(recipient or "").strip().lower()
-        actor_lc = str(actor or "").strip().lower()
-        event_type_str = str(event_type or "").strip()
-        created_ts = int(created_at or 0)
+    touched_recipients: list[str] = []
+    with connect_backend_db() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                for event_key, recipient, actor, event_type, created_at, amount, tx_hash in rows:
+                    event_key_str = str(event_key or "").strip()
+                    recipient_lc = str(recipient or "").strip().lower()
+                    actor_lc = str(actor or "").strip().lower()
+                    event_type_str = str(event_type or "").strip()
+                    created_ts = int(created_at or 0)
 
-        if not event_key_str or not recipient_lc or not actor_lc:
-            processed += 1
-            last_ts = created_ts
-            last_id = event_key_str
-            continue
+                    if not event_key_str or not recipient_lc or not actor_lc:
+                        processed += 1
+                        last_ts = created_ts
+                        last_id = event_key_str
+                        continue
 
-        if actor_lc == recipient_lc:
-            processed += 1
-            last_ts = created_ts
-            last_id = event_key_str
-            continue
+                    if actor_lc == recipient_lc:
+                        processed += 1
+                        last_ts = created_ts
+                        last_id = event_key_str
+                        continue
 
-        push_seen_key = f"inbox_event:{event_key_str}"
-        should_send = mark_push_event_seen(push_seen_key, event_type_str, created_ts)
-        if should_send:
-            actor_username = _get_username_for_owner(actor_lc, username_cache)
-            if event_type_str == "follow":
-                send_push_for_follow(
-                    actor_lc,
-                    actor_username,
-                    recipient_lc,
-                    event_key=event_key_str,
-                    created_at=created_ts,
-                )
-            elif event_type_str == "subscription_gift":
-                gift_level = int(amount) if amount is not None else 0
-                if gift_level <= 0:
-                    raise RuntimeError(f"subscription_gift missing level event_key={event_key_str}")
-                recipient_level = 0
-                with connect_db(timeout=3.0, busy_timeout_ms=5000) as iconn:
-                    icur = iconn.cursor()
-                    icur.execute(
-                        "SELECT COALESCE(level, 0) FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
-                        (recipient_lc,),
-                    )
-                    lrow = icur.fetchone()
-                    if lrow:
-                        recipient_level = int(lrow[0] or 0)
-                was_subscriber = recipient_level >= 1
-                logger().debug(
-                    "push.listener.subscription_gift level=%s was_subscriber=%s recipient=%s",
-                    gift_level,
-                    was_subscriber,
-                    recipient_lc[:16],
-                )
-                send_push_for_subscription_gift(
-                    actor_lc,
-                    actor_username,
-                    recipient_lc,
-                    level=gift_level,
-                    was_subscriber=was_subscriber,
-                    event_key=event_key_str,
-                    created_at=created_ts,
-                )
+                    push_seen_key = f"inbox_event:{event_key_str}"
+                    if event_type_str == "follow":
+                        enqueue_push_event(
+                            cur,
+                            push_seen_key,
+                            "follow",
+                            {
+                                "actor": actor_lc,
+                                "actor_username": _get_username_for_owner(actor_lc, username_cache),
+                                "recipient": recipient_lc,
+                                "event_key": event_key_str,
+                                "created_at": created_ts,
+                            },
+                            created_ts,
+                        )
+                    elif event_type_str == "subscription_gift":
+                        gift_level = int(amount) if amount is not None else 0
+                        if gift_level <= 0:
+                            raise RuntimeError(f"subscription_gift missing level event_key={event_key_str}")
+                        # Captured at enqueue time: by the time the push is
+                        # delivered the gift itself has already raised the level.
+                        recipient_level = 0
+                        with connect_db(timeout=3.0, busy_timeout_ms=5000) as iconn:
+                            icur = iconn.cursor()
+                            icur.execute(
+                                "SELECT COALESCE(level, 0) FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
+                                (recipient_lc,),
+                            )
+                            lrow = icur.fetchone()
+                            if lrow:
+                                recipient_level = int(lrow[0] or 0)
+                        was_subscriber = recipient_level >= 1
+                        logger().debug(
+                            "push.listener.subscription_gift level=%s was_subscriber=%s recipient=%s",
+                            gift_level,
+                            was_subscriber,
+                            recipient_lc[:16],
+                        )
+                        enqueue_push_event(
+                            cur,
+                            push_seen_key,
+                            "subscription_gift",
+                            {
+                                "actor": actor_lc,
+                                "actor_username": _get_username_for_owner(actor_lc, username_cache),
+                                "recipient": recipient_lc,
+                                "level": gift_level,
+                                "was_subscriber": was_subscriber,
+                                "event_key": event_key_str,
+                                "created_at": created_ts,
+                            },
+                            created_ts,
+                        )
 
+                    touched_recipients.append(recipient_lc)
+                    processed += 1
+                    last_ts = created_ts
+                    last_id = event_key_str
+
+                _update_cursor(cur, "inbox_events", last_ts, last_id)
+
+    if touched_recipients:
         from routes.public import _invalidate_inbox_cache
 
-        _invalidate_inbox_cache(recipient_lc)
-
-        processed += 1
-        last_ts = created_ts
-        last_id = event_key_str
-
-    _update_cursor("inbox_events", last_ts, last_id)
+        for recipient_lc in touched_recipients:
+            _invalidate_inbox_cache(recipient_lc)
     logger().debug("push.listener.inbox_events processed=%d last_ts=%d", processed, last_ts)
     return processed
+
+
+def _process_outbox(now_ts: int | None = None) -> int:
+    """Deliver a bounded slice of queued pushes. Each row is only settled after
+    its delivery outcome is known, so a crash mid-tick leaves it pending."""
+    now = int(now_ts or time.time())
+    events = fetch_due_push_events(PUSH_OUTBOX_BATCH_SIZE, now_ts=now)
+    if not events:
+        return 0
+    delivered = 0
+    for event in events:
+        event_key = event["event_key"]
+        if now - event["created_at"] >= PUSH_OUTBOX_MAX_AGE_SECONDS:
+            reschedule_push_event(
+                event_key,
+                event["attempts"],
+                event["created_at"],
+                "stale_before_delivery",
+                now_ts=now,
+            )
+            continue
+        try:
+            outcome = deliver_push_event(event["event_type"], event["payload"])
+            if outcome not in (PUSH_SENT, PUSH_DISCARD, PUSH_RETRY):
+                raise RuntimeError(f"unknown push delivery outcome={outcome!r} key={event_key}")
+        except Exception as exc:
+            logger().exception("push.outbox.deliver_err key=%s", event_key[:80])
+            reschedule_push_event(event_key, event["attempts"], event["created_at"], f"exception: {exc}", now_ts=now)
+            continue
+        if outcome == PUSH_SENT:
+            mark_push_event_sent(event_key, now_ts=now)
+            delivered += 1
+        elif outcome == PUSH_DISCARD:
+            mark_push_event_discarded(event_key, "not_deliverable", now_ts=now)
+            delivered += 1
+        elif outcome == PUSH_RETRY:
+            reschedule_push_event(event_key, event["attempts"], event["created_at"], "delivery_failed", now_ts=now)
+    logger().debug("push.outbox.tick due=%d settled=%d", len(events), delivered)
+    return delivered
 
 
 def _fetch_lively_candidates(now_ts: int) -> list[dict]:
@@ -905,7 +1054,7 @@ def _maybe_cleanup_seen() -> None:
                 DELETE FROM push_event_seen
                 WHERE ctid IN (
                     SELECT ctid FROM push_event_seen
-                    WHERE created_at < %s
+                    WHERE created_at < %s AND status <> 'pending'
                     LIMIT %s
                 )
                 """,

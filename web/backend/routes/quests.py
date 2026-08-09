@@ -15,13 +15,10 @@ Note: Reward stats moved to GET /api/get_stats?tab=rewards
       Reward history moved to GET /api/get_stats?tab=rewards_history
 """
 
-import hashlib
 import ipaddress
 import json
-import os
-import random
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from flask import Blueprint, jsonify, request
 
@@ -41,10 +38,18 @@ from db import connect_backend_db, connect_db
 from error_utils import api_error_code, safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
+from quest_assignment import assign_daily_quests_if_needed, assign_flash_quest_if_eligible
 from quest_multiplier import get_reward_multiplier
 from reward_distributor import get_distributor
 from routes.core import get_user_level, _require_signed_request
-from settings import QUESTS_ENABLED, require_bool_env, legacy_unsigned_claim_allowed
+from settings import (
+    QUESTS_ENABLED,
+    QUESTS_INVITE_EARNER_CHANCE,
+    QUESTS_INVITE_EARNER_INTERVAL,
+    QUESTS_INVITE_RECRUIT_CHANCE,
+    require_bool_env,
+    legacy_unsigned_claim_allowed,
+)
 from user_last_seen import update_user_last_seen
 
 
@@ -59,17 +64,6 @@ quests_bp = Blueprint("quests", __name__)
 
 # Backend debug switch
 BACKEND_DEBUG = require_bool_env("BACKEND_DEBUG")
-
-# Quest system configuration (from environment — crash if missing)
-QUESTS_DAILY_COUNT = int(os.environ["QUESTS_DAILY_COUNT"])
-QUESTS_FLASH_COUNT = int(os.environ["QUESTS_FLASH_COUNT"])
-QUESTS_FLASH_MIN_INTERVAL_HOURS = int(os.environ["QUESTS_FLASH_MIN_INTERVAL_HOURS"])
-QUESTS_FLASH_MAX_INTERVAL_HOURS = int(os.environ["QUESTS_FLASH_MAX_INTERVAL_HOURS"])
-
-# Special quest gating
-QUESTS_INVITE_RECRUIT_CHANCE = float(os.environ["QUESTS_INVITE_RECRUIT_CHANCE"])
-QUESTS_INVITE_EARNER_INTERVAL = int(os.environ["QUESTS_INVITE_EARNER_INTERVAL"])
-QUESTS_INVITE_EARNER_CHANCE = float(os.environ["QUESTS_INVITE_EARNER_CHANCE"])
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -116,99 +110,6 @@ def _is_user_suspended(owner: str, ts: int) -> bool:
             return row[0] > ts
 
 
-def _get_next_flash_time(owner: str) -> int:
-    """Get the timestamp when user can receive their next flash quest."""
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT next_flash_at FROM user_quest_state WHERE LOWER(owner) = LOWER(%s)", (owner,))
-            row = cur.fetchone()
-            return row[0] if row else 0
-
-
-def _set_next_flash_time(owner: str, next_ts: int) -> None:
-    """Set when the user can receive their next flash quest."""
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO user_quest_state (owner, next_flash_at)
-                VALUES (%s, %s)
-                ON CONFLICT (owner) DO UPDATE SET next_flash_at = EXCLUDED.next_flash_at
-                """,
-                (owner, next_ts),
-            )
-
-
-def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Assign a flash quest if eligible. Returns the quest data or None."""
-    if not flash_defs:
-        return None
-    if QUESTS_FLASH_COUNT <= 0:
-        return None
-
-    # Check if user already has the max number of active flash quests
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT COUNT(1)
-                FROM user_flash_quests
-                WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
-                """,
-                (owner, ts),
-            )
-            active_count = int((cur.fetchone() or [0])[0] or 0)
-            if active_count >= QUESTS_FLASH_COUNT:
-                return None  # Already has max active quests
-
-    # Check if enough time has passed since last flash quest
-    next_flash_at = _get_next_flash_time(owner)
-
-    # New user check: if no next_flash_at record exists (returns 0),
-    # initialize it with minimum interval delay so new users don't get flash quests immediately
-    if next_flash_at == 0:
-        initial_delay = QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600
-        _set_next_flash_time(owner, ts + initial_delay)
-        return None
-
-    if ts < next_flash_at:
-        return None
-
-    # Select a random flash quest template
-    template_id = random.choice(list(flash_defs.keys()))
-    template = flash_defs[template_id]
-
-    # Calculate duration based on time_window_minutes (default 60 min)
-    duration_seconds = (template.get("time_window_minutes") or 60) * 60
-    ends_at = ts + duration_seconds
-
-    # Insert the flash quest
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
-                VALUES (%s, %s, %s, %s, 0, '{}')
-                """,
-                (owner, template_id, ts, ends_at),
-            )
-
-    # Schedule next flash quest (random interval between MIN and MAX hours)
-    next_interval_seconds = random.randint(
-        QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600, QUESTS_FLASH_MAX_INTERVAL_HOURS * 3600
-    )
-    _set_next_flash_time(owner, ts + next_interval_seconds)
-
-    return {
-        "template_id": template_id,
-        "starts_at": ts,
-        "ends_at": ends_at,
-        "progress": 0,
-        "progress_meta": {},
-        "completed_at": None,
-    }
-
-
 def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
     """Get suspension info for a user."""
     with connect_backend_db() as conn:
@@ -232,195 +133,6 @@ def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
             }
 
 
-def _has_unused_invite_codes(owner: str) -> bool:
-    """Check if user has at least one unused invite code."""
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT 1 FROM invite_codes
-                WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
-                LIMIT 1
-                """,
-                (owner,),
-            )
-            return cur.fetchone() is not None
-
-
-def _get_completed_quest_count(owner: str) -> int:
-    """Get total number of completed quests/achievements for a user (daily + flash + achievements)."""
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM user_daily_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL)
-                  + (SELECT COUNT(*) FROM user_flash_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL)
-                  + (SELECT COUNT(*) FROM user_achievements WHERE LOWER(owner) = LOWER(%s) AND unlocked_at IS NOT NULL)
-                """,
-                (owner, owner, owner),
-            )
-            row = cur.fetchone()
-            return row[0] if row else 0
-
-
-def _get_invite_earner_completed_count(owner: str) -> int:
-    """Get total number of completed invite_earner quests for a user.
-
-    Counts claimed invite_code rewards from invite_earner quests, which is more
-    reliable than counting quest completions (which can be reset via debug panel).
-    """
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT COUNT(*) FROM pending_rewards
-                WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
-                """,
-                (owner,),
-            )
-            row = cur.fetchone()
-            return row[0] if row else 0
-
-
-def _is_invite_earner_eligible(owner: str, day_utc: int) -> bool:
-    """Check if user is eligible for invite_earner quest.
-
-    User is eligible if:
-    1. completed_count >= (invite_earner_completed + 1) * interval
-    2. 30% daily roll passes
-    """
-    completed_count = _get_completed_quest_count(owner)
-    invite_earner_completed = _get_invite_earner_completed_count(owner)
-    next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
-
-    if completed_count < next_milestone:
-        return False
-
-    # 30% daily roll
-    roll = _deterministic_roll(owner, day_utc, "invite_earner")
-    return roll < QUESTS_INVITE_EARNER_CHANCE
-
-
-def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
-    """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
-    seed_str = f"{owner.lower()}:{day_utc}:{roll_type}"
-    seed_hash = hashlib.sha256(seed_str.encode()).hexdigest()
-    # Use first 8 hex chars as seed (32 bits)
-    seed_int = int(seed_hash[:8], 16)
-    rng = random.Random(seed_int)
-    return rng.random()
-
-
-def _assign_daily_quests_if_needed(
-    owner: str,
-    day_utc: int,
-    ts: int,
-    daily_defs: Dict[str, Any],
-    special_defs: Dict[str, Any] = None,
-    use_random_rolls: bool = False,
-) -> List[str]:
-    """Assign daily quests to a user if they don't have any for today.
-
-    Includes special quest gating logic:
-    - invite_recruit: 30% chance if user has unused invite codes
-    - invite_earner: appears every N completed quests + 30% roll
-
-    Args:
-        use_random_rolls: If True, use random.random() instead of deterministic rolls (for localhost testing)
-
-    Returns the list of assigned quest IDs.
-    """
-    if special_defs is None:
-        special_defs = {}
-
-    def get_roll(roll_type: str) -> float:
-        """Get roll value - random on localhost, deterministic in production."""
-        if use_random_rolls:
-            return random.random()
-        return _deterministic_roll(owner, day_utc, roll_type)
-
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT DISTINCT quest_id FROM user_daily_quests
-                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
-                """,
-                (owner, day_utc),
-            )
-            existing = [row[0] for row in cur.fetchall()]
-
-    if existing:
-        return existing
-
-    quest_ids = []
-    special_quest_assigned = False
-
-    if not special_quest_assigned and "invite_recruit" in special_defs:
-        if _has_unused_invite_codes(owner):
-            roll = get_roll("invite_recruit")
-            log_event(
-                None,
-                "quest.invite_recruit.roll",
-                owner=owner,
-                roll=round(roll, 3),
-                threshold=QUESTS_INVITE_RECRUIT_CHANCE,
-            )
-            if roll < QUESTS_INVITE_RECRUIT_CHANCE:
-                quest_ids.append("invite_recruit")
-                special_quest_assigned = True
-                log_event(None, "quest.invite_recruit.assigned", owner=owner)
-
-    if not special_quest_assigned and "invite_earner" in special_defs:
-        completed_count = _get_completed_quest_count(owner)
-        invite_earner_completed = _get_invite_earner_completed_count(owner)
-        next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
-        if completed_count >= next_milestone:
-            roll = get_roll("invite_earner")
-            log_event(
-                None,
-                "quest.invite_earner.roll",
-                owner=owner,
-                roll=round(roll, 3),
-                threshold=QUESTS_INVITE_EARNER_CHANCE,
-            )
-            if roll < QUESTS_INVITE_EARNER_CHANCE:
-                quest_ids.append("invite_earner")
-                special_quest_assigned = True
-                log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
-
-    if not daily_defs:
-        return quest_ids
-
-    remaining_slots = QUESTS_DAILY_COUNT - len(quest_ids)
-    if remaining_slots > 0:
-        available_ids = list(daily_defs.keys())
-        count = min(remaining_slots, len(available_ids))
-        selected_ids = random.sample(available_ids, count)
-        quest_ids.extend(selected_ids)
-
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            for quest_id in quest_ids:
-                cur.execute(
-                    """
-                    INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
-                    VALUES (%s, %s, %s, 0, '{}')
-                    ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
-                    """,
-                    (owner, day_utc, quest_id),
-                )
-
-    min_flash_at = ts + 3600
-    next_flash = _get_next_flash_time(owner)
-    if next_flash < min_flash_at:
-        _set_next_flash_time(owner, min_flash_at)
-        log_event(None, "quest.flash_delayed", owner=owner, min_flash_at=min_flash_at)
-
-    return quest_ids
-
-
 def _build_rewards_summary(owner: str) -> dict:
     """Pure helper: build the rewards summary payload for a given owner address.
 
@@ -432,6 +144,12 @@ def _build_rewards_summary(owner: str) -> dict:
     suspended short-circuits as well as the normal path."""
     rid = next_request_id()
     log_event(rid, "rewards.summary.build", owner=owner)
+
+    # Summary polling is the recovery driver after a claim returns 202. Without
+    # this, the client correctly blocks another claim but nothing advances the
+    # reserved payout unless the user reloads and submits again.
+    distributor = get_distributor()
+    payout_pending = distributor.reconcile_owner_payouts(owner) is not None
 
     if not QUESTS_ENABLED:
         return {
@@ -445,6 +163,7 @@ def _build_rewards_summary(owner: str) -> dict:
             "total_mirage_after_multiplier": 0,
             "pending_invite_codes": 0,
             "claiming_available": False,
+            "payout_pending": payout_pending,
             "debug": BACKEND_DEBUG,
         }
 
@@ -465,6 +184,7 @@ def _build_rewards_summary(owner: str) -> dict:
             "total_mirage_after_multiplier": 0,
             "pending_invite_codes": 0,
             "claiming_available": False,
+            "payout_pending": payout_pending,
             "debug": BACKEND_DEBUG,
         }
 
@@ -475,7 +195,7 @@ def _build_rewards_summary(owner: str) -> dict:
     all_defs = {**daily_defs, **special_defs}
 
     # ===== DAILY QUESTS =====
-    _assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
+    assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
@@ -553,7 +273,7 @@ def _build_rewards_summary(owner: str) -> dict:
             flash_row = cur.fetchone()
 
     if not flash_row:
-        assigned = _maybe_assign_flash_quest(owner, ts, flash_defs)
+        assigned = assign_flash_quest_if_eligible(owner, ts, flash_defs)
         if assigned:
             with connect_backend_db() as conn:
                 with conn.cursor() as cur:
@@ -664,7 +384,6 @@ def _build_rewards_summary(owner: str) -> dict:
     total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
     total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
 
-    distributor = get_distributor()
     claiming_available = distributor.is_configured()
 
     log_event(
@@ -686,6 +405,7 @@ def _build_rewards_summary(owner: str) -> dict:
         "total_mirage_after_multiplier": total_mirage_after_multiplier,
         "pending_invite_codes": pending_invite_codes,
         "claiming_available": claiming_available,
+        "payout_pending": payout_pending,
         "debug": BACKEND_DEBUG,
     }
 
@@ -849,15 +569,17 @@ def claim_rewards():
             elif error_msg == "insufficient_pool_balance":
                 log_event(rid, "rewards.claim.insufficient_funds", owner=owner)
                 return api_error_code("insufficient_funds", 503, success=False)
-            elif error_msg == "rewards_pool_key_not_configured":
-                log_event(rid, "rewards.claim.pool_not_configured", owner=owner)
-                return api_error_code("pool_not_configured", 503, success=False)
-            elif error_msg == "sequence_mismatch_retry":
-                log_event(rid, "rewards.claim.sequence_mismatch", owner=owner)
-                return api_error_code("retry", 503, success=False)
-            elif error_msg == "payout_transaction_failed":
-                log_event(rid, "rewards.claim.tx_failed", owner=owner)
+            elif error_msg == "payout_pending":
+                # The payment is reserved and may already be on chain; the rows
+                # stay claimed until reconciliation resolves it by hash.
+                log_event(rid, "rewards.claim.payout_pending", owner=owner, tx_hash=result.get("tx_hash"))
+                return api_error_code("payout_pending", 202, success=False, tx_hash=result.get("tx_hash"))
+            elif error_msg == "payout_failed":
+                log_event(rid, "rewards.claim.tx_failed", owner=owner, tx_hash=result.get("tx_hash"))
                 return api_error_code("payout_failed", 503, success=False)
+            elif error_msg == "invalid_recipient_address":
+                log_event(rid, "rewards.claim.invalid_owner", owner=owner)
+                return api_error_code("target_must_be_mirage1", 400, success=False)
             else:
                 log_event(rid, "rewards.claim.failed", owner=owner, error=error_msg)
                 return api_error_code("internal_error", 500, success=False)

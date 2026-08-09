@@ -4,7 +4,7 @@ from __future__ import annotations
 
 Core model (see the Server Stats Redesign plan):
 
-- One identity per person. It starts as an anonymous visitor id (sent by every
+- One identity per user. It starts as an anonymous visitor id (sent by every
   client in the ``X-Mirage-Visitor`` header) and is bound to a Mirage address on
   authentication. The address always wins and is the only durable merge key.
   IP is never identity.
@@ -17,8 +17,6 @@ Core model (see the Server Stats Redesign plan):
 - Every metric is a query over an arbitrary ``[start, end]`` window.
 """
 
-import base64
-import binascii
 import ipaddress
 import logging
 import re
@@ -27,11 +25,12 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from flask import has_request_context, request
+from flask import g, has_request_context, request
 
 from chain import get_connected_peers
 from client_ip import hash_visitor_id
 from db import connect_backend_db, connect_db
+from fleet_url import validate_fleet_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +56,6 @@ _SKIP_PREFIXES = (
     "/api/stats/",
 )
 
-# Paths where the ``address`` query arg names the TARGET being looked at (e.g.
-# whose profile to load), not the authenticated viewer. Using it as identity
-# would credit the viewer's activity to the person being viewed, so every user
-# who merely got looked at would show up as an active logged-in user.
-_ADDRESS_IS_TARGET_PREFIXES = ("/api/get_profile",)
-
-
-def _path_address_is_target(path: str) -> bool:
-    return bool(path) and path.startswith(_ADDRESS_IS_TARGET_PREFIXES)
-
-
 # Throttle event/visitor writes per identity+type, like user_last_seen, to keep
 # one write per identity per minute instead of one per request.
 EVENT_THROTTLE_SECONDS = 60
@@ -88,42 +76,24 @@ def _clean_addr(addr: Optional[str]) -> Optional[str]:
     return a
 
 
-def _signed_body_address(path: str) -> Optional[str]:
-    if path != "/api/core/vote":
-        return None
-    data = request.get_json(silent=True) if request.is_json else None
-    if not isinstance(data, dict):
-        return None
-    pub_b64 = str(data.get("pubkey", "")).strip()
-    if not pub_b64:
-        return None
-    try:
-        pub_dec = base64.b64decode(pub_b64, validate=True)
-    except binascii.Error:
-        return None
-    if len(pub_dec) != 33:
-        return None
-    from node import derive_address_from_pubkey
-
-    return _clean_addr(derive_address_from_pubkey(pub_dec))
-
-
-def extract_identity() -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def extract_identity(signed_request_verified: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Return (visitor_hash, address, platform) for the current request.
 
     visitor_hash is the salted hash of the ``X-Mirage-Visitor`` header (raw id
-    never stored). address is the authed Mirage address when present. Either may
-    be None; if both are None the caller records nothing identity-bearing.
+    never stored). address is set only when the request proved it, by signing
+    with the matching public key; a query ``address`` is client-supplied text
+    and binding it here let anyone attribute their browsing to another account.
+    Either may be None; if both are None the caller records nothing
+    identity-bearing.
     """
     if not has_request_context():
         return None, None, None
     raw_visitor = request.headers.get(VISITOR_HEADER, "") if request else ""
     visitor_hash = hash_visitor_id(raw_visitor)
-    address = None
-    if not _path_address_is_target(request.path):
-        address = _clean_addr(request.args.get("address") or request.args.get("admin_address"))
-    if address is None:
-        address = _signed_body_address(request.path)
+    # Merely presenting a public key proves nothing. The shared signature
+    # verifier records the derived address only after cryptographic validation,
+    # and only a successful route's after-request hook opts into attribution.
+    address = _clean_addr(getattr(g, "verified_request_address", None)) if signed_request_verified else None
     platform = _platform_from_request()
     return visitor_hash, address, platform
 
@@ -171,10 +141,16 @@ def _should_skip(key: str, now_ts: int) -> bool:
     return False
 
 
+def _release_failed_throttle(key: str, now_ts: int) -> None:
+    with _event_cache_lock:
+        if _event_cache.get(key) == now_ts:
+            _event_cache.pop(key, None)
+
+
 # ── Recording (throttled per identity; fails hard like update_user_last_seen) ─
 
 
-def record_request_event(path: str) -> None:
+def record_request_event(path: str, signed_request_verified: bool = False) -> None:
     """Record a visit/engagement for the current request, deduped per minute.
 
     Fails hard like update_user_last_seen: a broken analytics write surfaces as a
@@ -183,14 +159,58 @@ def record_request_event(path: str) -> None:
     event_type = _classify_event(path)
     if event_type is None:
         return
-    visitor_hash, address, platform = extract_identity()
+    visitor_hash, address, platform = extract_identity(signed_request_verified=signed_request_verified)
     if not visitor_hash and not address:
         return
     identity_key = address or visitor_hash
     now_ts = int(time.time())
-    if _should_skip(f"{identity_key}:{event_type}", now_ts):
+    throttle_key = f"{identity_key}:{event_type}"
+    if _should_skip(throttle_key, now_ts):
         return
-    _persist_event(event_type, visitor_hash, address, platform, path, now_ts)
+    try:
+        _persist_event(event_type, visitor_hash, address, platform, path, now_ts)
+    except Exception:
+        _release_failed_throttle(throttle_key, now_ts)
+        raise
+
+
+def bind_verified_request_identity(path: str) -> None:
+    """Bind a successful signed request to its derived address.
+
+    The anonymous event was already recorded by the before-request hook. When a
+    visitor id exists, updating its mapping is enough for metrics to resolve
+    that event to the address without inserting a duplicate.
+    """
+    event_type = _classify_event(path)
+    if event_type is None:
+        return
+    visitor_hash, address, platform = extract_identity(signed_request_verified=True)
+    if not address:
+        return
+    now_ts = int(time.time())
+    if not visitor_hash:
+        throttle_key = f"{address}:{event_type}"
+        if _should_skip(throttle_key, now_ts):
+            return
+        try:
+            _persist_event(event_type, None, address, platform, path, now_ts)
+        except Exception:
+            _release_failed_throttle(throttle_key, now_ts)
+            raise
+        return
+    with connect_backend_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO stats_visitors (visitor_hash, address, platform, first_seen_at, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (visitor_hash) DO UPDATE SET
+                    address = EXCLUDED.address,
+                    last_seen_at = EXCLUDED.last_seen_at,
+                    platform = COALESCE(stats_visitors.platform, EXCLUDED.platform)
+                """,
+                (visitor_hash, address, platform, now_ts, now_ts),
+            )
 
 
 def _persist_event(
@@ -312,9 +332,9 @@ def _resolved_event_cte() -> str:
     so old anonymous events do not become active users after later signup.
 
     The address on a profile-view event is the profile being looked at, not the
-    viewer (see _ADDRESS_IS_TARGET_PREFIXES), so it is nulled out here too — not
-    just at record time — so already-recorded rows self-correct instead of
-    permanently inflating the logged-in counts with everyone who got viewed.
+    viewer, so it is nulled out here: rows recorded while the query address was
+    still treated as identity self-correct instead of permanently inflating the
+    logged-in counts with everyone who got viewed.
     """
     viewer_addr = "(CASE WHEN e.path LIKE '/api/get_profile%%' THEN NULL ELSE e.address END)"
     return (
@@ -614,7 +634,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
     """Per-day buckets across the window for charting. On-chain lines (new_users,
     contributors, posts, comments) have full history; tracked lines (lurkers) only
     populate after visitor tracking began. Each bucket also carries per-signup-day
-    D7 cohort retention (d7_retained / d7_eligible_users): of the people who signed
+    D7 cohort retention (d7_retained / d7_eligible_users): of the users who signed
     up that day whose 7-day horizon has elapsed, how many were still active at/after
     signup+7d. Always returns one point per day so charts are dense."""
     new_users_by_day: Dict[int, int] = {}
@@ -794,34 +814,14 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
 
 
 def _normalize_moniker_url(moniker: str) -> Optional[str]:
-    """Return an http(s) base URL for a validator moniker, or None if it is not
-    a usable web endpoint. Mirrors the normalization used by get_peers."""
-    m = (moniker or "").strip()
-    if not m:
-        return None
-    if m.startswith("http://") or m.startswith("https://"):
-        return m.rstrip("/")
-    if any(ch.isspace() for ch in m) or "/" in m:
-        return None
-    host = m
-    if ":" in host:
-        maybe_host, maybe_port = host.rsplit(":", 1)
-        if maybe_host and maybe_port.isdigit():
-            host = maybe_host
-    host = host.strip(".")
-    if host.count(".") < 1:
-        return None
-    labels = host.split(".")
-    for label in labels:
-        if not label or len(label) > 63 or label[0] == "-" or label[-1] == "-":
-            return None
-        if not re.fullmatch(r"[A-Za-z0-9-]+", label):
-            return None
-    # Reject raw IPv4 (all-numeric labels): an IP is never a stats endpoint and
-    # must never be used as an identity/merge key.
-    if all(label.isdigit() for label in labels):
-        return None
-    return f"https://{m}"
+    """Return an http(s) base URL for a validator moniker, or None to skip it.
+
+    A moniker is attacker-influenced text, so a schemed one gets the same
+    hostname and address checks as a bare one. An IP is never a stats endpoint
+    and must never be used as an identity/merge key.
+    """
+    endpoint = validate_fleet_endpoint(moniker)
+    return endpoint.url if endpoint else None
 
 
 def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: int) -> Dict[str, Any]:

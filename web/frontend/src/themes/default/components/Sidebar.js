@@ -253,11 +253,11 @@ function isActivePath(pathname, target) {
     return pathname === target;
 }
 
-function SidebarItem({ to, icon, label, pathname }) {
+function SidebarItem({ to, icon, label, pathname, onClick }) {
     const active = isActivePath(pathname, to);
     const Glyph = active ? icon.filled : icon.outline;
     return (
-        <Item to={to} $active={active}>
+        <Item to={to} $active={active} onClick={onClick}>
             <IconBox><Glyph /></IconBox>
             {label}
         </Item>
@@ -390,10 +390,21 @@ function Sidebar({ state }) {
         return `@${trimmed.slice(0, 10)}…${trimmed.slice(-4)}`;
     };
 
+    // Same-path clicks are a REPLACE navigation, so MainView never refetches.
+    // Ask the feed for a hard refresh instead and jump back to the top.
+    const handleHomeClick = (e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        if (pathname === '/home' || pathname === '/') {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('mirageRefreshFeed'));
+        }
+    };
+
     return (
         <Aside aria-label="Sidebar">
             <Section>
-                <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} />
+                <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} onClick={handleHomeClick} />
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
                 <SidebarItem to="/agents" icon={icons.agents} label="Agents" pathname={pathname} />

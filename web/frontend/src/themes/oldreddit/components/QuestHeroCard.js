@@ -510,6 +510,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
         claiming,
         claimRewards,
         claimingAvailable,
+        payoutPending,
         refresh: refreshAll,
     } = useRewards();
 
@@ -823,11 +824,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
                         </LoyaltyBonusText>
                         <ClaimButton
                             onClick={handleClaim}
-                            disabled={!hasClaimableRewards || claiming || !claimingAvailable}
-                            $hasRewards={hasClaimableRewards && claimingAvailable}
-                            title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
-                        >
-                            {claiming ? 'claiming...' : !claimingAvailable ? 'coming soon' : hasClaimableRewards ? 'claim rewards' : 'complete quests'}
+                            disabled={!hasClaimableRewards || claiming || !claimingAvailable || payoutPending}
+                            $hasRewards={hasClaimableRewards && claimingAvailable && !payoutPending}
+                            title={payoutPending ? 'a previous payout is still being confirmed on chain' : !claimingAvailable ? 'reward distribution is not yet configured' : undefined}
+                            >
+                            {claiming ? 'claiming...' : payoutPending ? 'confirming payout...' : !claimingAvailable ? 'coming soon' : hasClaimableRewards ? 'claim rewards' : 'complete quests'}
                         </ClaimButton>
                     </ClaimSection>
 

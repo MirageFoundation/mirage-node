@@ -1144,6 +1144,7 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
         claiming,
         claimRewards,
         claimingAvailable,
+        payoutPending,
         refresh: refreshAll,
     } = useRewards();
 
@@ -1399,12 +1400,13 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
     /* CTA label */
     let ctaLabel;
     if (claiming) ctaLabel = 'Claiming…';
+    else if (payoutPending) ctaLabel = 'Confirming Payout…';
     else if (!claimingAvailable) ctaLabel = 'Payouts Coming Soon';
     else if (hasClaimableRewards) ctaLabel = 'Claim Rewards';
     else if (allComplete) ctaLabel = 'All Quests Complete';
     else ctaLabel = 'Complete Quests to Earn';
 
-    const ctaDisabled = !hasClaimableRewards || claiming || !claimingAvailable;
+    const ctaDisabled = !hasClaimableRewards || claiming || !claimingAvailable || payoutPending;
 
     return (
         <>
@@ -1586,7 +1588,7 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
                                 type="button"
                                 onClick={handleClaim}
                                 disabled={ctaDisabled}
-                                title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
+                                title={payoutPending ? 'A previous payout is still being confirmed on chain' : !claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
                             >
                                 {ctaLabel}
                             </CtaButton>

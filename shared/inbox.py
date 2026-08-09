@@ -146,7 +146,9 @@ def record_inbox_event(
     created_at: int,
     amount: int | None = None,
     tx_hash: str | None = None,
+    cur=None,
 ) -> bool:
+    """Record an inbox event. Pass `cur` to enlist in the caller's transaction."""
     if not event_key or not recipient or not actor or not event_type:
         raise RuntimeError("record_inbox_event requires event_key, recipient, actor, and event_type")
     recipient_lc = str(recipient).strip().lower()
@@ -155,19 +157,22 @@ def record_inbox_event(
         raise RuntimeError("record_inbox_event requires recipient and actor")
     tx_lc = str(tx_hash or "").strip().lower() or None
     created_at = int(created_at)
-    cfg = get_config()
-    url = cfg.get_backend_db_url()
-    with psycopg.connect(url, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO inbox_events (event_key, recipient, actor, event_type, created_at, amount, tx_hash)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (event_key) DO NOTHING
-                """,
-                (event_key, recipient_lc, actor_lc, event_type, created_at, amount, tx_lc),
-            )
-            inserted = cur.rowcount == 1
+    sql = """
+        INSERT INTO inbox_events (event_key, recipient, actor, event_type, created_at, amount, tx_hash)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (event_key) DO NOTHING
+        """
+    params = (event_key, recipient_lc, actor_lc, event_type, created_at, amount, tx_lc)
+    if cur is not None:
+        cur.execute(sql, params)
+        inserted = cur.rowcount == 1
+    else:
+        cfg = get_config()
+        url = cfg.get_backend_db_url()
+        with psycopg.connect(url, autocommit=True) as conn:
+            with conn.cursor() as own_cur:
+                own_cur.execute(sql, params)
+                inserted = own_cur.rowcount == 1
     logger.debug(
         "inbox.event.record key=%s type=%s recipient=%s actor=%s inserted=%s",
         event_key[:80],

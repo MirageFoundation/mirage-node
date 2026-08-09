@@ -202,9 +202,78 @@ def init_backend_schema() -> None:
                 )
             """
             )
+            # Delivery outbox columns. Rows that predate the outbox were already
+            # delivered (or lost) by the old fire-and-forget path, so the 'sent'
+            # default backfills them into a terminal state and only new rows are
+            # enqueued as pending.
+            cur.execute("ALTER TABLE push_event_seen ADD COLUMN IF NOT EXISTS payload JSONB")
+            cur.execute("ALTER TABLE push_event_seen ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent'")
+            cur.execute("ALTER TABLE push_event_seen ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0")
+            cur.execute(
+                "ALTER TABLE push_event_seen ADD COLUMN IF NOT EXISTS next_attempt_at BIGINT NOT NULL DEFAULT 0"
+            )
+            cur.execute("ALTER TABLE push_event_seen ADD COLUMN IF NOT EXISTS completed_at BIGINT")
+            cur.execute("ALTER TABLE push_event_seen ADD COLUMN IF NOT EXISTS last_error TEXT")
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE push_event_seen
+                    ADD CONSTRAINT push_event_seen_status_valid
+                    CHECK (status IN ('pending', 'sent', 'discarded', 'failed'));
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
+            )
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE push_event_seen
+                    ADD CONSTRAINT push_event_seen_pending_payload
+                    CHECK (status <> 'pending' OR payload IS NOT NULL);
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
+            )
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE push_event_seen
+                    ADD CONSTRAINT push_event_seen_pending_payload_object
+                    CHECK (
+                        status <> 'pending'
+                        OR (payload IS NOT NULL AND jsonb_typeof(payload) = 'object')
+                    );
+                EXCEPTION WHEN duplicate_object THEN
+                    NULL;
+                END $$;
+                """
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_push_event_seen_type ON push_event_seen(event_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_push_event_seen_created_at ON push_event_seen(created_at DESC)")
-            _assert_table_schema("push_event_seen", {"event_key", "event_type", "created_at"})
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_push_event_seen_due ON push_event_seen(next_attempt_at) "
+                "WHERE status = 'pending'"
+            )
+            _assert_table_schema(
+                "push_event_seen",
+                {
+                    "event_key",
+                    "event_type",
+                    "created_at",
+                    "payload",
+                    "status",
+                    "attempts",
+                    "next_attempt_at",
+                    "completed_at",
+                    "last_error",
+                },
+                {"payload": "jsonb"},
+            )
 
             cur.execute(
                 """
@@ -531,6 +600,7 @@ def init_backend_schema() -> None:
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_rewards_event_dedupe "
                     "ON pending_rewards(owner, reward_type, reason, created_at)"
                 )
+            cur.execute("ALTER TABLE pending_rewards ADD COLUMN IF NOT EXISTS payout_batch_id BIGINT")
             _assert_table_schema(
                 "pending_rewards",
                 {
@@ -542,8 +612,59 @@ def init_backend_schema() -> None:
                     "created_at",
                     "claimed_at",
                     "payout_amount",
+                    "payout_batch_id",
                 },
                 {"reward_data": "jsonb"},
+            )
+
+            # ── Reward payouts ───────────────────────────────────────────
+            # A payout is an external payment with its own lifecycle: the
+            # signed bytes are persisted before the broadcast so a crash
+            # mid-flight can be reconciled by hash instead of re-sending.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS reward_payouts (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    amount BIGINT NOT NULL,
+                    status TEXT NOT NULL,
+                    tx_hash TEXT NOT NULL,
+                    tx_bytes BYTEA NOT NULL,
+                    timeout_at BIGINT NOT NULL,
+                    scan_height BIGINT NOT NULL,
+                    attempts INT NOT NULL DEFAULT 0,
+                    error TEXT,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL,
+                    CONSTRAINT reward_payouts_owner_lower CHECK (owner = LOWER(owner)),
+                    CONSTRAINT reward_payouts_amount_positive CHECK (amount > 0),
+                    CONSTRAINT reward_payouts_status_valid
+                        CHECK (status IN ('reserved', 'broadcast', 'confirmed', 'failed'))
+                )
+            """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_reward_payouts_open ON reward_payouts(owner) "
+                "WHERE status IN ('reserved', 'broadcast')"
+            )
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_reward_payouts_tx_hash ON reward_payouts(tx_hash)")
+            _assert_table_schema(
+                "reward_payouts",
+                {
+                    "id",
+                    "owner",
+                    "amount",
+                    "status",
+                    "tx_hash",
+                    "tx_bytes",
+                    "timeout_at",
+                    "scan_height",
+                    "attempts",
+                    "error",
+                    "created_at",
+                    "updated_at",
+                },
+                {"tx_bytes": "bytea"},
             )
 
             cur.execute(

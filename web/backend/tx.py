@@ -13,6 +13,7 @@ import logging as _logging
 import math as _math
 import os as _os
 import random as _random
+import re as _re
 import time as _time
 import requests as _requests
 
@@ -36,6 +37,10 @@ _TX_SIZE_COST_PER_BYTE: Optional[int] = None
 _UNORDERED_TTL_NS = 120 * 1_000_000_000
 # Ante overhead after C-1: sig verify + unordered nonce (~2240) + existing ante.
 _ANTE_GAS = 20_000
+_TX_HASH_RE = _re.compile(r"[0-9A-F]{64}")
+# A payout's search window is the unordered TTL; this bounds it in blocks so a
+# bad cursor can never turn reconciliation into an unbounded scan.
+_MAX_SCAN_BLOCKS = 500
 
 
 def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
@@ -81,17 +86,47 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
 
 def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
     """Build a signed unordered relay TxRaw. Gas payer = validator (must have signed)."""
+    rt = require_runtime()
+    tx_bytes, _timeout_ns = build_signed_tx(
+        body_bytes,
+        gas_limit,
+        privkey_bytes=rt.validator_privkey_bytes,
+        pubkey_bytes=rt.validator_pubkey_bytes,
+        account_number=int(rt.validator_account_number),
+        fee_payer=rt.validator_payer_addr,
+    )
+    return tx_bytes
+
+
+def build_signed_tx(
+    body_bytes: bytes,
+    gas_limit: int,
+    *,
+    privkey_bytes: bytes,
+    pubkey_bytes: bytes,
+    account_number: int,
+    fee_payer: str = "",
+) -> Tuple[bytes, int]:
+    """Sign an unordered tx with an explicit signer.
+
+    Returns (tx_bytes, timeout_ns). The timeout is what makes a rebroadcast of
+    the identical bytes safe: past it the tx can never be included, so a payout
+    that is still not on chain after the timeout is definitively dead.
+    """
     if int(gas_limit) <= 0:
         raise RuntimeError("gas_limit must be > 0")
+    if not privkey_bytes or not pubkey_bytes:
+        raise RuntimeError("build_signed_tx requires a signer key pair")
     rt = require_runtime()
     min_gas_price = min_gas_price_umirage()
     fee_amt = int(_math.ceil(int(gas_limit) * min_gas_price))
     fee = Fee(gas_limit=int(gas_limit))
     fee.amount.extend([Coin(denom="umirage", amount=str(fee_amt))])
-    fee.payer = rt.validator_payer_addr
+    if fee_payer:
+        fee.payer = fee_payer
 
     pub_any = AnyPB()
-    pub_any.Pack(_secp_pubkey())
+    pub_any.Pack(_secp_pubkey(pubkey_bytes))
     pub_any.type_url = "/cosmos.crypto.secp256k1.PubKey"
     mode = ModeInfo(single=ModeInfo.Single(mode=SignMode.SIGN_MODE_DIRECT))
     # Unordered txs require sequence=0.
@@ -106,9 +141,9 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
         body_bytes=signed_body,
         auth_info_bytes=auth_bytes,
         chain_id=rt.chain_id,
-        account_number=int(rt.validator_account_number),
+        account_number=int(account_number),
     )
-    sig = _sign_sign_doc(rt.validator_privkey_bytes, sign_doc.SerializeToString())
+    sig = _sign_sign_doc(privkey_bytes, sign_doc.SerializeToString())
 
     _log.info(
         "build_tx gas_limit=%d fee_amt=%d timeout_ns=%d chain_id=%s account_number=%d sig_len=%d",
@@ -116,10 +151,137 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
         fee_amt,
         timeout_ns,
         rt.chain_id,
-        rt.validator_account_number,
+        int(account_number),
         len(sig),
     )
-    return TxRaw(body_bytes=signed_body, auth_info_bytes=auth_bytes, signatures=[sig]).SerializeToString()
+    tx_bytes = TxRaw(body_bytes=signed_body, auth_info_bytes=auth_bytes, signatures=[sig]).SerializeToString()
+    return tx_bytes, timeout_ns
+
+
+def bank_send_body_bytes(from_address: str, to_address: str, amount: int, memo: str = "") -> bytes:
+    """Serialize a TxBody carrying a single cosmos bank MsgSend of umirage."""
+    from cosmpy.protos.cosmos.bank.v1beta1.tx_pb2 import MsgSend
+    from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
+
+    if int(amount) <= 0:
+        raise RuntimeError("bank send amount must be > 0")
+    msg = MsgSend(from_address=from_address, to_address=to_address)
+    msg.amount.extend([Coin(denom="umirage", amount=str(int(amount)))])
+    any_msg = AnyPB()
+    any_msg.Pack(msg)
+    any_msg.type_url = "/cosmos.bank.v1beta1.MsgSend"
+    return TxBody(messages=[any_msg], memo=memo).SerializeToString()
+
+
+def chain_head() -> Tuple[int, float]:
+    """Latest committed height and its block time (unix seconds)."""
+    body = _rpc_get("/status", {})
+    sync = ((body.get("result") or {}).get("sync_info")) or {}
+    height = int(sync.get("latest_block_height") or 0)
+    if height <= 0:
+        raise RuntimeError(f"chain_head missing height: {str(body)[:200]}")
+    return height, _parse_block_time(str(sync.get("latest_block_time") or ""))
+
+
+def resolve_tx_by_scan(tx_hash: str, scan_from: int, timeout_at: int) -> Tuple[str, Optional[int], int]:
+    """Find an unordered tx by scanning the blocks it could appear in.
+
+    Transaction indexing is off on every Mirage node, so a hash lookup is not
+    available. An unordered tx can only be included in a block whose time is at
+    or before its timeout, which makes the search window finite.
+
+    Returns (verdict, code, scanned_to) where verdict is:
+    - "found": the tx is in a block; code is its DeliverTx result
+    - "expired": every block up to the timeout is scanned and it is not there
+    - "pending": the window is still open
+    """
+    digest = str(tx_hash or "").strip().upper()
+    if not _TX_HASH_RE.fullmatch(digest):
+        raise RuntimeError(f"resolve_tx_by_scan invalid hash: {tx_hash!r}")
+    if int(scan_from) <= 0:
+        raise RuntimeError(f"resolve_tx_by_scan invalid scan_from: {scan_from}")
+
+    head, _head_time = chain_head()
+    scanned_to = int(scan_from) - 1
+    for height in range(int(scan_from), head + 1):
+        if height - int(scan_from) >= _MAX_SCAN_BLOCKS:
+            return "pending", None, scanned_to
+        block_time, txs = _fetch_block(height)
+        for index, raw in enumerate(txs):
+            try:
+                tx_bytes = _b64.b64decode(raw, validate=True)
+            except Exception as exc:
+                raise RuntimeError(f"block {height} tx {index} is not valid base64") from exc
+            if _hashlib.sha256(tx_bytes).hexdigest().upper() == digest:
+                return "found", _tx_result_code(height, index), height
+        scanned_to = height
+        if block_time > float(timeout_at):
+            return "expired", None, scanned_to
+    return "pending", None, scanned_to
+
+
+def _fetch_block(height: int) -> Tuple[float, list]:
+    body = _rpc_get("/block", {"height": str(int(height))})
+    block = ((body.get("result") or {}).get("block")) or {}
+    header = block.get("header") or {}
+    data = block.get("data") or {}
+    txs = data.get("txs") or []
+    if not isinstance(txs, list) or any(not isinstance(tx, str) for tx in txs):
+        raise RuntimeError(f"block {height} has malformed txs")
+    return _parse_block_time(str(header.get("time") or "")), txs
+
+
+def _tx_result_code(height: int, index: int) -> int:
+    body = _rpc_get("/block_results", {"height": str(int(height))})
+    results = ((body.get("result") or {}).get("txs_results")) or []
+    if index >= len(results):
+        raise RuntimeError(f"block_results {height} has no tx at index {index}")
+    result = results[index]
+    if not isinstance(result, dict) or "code" not in result:
+        raise RuntimeError(f"block_results {height} tx {index} has no explicit code")
+    code = result["code"]
+    if not isinstance(code, int) or isinstance(code, bool):
+        raise RuntimeError(f"block_results {height} tx {index} code is not an integer: {code!r}")
+    return code
+
+
+def _rpc_get(path: str, params: dict) -> dict:
+    url = f"{require_runtime().rpc_url}{path}"
+    try:
+        resp = _requests.get(url, params=params, timeout=10)
+    except Exception as e:
+        raise RuntimeError(f"rpc {path} connection failed: {e}")
+    if resp.status_code != 200:
+        raise RuntimeError(f"rpc {path} http {resp.status_code}: {resp.text[:300]}")
+    try:
+        body = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"rpc {path} invalid json: {e}")
+    if body.get("error"):
+        raise RuntimeError(f"rpc {path} error: {str(body['error'])[:300]}")
+    return body
+
+
+def _parse_block_time(value: str) -> float:
+    """Parse a CometBFT RFC3339 timestamp (nanosecond precision) to unix seconds."""
+    raw = str(value or "").strip()
+    if not raw:
+        raise RuntimeError("block time missing")
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    if "." in raw:
+        head, rest = raw.split(".", 1)
+        frac, _, tail = rest.partition("+")
+        raw = f"{head}.{frac[:6]}+{tail}" if tail else f"{head}.{frac[:6]}"
+    from datetime import datetime, timezone
+
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid block time: {value!r}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 def simulate_gas(tx_bytes: bytes) -> int:
@@ -176,11 +338,11 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 
 
 def _broadcast_once(tx_bytes: bytes) -> Tuple[str, int, int, str]:
-    tx_hash = _hashlib.sha256(tx_bytes).hexdigest().lower()
+    expected_hash = _hashlib.sha256(tx_bytes).hexdigest().lower()
     api_url = require_runtime().api_url
     url = f"{api_url}/cosmos/tx/v1beta1/txs"
 
-    _log.info("broadcast_tx %s len=%d %s", tx_hash, len(tx_bytes), _extract_auth_hex(tx_bytes))
+    _log.info("broadcast_tx %s len=%d %s", expected_hash, len(tx_bytes), _extract_auth_hex(tx_bytes))
 
     payload = {
         "tx_bytes": _b64.b64encode(tx_bytes).decode(),
@@ -196,15 +358,23 @@ def _broadcast_once(tx_bytes: bytes) -> Tuple[str, int, int, str]:
         body = resp.json()
     except Exception as e:
         raise RuntimeError(f"broadcast_tx invalid json: {e}")
-    tx_resp = body.get("tx_response") or {}
-    code = int(tx_resp.get("code", 0) or 0)
+    tx_resp = body.get("tx_response")
+    if not isinstance(tx_resp, dict):
+        raise RuntimeError(f"broadcast_tx missing tx_response: {str(body)[:300]}")
+    if "code" not in tx_resp:
+        raise RuntimeError(f"broadcast_tx missing explicit code: {str(body)[:300]}")
+    code = tx_resp["code"]
+    if not isinstance(code, int) or isinstance(code, bool):
+        raise RuntimeError(f"broadcast_tx code is not an integer: {code!r}")
     raw_log = str(tx_resp.get("raw_log", "") or "")
     height = int(tx_resp.get("height", 0) or 0)
-    resp_hash = str(tx_resp.get("txhash", "") or "").strip().lower()
-    if resp_hash:
-        tx_hash = resp_hash
-    _log.info("broadcast %s code=%d resp=%s", tx_hash, code, str(body)[:500])
-    return tx_hash, code, height, raw_log
+    response_hash = str(tx_resp.get("txhash", "") or "").strip().lower()
+    if not _TX_HASH_RE.fullmatch(response_hash.upper()):
+        raise RuntimeError(f"broadcast_tx missing or invalid txhash: {response_hash!r}")
+    if response_hash != expected_hash:
+        raise RuntimeError(f"broadcast_tx hash mismatch expected={expected_hash} got={response_hash}")
+    _log.info("broadcast %s code=%d resp=%s", response_hash, code, str(body)[:500])
+    return response_hash, code, height, raw_log
 
 
 def _unique_timeout_ns() -> int:
@@ -293,17 +463,21 @@ def load_tx_size_cost_per_byte() -> int:
     raise RuntimeError("tx_size_cost_per_byte missing in indexer DB")
 
 
-def _secp_pubkey():
+def _secp_pubkey(pubkey_bytes: Optional[bytes] = None):
     from cosmpy.protos.cosmos.crypto.secp256k1.keys_pb2 import PubKey as SecpPubKey
 
-    return SecpPubKey(key=require_runtime().validator_pubkey_bytes)
+    return SecpPubKey(key=pubkey_bytes if pubkey_bytes is not None else require_runtime().validator_pubkey_bytes)
 
 
 __all__ = [
     "estimate_total_gas_limit",
     "build_tx_bytes",
+    "build_signed_tx",
+    "bank_send_body_bytes",
     "build_and_broadcast_tx",
     "simulate_gas",
     "broadcast_tx",
+    "chain_head",
+    "resolve_tx_by_scan",
     "load_tx_size_cost_per_byte",
 ]

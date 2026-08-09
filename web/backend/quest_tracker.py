@@ -11,17 +11,16 @@ Handles:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
-import random
 from dataclasses import dataclass, field
 from typing import Optional
 
 import yaml
 
-import quest_settings as settings
+import settings
+from quest_assignment import assign_daily_quests_if_needed, assign_flash_quest_if_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -193,140 +192,15 @@ class QuestTracker:
                 )
                 return [row[0] for row in cur.fetchall()]
 
-    def _has_unused_invite_codes(self, owner: str) -> bool:
-        """Check if user has at least one unused invite code."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT 1 FROM invite_codes
-                    WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
-                    LIMIT 1
-                    """,
-                    (owner,),
-                )
-                return cur.fetchone() is not None
-
-    def _get_completed_quest_count(self, owner: str) -> int:
-        """Get total number of completed quests for a user."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) FROM user_daily_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
-                    """,
-                    (owner,),
-                )
-                row = cur.fetchone()
-                return row[0] if row else 0
-
-    def _get_invite_earner_completed_count(self, owner: str) -> int:
-        """Get total number of completed invite_earner quests for a user.
-
-        Counts claimed invite_code rewards from invite_earner quests, which is more
-        reliable than counting quest completions (which can be reset via debug panel).
-        """
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) FROM pending_rewards
-                    WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
-                    """,
-                    (owner,),
-                )
-                row = cur.fetchone()
-                return row[0] if row else 0
-
-    def _is_invite_earner_eligible(self, owner: str, day_utc: int) -> bool:
-        """Check if user is eligible for invite_earner quest.
-
-        User is eligible if:
-        1. completed_count >= (invite_earner_completed + 1) * interval
-        2. 30% daily roll passes
-        """
-        completed_count = self._get_completed_quest_count(owner)
-        invite_earner_completed = self._get_invite_earner_completed_count(owner)
-        next_milestone = (invite_earner_completed + 1) * settings.QUESTS_INVITE_EARNER_INTERVAL
-
-        if completed_count < next_milestone:
-            return False
-
-        # 30% daily roll
-        roll = self._deterministic_roll(owner, day_utc, "invite_earner")
-        return roll < settings.QUESTS_INVITE_EARNER_CHANCE
-
-    def _deterministic_roll(self, owner: str, day_utc: int, roll_type: str) -> float:
-        """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
-        seed_str = f"{owner.lower()}:{day_utc}:{roll_type}"
-        seed_hash = hashlib.sha256(seed_str.encode()).hexdigest()
-        # Use first 8 hex chars as seed (32 bits)
-        seed_int = int(seed_hash[:8], 16)
-        rng = random.Random(seed_int)
-        return rng.random()
-
     def _assign_daily_quests(self, owner: str, day_utc: int, ts: int) -> list[str]:
-        """Assign random daily quests to a user for the day, including special quest gating."""
-        if not self.daily_quests:
-            return []
-
-        quest_ids = []
-        special_quest_assigned = False
-
-        # Check for invite_recruit eligibility (30% roll if user has unused codes)
-        if not special_quest_assigned and self._has_unused_invite_codes(owner):
-            roll = self._deterministic_roll(owner, day_utc, "invite_recruit")
-            logger.debug(
-                f"invite_recruit roll for {owner}: {roll:.3f} (threshold: {settings.QUESTS_INVITE_RECRUIT_CHANCE})"
-            )
-            if roll < settings.QUESTS_INVITE_RECRUIT_CHANCE:
-                # Find invite_recruit in special quests
-                invite_recruit = next((q for q in self.special_quests if q.id == "invite_recruit"), None)
-                if invite_recruit:
-                    quest_ids.append(invite_recruit.id)
-                    special_quest_assigned = True
-                    logger.info(f"Assigned special quest invite_recruit to {owner} (roll passed)")
-
-        # Check for invite_earner eligibility (every N completed quests + 30% roll)
-        if not special_quest_assigned:
-            if self._is_invite_earner_eligible(owner, day_utc):
-                invite_earner = next((q for q in self.special_quests if q.id == "invite_earner"), None)
-                if invite_earner:
-                    completed_count = self._get_completed_quest_count(owner)
-                    quest_ids.append(invite_earner.id)
-                    special_quest_assigned = True
-                    logger.info(f"Assigned special quest invite_earner to {owner} (completed {completed_count} quests)")
-
-        # Fill remaining slots with random daily quests
-        remaining_slots = settings.QUESTS_DAILY_COUNT - len(quest_ids)
-        if remaining_slots > 0 and self.daily_quests:
-            count = min(remaining_slots, len(self.daily_quests))
-            selected = random.sample(self.daily_quests, count)
-            quest_ids.extend([q.id for q in selected])
-
-        # Insert initial progress records
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                for quest_id in quest_ids:
-                    cur.execute(
-                        """
-                        INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
-                        VALUES (%s, %s, %s, 0, '{}')
-                        ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
-                        """,
-                        (owner, day_utc, quest_id),
-                    )
-
-        # Delay flash quest by at least 1h after daily quests are first assigned
-        min_flash_at = ts + 3600
-        next_flash = self._get_next_flash_time(owner)
-        if next_flash < min_flash_at:
-            self._set_next_flash_time(owner, min_flash_at)
-            logger.info(f"Pushed flash quest eligibility to {min_flash_at} for {owner} (1h after daily assignment)")
-
-        logger.info(f"Assigned daily quests {quest_ids} to {owner} for day {day_utc}")
-        return quest_ids
+        """Assign the day's quests through the shared, serialized assignment path."""
+        return assign_daily_quests_if_needed(
+            owner,
+            day_utc,
+            ts,
+            {q.id: {} for q in self.daily_quests},
+            {q.id: {} for q in self.special_quests},
+        )
 
     def _get_quest_by_id(self, quest_id: str) -> Optional[QuestDefinition]:
         """Get quest definition by ID."""
@@ -375,119 +249,13 @@ class QuestTracker:
                     }
                 return None
 
-    def _get_next_flash_time(self, owner: str) -> int:
-        """Get the timestamp when user can receive their next flash quest."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT next_flash_at FROM user_quest_state WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                row = cur.fetchone()
-                return row[0] if row else 0
-
-    def _set_next_flash_time(self, owner: str, next_ts: int) -> None:
-        """Set when the user can receive their next flash quest."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO user_quest_state (owner, next_flash_at)
-                    VALUES (%s, %s)
-                    ON CONFLICT (owner) DO UPDATE SET next_flash_at = EXCLUDED.next_flash_at
-                    """,
-                    (owner, next_ts),
-                )
-
     def _maybe_assign_flash_quest(self, owner: str, ts: int) -> Optional[dict]:
-        """
-        Assign a flash quest if enough time has passed since the last one.
-        Returns the newly assigned flash quest or None.
-        """
-        if not self.flash_templates:
-            return None
-
-        # Check if user already has an active flash quest
-        active = self._get_active_flash_quest(owner, ts)
-        if active:
-            return None
-
-        # Check if enough time has passed
-        next_flash_at = self._get_next_flash_time(owner)
-
-        # New user check: if no next_flash_at record exists (returns 0),
-        # initialize it with minimum interval delay so new users don't get flash quests immediately
-        if next_flash_at == 0:
-            initial_delay = settings.QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600
-            self._set_next_flash_time(owner, ts + initial_delay)
-            logger.info(f"New user {owner}: initialized flash quest delay to {initial_delay}s")
-            return None
-
-        if ts < next_flash_at:
-            return None
-
-        # Select a random flash quest template
-        template = random.choice(self.flash_templates)
-
-        # Calculate duration based on time_window_minutes (default 60 min)
-        duration_seconds = (template.time_window_minutes or 60) * 60
-        ends_at = ts + duration_seconds
-
-        # Insert the flash quest
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
-                    VALUES (%s, %s, %s, %s, 0, '{}')
-                    ON CONFLICT (owner, starts_at) DO NOTHING
-                    RETURNING template_id, starts_at, ends_at
-                    """,
-                    (owner, template.id, ts, ends_at),
-                )
-                inserted = cur.fetchone()
-
-        if not inserted:
-            # Concurrent requests can race on (owner, starts_at) when they land in the
-            # same second. Treat it as already-assigned and return the existing row.
-            with self._connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT template_id, starts_at, ends_at, progress, progress_meta, last_action_at, completed_at
-                        FROM user_flash_quests
-                        WHERE owner = %s AND starts_at = %s
-                        """,
-                        (owner, ts),
-                    )
-                    row = cur.fetchone()
-            if not row:
-                raise RuntimeError(f"flash quest insert conflicted but no row found: owner={owner} starts_at={ts}")
-            logger.warning(f"flash quest insert race resolved: owner={owner} starts_at={ts}")
-            return {
-                "template_id": row[0],
-                "starts_at": row[1],
-                "ends_at": row[2],
-                "progress": row[3],
-                "progress_meta": row[4] if row[4] else {},
-                "last_action_at": row[5],
-                "completed_at": row[6],
-            }
-
-        # Schedule next flash quest (random interval between MIN and MAX hours)
-        min_hours = settings.QUESTS_FLASH_MIN_INTERVAL_HOURS
-        max_hours = settings.QUESTS_FLASH_MAX_INTERVAL_HOURS
-        next_interval_seconds = random.randint(min_hours * 3600, max_hours * 3600)
-        self._set_next_flash_time(owner, ts + next_interval_seconds)
-
-        logger.info(f"Assigned flash quest {template.id} to {owner}, ends at {ends_at}")
-
-        return {
-            "template_id": template.id,
-            "starts_at": ts,
-            "ends_at": ends_at,
-            "progress": 0,
-            "progress_meta": {},
-            "last_action_at": None,
-            "completed_at": None,
-        }
+        """Assign a flash quest through the shared, serialized assignment path."""
+        return assign_flash_quest_if_eligible(
+            owner,
+            ts,
+            {q.id: {"time_window_minutes": q.time_window_minutes} for q in self.flash_templates},
+        )
 
     def _get_flash_quest_progress(self, owner: str, starts_at: int) -> QuestProgress:
         """Get progress for a specific flash quest."""

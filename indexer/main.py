@@ -642,10 +642,14 @@ class Indexer:
                     f"{earliest}). Restore a trusted dump or start from an empty database."
                 )
             self.db.set_meta(META_CONTINUITY_STATUS, "unverified_pruned_gap")
-            self._record_history_gap(stored_height + 1, earliest - 1, "pruned_before_verification")
+            # stored_height + 1 == earliest means the DB ends exactly where the
+            # node's retained history starts: no block is missing, there is just
+            # no overlap left to compare hashes against.
+            if stored_height + 1 <= earliest - 1:
+                self._record_history_gap(stored_height + 1, earliest - 1, "pruned_before_verification")
             logger.warning(
                 "Continuity UNVERIFIED: checkpoint height %s is below the node's earliest retained height %s. "
-                "The overlap needed to compare block hashes was pruned; continuing with a recorded gap.",
+                "The overlap needed to compare block hashes was pruned; continuing.",
                 stored_height,
                 earliest,
             )
