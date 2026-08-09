@@ -396,13 +396,14 @@ export function useCreateAccount({
         setButtonStatus("preparing");
         setStatusStartTime(Date.now());
         await new Promise(r => setTimeout(r, 50)); // Let React render
+        let signingHandoffId = null;
         try {
             // Stage seed for create_user signing via in-memory handoff (do not wipe active vault).
-            const { id: signingHandoffId } = createHandoff({
+            ({ id: signingHandoffId } = createHandoff({
                 purpose: 'create-user-signing',
                 seed: seedPhrase,
                 owner: publicKey,
-            });
+            }));
             try {
                 console.debug('[CreateAccount] staged create-user handoff', {
                     handoffId: signingHandoffId,
@@ -415,6 +416,7 @@ export function useCreateAccount({
             const result = await tx.createUser(usernameFinal, codeClean, submittedReferrer);
             if (!result || !result.success) {
                 clearHandoff(signingHandoffId);
+                signingHandoffId = null;
                 const msg = String((result && result.error) || "Submit failed");
                 if (/admin insufficient balance/i.test(msg)) {
                     setSubmitError("Your account balance is too low to cover the transaction fee.");
@@ -454,6 +456,7 @@ export function useCreateAccount({
             clearReferralAttribution();
             if (handoffId) clearHandoff(handoffId);
             clearHandoff(signingHandoffId);
+            signingHandoffId = null;
             await seedVault.storeSeed(seedPhrase, 'insecure', null);
             const { id: welcomeHandoffId } = createHandoff({
                 purpose: 'welcome',
@@ -469,9 +472,26 @@ export function useCreateAccount({
             });
             setCredentials(publicKey, finalUsername, seedPhrase);
         } catch (e) {
-            setSubmitError(String(e?.message || e || "Submit failed"));
+            if (signingHandoffId) {
+                clearHandoff(signingHandoffId);
+                signingHandoffId = null;
+            }
+            try {
+                console.error('[CreateAccount] submit failed', e);
+            } catch (_) { /* noop */ }
+            if (e && typeof e === 'object' && (e.error_code || e.cancelled || e.reason)) {
+                setSubmitError(formatError(e));
+            } else {
+                setSubmitError(String(e?.message || e || "Submit failed"));
+            }
             setButtonStatus("idle");
             setStatusStartTime(null);
+            try {
+                Storage.remove('username_pending');
+            } catch (_) { }
+            try {
+                Storage.remove('publicKey_pending');
+            } catch (_) { }
         } finally {
             setSubmitting(false);
         }

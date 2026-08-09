@@ -58,6 +58,14 @@ const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "client error": "client_error",
     "transaction failed": "transaction_failed",
     "insufficient balance": "insufficient_balance",
+    "missing onboarding handoff seed": "missing_onboarding_handoff",
+    "handoff owner mismatch": "handoff_owner_mismatch",
+    "owner_mismatch": "owner_mismatch",
+    "missing_entry_owner": "missing_entry_owner",
+    "missing_seed": "missing_recovery_phrase",
+    "pipeline_failure": "pipeline_failure",
+    "session_reset": "tx_cancelled",
+    "cancelled": "tx_cancelled",
 };
 
 function getLocalErrorCode(message) {
@@ -66,6 +74,16 @@ function getLocalErrorCode(message) {
         throw new Error(`[tx] unmapped local error message: ${message}`);
     }
     return code;
+}
+
+function cancelResult(reason) {
+    const r = String(reason || 'cancelled');
+    return {
+        success: false,
+        cancelled: true,
+        reason: r,
+        error_code: LOCAL_ERROR_CODE_BY_MESSAGE[r] || 'tx_cancelled',
+    };
 }
 
 let __CosmSecp256k1 = null;
@@ -267,7 +285,9 @@ class TransactionHandler {
     }
 
     _verifyOwnerBinding(entry, phase) {
+        this._lastOwnerVerifyReason = null;
         if (!entry || !entry.owner) {
+            this._lastOwnerVerifyReason = 'missing_entry_owner';
             console.debug('[tx] owner-verify-fail', { phase, reason: 'missing_entry_owner', queueId: entry?.queueId });
             this._drainQueue('missing_entry_owner');
             return false;
@@ -277,11 +297,13 @@ class TransactionHandler {
             binding = this._requireOwnerBinding(entry);
         } catch (err) {
             const reason = String(err?.message || 'missing_seed');
+            this._lastOwnerVerifyReason = reason;
             console.debug('[tx] owner-verify-fail', { phase, reason, queueId: entry.queueId });
             this._drainQueue(reason);
             return false;
         }
         if (entry.owner !== binding.owner || entry.sessionGeneration !== binding.sessionGeneration) {
+            this._lastOwnerVerifyReason = 'owner_mismatch';
             console.debug('[tx] owner-verify-fail', {
                 phase,
                 reason: 'owner_mismatch',
@@ -352,9 +374,9 @@ class TransactionHandler {
         if (this._draining) return;
         this._draining = true;
         const cancelReason = String(reason || 'cancelled');
-        const cancelled = { success: false, cancelled: true, reason: cancelReason };
+        const cancelled = cancelResult(cancelReason);
         const pendingCount = this.transactions.length;
-        console.debug('[tx] drain-queue', { reason: cancelReason, pendingCount });
+        console.debug('[tx] drain-queue', { reason: cancelReason, pendingCount, error_code: cancelled.error_code });
 
         this._terminateActivePowWorker();
 
@@ -2573,7 +2595,7 @@ class TransactionHandler {
 
                 try {
                     if (!this._verifyOwnerBinding(queued, 'pre-sign')) {
-                        failAndDrain({ success: false, cancelled: true, error_code: 'owner_mismatch', reason: 'owner_mismatch' });
+                        failAndDrain(cancelResult(this._lastOwnerVerifyReason || 'owner_mismatch'));
                         break;
                     }
                     result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress, forcePow);
@@ -3883,7 +3905,7 @@ class TransactionHandler {
      */
     async handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, resolve) {
         if (transaction?.owner && !this._verifyOwnerBinding(transaction, 'sign')) {
-            resolve({ success: false, cancelled: true, reason: 'owner_mismatch' });
+            resolve(cancelResult(this._lastOwnerVerifyReason || 'owner_mismatch'));
             return;
         }
 
@@ -5128,7 +5150,7 @@ class TransactionHandler {
             const effectiveForcePow = forcePow || transaction?._forcePow === true;
 
             if (transaction?.owner && !this._verifyOwnerBinding(transaction, 'sign')) {
-                wrapResolve({ success: false, cancelled: true, error_code: 'owner_mismatch', reason: 'owner_mismatch' });
+                wrapResolve(cancelResult(this._lastOwnerVerifyReason || 'owner_mismatch'));
                 return;
             }
 

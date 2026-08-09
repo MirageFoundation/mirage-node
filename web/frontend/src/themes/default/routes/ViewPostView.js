@@ -10,6 +10,8 @@ import { ContentGrid, ModernPostFeed } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import MarkdownRenderer from "../components/MarkdownRenderer.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
+import InlineMedia from "../components/InlineMedia.js";
+import MediaGallery from "../components/MediaGallery.js";
 import DefaultEditorChrome, { EditorMediaTools } from "../components/DefaultEditorChrome.js";
 import { FeedCardSkeleton, CommentSkeleton } from "../components/Skeleton.js";
 import { MediaRow, MediaPreviewWrapper, MediaPreviewImage, MediaSpinner, MediaRemoveButton } from "../components/MediaAttachmentLayout.js";
@@ -3678,17 +3680,15 @@ function ViewPostView({
 
                                                             // v1.12.0: Render from dedicated media array if available
                                                             if (mediaArr.length > 0) {
-                                                                const Inline = require("../components/InlineMedia").default;
-                                                                const Gallery = require("../components/MediaGallery").default;
-                                                                const mediaNode = mediaArr.length > 1 && Gallery ? React.createElement(Gallery, {
-                                                                    items: mediaArr,
-                                                                    variant: isRoot ? 'root_post' : undefined,
-                                                                    mediaMeta: displayMediaMeta
-                                                                }) : Inline ? React.createElement(Inline, {
-                                                                    url: mediaArr[0],
-                                                                    variant: isRoot ? 'root_post' : undefined,
-                                                                    mediaMeta: displayMediaMeta[0] || null
-                                                                }) : null;
+                                                                const mediaNode = mediaArr.length > 1 ? <MediaGallery
+                                                                    items={mediaArr}
+                                                                    variant={isRoot ? 'root_post' : undefined}
+                                                                    mediaMeta={displayMediaMeta}
+                                                                /> : <InlineMedia
+                                                                    url={mediaArr[0]}
+                                                                    variant={isRoot ? 'root_post' : undefined}
+                                                                    mediaMeta={displayMediaMeta[0] || null}
+                                                                />;
                                                                 return <>
                                                                     {mediaNode}
                                                                     {raw ? <div style={{
@@ -3706,11 +3706,11 @@ function ViewPostView({
                                                             const isUrl = /^https?:\/\//i.test(first);
                                                             if (isUrl) {
                                                                 return <>
-                                                                    {require("../components/InlineMedia").default ? React.createElement(require("../components/InlineMedia").default, {
-                                                                        url: first,
-                                                                        variant: isRoot ? 'root_post' : undefined,
-                                                                        mediaMeta: displayMediaMeta[0] || null
-                                                                    }) : null}
+                                                                    <InlineMedia
+                                                                        url={first}
+                                                                        variant={isRoot ? 'root_post' : undefined}
+                                                                        mediaMeta={displayMediaMeta[0] || null}
+                                                                    />
                                                                     {restRaw ? <div style={{
                                                                         height: '0.5rem'
                                                                     }} /> : null}

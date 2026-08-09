@@ -11,5 +11,7 @@ describe('formatError', () => {
             .toBe('Session changed while submitting. Please try again.');
         expect(formatError({ success: false, cancelled: true, reason: 'missing recovery phrase' }))
             .toBe('Recovery phrase is missing.');
+        expect(formatError({ success: false, cancelled: true, error_code: 'missing_onboarding_handoff' }))
+            .toBe('Recovery phrase is missing.');
     });
 });

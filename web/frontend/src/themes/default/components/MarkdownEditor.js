@@ -14,6 +14,7 @@ import { uploadImageWithCancel } from "../../../utils/ImageUpload";
 import { captureVideoPoster, registerLocalVideoPoster } from "../../../utils/media";
 import Api from "../../../utils/api";
 import UserAvatar from "./UserAvatar.js";
+import MarkdownRenderer from "./MarkdownRenderer.js";
 
 // Lazy import to keep initial bundle small
 async function uploadVideoLazy(file, onProgress, xhrRef) {
@@ -1366,9 +1367,8 @@ export default function MarkdownEditor({
             <HiddenInput ref={fileInputRef} type="file" onChange={handleFileChange} />
             <LivePreviewContainer $visible={!!(previewEnabled && value && value.trim())}>
                 <PreviewLabel>Preview</PreviewLabel>
-                {/* eslint-disable-next-line global-require */}
-                {previewEnabled && value && value.trim() && require("./MarkdownRenderer").default
-                    ? React.createElement(require("./MarkdownRenderer").default, { text: value })
+                {previewEnabled && value && value.trim()
+                    ? <MarkdownRenderer text={value} />
                     : null}
             </LivePreviewContainer>
         </EditorContainer>

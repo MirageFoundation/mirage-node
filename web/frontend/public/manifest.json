@@ -1,11 +1,12 @@
 {
-    "short_name": "Mirage-Client",
-    "name": "Mirage-Client",
+    "short_name": "Mirage",
+    "name": "Mirage",
     "icons": [
         {
-            "src": "favicon3.png",
-            "sizes": "96x96",
-            "type": "image/png"
+            "src": "favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
         }
     ],
     "start_url": ".",

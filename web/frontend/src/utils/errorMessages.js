@@ -248,6 +248,9 @@ const ERROR_MAP = {
     invalid_signer_address: "Invalid signer address.",
     address_invalid: "Invalid address.",
     missing_recovery_phrase: "Recovery phrase is missing.",
+    missing_onboarding_handoff: "Recovery phrase is missing.",
+    handoff_owner_mismatch: "Session changed while submitting. Please try again.",
+    missing_entry_owner: "Session changed while submitting. Please try again.",
     transaction_failed: "Transaction failed.",
     client_error: "Something went wrong. Please try again.",
     tx_cancelled: "Transaction was cancelled. Please try again.",
@@ -255,6 +258,7 @@ const ERROR_MAP = {
     pipeline_failure: "Transaction failed. Please try again.",
     missing_seed: "Recovery phrase is missing.",
     'missing onboarding handoff seed': "Recovery phrase is missing.",
+    'handoff owner mismatch': "Session changed while submitting. Please try again.",
     'missing recovery phrase': "Recovery phrase is missing.",
 };
 
