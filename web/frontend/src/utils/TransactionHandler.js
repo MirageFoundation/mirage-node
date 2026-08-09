@@ -2519,6 +2519,18 @@ class TransactionHandler {
                 final_transaction.sessionGeneration = queued.sessionGeneration;
                 final_transaction.queueId = queued.queueId;
                 final_transaction._forcePow = forcePow;
+                // performTransaction re-verifies owner on `transaction`; handoff create_user
+                // must keep signer source or sign-time verify reads the (empty) vault instead.
+                if (queued._signerSource) final_transaction._signerSource = queued._signerSource;
+                if (queued._handoffPurpose) final_transaction._handoffPurpose = queued._handoffPurpose;
+                try {
+                    console.debug('[tx] final-tx-signer-meta', {
+                        action: final_transaction.action,
+                        queueId: final_transaction.queueId,
+                        signerSource: final_transaction._signerSource || 'vault',
+                        handoffPurpose: final_transaction._handoffPurpose || null,
+                    });
+                } catch (_) { /* noop */ }
             }
 
             // Retry loop: PoW-related failures (difficulty changed between compute and submit)
@@ -2561,7 +2573,7 @@ class TransactionHandler {
 
                 try {
                     if (!this._verifyOwnerBinding(queued, 'pre-sign')) {
-                        failAndDrain({ success: false, cancelled: true, reason: 'owner_mismatch' });
+                        failAndDrain({ success: false, cancelled: true, error_code: 'owner_mismatch', reason: 'owner_mismatch' });
                         break;
                     }
                     result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress, forcePow);
@@ -5116,7 +5128,7 @@ class TransactionHandler {
             const effectiveForcePow = forcePow || transaction?._forcePow === true;
 
             if (transaction?.owner && !this._verifyOwnerBinding(transaction, 'sign')) {
-                wrapResolve({ success: false, cancelled: true, reason: 'owner_mismatch' });
+                wrapResolve({ success: false, cancelled: true, error_code: 'owner_mismatch', reason: 'owner_mismatch' });
                 return;
             }
 

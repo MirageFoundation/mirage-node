@@ -250,6 +250,12 @@ const ERROR_MAP = {
     missing_recovery_phrase: "Recovery phrase is missing.",
     transaction_failed: "Transaction failed.",
     client_error: "Something went wrong. Please try again.",
+    tx_cancelled: "Transaction was cancelled. Please try again.",
+    owner_mismatch: "Session changed while submitting. Please try again.",
+    pipeline_failure: "Transaction failed. Please try again.",
+    missing_seed: "Recovery phrase is missing.",
+    'missing onboarding handoff seed': "Recovery phrase is missing.",
+    'missing recovery phrase': "Recovery phrase is missing.",
 };
 
 /**
@@ -261,6 +267,14 @@ const ERROR_MAP = {
 export function formatError(resp) {
     const code = typeof resp === 'string' ? resp : resp?.error_code;
     if (!code) {
+        // Cancelled queue drains use { cancelled, reason } without error_code.
+        const reason = typeof resp === 'object' && resp ? (resp.reason || resp.details || resp.error) : null;
+        if (reason) {
+            const mappedReason = ERROR_MAP[reason];
+            if (mappedReason) return mappedReason;
+            try { console.error('[errorMessages] cancelled/unmapped without error_code', resp); } catch (_) { }
+            return String(reason);
+        }
         try { console.error('[errorMessages] missing error_code', resp); } catch (_) { }
         return "Missing error code.";
     }
