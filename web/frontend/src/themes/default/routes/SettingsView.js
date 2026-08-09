@@ -727,6 +727,8 @@ export default function SettingsView({ state }) {
         setHideDownvotedPosts,
         blurSensitiveMedia,
         setBlurSensitiveMedia,
+        autoplayMedia,
+        setAutoplayMedia,
         showTagSensitive,
         setShowTagSensitive,
         showTagAdult,
@@ -766,6 +768,8 @@ export default function SettingsView({ state }) {
         setSeedRevealed,
         seedCopied,
         setSeedCopied,
+        vaultAutoLockMinutes,
+        setVaultAutoLockMinutes,
         commitModeSwitch,
         handleModeSelect,
         handleThemeIdChange,
@@ -882,6 +886,23 @@ export default function SettingsView({ state }) {
                                             setBlurSensitiveMedia(val);
                                             Storage.save('blur_sensitive_media', val);
                                             window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { blurSensitiveMedia: val } }));
+                                        }} />
+                                    </ToggleRow>
+                                </SettingControl>
+                            </SettingRow>
+
+                            <SettingRow>
+                                <SettingControl>
+                                    <ToggleRow as="div">
+                                        <div>
+                                            <ToggleLabel>Autoplay media</ToggleLabel>
+                                            <ToggleDesc>Automatically play videos and embeds in posts</ToggleDesc>
+                                        </div>
+                                        <Toggle checked={autoplayMedia} onChange={e => {
+                                            const val = !!e.target.checked;
+                                            setAutoplayMedia(val);
+                                            Storage.save('autoplay_media', val);
+                                            window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { autoplayMedia: val } }));
                                         }} />
                                     </ToggleRow>
                                 </SettingControl>
@@ -1034,6 +1055,27 @@ export default function SettingsView({ state }) {
                                     {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
                                 </SettingControl>
                             </SettingRow>
+
+                            {seedMode !== 'insecure' && <SettingRow>
+                                <SettingLabel>Auto-lock</SettingLabel>
+                                <SettingControl>
+                                    <select
+                                        value={vaultAutoLockMinutes === 0 ? 'off' : String(vaultAutoLockMinutes)}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            setVaultAutoLockMinutes(v === 'off' ? 0 : Number(v));
+                                        }}
+                                        disabled={secBusy}
+                                    >
+                                        <option value="off">Off</option>
+                                        <option value="5">5 minutes</option>
+                                        <option value="15">15 minutes</option>
+                                        <option value="30">30 minutes</option>
+                                        <option value="60">60 minutes</option>
+                                    </select>
+                                    <ExplanationText>Locks password/passkey/memory vaults after idle time. Plaintext mode cannot be locked because the phrase is intentionally persisted.</ExplanationText>
+                                </SettingControl>
+                            </SettingRow>}
 
                             {state.publicKey && <SettingRow>
                                 <SettingLabel>Recovery phrase</SettingLabel>

@@ -152,8 +152,21 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 	handle {
 		root * /opt/mirage/web/frontend/build
 
+		# Security headers (wallet origin)
+		header {
+			Referrer-Policy "no-referrer"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+			# Report-only first; enforce after UAT soak (see frontend security remediation).
+			Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; upgrade-insecure-requests"
+		}
+
 		@aasa path /.well-known/apple-app-site-association
 		header @aasa Content-Type "application/json"
+
+		@wasm path *.wasm
+		header @wasm Content-Type "application/wasm"
 
 		@immutable path /static/*
 		header @immutable Cache-Control "public, max-age=31536000, immutable"

@@ -1,0 +1,66 @@
+name: frontend
+
+on:
+  push:
+    paths:
+      - 'web/frontend/**'
+      - 'docs/FAQ.md'
+      - 'deploy/Dockerfile'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    paths:
+      - 'web/frontend/**'
+      - 'docs/FAQ.md'
+      - 'deploy/Dockerfile'
+      - '.github/workflows/frontend.yml'
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Check PoW assets
+        run: npm run check:pow-assets
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Production build
+        env:
+          VITE_APP_VERSION: ci (${{ github.sha }})
+          VITE_API_BASE: /api
+        run: npm run build
+
+      - name: Bundle policy
+        run: npm run check:bundle-policy
+
+      - name: Audit (high+)
+        run: npm audit --audit-level=high
+
+      - name: SBOM
+        run: npm sbom --omit dev -o sbom.json
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E (mocked)
+        env:
+          VITE_APP_VERSION: ci (${{ github.sha }})
+          VITE_API_BASE: /api
+        run: npm run test:e2e

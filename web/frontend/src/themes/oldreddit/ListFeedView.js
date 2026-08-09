@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom';
 import VoteSection from './components/VoteSection';
 import InlineMedia from './components/InlineMedia';
 import MarkdownRenderer from './components/MarkdownRenderer';
-import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from '../../utils/media';
+import { isLikelyImageUrl, isLikelyVideoUrl } from '../../utils/media';
+import ExternalMediaGate from '../../components/ExternalMediaGate';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
 import { normalizeTag } from '../../utils/ContentTags';
@@ -366,10 +367,7 @@ function formatAge(tsSec) {
 function getThumbUrl(post) {
     const thumb = post?.thumbnail;
     if (typeof thumb !== 'string' || thumb.trim().length === 0) return null;
-    if (isLikelyImageUrl(thumb)) {
-        try { return buildPhotonUrl(thumb, 140, 105); }
-        catch (_) { return null; }
-    }
+    if (isLikelyImageUrl(thumb)) return thumb.trim();
     return null;
 }
 
@@ -379,7 +377,7 @@ function truncateText(text, max) {
     return text.slice(0, max) + '…';
 }
 
-function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive, observePost, unobservePost }) {
+function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, onShare, blurSensitive, autoplayMedia, observePost, unobservePost }) {
     const [expanded, setExpanded] = useState(false);
     const rowRef = useRef(null);
 
@@ -491,7 +489,11 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                 </VoteColumn>
                 {thumbUrl ? (
                     <Thumbnail to={linkTarget}>
-                        <img src={thumbUrl} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
+                        <ExternalMediaGate url={thumbUrl} mediaType="thumbnail">
+                            {({ url }) => (
+                                <img src={url} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
+                            )}
+                        </ExternalMediaGate>
                     </Thumbnail>
                 ) : null}
                 <ContentColumn>
@@ -507,7 +509,7 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                 <ExpandedContent>
                     {hasExpandableMedia && (
                         <div style={{ marginBottom: expandedTextBody ? '0.5rem' : 0 }}>
-                            <InlineMedia url={firstMediaUrl} variant="root_post" autoPlay mediaMeta={Array.isArray(post.media_meta) ? post.media_meta[0] || null : null} />
+                            <InlineMedia url={firstMediaUrl} variant="root_post" autoPlay={autoplayMedia} mediaMeta={Array.isArray(post.media_meta) ? post.media_meta[0] || null : null} />
                         </div>
                     )}
                     {expandedTextBody && <MarkdownRenderer text={expandedTextBody} />}
@@ -522,6 +524,7 @@ const MemoizedRow = memo(ListRow, (prev, next) => {
     const n = next.post;
     return (
         prev.blurSensitive === next.blurSensitive &&
+        prev.autoplayMedia === next.autoplayMedia &&
         (p === n ||
             (p?.post_id === n?.post_id &&
                 p?.score === n?.score &&
@@ -550,15 +553,21 @@ export default function ListFeedView({
         const val = Storage.load('blur_sensitive_media', true);
         return val !== false;
     });
+    const [autoplayMedia, setAutoplayMedia] = useState(() => Storage.load('autoplay_media', false) === true);
 
     useEffect(() => {
         const handler = (e) => {
             if (e?.detail && typeof e.detail.blurSensitiveMedia !== 'undefined') {
                 setBlurSensitive(e.detail.blurSensitiveMedia !== false);
-                return;
+            } else {
+                const val = Storage.load('blur_sensitive_media', true);
+                setBlurSensitive(val !== false);
             }
-            const val = Storage.load('blur_sensitive_media', true);
-            setBlurSensitive(val !== false);
+            if (e?.detail && typeof e.detail.autoplayMedia !== 'undefined') {
+                setAutoplayMedia(e.detail.autoplayMedia === true);
+            } else {
+                setAutoplayMedia(Storage.load('autoplay_media', false) === true);
+            }
         };
         window.addEventListener('settingsUpdated', handler);
         return () => window.removeEventListener('settingsUpdated', handler);
@@ -654,6 +663,7 @@ export default function ListFeedView({
                         onHide={onHide}
                         onShare={onShare}
                         blurSensitive={blurSensitive}
+                        autoplayMedia={autoplayMedia}
                         observePost={observePost}
                         unobservePost={unobservePost}
                     />

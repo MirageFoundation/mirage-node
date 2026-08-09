@@ -97,10 +97,15 @@ function LoginView({ state, setCredentials }) {
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck="false"
+                  autoComplete="off"
+                  data-1p-ignore="true"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  name="mirage-recovery-phrase"
                   disabled={loading}
                 />
                 <AuthHelperText>
-                  Your username is detected automatically once the phrase is verified.
+                  Enter your recovery phrase privately. It stays on this device and is never sent to Mirage servers as plaintext login.
                 </AuthHelperText>
               </AuthFieldRow>
 

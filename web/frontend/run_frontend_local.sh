@@ -41,10 +41,10 @@ replace_or_append() {
     mv "$tmp" "$ENV_FILE"
 }
 
-# If REACT_APP_API_BASE is empty, ask the user which node to use
-if [ -z "${REACT_APP_API_BASE:-}" ]; then
+# If VITE_API_BASE is empty, ask the user which node to use
+if [ -z "${VITE_API_BASE:-}" ]; then
     echo ""
-    echo "  REACT_APP_API_BASE is not set in frontend.env."
+    echo "  VITE_API_BASE is not set in frontend.env."
     echo ""
     echo "  Which Mirage node do you want to connect to?"
     echo ""
@@ -58,17 +58,17 @@ if [ -z "${REACT_APP_API_BASE:-}" ]; then
     case "$choice" in
         2)
             read -rp "  Enter node URL (e.g. https://mynode.example.com): " custom_url
-            export REACT_APP_API_BASE="$custom_url"
+            export VITE_API_BASE="$custom_url"
             ;;
         3)
-            export REACT_APP_API_BASE="http://localhost"
+            export VITE_API_BASE="http://localhost"
             ;;
         *)
-            export REACT_APP_API_BASE="https://mirage.vote"
+            export VITE_API_BASE="https://mirage.vote"
             ;;
     esac
 
-    replace_or_append "REACT_APP_API_BASE" "${REACT_APP_API_BASE}"
+    replace_or_append "VITE_API_BASE" "${VITE_API_BASE}"
     echo ""
     echo "  Saved to frontend.env"
 fi
@@ -76,11 +76,11 @@ fi
 if [ ! -d node_modules ]; then
     echo ""
     echo "  Installing dependencies..."
-    npm install
+    npm install --legacy-peer-deps
 fi
 
 echo ""
-echo "  Starting dev server (node: ${REACT_APP_API_BASE})..."
+echo "  Starting Vite dev server (node: ${VITE_API_BASE})..."
 echo ""
 
 START_URL="http://localhost:3000"
@@ -90,4 +90,4 @@ elif command -v open >/dev/null 2>&1; then
     (sleep 2; open "$START_URL" >/dev/null 2>&1) &
 fi
 
-npm start
+npm run dev

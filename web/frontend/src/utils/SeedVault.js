@@ -1,4 +1,5 @@
 import Storage from './Storage';
+import { requireValidMnemonic } from './CryptoUtils';
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 const KEY_MODE = 'seed_storage_mode';       // "insecure" | "memory" | "password" | "passkey"
@@ -136,6 +137,8 @@ class SeedVault {
         this._seed = null;          // in-memory plaintext seed (set after unlock)
         this._pwdKeyBytes = null;   // cached password-derived key (for re-encrypt on storeSeed)
         this._prfKeyBytes = null;   // cached PRF-derived key
+        this._lastUnlockedAt = 0;   // ms timestamp; memory-only
+        this._lastActivityAt = 0;
     }
 
     // ── Mode ──────────────────────────────────────────────────────────────────
@@ -201,6 +204,7 @@ class SeedVault {
 
         if (mode === 'insecure') {
             this._seed = Storage.load(KEY_PLAINTEXT, '') || null;
+            if (this._seed) this._touchUnlock();
             return !!this._seed;
         }
 
@@ -221,6 +225,7 @@ class SeedVault {
             try {
                 this._seed = await decryptAESGCM(iv, ciphertext, keyBytes);
                 this._pwdKeyBytes = keyBytes;
+                this._touchUnlock();
                 return true;
             } catch (e) {
                 throw new Error('Incorrect password');
@@ -240,6 +245,7 @@ class SeedVault {
             try {
                 this._seed = await decryptAESGCM(blob.iv, blob.ciphertext, keyBytes);
                 this._prfKeyBytes = keyBytes;
+                this._touchUnlock();
                 return true;
             } catch (e) {
                 throw new Error('Passkey decryption failed');
@@ -253,15 +259,18 @@ class SeedVault {
 
     async storeSeed(seed, mode, secret) {
         if (!seed) return;
+        const normalized = requireValidMnemonic(seed);
 
         // CRITICAL: Build the new storage blob FIRST, then clear old formats.
         // This prevents seed loss if encryption throws — the old format stays untouched.
 
         if (mode === 'insecure') {
             this._clearAllStoredSeeds();
-            Storage.save(KEY_PLAINTEXT, seed);
+            Storage.save(KEY_PLAINTEXT, normalized);
             Storage.save(KEY_MODE, 'insecure');
-            this._seed = seed;
+            this._seed = normalized;
+            this._touchUnlock();
+            try { console.debug('[SeedVault] stored insecure'); } catch (_) { /* noop */ }
             return;
         }
 
@@ -269,7 +278,9 @@ class SeedVault {
             this._clearAllStoredSeeds();
             // Don't persist the seed anywhere — only keep in memory
             Storage.save(KEY_MODE, 'memory');
-            this._seed = seed;
+            this._seed = normalized;
+            this._touchUnlock();
+            try { console.debug('[SeedVault] stored memory-only'); } catch (_) { /* noop */ }
             return;
         }
 
@@ -281,7 +292,7 @@ class SeedVault {
                 // New password — derive fresh key
                 const salt = crypto.getRandomValues(new Uint8Array(16));
                 keyBytes = await deriveKeyFromPassword(secret, salt);
-                const encrypted = await encryptAESGCM(seed, keyBytes);
+                const encrypted = await encryptAESGCM(normalized, keyBytes);
                 newBlob = {
                     iv: encrypted.iv,
                     salt: toBase64(salt),
@@ -292,7 +303,7 @@ class SeedVault {
                 keyBytes = this._pwdKeyBytes;
                 const existingBlob = Storage.load(KEY_PWD_ENCRYPTED, null);
                 const salt = existingBlob ? new Uint8Array(fromBase64(existingBlob.salt)) : crypto.getRandomValues(new Uint8Array(16));
-                const encrypted = await encryptAESGCM(seed, keyBytes);
+                const encrypted = await encryptAESGCM(normalized, keyBytes);
                 newBlob = {
                     iv: encrypted.iv,
                     salt: toBase64(salt),
@@ -306,8 +317,10 @@ class SeedVault {
             this._clearAllStoredSeeds();
             Storage.save(KEY_PWD_ENCRYPTED, newBlob);
             Storage.save(KEY_MODE, 'password');
-            this._seed = seed;
+            this._seed = normalized;
             this._pwdKeyBytes = keyBytes;
+            this._touchUnlock();
+            try { console.debug('[SeedVault] stored password'); } catch (_) { /* noop */ }
             return;
         }
 
@@ -317,7 +330,7 @@ class SeedVault {
             if (!keyBytes) throw new Error('PRF key required for passkey mode');
 
             // Encrypt first, then clear old formats
-            const encrypted = await encryptAESGCM(seed, keyBytes);
+            const encrypted = await encryptAESGCM(normalized, keyBytes);
             const newBlob = {
                 iv: encrypted.iv,
                 ciphertext: encrypted.ciphertext,
@@ -327,12 +340,66 @@ class SeedVault {
             this._clearAllStoredSeeds();
             Storage.save(KEY_PRF_ENCRYPTED, newBlob);
             Storage.save(KEY_MODE, 'passkey');
-            this._seed = seed;
+            this._seed = normalized;
             this._prfKeyBytes = keyBytes;
+            this._touchUnlock();
+            try { console.debug('[SeedVault] stored passkey'); } catch (_) { /* noop */ }
             return;
         }
 
         throw new Error('Unknown seed storage mode: ' + mode);
+    }
+
+    _touchUnlock() {
+        const now = Date.now();
+        this._lastUnlockedAt = now;
+        this._lastActivityAt = now;
+    }
+
+    touchActivity() {
+        if (this._seed) this._lastActivityAt = Date.now();
+    }
+
+    getAutoLockMinutes() {
+        const raw = Storage.load('vault_auto_lock_minutes', null);
+        if (raw === 'off' || raw === 0 || raw === '0') return 0;
+        const n = Number(raw);
+        if ([5, 15, 30, 60].includes(n)) return n;
+        // Default 15 for protected/memory; insecure never locks.
+        return 15;
+    }
+
+    setAutoLockMinutes(minutes) {
+        if (minutes === 'off' || minutes === 0) {
+            Storage.save('vault_auto_lock_minutes', 'off');
+            return;
+        }
+        const n = Number(minutes);
+        if (![5, 15, 30, 60].includes(n)) throw new Error('invalid auto-lock minutes');
+        Storage.save('vault_auto_lock_minutes', n);
+    }
+
+    /**
+     * Lock protected/memory vaults after idle timeout. Plaintext mode never auto-locks.
+     * @returns {boolean} true if locked
+     */
+    checkAutoLock() {
+        const mode = this.getMode();
+        if (mode === 'insecure') return false;
+        if (!this._seed) return false;
+        const mins = this.getAutoLockMinutes();
+        if (!mins) return false;
+        const idleMs = Date.now() - (this._lastActivityAt || this._lastUnlockedAt || 0);
+        if (idleMs < mins * 60 * 1000) return false;
+        try { console.debug('[SeedVault] auto-lock', { mode, idleMs, mins }); } catch (_) { /* noop */ }
+        this.lock();
+        return true;
+    }
+
+    requireFreshUnlock(maxAgeMs = 60_000) {
+        if (!this._seed) return false;
+        if (!this._lastUnlockedAt) return false;
+        return (Date.now() - this._lastUnlockedAt) <= maxAgeMs;
     }
 
     // ── Passkey registration ───────────────────────────────────────────────────

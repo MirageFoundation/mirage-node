@@ -4,6 +4,7 @@ import styled, { useTheme, css } from "styled-components"
 import { Link, useNavigate } from 'react-router-dom';
 import { getThemeFamily } from "../../../registry/theme";
 import InlineMedia from "./InlineMedia";
+import ExternalMediaGate from "../../../components/ExternalMediaGate";
 import Button from "./Button";
 import Storage from '../../../utils/Storage';
 import { requireAccount } from '../../../utils/openBrowsing';
@@ -13,7 +14,7 @@ import { signPlainPayload } from '../../../utils/signPlain';
 import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
 import { requireThemeColor } from "../../../utils/themeColor";
-import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
+import { isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import useBalance from "../../../logic/useBalance";
@@ -813,6 +814,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             return true;
         }
     });
+    const [autoplayMedia, setAutoplayMedia] = useState(() => {
+        try {
+            return Storage.load('autoplay_media', false) === true;
+        } catch (_) {
+            return false;
+        }
+    });
     const [cardSize, setCardSize] = useState(() => resolveCardSize(Storage.load('card_size', 'compact')));
     const menuRef = useRef(null);
     const menuButtonRef = useRef(null);
@@ -842,6 +850,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             try {
                 if (e && e.detail && typeof e.detail.blurSensitiveMedia !== 'undefined') {
                     setBlurSensitiveMedia(e.detail.blurSensitiveMedia === false ? false : true);
+                }
+                if (e && e.detail && typeof e.detail.autoplayMedia !== 'undefined') {
+                    setAutoplayMedia(e.detail.autoplayMedia === true);
                 }
                 if (e && e.detail && typeof e.detail.cardSize !== 'undefined') {
                     setCardSize(resolveCardSize(e.detail.cardSize));
@@ -1642,69 +1653,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) { return false; }
     })();
 
-    // Compute the initial thumb state synchronously so the first render already has the
-    // correct <img src>. Without this, first render would render a placeholder, the effect
-    // below would then swap in the real thumb, and the browser would abort the in-flight
-    // placeholder fetch with NS_BINDING_ABORTED.
-    const computeInitialThumbState = () => {
+    const resolveThumbUrl = () => {
         const provided = post && typeof post.thumbnail === 'string' && post.thumbnail.trim() ? post.thumbnail.trim() : '';
-        const thumbUrl = provided || (isDirectImage ? firstLinkInContent : null);
-        if (!thumbUrl) return { src: null, blurSrc: null, original: null, proxy: 'none' };
-        const isYoutubeThumbnail = thumbUrl.includes('img.youtube.com') || thumbUrl.includes('i.ytimg.com');
-        if (isYoutubeThumbnail) {
-            return { src: thumbUrl, blurSrc: thumbUrl, original: thumbUrl, proxy: 'direct' };
-        }
-        if (thumbUrl.includes('?')) {
-            return {
-                src: buildWsrvUrl(thumbUrl, { w: 240, h: 240 }),
-                blurSrc: buildBlurredWsrvUrl(thumbUrl, { w: 240, h: 240, blur: 18 }),
-                original: thumbUrl,
-                proxy: 'wsrv',
-            };
-        }
-        return {
-            src: buildPhotonUrl(thumbUrl, { w: 240, h: 240 }),
-            blurSrc: buildPhotonUrl(thumbUrl, { w: 240, h: 240 }),
-            original: thumbUrl,
-            proxy: 'photon',
-        };
+        return provided || (isDirectImage ? firstLinkInContent : null);
     };
-    const [thumbSrc, setThumbSrc] = useState(() => computeInitialThumbState().src);
-    const [thumbBlurSrc, setThumbBlurSrc] = useState(() => computeInitialThumbState().blurSrc);
-    const [thumbOriginal, setThumbOriginal] = useState(() => computeInitialThumbState().original);
-    const [thumbProxy, setThumbProxy] = useState(() => computeInitialThumbState().proxy);
+    const [thumbUrl, setThumbUrl] = useState(() => resolveThumbUrl());
+    const [thumbFailed, setThumbFailed] = useState(false);
 
     useEffect(() => {
-        // Use thumbnail from database (indexed by backend), or fall back to direct image URL
-        const provided = post && typeof post.thumbnail === 'string' && post.thumbnail.trim() ? post.thumbnail.trim() : '';
-        const thumbUrl = provided || (isDirectImage ? firstLinkInContent : null);
-
-        setThumbOriginal(thumbUrl);
-
-        if (thumbUrl) {
-            const isYoutubeThumbnail = thumbUrl.includes('img.youtube.com') || thumbUrl.includes('i.ytimg.com');
-            const hasQuery = thumbUrl.includes('?');
-            if (isYoutubeThumbnail) {
-                setThumbProxy('direct');
-                setThumbSrc(thumbUrl);
-                setThumbBlurSrc(thumbUrl);
-            } else if (hasQuery) {
-                setThumbProxy('wsrv');
-                setThumbSrc(buildWsrvUrl(thumbUrl, { w: 240, h: 240 }));
-                setThumbBlurSrc(buildBlurredWsrvUrl(thumbUrl, { w: 240, h: 240, blur: 18 }));
-                console.debug('[CardView] thumbnail proxy wsrv for query URL', { thumbUrl });
-            } else {
-                // NOTE: Photon was chosen over wsrv in the past (reason lost), but it behaved better.
-                // If thumbnail issues return, this proxy choice is the likely cause.
-                setThumbProxy('photon');
-                setThumbSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 }));
-                setThumbBlurSrc(buildPhotonUrl(thumbUrl, { w: 240, h: 240 }));
-            }
-        } else {
-            setThumbProxy('none');
-            setThumbSrc(null);
-            setThumbBlurSrc(null);
-        }
+        setThumbUrl(resolveThumbUrl());
+        setThumbFailed(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [post && post.thumbnail, post && post.content, isDirectImage, firstLinkInContent]);
 
@@ -1727,9 +1685,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const thumbTarget = undefined;
     const thumbRel = undefined;
 
-    const hasMedia = !!(thumbSrc || thumbBlurSrc || isDirectImage || isPrimaryVideo);
+    const hasMedia = !!(thumbUrl || isDirectImage || isPrimaryVideo);
     const shouldBlurMedia = !!(blurSensitiveMedia && post && post.tag && String(post.tag).trim() && hasMedia);
-    const displayThumbSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
 
     const shortenAddress = (address) => {
         if (!address) return "";
@@ -1920,30 +1877,37 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 }
                             };
                             const placeholderSrc = pickPlaceholder();
-                            const imgEl = (
+                            const thumbImgStyle = (() => {
+                                const s = {};
+                                if (shouldBlurMedia && !mediaExpanded && thumbUrl && !thumbFailed) s.filter = 'blur(15px)';
+                                if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
+                                return Object.keys(s).length ? s : undefined;
+                            })();
+                            const imgEl = thumbUrl && !thumbFailed ? (
+                                <ExternalMediaGate url={thumbUrl} mediaType="thumbnail">
+                                    {({ url }) => (
+                                        <ThumbImage
+                                            src={url}
+                                            alt=""
+                                            loading="lazy"
+                                            style={thumbImgStyle}
+                                            onError={() => {
+                                                console.debug('[MediaPolicy] thumbnail load failed', {
+                                                    hostname: (() => {
+                                                        try { return new URL(thumbUrl).hostname; } catch (_) { return 'unknown'; }
+                                                    })(),
+                                                });
+                                                setThumbFailed(true);
+                                            }}
+                                        />
+                                    )}
+                                </ExternalMediaGate>
+                            ) : (
                                 <ThumbImage
-                                    src={displayThumbSrc ? displayThumbSrc : placeholderSrc}
+                                    src={placeholderSrc}
                                     alt=""
                                     loading="lazy"
-                                    style={(() => {
-                                        const s = {};
-                                        if (shouldBlurMedia && !mediaExpanded && displayThumbSrc) s.filter = 'blur(15px)';
-                                        if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
-                                        return Object.keys(s).length ? s : undefined;
-                                    })()}
-                                    onError={() => {
-                                        // Photon failed? Try wsrv as fallback
-                                        if (thumbProxy === 'photon' && thumbOriginal) {
-                                            setThumbProxy('wsrv');
-                                            setThumbSrc(buildWsrvUrl(thumbOriginal, { w: 240, h: 240 }));
-                                            setThumbBlurSrc(buildBlurredWsrvUrl(thumbOriginal, { w: 240, h: 240, blur: 18 }));
-                                            return;
-                                        }
-                                        // Both failed, show placeholder
-                                        setThumbProxy('none');
-                                        setThumbSrc(placeholderSrc);
-                                        setThumbBlurSrc(null);
-                                    }}
+                                    style={isYoutubeThumb ? { transform: `scale(${YOUTUBE_THUMB_ZOOM})` } : undefined}
                                 />
                             );
                             return (
@@ -1975,22 +1939,27 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {!hasMediaModeContent && <MobileCardWrapper>
                         <MobileCardSquare $gradient={undefined}>
                             {(() => {
-                                // Use the already-computed proxied thumbnail (Photon primary, wsrv fallback)
-                                const displayMobileSrc = shouldBlurMedia && !mediaExpanded && thumbBlurSrc ? thumbBlurSrc : thumbSrc;
+                                // Direct thumbnail URL; CSS blur when sensitive tag is hidden.
+                                const displayMobileSrc = thumbUrl && !thumbFailed ? thumbUrl : null;
                                 if (displayMobileSrc) {
                                     return (
                                         <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ display: 'block', position: 'absolute', inset: 0 }}>
-                                            <MobileCardImg
-                                                src={displayMobileSrc}
-                                                alt=""
-                                                loading="lazy"
-                                                style={(() => {
-                                                    const s = {};
-                                                    if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
-                                                    if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
-                                                    return Object.keys(s).length ? s : undefined;
-                                                })()}
-                                            />
+                                            <ExternalMediaGate url={displayMobileSrc} mediaType="thumbnail">
+                                                {({ url }) => (
+                                                    <MobileCardImg
+                                                        src={url}
+                                                        alt=""
+                                                        loading="lazy"
+                                                        style={(() => {
+                                                            const s = {};
+                                                            if (shouldBlurMedia && !mediaExpanded) s.filter = 'blur(15px)';
+                                                            if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
+                                                            return Object.keys(s).length ? s : undefined;
+                                                        })()}
+                                                        onError={() => setThumbFailed(true)}
+                                                    />
+                                                )}
+                                            </ExternalMediaGate>
                                         </Link>
                                     );
                                 } else {
@@ -2002,7 +1971,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 }
                             })()}
                         </MobileCardSquare>
-                        {thumbSrc && post && post.title ? (
+                        {thumbUrl && !thumbFailed && post && post.title ? (
                             <MobileCardTitleBelow>
                                 <Link to={thumbTo} target={thumbTarget} rel={thumbRel} style={{ color: 'inherit', textDecoration: 'none' }}>
                                     {post.title}
@@ -2318,7 +2287,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {hasMediaModeContent && (
                         <MediaModeContainer $blur={shouldBlurMedia && !mediaExpanded}>
-                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
+                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay={autoplayMedia} mediaMeta={mediaMetaArr[0] || null} />
                         </MediaModeContainer>
                     )}
                     {mediaExpanded && (() => {
@@ -2328,7 +2297,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <>
                                 {showMedia && (
                                     <MediaModeContainer $blur={false}>
-                                        <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay mediaMeta={mediaMetaArr[0] || null} />
+                                        <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay={autoplayMedia} mediaMeta={mediaMetaArr[0] || null} />
                                     </MediaModeContainer>
                                 )}
                                 {expandedTextBody && (

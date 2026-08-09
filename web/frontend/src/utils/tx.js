@@ -1,4 +1,6 @@
 // Lightweight facade that lazily loads the heavy TransactionHandler only on demand
+import Storage from './Storage';
+
 let handlerPromise = null;
 let _chainConfigFetchClaimed = false;
 
@@ -274,9 +276,14 @@ export async function createVote(parentId, direction) {
     return h.createVote(parentId, direction);
 }
 
-export async function performTransaction(tx, challenge, privateKeyHex, signerAddress, forcePow = false) {
+export async function cancelAll(reason = 'cancelled') {
     const h = await getHandler();
-    return h.performTransaction(tx, challenge, privateKeyHex, signerAddress, forcePow);
+    return h.cancelAll(reason);
+}
+
+export async function resetSession(reason = 'session_reset') {
+    const h = await getHandler();
+    return h.resetSession(reason);
 }
 
 export async function deletePost(txhash) {
@@ -339,7 +346,6 @@ const BALANCE_HOLD_MS = 15000;
 
 export function adjustBalanceOptimistic(deltaUmirage) {
     try {
-        const Storage = require('./Storage').default;
         const current = Number(Storage.load('user_balance', '0') || 0);
         if (!Number.isFinite(current)) return;
         const next = Math.max(0, current + deltaUmirage);
@@ -358,7 +364,7 @@ export function adjustBalanceOptimistic(deltaUmirage) {
         } else if (deltaUmirage > 0) {
             Storage.remove(BALANCE_HOLD_KEY);
         }
-    } catch (_) { }
+    } catch (_) { /* noop */ }
 }
 
 export async function refreshBalance() {

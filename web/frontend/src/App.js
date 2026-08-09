@@ -15,6 +15,7 @@ import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } 
 
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
+import { installCrossTabSessionWatcher } from './utils/sessionLifecycle';
 
 
 // Lazy import wrapper that handles chunk load failures after deployments.
@@ -75,8 +76,8 @@ const AgentsView = lazyWithRetry(() => import('./views/AgentsView'));
 const FAQView = lazyWithRetry(() => import('./views/FAQView'));
 const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
-const APP_VERSION = process.env.REACT_APP_VERSION || '';
-const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
+/* global __MIRAGE_APP_VERSION__ */
+const APP_VERSION = typeof __MIRAGE_APP_VERSION__ === 'string' ? __MIRAGE_APP_VERSION__ : '';
 
 // Routes that should not be saved/restored
 const excludedRoutes = [
@@ -360,9 +361,8 @@ class App extends Component {
         }
 
         const version = APP_VERSION || 'dev';
-        const buildId = APP_BUILD_ID || '';
-        console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
-        try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
+        console.log('[Mirage] Frontend version:', version);
+        try { window.__MIRAGE_BUILD__ = { version: version }; } catch (_) { }
 
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
@@ -372,6 +372,29 @@ class App extends Component {
             }
         };
         window.addEventListener('keydown', this._onKeyDown);
+
+        // Protected-vault auto-lock + activity refresh
+        this._onVaultActivity = () => {
+            try { seedVault.touchActivity(); } catch (_) { /* noop */ }
+        };
+        ['pointerdown', 'keydown', 'touchstart'].forEach((evt) => {
+            window.addEventListener(evt, this._onVaultActivity, { passive: true });
+        });
+        this._vaultAutoLockInterval = setInterval(() => {
+            try {
+                if (seedVault.checkAutoLock()) {
+                    console.debug('[App] vault auto-locked');
+                    // Keep public identity for unlock UI; seed is cleared in memory.
+                    this.setState({ seedPhrase: '' });
+                }
+            } catch (_) { /* noop */ }
+        }, 30_000);
+
+        // Cross-tab session reset
+        this._removeCrossTabWatcher = installCrossTabSessionWatcher(() => {
+            try { seedVault.lock(); } catch (_) { /* noop */ }
+            this.setState({ publicKey: '', username: '', seedPhrase: '' });
+        });
 
         // Listen for theme id changes from SettingsView
         this._onThemeIdChange = (e) => {
@@ -455,6 +478,19 @@ class App extends Component {
 
     componentWillUnmount() {
         try { window.removeEventListener('keydown', this._onKeyDown); } catch (_) { }
+        try {
+            if (this._onVaultActivity) {
+                ['pointerdown', 'keydown', 'touchstart'].forEach((evt) => {
+                    window.removeEventListener(evt, this._onVaultActivity);
+                });
+            }
+        } catch (_) { }
+        try {
+            if (this._vaultAutoLockInterval) clearInterval(this._vaultAutoLockInterval);
+        } catch (_) { }
+        try {
+            if (typeof this._removeCrossTabWatcher === 'function') this._removeCrossTabWatcher();
+        } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
         try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
         try { window.removeEventListener('themeIdChanged', this._onThemeIdChange); } catch (_) { }
@@ -761,15 +797,17 @@ class App extends Component {
 
         Storage.save('publicKey', publicKey);
         Storage.save('username', username);
-        // Store seed through SeedVault (respects chosen security mode).
-        // If the current mode requires a secret we don't have (e.g. user re-entered
-        // seed via fallback login while mode is 'password'), fall back to insecure.
+        // Store seed through SeedVault. Never silently downgrade to insecure on error —
+        // preserve the previous vault and surface the failure.
         if (seedPhrase) {
-            seedVault.storeSeed(seedPhrase, seedVault.getMode(), null).catch((e) => {
-                console.warn('[SeedVault] Falling back to insecure mode:', e.message);
-                return seedVault.storeSeed(seedPhrase, 'insecure', null);
-            }).catch((e) => {
-                console.error('[SeedVault] Failed to store seed:', e);
+            const mode = seedVault.getMode() || 'insecure';
+            seedVault.storeSeed(seedPhrase, mode, null).catch((e) => {
+                console.error('[SeedVault] Failed to store seed (vault unchanged):', e?.message || e);
+                try {
+                    window.dispatchEvent(new CustomEvent('seedVaultStoreFailed', {
+                        detail: { message: String(e?.message || e || 'Failed to store recovery phrase') },
+                    }));
+                } catch (_) { /* noop */ }
             });
         } else {
             seedVault.clear();

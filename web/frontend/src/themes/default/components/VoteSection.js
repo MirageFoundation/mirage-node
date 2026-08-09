@@ -215,11 +215,12 @@ const DownIcon = (props) => (
 // ─── Component ─────────────────────────────────────────────────────────────
 
 function DefaultVoteSection({ state, post, updatePost, showToggle = true, inline = false }) {
-    const { handleVote, isPending, isLocallyPending } = useVoteHandler({ state, updatePost });
+    const { handleVote, isPending, isLocallyPending, formatVoteStatus } = useVoteHandler({ state, updatePost });
 
     const direction = resolveDirection(post, state);
     const displayVotes = computeDisplayVotes(post, direction);
     const hasPendingVote = isPending(post.post_id) || isLocallyPending(post.post_id);
+    const voteStatus = hasPendingVote ? formatVoteStatus(post.post_id) : null;
     const upActive = direction === +1;
     const downActive = direction === -1;
 
@@ -252,7 +253,7 @@ function DefaultVoteSection({ state, post, updatePost, showToggle = true, inline
                     $up
                     $active={upActive}
                     $bouncing={bounce === +1}
-                    disabled={hasPendingVote}
+                    disabled={hasPendingVote} title={voteStatus || undefined} aria-busy={hasPendingVote}
                     onClick={onClick(+1)}
                     aria-label="Upvote"
                 >
@@ -266,7 +267,7 @@ function DefaultVoteSection({ state, post, updatePost, showToggle = true, inline
                 <PillButton
                     $active={downActive}
                     $bouncing={bounce === -1}
-                    disabled={hasPendingVote}
+                    disabled={hasPendingVote} title={voteStatus || undefined} aria-busy={hasPendingVote}
                     onClick={onClick(-1)}
                     aria-label="Downvote"
                 >
@@ -293,7 +294,7 @@ function DefaultVoteSection({ state, post, updatePost, showToggle = true, inline
                 <ColumnButton
                     $up
                     $active={upActive}
-                    disabled={hasPendingVote}
+                    disabled={hasPendingVote} title={voteStatus || undefined} aria-busy={hasPendingVote}
                     onClick={onClick(+1)}
                     aria-label="Upvote"
                 >
@@ -304,7 +305,7 @@ function DefaultVoteSection({ state, post, updatePost, showToggle = true, inline
             {(!isComment || !isCollapsed) && (
                 <ColumnButton
                     $active={downActive}
-                    disabled={hasPendingVote}
+                    disabled={hasPendingVote} title={voteStatus || undefined} aria-busy={hasPendingVote}
                     onClick={onClick(-1)}
                     aria-label="Downvote"
                 >

@@ -1,5 +1,5 @@
-// Use Argon2id in the worker (WASM bundled)
-importScripts('https://cdn.jsdelivr.net/npm/argon2-browser/dist/argon2-bundled.min.js');
+// Use Argon2id in the worker (same-origin pinned WASM bundle; see public/pow/MANIFEST.txt)
+importScripts('/pow/argon2-bundled.min.js');
 
 function hexCharToByte(c) {
     return c >= '0' && c <= '9'

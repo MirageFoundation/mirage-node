@@ -2,7 +2,7 @@
 
 /**
  * Minimal API client wrapper around fetch with JSON handling and timeouts.
- * Defaults to relative "/api" (Caddy proxy). Set REACT_APP_API_BASE in
+ * Defaults to relative "/api" (Caddy proxy). Set VITE_API_BASE in
  * deploy/templates/env/frontend.env to point at a remote node instead.
  */
 
@@ -14,7 +14,9 @@ import { getVisitorId, VISITOR_HEADER } from './visitorId';
 function getBaseUrl() {
     try {
         let base = '/api';
-        const env = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_BASE) ? process.env.REACT_APP_API_BASE : '';
+        const env = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE)
+            ? import.meta.env.VITE_API_BASE
+            : '';
         if (env) {
             base = String(env).trim() || '/api';
         }
@@ -28,6 +30,31 @@ function getBaseUrl() {
 }
 
 const API_BASE = getBaseUrl();
+
+/** @type {Set<AbortController>} */
+const sessionControllers = new Set();
+let apiSessionGeneration = 0;
+
+/**
+ * Abort in-flight account-bound requests and bump API session generation.
+ * @param {number=} gen
+ * @param {string=} reason
+ */
+function resetApiSession(gen, reason = 'session_reset') {
+    apiSessionGeneration = typeof gen === 'number' ? gen : (apiSessionGeneration + 1);
+    try {
+        console.debug('[Api] resetApiSession', { generation: apiSessionGeneration, reason, inflight: sessionControllers.size });
+    } catch (_) { /* noop */ }
+    for (const c of [...sessionControllers]) {
+        try { c.abort(); } catch (_) { /* noop */ }
+    }
+    sessionControllers.clear();
+}
+
+function trackController(controller) {
+    sessionControllers.add(controller);
+    return () => { sessionControllers.delete(controller); };
+}
 
 /**
  * Merge the analytics visitor header into a request's headers. Sent on every
@@ -254,15 +281,24 @@ async function get(path, params, options) {
 
     const promise = (async () => {
         const controller = new AbortController();
+        const genAtStart = apiSessionGeneration;
+        const untrack = trackController(controller);
         const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
         try {
             const resp = await fetch(url, { signal: controller.signal, headers: withVisitorHeader(options && options.headers) });
+            if (genAtStart !== apiSessionGeneration) {
+                try { console.debug('[Api] stale-result-dropped', { method: 'GET', generation: genAtStart }); } catch (_) { /* noop */ }
+                throw new Error('request cancelled: session reset');
+            }
             if (resp.ok) {
                 const ct = resp.headers.get('content-type') || '';
                 // If HTML came back, likely misroute: attempt remote fallback
                 if (!ct.includes('text/html')) {
                     if (ct.includes('application/json')) {
                         const json = await resp.json();
+                        if (genAtStart !== apiSessionGeneration) {
+                            throw new Error('request cancelled: session reset');
+                        }
                         maybeSyncBalance(params, undefined, json);
                         maybeSyncInbox(params, undefined, json);
                         if (cacheMs > 0) {
@@ -281,6 +317,7 @@ async function get(path, params, options) {
             throw buildHttpError(resp, detail, code);
         } finally {
             clearTimeout(id);
+            untrack();
         }
     })().finally(() => {
         inflight.delete(url);
@@ -329,6 +366,8 @@ function invalidate(pathPrefix) {
 async function post(path, body, options) {
     const url = buildUrl(path);
     const controller = new AbortController();
+    const genAtStart = apiSessionGeneration;
+    const untrack = trackController(controller);
     const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {
         const resp = await fetch(url, {
@@ -337,11 +376,18 @@ async function post(path, body, options) {
             headers: withVisitorHeader({ 'Content-Type': 'application/json', ...(options && options.headers) }),
             body: JSON.stringify(body == null ? {} : body),
         });
+        if (genAtStart !== apiSessionGeneration) {
+            try { console.debug('[Api] stale-result-dropped', { method: 'POST', generation: genAtStart }); } catch (_) { /* noop */ }
+            throw new Error('request cancelled: session reset');
+        }
         if (resp.ok) {
             const ct = resp.headers.get('content-type') || '';
             if (!ct.includes('text/html')) {
                 if (ct.includes('application/json')) {
                     const json = await resp.json();
+                    if (genAtStart !== apiSessionGeneration) {
+                        throw new Error('request cancelled: session reset');
+                    }
                     maybeSyncBalance(undefined, body, json);
                     maybeSyncInbox(undefined, body, json);
                     return json;
@@ -353,10 +399,11 @@ async function post(path, body, options) {
         throw buildHttpError(resp, detail, code);
     } finally {
         clearTimeout(id);
+        untrack();
     }
 }
 
-export const Api = { get, post, prefetch, invalidate, buildUrl, API_BASE };
+export const Api = { get, post, prefetch, invalidate, buildUrl, API_BASE, resetApiSession };
 
 export default Api;
 

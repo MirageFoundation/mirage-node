@@ -182,6 +182,13 @@ export function useSettings({
             return true;
         }
     });
+    const [autoplayMedia, setAutoplayMedia] = useState(() => {
+        try {
+            return Storage.load('autoplay_media', false) === true;
+        } catch (_) {
+            return false;
+        }
+    });
     // Content tag visibility (default: only sensitive shown, others hidden)
     const [showTagSensitive, setShowTagSensitive] = useState(() => {
         try {
@@ -266,6 +273,20 @@ export function useSettings({
     const deleteConfirmReady = deleteConfirmText.trim().toUpperCase() === 'DELETE';
     const [seedRevealed, setSeedRevealed] = useState(false);
     const [seedCopied, setSeedCopied] = useState(false);
+    const [vaultAutoLockMinutes, setVaultAutoLockMinutesState] = useState(() => {
+        try {
+            return seedVault.getAutoLockMinutes();
+        } catch (_) {
+            return 15;
+        }
+    });
+    const setVaultAutoLockMinutes = useCallback((mins) => {
+        seedVault.setAutoLockMinutes(mins);
+        setVaultAutoLockMinutesState(seedVault.getAutoLockMinutes());
+        try {
+            console.debug('[Settings] vault-auto-lock', { minutes: mins });
+        } catch (_) { /* noop */ }
+    }, []);
 
     // Auto-hide seed after 60 seconds
     useEffect(() => {
@@ -291,8 +312,21 @@ export function useSettings({
                 return;
             }
             if (newMode === 'password') {
-                if (!password || password.length < 4) {
-                    setSecError('Password must be at least 4 characters.');
+                if (!password || password.length < 12) {
+                    setSecError('Password must be at least 12 characters.');
+                    setSecBusy(false);
+                    return;
+                }
+                if (password !== secPasswordConfirm) {
+                    setSecError('Passwords do not match.');
+                    setSecBusy(false);
+                    return;
+                }
+                // Reject trivially weak patterns locally (never log the password).
+                const lower = password.toLowerCase();
+                const weak = ['password', 'password123', '123456789012', 'qwertyuiopas', 'miragepassword'];
+                if (weak.some((w) => lower.includes(w)) || /^(.)\1+$/.test(password)) {
+                    setSecError('Choose a stronger password.');
                     setSecBusy(false);
                     return;
                 }
@@ -528,6 +562,8 @@ export function useSettings({
         setHideDownvotedPosts,
         blurSensitiveMedia,
         setBlurSensitiveMedia,
+        autoplayMedia,
+        setAutoplayMedia,
         showTagSensitive,
         setShowTagSensitive,
         showTagAdult,
@@ -567,6 +603,8 @@ export function useSettings({
         setSeedRevealed,
         seedCopied,
         setSeedCopied,
+        vaultAutoLockMinutes,
+        setVaultAutoLockMinutes,
         commitModeSwitch,
         handleModeSelect,
         handleThemeIdChange,

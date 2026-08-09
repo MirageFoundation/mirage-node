@@ -720,8 +720,11 @@ if (username.length < minUsername || username.length > maxUsername) {
 
 The frontend only communicates with its own backend:
 - API calls go to `/api/*` (same origin via Caddy proxy)
-- No cross-origin requests to other domains
 - Backend validates all signatures server-side
+- First-party visitor attribution (`X-Mirage-Visitor`) powers `/stats`; third-party GTM is not used
+- Recovery phrases use an in-memory onboarding handoff (never React Router `location.state`)
+- Transaction queue entries are owner-bound and drained on failure/sign-out
+- Unknown media origins are click-to-load; Photon/wsrv proxies are not used
 
 ---
 
@@ -730,12 +733,14 @@ The frontend only communicates with its own backend:
 ### Build Process
 
 ```bash
-# Development
-npm start
+# Development (Vite)
+npm run dev
 
-# Production build
-npm run build
+# Production build (output: web/frontend/build with /static/* hashed assets)
+VITE_APP_VERSION="…" VITE_API_BASE=/api npm run build
 ```
+
+PoW Argon2 assets are vendored under `public/pow/` (`npm run check:pow-assets`).
 
 ### Environment Variables
 

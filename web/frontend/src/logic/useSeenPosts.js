@@ -87,8 +87,8 @@ function _normalizeId(pid) {
 function _getApiBase() {
     try {
         let base = '/api';
-        const env = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_BASE)
-            ? process.env.REACT_APP_API_BASE
+        const env = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE)
+            ? import.meta.env.VITE_API_BASE
             : '';
         if (env) {
             base = String(env).trim() || '/api';

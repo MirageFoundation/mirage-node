@@ -2,6 +2,7 @@
     "name": "client",
     "version": "0.1.0",
     "private": true,
+    "type": "module",
     "dependencies": {
         "@cosmjs/crypto": "^0.38.1",
         "@noble/curves": "^1.4.0",
@@ -11,34 +12,32 @@
         "bech32": "^2.0.0",
         "bip39": "^3.1.0",
         "buffer": "^6.0.3",
-        "crypto-browserify": "^3.12.0",
         "crypto-js": "^4.2.0",
         "hls.js": "^1.5.7",
-        "process": "^0.11.10",
         "react": "^19.2.3",
-        "react-app-rewired": "^2.2.1",
         "react-dom": "^19.2.3",
         "react-helmet-async": "^2.0.5",
         "react-icons": "^5.6.0",
+        "react-is": "^19.2.8",
         "react-markdown": "^10.1.0",
-        "react-router-dom": "^6.2.1",
-        "react-scripts": "^5.0.1",
+        "react-router-dom": "^6.30.4",
         "recharts": "^3.9.0",
         "remark-gfm": "^4.0.1",
-        "stream-browserify": "^3.0.0",
         "styled-components": "^5.3.3",
         "unist-util-visit": "^5.0.0"
     },
     "scripts": {
-        "start": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export REACT_APP_VERSION=\"${GIT_BRANCH} (${GIT_HASH})\"; BROWSER=none react-app-rewired start'",
-        "build": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export REACT_APP_VERSION=\"${GIT_BRANCH} (${GIT_HASH})\"; react-app-rewired build'",
-        "lint": "eslint src --ext .js,.jsx",
-        "eject": "react-scripts eject"
-    },
-    "eslintConfig": {
-        "extends": [
-            "react-app"
-        ]
+        "dev": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export VITE_APP_VERSION=\"${VITE_APP_VERSION:-${GIT_BRANCH} (${GIT_HASH})}\"; vite'",
+        "build": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export VITE_APP_VERSION=\"${VITE_APP_VERSION:-${GIT_BRANCH} (${GIT_HASH})}\"; vite build'",
+        "preview": "vite preview",
+        "lint": "eslint src/utils/onboardingSession.js src/utils/sessionLifecycle.js src/utils/mediaPolicy.js src/utils/CryptoUtils.js src/components/ExternalMediaGate.js src/logic/useLogin.js src/logic/useWelcome.js src/logic/useSignOut.js tests scripts --max-warnings=0",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:e2e": "playwright test --project=chromium-mocked",
+        "check:pow-assets": "node scripts/sync_pow_assets.mjs --check",
+        "sync:pow-assets": "node scripts/sync_pow_assets.mjs",
+        "check:bundle-policy": "node scripts/check_bundle_policy.mjs",
+        "check:repro": "node scripts/check_build_reproducibility.mjs --run"
     },
     "browserslist": {
         "production": [
@@ -53,12 +52,24 @@
         ]
     },
     "devDependencies": {
-        "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
-        "react-error-overlay": "^6.0.9"
+        "@eslint/js": "^9.22.0",
+        "@fontsource/noto-sans": "^5.3.0",
+        "@playwright/test": "^1.51.0",
+        "@vitejs/plugin-react": "^4.3.4",
+        "argon2-browser": "^1.18.0",
+        "eslint": "^9.22.0",
+        "eslint-plugin-react": "^7.37.4",
+        "eslint-plugin-react-hooks": "^5.2.0",
+        "globals": "^16.0.0",
+        "jsdom": "^26.0.0",
+        "vite": "^6.2.0",
+        "vitest": "^3.0.8"
     },
     "overrides": {
         "mdast-util-find-and-replace": "^3.0.0",
         "nth-check": "^2.1.1"
     },
-    "proxy": "http://localhost:80"
+    "allowScripts": {
+        "esbuild@0.25.12": true
+    }
 }

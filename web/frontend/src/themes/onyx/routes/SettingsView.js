@@ -493,6 +493,8 @@ export default function SettingsView({
         setHideDownvotedPosts,
         blurSensitiveMedia,
         setBlurSensitiveMedia,
+        autoplayMedia,
+        setAutoplayMedia,
         showTagSensitive,
         setShowTagSensitive,
         showTagAdult,
@@ -695,6 +697,27 @@ export default function SettingsView({
                                         }));
                                     }} />
                                     Blur tagged sensitive media (images/videos)
+                                </CheckboxLabel>
+                            </ValueBox>
+                        </Row>
+
+                        <Row>
+                            <Label style={{
+                                whiteSpace: 'normal'
+                            }}>Autoplay media:</Label>
+                            <ValueBox>
+                                <CheckboxLabel>
+                                    <CheckboxInput checked={autoplayMedia} onChange={e => {
+                                        const val = !!e.target.checked;
+                                        setAutoplayMedia(val);
+                                        Storage.save('autoplay_media', val);
+                                        window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                                            detail: {
+                                                autoplayMedia: val
+                                            }
+                                        }));
+                                    }} />
+                                    Autoplay videos and embeds in posts
                                 </CheckboxLabel>
                             </ValueBox>
                         </Row>

@@ -3,7 +3,9 @@ import { updateNotification } from "../utils/notifications.js";
 import Storage from './Storage';
 import seedVault from './SeedVault';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
-import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
+import { derivePrivateKeyFromSeed, deriveKeysFromSeed, requireValidMnemonic } from './CryptoUtils.js';
+import { getSessionGeneration } from './sessionLifecycle';
+import { peekHandoffByPurpose } from './onboardingSession';
 import Api from './api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 import { generateEnvelopeNonce } from './canonicalEncoding';
@@ -149,6 +151,11 @@ class TransactionHandler {
             this.pendingPosts = new Map();
 
             this.lastOnchainBalanceUmirage = 0;
+            this.reservedUmirage = 0;
+            this.pendingFeeUmirage = 0;
+            this._queueIdCounter = 0;
+            this._activePowWorker = null;
+            this._draining = false;
 
             // Track in-flight follow/unfollow operations with queue position and action type
             // Map<key, { action: 'follow'|'unfollow', type: 'user'|'topic', target: string, queuePosition: number }>
@@ -222,6 +229,276 @@ class TransactionHandler {
         }
         const msg = String(err?.message || err || "");
         return this._fail("client error", msg ? { details: msg } : undefined);
+    }
+
+    _nextQueueId() {
+        this._queueIdCounter += 1;
+        return `tx-${Date.now()}-${this._queueIdCounter}`;
+    }
+
+    _requireOwnerBinding(entry = null) {
+        let seedPhrase = null;
+        let signerSource = 'vault';
+
+        if (entry && entry._signerSource === 'handoff') {
+            const handoff = peekHandoffByPurpose(entry._handoffPurpose || 'create-user-signing');
+            if (!handoff || !handoff.seed) {
+                throw new Error('missing onboarding handoff seed');
+            }
+            seedPhrase = handoff.seed;
+            signerSource = 'handoff';
+            if (entry.owner && handoff.owner && entry.owner !== handoff.owner) {
+                throw new Error('handoff owner mismatch');
+            }
+        } else {
+            seedPhrase = seedVault.getSeed();
+        }
+
+        if (!seedPhrase) throw new Error('missing recovery phrase');
+        const normalized = requireValidMnemonic(seedPhrase);
+        const { publicKey } = deriveKeysFromSeed(normalized);
+        if (!publicKey) throw new Error('invalid signer address');
+        return {
+            owner: publicKey,
+            sessionGeneration: getSessionGeneration(),
+            normalizedSeed: normalized,
+            signerSource,
+        };
+    }
+
+    _verifyOwnerBinding(entry, phase) {
+        if (!entry || !entry.owner) {
+            console.debug('[tx] owner-verify-fail', { phase, reason: 'missing_entry_owner', queueId: entry?.queueId });
+            this._drainQueue('missing_entry_owner');
+            return false;
+        }
+        let binding;
+        try {
+            binding = this._requireOwnerBinding(entry);
+        } catch (err) {
+            const reason = String(err?.message || 'missing_seed');
+            console.debug('[tx] owner-verify-fail', { phase, reason, queueId: entry.queueId });
+            this._drainQueue(reason);
+            return false;
+        }
+        if (entry.owner !== binding.owner || entry.sessionGeneration !== binding.sessionGeneration) {
+            console.debug('[tx] owner-verify-fail', {
+                phase,
+                reason: 'owner_mismatch',
+                queueId: entry.queueId,
+                entryOwner: entry.owner,
+                currentOwner: binding.owner,
+                entryGeneration: entry.sessionGeneration,
+                currentGeneration: binding.sessionGeneration,
+            });
+            this._drainQueue('owner_mismatch');
+            return false;
+        }
+        return true;
+    }
+
+    _getAvailableBalanceUmirage() {
+        const stored = Math.max(0, Math.trunc(Number(Storage.load('user_balance', '0'))));
+        const onChain = Math.max(0, Math.trunc(Number(this.lastOnchainBalanceUmirage || 0)));
+        const base = Math.max(stored, onChain);
+        const reserved = Math.max(0, Math.trunc(Number(this.reservedUmirage || 0)));
+        return Math.max(0, base - reserved);
+    }
+
+    _applyReservation(entry) {
+        const amount = Math.trunc(Number(entry._reserveUmirage || 0));
+        if (amount <= 0) return;
+        this.reservedUmirage = Math.max(0, Math.trunc(Number(this.reservedUmirage || 0)) + amount);
+        this.pendingFeeUmirage = this.reservedUmirage;
+        console.debug('[tx] reserve-balance', { queueId: entry.queueId, amount, reservedTotal: this.reservedUmirage });
+    }
+
+    _releaseEntryReservation(entry) {
+        const amount = Math.trunc(Number(entry?._reserveUmirage || 0));
+        if (amount <= 0 || entry._reservationReleased) return;
+        entry._reservationReleased = true;
+        this.reservedUmirage = Math.max(0, Math.trunc(Number(this.reservedUmirage || 0)) - amount);
+        this.pendingFeeUmirage = this.reservedUmirage;
+        console.debug('[tx] release-reservation', { queueId: entry.queueId, amount, reservedTotal: this.reservedUmirage });
+    }
+
+    _terminateActivePowWorker() {
+        if (!this._activePowWorker) return;
+        try {
+            console.debug('[tx] terminate-pow-worker');
+            this._activePowWorker.terminate();
+        } catch (_) { /* noop */ }
+        this._activePowWorker = null;
+    }
+
+    _clearPendingMaps() {
+        this.pendingVotes.clear();
+        this.pendingFollows.clear();
+        this.pendingBlocks.clear();
+        this.pendingSends.clear();
+        this.pendingSubscribes.clear();
+        this.pendingDeletes.clear();
+        this.pendingAgents.clear();
+        this._notifyVoteListeners();
+        this._notifyFollowListeners();
+        this._notifyBlockListeners();
+        this._notifySendListeners();
+        this._notifySubscribeListeners();
+        this._notifyDeleteListeners();
+        this._notifyAgentListeners();
+    }
+
+    _drainQueue(reason) {
+        if (this._draining) return;
+        this._draining = true;
+        const cancelReason = String(reason || 'cancelled');
+        const cancelled = { success: false, cancelled: true, reason: cancelReason };
+        const pendingCount = this.transactions.length;
+        console.debug('[tx] drain-queue', { reason: cancelReason, pendingCount });
+
+        this._terminateActivePowWorker();
+
+        for (const entry of this.transactions) {
+            this._releaseEntryReservation(entry);
+            if (typeof entry._resolve === 'function') {
+                try { entry._resolve(cancelled); } catch (_) { /* noop */ }
+            }
+        }
+        this.transactions = [];
+        this.reservedUmirage = 0;
+        this.pendingFeeUmirage = 0;
+        this._clearPendingMaps();
+        this.totalTransactions = 0;
+        this.processedTransactions = 0;
+        this.isProcessing = false;
+        this._updateStatus('idle');
+        if (this.setWarnOnLeave) {
+            this.setWarnOnLeave(false);
+        }
+        this._draining = false;
+    }
+
+    cancelAll(reason = 'cancelled') {
+        this._drainQueue(reason);
+        return Promise.resolve();
+    }
+
+    resetSession(reason = 'session_reset') {
+        this._drainQueue(reason);
+        return Promise.resolve();
+    }
+
+    _stampQueueEntry(entry) {
+        const binding = this._requireOwnerBinding(entry);
+        entry.owner = binding.owner;
+        entry.sessionGeneration = binding.sessionGeneration;
+        entry.queueId = this._nextQueueId();
+        entry._signerSource = entry._signerSource || binding.signerSource || 'vault';
+        console.debug('[tx] stamp-queue-entry', {
+            action: entry.action,
+            queueId: entry.queueId,
+            owner: entry.owner,
+            sessionGeneration: entry.sessionGeneration,
+            signerSource: entry._signerSource,
+        });
+        return entry;
+    }
+
+    _pushStampedTransaction(entry) {
+        this._stampQueueEntry(entry);
+        if (entry._reserveUmirage > 0) {
+            this._applyReservation(entry);
+        }
+        this.transactions.push(entry);
+        this.totalTransactions += 1;
+        this.processTransactions();
+    }
+
+    _enqueueBoundTransaction(baseTx, options = {}) {
+        const {
+            reserveUmirage = 0,
+            forcePow = false,
+            beforeEnqueue,
+            onResolve,
+            extraKeys = {},
+        } = options;
+
+        if (reserveUmirage > 0) {
+            const available = this._getAvailableBalanceUmirage();
+            if (available < reserveUmirage) {
+                const haveM = (available / 1000000).toFixed(3);
+                const needM = (reserveUmirage / 1000000).toFixed(3);
+                return Promise.resolve(this._fail("insufficient balance", { balance: haveM, needed: needM }));
+            }
+        }
+
+        if (typeof beforeEnqueue === 'function') {
+            const pre = beforeEnqueue();
+            if (pre && pre.success === false) {
+                return Promise.resolve(pre);
+            }
+        }
+
+        return new Promise((resolve) => {
+            const entry = {
+                ...baseTx,
+                ...extraKeys,
+                _forcePow: forcePow,
+            };
+            if (reserveUmirage > 0) {
+                entry._reserveUmirage = Math.trunc(reserveUmirage);
+            }
+            entry._resolve = (result) => {
+                this._releaseEntryReservation(entry);
+                if (typeof onResolve === 'function') {
+                    try { onResolve(result); } catch (_) { /* noop */ }
+                }
+                resolve(result);
+            };
+            try {
+                this._pushStampedTransaction(entry);
+            } catch (err) {
+                this._releaseEntryReservation(entry);
+                resolve(this._failFromException(err));
+            }
+        });
+    }
+
+    _getSubscribeFeeUmirage(level, monthlyFeeUmirage) {
+        const explicit = Math.trunc(Number(monthlyFeeUmirage) || 0);
+        if (explicit > 0) return explicit;
+        let cfg;
+        try {
+            cfg = JSON.parse(localStorage.getItem('chainConfig') || '');
+        } catch (_) {
+            throw new Error('chainConfig unavailable');
+        }
+        if (!cfg || typeof cfg !== 'object') throw new Error('chainConfig unavailable');
+        const tiers = cfg.subscription_tiers || cfg.tiers;
+        if (!Array.isArray(tiers)) throw new Error('subscription tiers unavailable');
+        const targetLevel = Number(level);
+        const tierIdx = targetLevel === 1 ? 1 : targetLevel === 10 ? 2 : -1;
+        if (tierIdx < 0 || tierIdx >= tiers.length) throw new Error('Invalid level');
+        const fee = Math.trunc(Number(tiers[tierIdx]?.period_fee || 0));
+        if (fee <= 0) throw new Error('subscription fee unavailable');
+        return fee;
+    }
+
+    _getAwardCostUmirage(awardType) {
+        let cfg;
+        try {
+            cfg = JSON.parse(localStorage.getItem('chainConfig') || '');
+        } catch (_) {
+            throw new Error('chainConfig unavailable');
+        }
+        if (!cfg || typeof cfg !== 'object') throw new Error('chainConfig unavailable');
+        const configs = cfg.award_configs;
+        if (!Array.isArray(configs)) throw new Error('award configs unavailable');
+        const type = String(awardType || '').trim();
+        const match = configs.find((c) => c && c.name === type);
+        const cost = Math.trunc(Number(match?.cost || 0));
+        if (cost <= 0) throw new Error(`Unknown award type: ${type}`);
+        return cost;
     }
 
     _persistUserBalance(balanceVal, { normalizeStorage = false, updateLastOnchain = true } = {}) {
@@ -669,49 +946,24 @@ class TransactionHandler {
      */
     async createUser(usernameRaw, inviteCode = "", referrerUsername = "") {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
             if (!username) return this._fail("empty username");
 
-            // Determine subscriber path
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
-                last_block_hash = statusData.last_block_hash;
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
-                } catch (_) { }
+            // Prefer in-memory onboarding handoff so we never wipe an existing vault
+            // before create_user confirms on-chain.
+            const handoff = peekHandoffByPurpose('create-user-signing');
+            if (!handoff || !handoff.seed) {
+                return this._fail("missing onboarding handoff seed");
             }
 
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'set_username',
                 username,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                // Use a slightly past timestamp to avoid envelope_timestamp-in-future due to clock skew
-                timestamp: Math.max(0, Date.now() - 15000),
                 invite_code: inviteCode || "",
                 referrer_username: referrerUsername || "",
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+                _signerSource: 'handoff',
+                _handoffPurpose: 'create-user-signing',
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -719,47 +971,13 @@ class TransactionHandler {
 
     async setUsername(usernameRaw) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
             if (!username) return this._fail("empty username");
 
-            // Subscribers do not need parameters; free users do
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevel === 0) {
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
-                } catch (_) { }
-            }
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'set_username',
                 username,
-                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
-                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${userLevel >= 1 ? "" : last_block_hash}:0`; // Challenge format required
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -767,43 +985,11 @@ class TransactionHandler {
 
     async setBiography(biographyRaw) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const biography = String(biographyRaw ?? "").trim();
-
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
-                } catch (_) { }
-            }
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'set_biography',
                 biography,
-                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
-                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${userLevel >= 1 ? "" : last_block_hash}:0`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -853,9 +1039,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -889,9 +1073,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -936,9 +1118,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -972,9 +1152,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -1030,9 +1208,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -1070,9 +1246,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -1114,9 +1288,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1155,9 +1327,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1196,9 +1366,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1241,9 +1409,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1282,9 +1448,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: agentTrimmed };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1323,9 +1487,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: agentTrimmed };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1371,9 +1533,7 @@ class TransactionHandler {
             };
             const pendingKey = triggerKey || '__set_agents__';
             const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: pendingKey };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -1385,43 +1545,16 @@ class TransactionHandler {
      */
     async reportPost(txhash, reason) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             const why = String(reason || "").trim();
             if (!txhashTrimmed) return this._fail("empty target");
             if (!why) return this._fail("empty reason");
 
-            const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-            ]);
-            const last_block_hash = statusData.last_block_hash;
-            let pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-            const pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-            const pow_factor = requirePowFactor(statusData.pow_factor);
-            // Level >= 1 users don't need PoW
-            const userLevel = Number(statusData.user_level !== undefined ? statusData.user_level : Storage.load('user_level', '0')) || 0;
-            if (userLevel >= 1) {
-                pow_difficulty = 0;
-            }
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'report',
                 target: txhashTrimmed,
                 reason: why,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, true);
-            return result;
+            }, { forcePow: true });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -1435,20 +1568,16 @@ class TransactionHandler {
      */
     async sendTokens(targetAddress, amountMirage) {
         try {
-            const _seed = seedVault.getSeed() || ""; // eslint-disable-line no-unused-vars
-            const publicKey = Storage.load("publicKey", "");
             const targetTrimmed = String(targetAddress || "").trim().toLowerCase();
 
             if (!targetTrimmed || !amountMirage || amountMirage <= 0) {
                 return this._fail("Invalid recipient or amount");
             }
 
-            // Validate mirage1 address
             if (!targetTrimmed.startsWith("mirage1")) {
                 return this._fail("Recipient must be a mirage1 address");
             }
 
-            // Convert MIRAGE to umirage
             const amountUmirage = Math.floor(amountMirage * 1000000);
             if (amountUmirage < 1000) {
                 return this._fail("Minimum amount is 0.001 MIRAGE");
@@ -1456,50 +1585,34 @@ class TransactionHandler {
 
             updateNotification("Sending tokens");
 
-            const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-            ]);
-            const balance = statusData?.balance || 0;
-
-            // Check balance for amount only (no gas fee for level >= 1 users)
-            const totalNeeded = amountUmirage;
-
-            if (balance < totalNeeded) {
-                const haveM = (balance / 1000000).toFixed(3);
-                const needM = (totalNeeded / 1000000).toFixed(3);
-                return this._fail("insufficient balance", { balance: haveM, needed: needM });
-            }
-
             const sendKey = `send:${targetTrimmed}`;
-            if (this.pendingSends.has(sendKey)) {
-                return this._fail("send tokens already in progress");
-            }
-            const queuePosition = this.totalTransactions + 1;
-            this.pendingSends.set(sendKey, { target: targetTrimmed, amount: amountUmirage, queuePosition });
-            this._notifySendListeners();
-            console.debug("[send_tokens] enqueue", { target: targetTrimmed, amount: amountUmirage, queuePosition });
-
-            const baseTx = {
+            return this._enqueueBoundTransaction({
                 action: 'send_tokens',
                 target: targetTrimmed,
                 amount: amountUmirage,
-            };
-
-            return new Promise((resolve) => {
-                const wrappedResolve = (result) => {
+            }, {
+                reserveUmirage: amountUmirage,
+                beforeEnqueue: () => {
+                    if (this.pendingSends.has(sendKey)) {
+                        return this._fail("send tokens already in progress");
+                    }
+                    const queuePosition = this.totalTransactions + 1;
+                    this.pendingSends.set(sendKey, { target: targetTrimmed, amount: amountUmirage, queuePosition });
+                    this._notifySendListeners();
+                    console.debug("[send_tokens] enqueue", { target: targetTrimmed, amount: amountUmirage, queuePosition });
+                    return null;
+                },
+                onResolve: () => {
                     this.pendingSends.delete(sendKey);
                     this._notifySendListeners();
-                    console.debug("[send_tokens] resolved", {
-                        target: targetTrimmed,
-                        success: !!result?.success,
-                        error: result?.error,
-                    });
-                    resolve(result);
-                };
-                const transaction = { ...baseTx, _resolve: wrappedResolve };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                },
+            }).then((result) => {
+                console.debug("[send_tokens] resolved", {
+                    target: targetTrimmed,
+                    success: !!result?.success,
+                    error: result?.error,
+                });
+                return result;
             });
         } catch (e) {
             return this._failFromException(e);
@@ -1514,8 +1627,6 @@ class TransactionHandler {
      */
     async giveAward(targetPostId, awardType) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const target = String(targetPostId || "").trim().toLowerCase();
             const type = String(awardType || "").trim();
 
@@ -1524,36 +1635,14 @@ class TransactionHandler {
             }
 
             updateNotification("Giving award");
+            const awardCost = this._getAwardCostUmirage(type);
+            console.debug('[TransactionHandler] giveAward.enqueue', { target, award_type: type, awardCost });
 
-            const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-            ]);
-            let last_block_hash = statusData?.last_block_hash || "";
-            let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevel >= 1) {
-                pow_difficulty = 0;
-                last_block_hash = "";
-            }
-            console.debug('[TransactionHandler] giveAward.submit', { target, award_type: type, user_level: userLevel });
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'award',
                 target,
                 award_type: type,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits: 0,
-                pow_factor: 0,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            }, { reserveUmirage: awardCost });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -1562,64 +1651,51 @@ class TransactionHandler {
     /**
      * Subscribe (or gift a subscription) to a tier level.
      * @param {number} level - Target paid subscription level (1=Subscriber, 10=Agent)
-     * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier (unused, kept for API compatibility)
+     * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier
      * @param {string} [target] - Optional target address to gift the subscription to
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
     async subscribe(level, monthlyFeeUmirage, target) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const targetLevel = Number(level);
 
             if (targetLevel !== 1 && targetLevel !== 10) {
-                return this._fail("Invalid level");
+                return this._fail("Invalid level (must be 1 or 10)");
             }
 
             const targetTrimmed = String(target || "").trim().toLowerCase();
             updateNotification(targetTrimmed ? "Gifting subscription" : "Subscribing");
 
-            const last_block_hash = "";
-            const tx = {
+            const feeUmirage = this._getSubscribeFeeUmirage(targetLevel, monthlyFeeUmirage);
+            const binding = this._requireOwnerBinding();
+            const recipient = targetTrimmed || String(binding.owner || "").trim().toLowerCase();
+            const subKey = `subscribe:${recipient}`;
+
+            return this._enqueueBoundTransaction({
                 action: 'subscribe',
                 level: targetLevel,
                 target: targetTrimmed,
-                last_block_hash,
-                pow_difficulty: 0, // PoW not allowed for subscribe
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${last_block_hash}:0`;
-
-            const recipient = targetTrimmed || String(derivedAddress || "").trim().toLowerCase();
-            const subKey = `subscribe:${recipient}`;
-            if (this.pendingSubscribes.has(subKey)) {
-                return this._fail("subscription already in progress");
-            }
-            const queuePosition = this.totalTransactions + 1;
-            this.pendingSubscribes.set(subKey, {
-                target: recipient,
-                action: targetTrimmed ? 'gift' : 'subscribe',
-                queuePosition,
-            });
-            this._notifySubscribeListeners();
-            console.debug("[subscribe] enqueue", { target: recipient, action: targetTrimmed ? 'gift' : 'subscribe', queuePosition });
-
-            return new Promise((resolve) => {
-                const wrappedResolve = (result) => {
+            }, {
+                reserveUmirage: feeUmirage,
+                beforeEnqueue: () => {
+                    if (this.pendingSubscribes.has(subKey)) {
+                        return this._fail("subscription already in progress");
+                    }
+                    const queuePosition = this.totalTransactions + 1;
+                    this.pendingSubscribes.set(subKey, {
+                        target: recipient,
+                        action: targetTrimmed ? 'gift' : 'subscribe',
+                        queuePosition,
+                    });
+                    this._notifySubscribeListeners();
+                    console.debug("[subscribe] enqueue", { target: recipient, action: targetTrimmed ? 'gift' : 'subscribe', queuePosition });
+                    return null;
+                },
+                onResolve: () => {
                     this.pendingSubscribes.delete(subKey);
                     this._notifySubscribeListeners();
-                    console.debug("[subscribe] resolved", {
-                        target: recipient,
-                        success: !!result?.success,
-                        error: result?.error,
-                    });
-                    resolve(result);
-                };
-                this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false)
-                    .then(wrappedResolve)
-                    .catch((err) => wrappedResolve(this._failFromException(err)));
+                    console.debug("[subscribe] resolved", { target: recipient });
+                },
             });
         } catch (e) {
             return this._failFromException(e);
@@ -1633,23 +1709,10 @@ class TransactionHandler {
      */
     async setAutoRenewal(autoRenew) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const last_block_hash = "";
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'set_auto_renewal',
                 auto_renew: Boolean(autoRenew),
-                last_block_hash,
-                pow_difficulty: 0,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${last_block_hash}:0`;
-
-            // Force fees mode (no PoW)
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -1661,12 +1724,8 @@ class TransactionHandler {
      */
     async deleteUser() {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            if (!seedPhrase) {
-                return this._fail("missing recovery phrase");
-            }
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const target = String(derivedAddress || "").trim().toLowerCase();
+            const binding = this._requireOwnerBinding();
+            const target = String(binding.owner || "").trim().toLowerCase();
             if (!target) return this._fail("invalid signer address");
             if (!target.startsWith("mirage1")) return this._fail("invalid address");
 
@@ -1693,9 +1752,7 @@ class TransactionHandler {
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _deleteKey: key };
-                this.transactions.push(transaction);
-                this.totalTransactions += 1;
-                this.processTransactions();
+                this._pushStampedTransaction(transaction);
             });
         } catch (e) {
             return this._failFromException(e);
@@ -1709,47 +1766,14 @@ class TransactionHandler {
      */
     async deletePost(txhash) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return this._fail("empty txhash");
 
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                updateNotification("Deleting post");
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
-                } catch (_) { }
-            }
-
-            const tx = {
+            updateNotification("Deleting post");
+            return this._enqueueBoundTransaction({
                 action: 'delete_post',
                 target: txhashTrimmed,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -1763,8 +1787,6 @@ class TransactionHandler {
      */
     async editPost(overrideId, changes) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const overrideLower = String(overrideId || "").trim().toLowerCase();
             if (!overrideLower || overrideLower.length !== 64) return this._fail("invalid override");
             const content = String(changes?.content || "").trim();
@@ -1775,22 +1797,7 @@ class TransactionHandler {
             const media = Array.isArray(changes?.media) ? changes.media : [];
             if (!ALLOWED_TAGS.has(tagRaw)) return this._fail("invalid tag");
 
-            const userLevelE = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash_e = "";
-            let pow_difficulty_e = 0;
-            let pow_base_bits_e = 0;
-            let pow_factor_e = 0;
-            if (userLevelE === 0) {
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash_e = statusData.last_block_hash || "";
-                pow_difficulty_e = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits_e = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor_e = requirePowFactor(statusData.pow_factor);
-            }
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'edit_post',
                 override: overrideLower,
                 target,
@@ -1799,17 +1806,7 @@ class TransactionHandler {
                 content,
                 tag: tagRaw,
                 media,
-                last_block_hash: last_block_hash_e,
-                pow_difficulty: pow_difficulty_e,
-                pow_base_bits: pow_base_bits_e,
-                pow_factor: pow_factor_e,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash_e}:${pow_difficulty_e}`;
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -1824,8 +1821,6 @@ class TransactionHandler {
      */
     async annotatePost(overrideId, fields) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
-            const publicKey = Storage.load("publicKey", "");
             const overrideLower = String(overrideId || "").trim().toLowerCase();
             if (!overrideLower || overrideLower.length !== 64) return this._fail("invalid override");
             const topic = String(fields?.topic ?? ".").trim();
@@ -1835,7 +1830,7 @@ class TransactionHandler {
             const appendix = String(fields?.appendix ?? ".").trim();
             const media = Array.isArray(fields?.media) ? fields.media : ["."];
 
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'annotate_post',
                 override: overrideLower,
                 topic,
@@ -1844,17 +1839,7 @@ class TransactionHandler {
                 tag,
                 media,
                 appendix,
-                last_block_hash: "",
-                pow_difficulty: 0,
-                pow_base_bits: 0,
-                pow_factor: 0,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}::0`;
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -1994,9 +1979,7 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _voteKey: postKey };
-            this.transactions.push(transaction);
-            this.totalTransactions += 1;
-            this.processTransactions();
+            this._pushStampedTransaction(transaction);
         });
     }
 
@@ -2026,9 +2009,7 @@ class TransactionHandler {
             media: Array.isArray(media) ? media : [],
         };
 
-        this.transactions.push(transaction);
-        this.totalTransactions += 1;
-        this.processTransactions();
+        this._pushStampedTransaction(transaction);
     }
 
     /**
@@ -2041,8 +2022,8 @@ class TransactionHandler {
      */
     async createPostAsync(topic, title, content, tag = "", media = []) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
+            const seedPhrase = seedVault.getSeed() || "";
             if (!publicKey || !seedPhrase) {
                 return this._fail("Not logged in");
             }
@@ -2052,20 +2033,7 @@ class TransactionHandler {
                 return this._fail("invalid tag");
             }
 
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-            }
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'create_post',
                 userId: publicKey,
                 topic,
@@ -2073,18 +2041,7 @@ class TransactionHandler {
                 content,
                 tag: cleanTag,
                 media: Array.isArray(media) ? media : [],
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -2108,9 +2065,7 @@ class TransactionHandler {
             content: content
         }
 
-        this.transactions.push(transaction);
-        this.totalTransactions += 1;
-        this.processTransactions();
+        this._pushStampedTransaction(transaction);
     }
 
     /**
@@ -2121,43 +2076,18 @@ class TransactionHandler {
      */
     async createCommentAsync(parentId, content) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
+            const seedPhrase = seedVault.getSeed() || "";
             if (!publicKey || !seedPhrase) {
                 return this._fail("Not logged in");
             }
 
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-            }
-
-            const tx = {
+            return this._enqueueBoundTransaction({
                 action: 'create_comment',
                 userId: publicKey,
                 parentId,
-                target: parentId,
                 content,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            });
         } catch (e) {
             return this._failFromException(e);
         }
@@ -2182,10 +2112,32 @@ class TransactionHandler {
         let hadFailure = false;
         let hadQuestAction = false; // Track if any quest-relevant actions were processed
         while (this.transactions.length > 0) {
-            // Get the next transaction  
-            const queued = this.transactions.shift() || {};
+            const queuedPeek = this.transactions[0];
+            if (!queuedPeek) break;
+            if (!this._verifyOwnerBinding(queuedPeek, 'dequeue')) {
+                hadFailure = true;
+                break;
+            }
+            const queued = this.transactions.shift();
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
-            const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, _deleteKey: _ignored4, _agentKey: _ignored5, ...transaction } = queued;
+            const forcePow = queued._forcePow === true;
+            const {
+                _resolve: _ignored,
+                _followKey: _ignored2,
+                _blockKey: _ignored3,
+                _deleteKey: _ignored4,
+                _agentKey: _ignored5,
+                _voteKey: _ignored6,
+                _sendKey: _ignored7,
+                _forcePow: _ignored8,
+                _reserveUmirage: _ignored9,
+                owner: _ignored10,
+                sessionGeneration: _ignored11,
+                queueId: _ignored12,
+                _signerSource: _ignored13,
+                _handoffPurpose: _ignored14,
+                ...transaction
+            } = queued;
             const giftTarget = String(transaction.target || '').trim();
             const _isGiftSubscribe = transaction.action === 'subscribe' && giftTarget !== ''; // eslint-disable-line no-unused-vars
             this.processedTransactions += 1;
@@ -2194,15 +2146,22 @@ class TransactionHandler {
                 hadQuestAction = true;
             }
 
+            const failAndDrain = (failResult) => {
+                this._releaseEntryReservation(queued);
+                if (_resolve) _resolve(failResult);
+                this._drainQueue('pipeline_failure');
+                hadFailure = true;
+            };
 
             let last_block_hash = "";
             let pow_difficulty = 0;
             let pow_base_bits_relay = 0;
             let pow_factor_relay = 0;
             const userLevelNow = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevelNow === 0) {
+            const NO_POW_QUEUE_ACTIONS = new Set(['subscribe', 'set_auto_renewal', 'award', 'annotate_post']);
+            if (userLevelNow === 0 && !NO_POW_QUEUE_ACTIONS.has(transaction.action)) {
                 try {
-                    const addrNow = Storage.load('publicKey', '');
+                    const addrNow = queued.owner || Storage.load('publicKey', '');
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined);
                     last_block_hash = status.last_block_hash || "";
                     pow_difficulty = requirePowDifficulty(status.pow_difficulty);
@@ -2211,31 +2170,37 @@ class TransactionHandler {
                     const onChainBalance = Math.max(0, Math.trunc(Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'))));
                     const prevOnChain = this.lastOnchainBalanceUmirage;
                     this.lastOnchainBalanceUmirage = onChainBalance;
-                    if (this.pendingFeeUmirage > 0) {
-                        const spentIncluded = onChainBalance <= Math.max(0, prevOnChain - this.pendingFeeUmirage);
-                        if (spentIncluded) this.pendingFeeUmirage = 0;
+                    if (this.reservedUmirage > 0) {
+                        const spentIncluded = onChainBalance <= Math.max(0, prevOnChain - this.reservedUmirage);
+                        if (spentIncluded) {
+                            this.reservedUmirage = 0;
+                            this.pendingFeeUmirage = 0;
+                        }
                     }
-                    const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - Math.max(0, this.pendingFeeUmirage));
+                    const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - Math.max(0, this.reservedUmirage));
                     this._persistUserBalance(effectiveBalance, { normalizeStorage: true, updateLastOnchain: false });
                 } catch (error) {
                     const msg = (error && error.message) ? error.message : 'network error';
-                    if (_resolve) _resolve(this._fail("transaction failed", { details: msg }));
-                    hadFailure = true;
+                    failAndDrain(this._fail("transaction failed", { details: msg }));
                     break;
                 }
             } else {
-                // Subscribers: use timestamp as nonce for tx uniqueness (no PoW needed)
-                last_block_hash = Date.now().toString(16).padStart(64, '0');
+                // Subscribers and fee-only actions: no PoW params fetch
+                last_block_hash = NO_POW_QUEUE_ACTIONS.has(transaction.action) ? "" : Date.now().toString(16).padStart(64, '0');
                 pow_difficulty = 0;
             }
 
             let final_transaction = undefined;
             let challenge = undefined;
-            // Derive signer address from current seed to ensure consistency with relay
-            const seedPhrase = seedVault.getSeed() || "";
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return Storage.load('publicKey', ''); } })();
-            if (derivedAddress && derivedAddress !== Storage.load('publicKey', '')) {
-                try { Storage.save('publicKey', derivedAddress); } catch (_) { }
+            let derivedAddress;
+            let privateKey;
+            try {
+                const binding = this._requireOwnerBinding(queued);
+                derivedAddress = binding.owner;
+                privateKey = derivePrivateKeyFromSeed(binding.normalizedSeed);
+            } catch (err) {
+                failAndDrain(this._failFromException(err));
+                break;
             }
 
             // Timestamp for canonical bytes (must match backend verification but avoid future skew)
@@ -2253,6 +2218,8 @@ class TransactionHandler {
                     pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
+                if (transaction.invite_code) final_transaction.invite_code = transaction.invite_code;
+                if (transaction.referrer_username) final_transaction.referrer_username = transaction.referrer_username;
             }
             else if (transaction.action === "create_vote") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
@@ -2444,8 +2411,115 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
+            else if (transaction.action === "delete_post") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target,
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "edit_post") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    override: transaction.override,
+                    target: transaction.target || "",
+                    topic: transaction.topic || "",
+                    title: transaction.title || "",
+                    content: transaction.content || "",
+                    tag: transaction.tag || "",
+                    media: Array.isArray(transaction.media) ? transaction.media : [],
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "report") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target,
+                    reason: transaction.reason,
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "subscribe") {
+                challenge = `${derivedAddress}:${last_block_hash}:0`;
+                final_transaction = {
+                    action: transaction.action,
+                    level: Number(transaction.level),
+                    target: transaction.target || "",
+                    last_block_hash: "",
+                    pow_difficulty: 0,
+                    pow_base_bits: 0,
+                    pow_factor: 0,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "set_auto_renewal") {
+                challenge = `${derivedAddress}:${last_block_hash}:0`;
+                final_transaction = {
+                    action: transaction.action,
+                    auto_renew: Boolean(transaction.auto_renew),
+                    last_block_hash: "",
+                    pow_difficulty: 0,
+                    pow_base_bits: 0,
+                    pow_factor: 0,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "award") {
+                challenge = `${derivedAddress}:${last_block_hash}:0`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target,
+                    award_type: transaction.award_type,
+                    last_block_hash: "",
+                    pow_difficulty: 0,
+                    pow_base_bits: 0,
+                    pow_factor: 0,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "annotate_post") {
+                challenge = `${derivedAddress}::0`;
+                final_transaction = {
+                    action: transaction.action,
+                    override: transaction.override,
+                    topic: transaction.topic || ".",
+                    title: transaction.title || ".",
+                    content: transaction.content || ".",
+                    tag: transaction.tag || ".",
+                    media: Array.isArray(transaction.media) ? transaction.media : ["."],
+                    appendix: transaction.appendix || ".",
+                    last_block_hash: "",
+                    pow_difficulty: 0,
+                    pow_base_bits: 0,
+                    pow_factor: 0,
+                    timestamp: txTimestamp,
+                };
+            } else {
+                failAndDrain(this._fail("transaction failed", { details: `Unknown action: ${transaction.action}` }));
+                break;
+            }
 
-            const privateKey = derivePrivateKeyFromSeed(seedPhrase);
+            if (final_transaction) {
+                final_transaction.owner = queued.owner;
+                final_transaction.sessionGeneration = queued.sessionGeneration;
+                final_transaction.queueId = queued.queueId;
+                final_transaction._forcePow = forcePow;
+            }
 
             // Retry loop: PoW-related failures (difficulty changed between compute and submit)
             // warrant re-fetching params and recomputing PoW, up to 3 times.
@@ -2486,7 +2560,11 @@ class TransactionHandler {
                 }
 
                 try {
-                    result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress);
+                    if (!this._verifyOwnerBinding(queued, 'pre-sign')) {
+                        failAndDrain({ success: false, cancelled: true, reason: 'owner_mismatch' });
+                        break;
+                    }
+                    result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress, forcePow);
                 } catch (error) {
                     lastError = error;
                     const errMsg = String(error && error.message ? error.message : error);
@@ -2515,23 +2593,24 @@ class TransactionHandler {
                 const errMsg = String(lastError && lastError.message ? lastError.message : lastError);
                 const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
                 const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : errMsg;
-                if (_resolve) _resolve(this._fail("transaction failed", cleanMsg ? { details: cleanMsg } : undefined));
-                hadFailure = true;
+                failAndDrain(this._fail("transaction failed", cleanMsg ? { details: cleanMsg } : undefined));
                 break;
             }
             if (!result || !result.success) {
-                if (_resolve) {
-                    if (result && result.error_code) {
-                        _resolve(result);
-                    } else {
-                        const msg = String(result && result.error ? result.error : 'Transaction failed');
-                        _resolve(this._fail("transaction failed", msg ? { details: msg } : undefined));
-                    }
+                if (result && result.cancelled) {
+                    failAndDrain(result);
+                    break;
                 }
-                hadFailure = true;
+                if (result && result.error_code) {
+                    failAndDrain(result);
+                } else {
+                    const msg = String(result && result.error ? result.error : 'Transaction failed');
+                    failAndDrain(this._fail("transaction failed", msg ? { details: msg } : undefined));
+                }
                 break;
             }
 
+            this._releaseEntryReservation(queued);
             if (_resolve) _resolve(result);
 
         }
@@ -3791,6 +3870,11 @@ class TransactionHandler {
      * @param {(res: {success: boolean, error?: string, tx_hash?: string, result?: any}) => void} resolve
      */
     async handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, resolve) {
+        if (transaction?.owner && !this._verifyOwnerBinding(transaction, 'sign')) {
+            resolve({ success: false, cancelled: true, reason: 'owner_mismatch' });
+            return;
+        }
+
         await ensureCosmCrypto();
 
         // derive keys
@@ -5029,6 +5113,13 @@ class TransactionHandler {
                 resolve(result);
             };
 
+            const effectiveForcePow = forcePow || transaction?._forcePow === true;
+
+            if (transaction?.owner && !this._verifyOwnerBinding(transaction, 'sign')) {
+                wrapResolve({ success: false, cancelled: true, reason: 'owner_mismatch' });
+                return;
+            }
+
             // Set timestamp for replay protection if not already set
             if (!transaction.timestamp) {
                 transaction.timestamp = Date.now();
@@ -5044,7 +5135,7 @@ class TransactionHandler {
             // which still requires computing a valid argon2 hash.  Do NOT skip PoW for that.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             const NO_POW_ACTIONS = new Set(['subscribe', 'set_auto_renewal', 'award']);
-            const canSkipPow = !forcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
+            const canSkipPow = !effectiveForcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
 
             // Inform UI that we are starting a transaction
             this._setStatus("preparing");
@@ -5072,6 +5163,7 @@ class TransactionHandler {
             }
             // Perform PoW as usual
             const worker = new Worker("/pow/worker.js");
+            this._activePowWorker = worker;
 
             // Set the flag before starting PoW
             if (this.setWarnOnLeave) {
@@ -5599,6 +5691,7 @@ class TransactionHandler {
                 if (powTimedOut) return;
                 powTimedOut = true;
                 worker.terminate();
+                this._activePowWorker = null;
                 clearInterval(intervalId);
                 if (this.setWarnOnLeave) {
                     this.setWarnOnLeave(false);
@@ -5614,6 +5707,7 @@ class TransactionHandler {
 
                 // Received PoW result from the worker
                 worker.terminate();
+                this._activePowWorker = null;
 
                 // Clear the flag after PoW is done
                 if (this.setWarnOnLeave) {

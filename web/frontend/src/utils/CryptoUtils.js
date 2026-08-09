@@ -1,6 +1,6 @@
 import { HDKey } from '@scure/bip32';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
-import { mnemonicToSeedSync } from 'bip39';
+import { mnemonicToSeedSync, validateMnemonic } from 'bip39';
 import { bech32 } from 'bech32';
 import CryptoJS from 'crypto-js';
 
@@ -15,10 +15,26 @@ const pubkeyHexToMirageAddress = (pubkeyHex) => {
     return bech32.encode('mirage', words);
 };
 
+export function requireValidMnemonic(seedPhrase) {
+    const normalized = String(seedPhrase || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!normalized) throw new Error('Recovery phrase is required');
+    const words = normalized.split(' ');
+    if (![12, 15, 18, 21, 24].includes(words.length)) {
+        throw new Error('Recovery phrase must be 12, 15, 18, 21, or 24 words');
+    }
+    if (!validateMnemonic(normalized)) throw new Error('Invalid recovery phrase');
+    return normalized;
+}
+
+function mnemonicToSeedBytes(seedPhrase) {
+    const seed = mnemonicToSeedSync(seedPhrase, "");
+    return seed instanceof Uint8Array ? seed : Uint8Array.from(seed);
+}
+
 // Derive private key from seed phrase using Cosmos BIP44 path m/44'/118'/0'/0/0
 export const derivePrivateKeyFromSeed = (seedPhrase) => {
-    const seed = mnemonicToSeedSync(seedPhrase, "");
-    const hd = HDKey.fromMasterSeed(seed);
+    const normalized = requireValidMnemonic(seedPhrase);
+    const hd = HDKey.fromMasterSeed(mnemonicToSeedBytes(normalized));
     const child = hd.derive("m/44'/118'/0'/0/0");
     const privBytes = child.privateKey;
     if (!privBytes) {
@@ -29,8 +45,8 @@ export const derivePrivateKeyFromSeed = (seedPhrase) => {
 
 // Derive public key and address from seed phrase
 export const derivePublicKeyFromSeed = (seedPhrase) => {
-    const seed = mnemonicToSeedSync(seedPhrase, "");
-    const hd = HDKey.fromMasterSeed(seed);
+    const normalized = requireValidMnemonic(seedPhrase);
+    const hd = HDKey.fromMasterSeed(mnemonicToSeedBytes(normalized));
     const child = hd.derive("m/44'/118'/0'/0/0");
     const privBytes = child.privateKey;
     if (!privBytes) {
@@ -44,8 +60,8 @@ export const derivePublicKeyFromSeed = (seedPhrase) => {
 
 // Get both private key and address from seed phrase
 export const deriveKeysFromSeed = (seedPhrase) => {
-    const seed = mnemonicToSeedSync(seedPhrase, "");
-    const hd = HDKey.fromMasterSeed(seed);
+    const normalized = requireValidMnemonic(seedPhrase);
+    const hd = HDKey.fromMasterSeed(mnemonicToSeedBytes(normalized));
     const child = hd.derive("m/44'/118'/0'/0/0");
     const privBytes = child.privateKey;
     if (!privBytes) {

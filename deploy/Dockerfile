@@ -58,22 +58,23 @@ RUN pip3 install --break-system-packages --root-user-action=ignore --no-cache-di
 WORKDIR /opt/mirage/web/frontend
 RUN npm ci --no-audit --no-fund --legacy-peer-deps
 
-# One-time workaround dependency (keep cached unless package.json/lock changes)
-RUN npm install --no-audit --no-fund --no-save --legacy-peer-deps @babel/plugin-transform-private-property-in-object
-
 # Copy frontend sources only (avoid invalidating cache on unrelated changes)
 COPY web/frontend/ /opt/mirage/web/frontend/
 
-# FAQ markdown is embedded into the frontend at build time: config-overrides.js
+# FAQ markdown is embedded into the frontend at build time: vite.config.js
 # reads ../../docs/FAQ.md (resolves to /opt/mirage/docs/FAQ.md). It must exist
 # before `npm run build` or the React build fails with ENOENT.
 COPY docs/FAQ.md /opt/mirage/docs/FAQ.md
+
+# Verify vendored PoW assets match the locked argon2-browser package
+RUN npm run check:pow-assets
 
 # Build frontend (version comes from build args provided by deploy script)
 ARG GIT_BRANCH
 ARG GIT_HASH
 ENV BROWSERSLIST_IGNORE_OLD_DATA=true
-RUN REACT_APP_VERSION="${GIT_BRANCH:-?} (${GIT_HASH:-?})" REACT_APP_API_BASE=/api npm run build
+RUN VITE_APP_VERSION="${GIT_BRANCH:-?} (${GIT_HASH:-?})" VITE_API_BASE=/api npm run build
+RUN npm run check:bundle-policy
 
 # Copy runtime files after frontend build so backend/go changes don't force a React rebuild
 WORKDIR /opt/mirage

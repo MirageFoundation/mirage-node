@@ -2,23 +2,21 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import styled from 'styled-components';
 
-// Build-time fallback (used if runtime config not available)
-const BUILD_TIME_GIPHY_KEY = (process.env.REACT_APP_GIPHY_API_KEY || '').trim();
 const GIPHY_SEARCH_URL = 'https://api.giphy.com/v1/gifs/search';
 const GIPHY_TRENDING_URL = 'https://api.giphy.com/v1/gifs/trending';
 
-// Get Giphy API key: runtime config (from backend) takes precedence over build-time env
+// Giphy API key comes from first-party nodeConfig (backend); fail closed if missing.
 function getGiphyApiKey() {
     try {
         const raw = localStorage.getItem('nodeConfig');
         if (raw) {
             const config = JSON.parse(raw);
             if (config.giphy_api_key) {
-                return config.giphy_api_key.trim();
+                return String(config.giphy_api_key).trim();
             }
         }
     } catch (_) { }
-    return BUILD_TIME_GIPHY_KEY;
+    return '';
 }
 
 const PickerWrapper = styled.div`

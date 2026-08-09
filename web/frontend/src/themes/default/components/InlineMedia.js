@@ -1,6 +1,78 @@
 import React from "react";
 import styled, { useTheme } from "styled-components";
-import { normalizeRedgifsToMp4, extractRedgifsId, redgifsCanonicalWatchUrl } from "../../../utils/media";
+import ExternalMediaGate from "../../../components/ExternalMediaGate";
+import { normalizeRedgifsToMp4, extractRedgifsId, redgifsCanonicalWatchUrl, extractRumbleId, buildRumbleEmbedUrl } from "../../../utils/media";
+import { classifyMediaUrl } from "../../../utils/mediaPolicy";
+
+const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-presentation';
+
+function buildRedgifsEmbedUrl(id, autoPlay) {
+    const params = new URLSearchParams({ muted: '1', loop: '1', controls: '1' });
+    if (autoPlay) params.set('autoplay', '1');
+    return `https://www.redgifs.com/ifr/${id}?${params.toString()}`;
+}
+
+function youtubeAllow(autoPlay) {
+    return autoPlay
+        ? 'accelerometer; autoplay; encrypted-media; picture-in-picture; fullscreen'
+        : 'accelerometer; encrypted-media; picture-in-picture; fullscreen';
+}
+
+function extractYoutubeId(rawUrl) {
+    try {
+        if (!rawUrl) return null;
+        const u = new URL(rawUrl);
+        const host = (u.hostname || '').toLowerCase();
+        if (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') {
+            if (u.pathname === '/watch') {
+                const params = new URLSearchParams(u.search);
+                return params.get('v') || null;
+            }
+            if (u.pathname.startsWith('/embed/') || u.pathname.startsWith('/v/')) {
+                const parts = u.pathname.split('/');
+                return parts[2] ? parts[2].split('?')[0] : null;
+            }
+            if (u.pathname.startsWith('/shorts/')) {
+                const parts = u.pathname.split('/');
+                return parts[2] ? parts[2].split('?')[0] : null;
+            }
+        }
+        if (host === 'youtu.be' || host === 'www.youtu.be') {
+            const path = (u.pathname || '').replace(/^\//, '');
+            return path ? path.split('/')[0].split('?')[0] : null;
+        }
+    } catch (_) { }
+    return null;
+}
+
+function detectInlineMediaKind(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return 'text';
+    try {
+        if (extractRedgifsId(rawUrl)) return 'iframe';
+        if (extractYoutubeId(rawUrl)) return 'iframe';
+        if (extractRumbleId(rawUrl)) return 'iframe';
+        const resolved = normalizeRedgifsToMp4(rawUrl);
+        const base = (typeof window !== 'undefined' && window.location && window.location.origin)
+            ? window.location.origin
+            : 'http://localhost';
+        const u = new URL(resolved, base);
+        const scheme = u.protocol.toLowerCase().replace(':', '');
+        if (scheme !== 'http' && scheme !== 'https') return 'text';
+        const p = u.pathname.toLowerCase();
+        const host = u.hostname.toLowerCase();
+        const isImgDomain = host.endsWith('imagedelivery.net');
+        const isImgExt = /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(p);
+        if (isImgDomain || isImgExt) return 'image';
+        const isIframeStream = host === 'iframe.cloudflarestream.com';
+        const isStreamDomain = isIframeStream || host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
+        const isHlsExt = /\.m3u8$/i.test(p);
+        const isVidExt = /\.(mp4|webm|ogv|mov|mkv|gifv)$/i.test(p);
+        if (isStreamDomain || isHlsExt || isVidExt) return 'video';
+        return 'link';
+    } catch (_) {
+        return 'text';
+    }
+}
 
 const StyledLink = styled.a`
     color: ${({ theme }) => theme.colors.link};
@@ -65,7 +137,7 @@ const MAX_INITIAL_WIDTH = 600;
 
 
 
-export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta = null }) {
+function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
     const theme = useTheme();
     const capMaxVideoWidth = theme.layout.maxVideoWidth;
     const [naturalWidth, setNaturalWidth] = React.useState((mediaMeta && mediaMeta.w) || 0);
@@ -294,46 +366,21 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
         };
     }, [url]);
 
-    // Extract YouTube video ID from various URL formats
-    const extractYoutubeId = (rawUrl) => {
-        try {
-            if (!rawUrl) return null;
-            const u = new URL(rawUrl);
-            const host = (u.hostname || '').toLowerCase();
-            if (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com') {
-                if (u.pathname === '/watch') {
-                    const params = new URLSearchParams(u.search);
-                    return params.get('v') || null;
-                }
-                if (u.pathname.startsWith('/embed/') || u.pathname.startsWith('/v/')) {
-                    const parts = u.pathname.split('/');
-                    return parts[2] ? parts[2].split('?')[0] : null;
-                }
-                if (u.pathname.startsWith('/shorts/')) {
-                    const parts = u.pathname.split('/');
-                    return parts[2] ? parts[2].split('?')[0] : null;
-                }
-            }
-            if (host === 'youtu.be' || host === 'www.youtu.be') {
-                const path = (u.pathname || '').replace(/^\//, '');
-                return path ? path.split('/')[0].split('?')[0] : null;
-            }
-        } catch (_) { }
-        return null;
-    };
-
     try {
         const redgifsId = extractRedgifsId(url);
         if (redgifsId) {
-            const embedUrl = `https://www.redgifs.com/ifr/${redgifsId}?autoplay=1&muted=1&loop=1&controls=1`;
+            const embedUrl = buildRedgifsEmbedUrl(redgifsId, autoPlay);
             const aspectPadding = '56.25%'; // 16:9 default
             return (
                 <div style={{ position: 'relative', width: '100%', paddingTop: aspectPadding, borderRadius: '4px', overflow: 'hidden' }}>
                     <iframe
                         src={embedUrl}
                         title="Redgifs embed"
-                        allow="fullscreen; autoplay"
+                        allow={autoPlay ? 'fullscreen; autoplay' : 'fullscreen'}
                         allowFullScreen
+                        referrerPolicy="no-referrer"
+                        sandbox={IFRAME_SANDBOX}
+                        loading="lazy"
                         frameBorder="0"
                         scrolling="no"
                         style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
@@ -354,8 +401,33 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
                     <iframe
                         src={embedUrl}
                         title="YouTube video"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                        allow={youtubeAllow(autoPlay)}
                         allowFullScreen
+                        referrerPolicy="no-referrer"
+                        sandbox={IFRAME_SANDBOX}
+                        loading="lazy"
+                        frameBorder="0"
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+                    />
+                </div>
+            );
+        }
+
+        // Rumble embed
+        const rumbleId = extractRumbleId(url);
+        if (rumbleId) {
+            const embedUrl = buildRumbleEmbedUrl(rumbleId, autoPlay);
+            const aspectPadding = '56.25%'; // 16:9 default
+            return (
+                <div style={{ position: 'relative', width: '100%', paddingTop: aspectPadding, borderRadius: '4px', overflow: 'hidden' }}>
+                    <iframe
+                        src={embedUrl}
+                        title="Rumble video"
+                        allow={youtubeAllow(autoPlay)}
+                        allowFullScreen
+                        referrerPolicy="no-referrer"
+                        sandbox={IFRAME_SANDBOX}
+                        loading="lazy"
                         frameBorder="0"
                         style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
                     />
@@ -531,4 +603,26 @@ export default function InlineMedia({ url, variant, autoPlay = false, mediaMeta 
     } catch (_) { }
 
     return <>{linkifyText(url)}</>;
+}
+
+export default function InlineMedia(props) {
+    const kind = detectInlineMediaKind(props.url);
+    if (kind === 'iframe' || kind === 'image' || kind === 'video') {
+        const mediaType = kind === 'iframe' ? 'embed' : kind;
+        const classification = classifyMediaUrl(props.url);
+        try {
+            console.debug('[MediaPolicy] inline gate', {
+                hostname: classification.hostname || '',
+                provider: classification.provider,
+                kind: mediaType,
+                autoLoad: classification.autoLoad,
+            });
+        } catch (_) { /* noop */ }
+        return (
+            <ExternalMediaGate url={props.url} mediaType={mediaType}>
+                {() => <InlineMediaBody {...props} />}
+            </ExternalMediaGate>
+        );
+    }
+    return <InlineMediaBody {...props} />;
 }

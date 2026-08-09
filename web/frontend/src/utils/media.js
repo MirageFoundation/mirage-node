@@ -39,7 +39,8 @@ export const isLikelyVideoUrl = (url) => {
         const isVidExt = ['.mp4', '.webm', '.ogv', '.mov', '.mkv', '.gifv', '.m3u8'].some((ext) => path.endsWith(ext));
         // YouTube video URLs
         const isYoutube = (host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host === 'www.youtu.be');
-        return isStream || isRedgifsWatch || isVidExt || isYoutube;
+        const isRumble = (host === 'rumble.com' || host === 'www.rumble.com');
+        return isStream || isRedgifsWatch || isVidExt || isYoutube || isRumble;
     } catch (_) {
         return false;
     }
@@ -356,45 +357,6 @@ export const getVideoThumbnailUrl = (rawUrl) => {
     }
 };
 
-// Photon (WordPress.com CDN) - works with redgifs and other domains wsrv blocks
-export const buildPhotonUrl = (src, { w, h } = {}) => {
-    try {
-        if (!src) return '';
-        const srcUrl = new URL(src);
-        // Photon format: https://i0.wp.com/{host}/{path}?w=X&h=Y&crop=1
-        // crop=1 ensures the image fills the dimensions (like object-fit: cover)
-        const photonUrl = new URL(`https://i0.wp.com/${srcUrl.host}${srcUrl.pathname}`);
-        if (w) photonUrl.searchParams.set('w', String(w));
-        if (h) photonUrl.searchParams.set('h', String(h));
-        if (w && h) photonUrl.searchParams.set('crop', '1');
-        return photonUrl.toString();
-    } catch (_) {
-        return src;
-    }
-};
-
-// wsrv.nl - fallback proxy (blocks some domains like redgifs)
-export const buildWsrvUrl = (src, { w, h, fit = 'cover', blur } = {}) => {
-    try {
-        if (!src) return '';
-        const url = new URL('https://wsrv.nl/');
-        const params = url.searchParams;
-        params.set('url', src);
-        if (w) params.set('w', String(w));
-        if (h) params.set('h', String(h));
-        if (fit) params.set('fit', fit);
-        if (typeof blur === 'number') params.set('blur', String(blur));
-        return url.toString();
-    } catch (_) {
-        return src;
-    }
-};
-
-export const buildBlurredWsrvUrl = (src, opts = {}) => {
-    const { blur = 24, ...rest } = opts || {};
-    return buildWsrvUrl(src, { ...rest, blur });
-};
-
 const _extractRedgifsId = (u) => {
     try {
         const host = (u.hostname || '').toLowerCase();
@@ -423,6 +385,60 @@ export const extractRedgifsId = (rawUrl) => {
         return _extractRedgifsId(u);
     } catch (_) {
         return null;
+    }
+};
+
+/**
+ * Extract a Rumble embed id from a watch or embed URL.
+ * Watch: https://rumble.com/v70bqqu-some-title.html → v70bqqu
+ * Embed: https://rumble.com/embed/v70bqqu/ or https://rumble.com/embed/uXXXX.v70bqqu/
+ * @param {string} rawUrl
+ * @returns {string|null}
+ */
+export const extractRumbleId = (rawUrl) => {
+    try {
+        if (!rawUrl) return null;
+        const u = new URL(String(rawUrl).trim());
+        const host = (u.hostname || '').toLowerCase();
+        if (host !== 'rumble.com' && host !== 'www.rumble.com') return null;
+        const parts = (u.pathname || '').split('/').filter(Boolean);
+        if (!parts.length) return null;
+        if (parts[0] === 'embed') {
+            const id = String(parts[1] || '').split('?')[0].replace(/\/+$/, '');
+            // Accept vXXXX or publisher.vXXXX embed path segments.
+            if (/^(?:[a-z0-9]+\.)?v[a-z0-9]+$/i.test(id)) return id;
+            return null;
+        }
+        // Watch / share pages: /vXXXX-slug.html
+        const first = String(parts[0] || '').replace(/\.html?$/i, '');
+        const m = first.match(/^(v[a-z0-9]+)/i);
+        return m ? m[1] : null;
+    } catch (_) {
+        return null;
+    }
+};
+
+/**
+ * Build a Rumble iframe embed URL. autoPlay uses Rumble's muted autoplay (=2).
+ * @param {string} id
+ * @param {boolean=} autoPlay
+ */
+export const buildRumbleEmbedUrl = (id, autoPlay = false) => {
+    const clean = String(id || '').replace(/\/+$/, '');
+    if (!clean) return '';
+    const base = `https://rumble.com/embed/${clean}/`;
+    return autoPlay ? `${base}?autoplay=2` : base;
+};
+
+export const rumbleCanonicalWatchUrl = (rawUrl) => {
+    try {
+        const id = extractRumbleId(rawUrl);
+        if (!id) return rawUrl;
+        // Prefer the short vXXXX form for watch links when we only have an embed id.
+        const videoId = id.includes('.') ? id.split('.').pop() : id;
+        return `https://rumble.com/${videoId}.html`;
+    } catch (_) {
+        return rawUrl;
     }
 };
 

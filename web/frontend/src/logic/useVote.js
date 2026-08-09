@@ -4,9 +4,11 @@ import Storage from '../utils/Storage';
 import { updateNotification } from '../utils/notifications';
 import { markPostVoted } from './useSeenPosts';
 import { requireAccount } from '../utils/openBrowsing';
+import { useTxStatus } from './useTxStatus';
 
 export function usePendingVotes() {
     const [pendingVotes, setPendingVotes] = useState({});
+    const { formatStatusForPosition } = useTxStatus();
 
     useEffect(() => {
         let unsubscribe = null;
@@ -50,11 +52,24 @@ export function usePendingVotes() {
         return pendingVotes[key]?.direction || null;
     }, [pendingVotes]);
 
-    return { pendingVotes, isPending, getDirection };
+    const getInfo = useCallback((postId) => {
+        const key = String(postId || '').toLowerCase();
+        return pendingVotes[key] || null;
+    }, [pendingVotes]);
+
+    const formatVoteStatus = useCallback((postId) => {
+        const info = getInfo(postId);
+        if (!info) return null;
+        const formatted = formatStatusForPosition(info.queuePosition);
+        if (formatted) return formatted;
+        return 'Voting...';
+    }, [getInfo, formatStatusForPosition]);
+
+    return { pendingVotes, isPending, getDirection, getInfo, formatVoteStatus };
 }
 
 export function useVoteHandler({ state, updatePost }) {
-    const { isPending } = usePendingVotes();
+    const { isPending, formatVoteStatus } = usePendingVotes();
     const localPendingRef = useRef(new Set());
 
     const handleVote = useCallback(async (postObj, direction) => {
@@ -128,7 +143,7 @@ export function useVoteHandler({ state, updatePost }) {
         return localPendingRef.current.has(key);
     }, []);
 
-    return { handleVote, isPending, isLocallyPending };
+    return { handleVote, isPending, isLocallyPending, formatVoteStatus };
 }
 
 export function resolveDirection(post, state) {

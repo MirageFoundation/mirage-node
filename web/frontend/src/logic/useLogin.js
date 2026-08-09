@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { deriveKeysFromSeed } from "../utils/CryptoUtils.js";
-import { validateMnemonic } from "bip39";
+import { deriveKeysFromSeed, requireValidMnemonic } from "../utils/CryptoUtils.js";
 import Api from "../utils/api";
+import { createHandoff } from "../utils/onboardingSession";
 export function useLogin({
     state,
     setCredentials
@@ -34,7 +34,7 @@ export function useLogin({
                 address
             });
             return data?.username || null;
-        } catch (e) {
+        } catch (_e) {
             return null;
         }
     };
@@ -42,35 +42,34 @@ export function useLogin({
         setError('');
         setLoading(true);
         try {
-            const trimmedSeed = seedPhrase.trim();
-            if (!trimmedSeed) {
-                if (mountedRef.current) setError('Please enter your recovery phrase');
+            let normalizedSeed;
+            try {
+                normalizedSeed = requireValidMnemonic(seedPhrase);
+            } catch (e) {
+                if (mountedRef.current) setError(String(e?.message || 'Invalid recovery phrase'));
                 if (mountedRef.current) setLoading(false);
                 return;
             }
-            const normalizedSeed = trimmedSeed.toLowerCase();
-            if (trimmedSeed !== normalizedSeed) {
-                try {
-                    console.debug('[Login] normalized recovery phrase to lowercase', {
-                        wordCount: trimmedSeed.split(/\s+/).filter(Boolean).length
-                    });
-                } catch (_) { }
-            }
-            if (!validateMnemonic(normalizedSeed)) {
-                if (mountedRef.current) setError('Invalid recovery phrase');
-                if (mountedRef.current) setLoading(false);
-                return;
-            }
+            try {
+                console.debug('[Login] validated recovery phrase', {
+                    wordCount: normalizedSeed.split(' ').length
+                });
+            } catch (_) { }
             const {
                 publicKey
             } = deriveKeysFromSeed(normalizedSeed);
             const username = await fetchUsernameFromAddress(publicKey);
             if (!username) {
-                // Account not found - redirect to create account with the provided seed
+                // Account not found — hand off seed in memory (never via location.state)
                 if (mountedRef.current) setLoading(false);
+                const { id } = createHandoff({
+                    purpose: 'import',
+                    seed: normalizedSeed,
+                    owner: publicKey,
+                });
                 navigate('/signup', {
                     state: {
-                        importedSeed: normalizedSeed,
+                        handoffId: id,
                         fromRecovery: true
                     },
                     replace: true

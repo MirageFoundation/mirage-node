@@ -3,12 +3,13 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { generateMnemonic } from "bip39";
 import Storage from "../utils/Storage.js";
 import seedVault from "../utils/SeedVault.js";
-import { deriveKeysFromSeed } from "../utils/CryptoUtils.js";
+import { deriveKeysFromSeed, requireValidMnemonic } from "../utils/CryptoUtils.js";
 import * as tx from "../utils/tx";
 import Api from "../utils/api";
 import { getMaxUsernameSize, getMinUsernameSize } from "../utils/chainParams";
 import { formatError } from "../utils/errorMessages";
 import { clearReferralAttribution, getReferralAttribution } from "../utils/visitorId";
+import { peekHandoff, createHandoff, clearHandoff } from "../utils/onboardingSession";
 export function useCreateAccount({
     state,
     setCredentials
@@ -77,9 +78,15 @@ export function useCreateAccount({
         };
     }, [nodeConfig]);
 
-    // Check if we're coming from login with an imported seed (account not found on chain)
-    const importedSeed = location.state?.importedSeed || null;
+    // Check if we're coming from login with an imported seed (account not found on chain).
+    // Secrets live only in the in-memory handoff — never in location.state.
+    const handoffId = location.state?.handoffId || null;
     const fromRecovery = location.state?.fromRecovery || false;
+    const importedSeed = React.useMemo(() => {
+        if (!handoffId) return null;
+        const entry = peekHandoff(handoffId, 'import');
+        return entry?.seed || null;
+    }, [handoffId]);
 
     // Get invite code and referrer from URL parameters
     const urlParams = new URLSearchParams(location.search);
@@ -242,15 +249,27 @@ export function useCreateAccount({
         }
     };
     const initializeAccount = (existingSeed = null) => {
-        Storage.clear();
-        const newSeedPhrase = existingSeed || generateMnemonic();
+        // Do NOT clear Storage / vault here — only stage a new identity in component state.
+        // Active vault stays intact until create_user confirms on-chain.
+        let newSeedPhrase;
+        try {
+            newSeedPhrase = existingSeed
+                ? requireValidMnemonic(existingSeed)
+                : generateMnemonic();
+        } catch (error) {
+            setSubmitError("Invalid recovery phrase: " + error.message);
+            return;
+        }
         setSeedPhrase(newSeedPhrase);
         try {
-            // Derive public key/address from seed phrase
-            const {
-                publicKey: address
-            } = deriveKeysFromSeed(newSeedPhrase);
+            const { publicKey: address } = deriveKeysFromSeed(newSeedPhrase);
             setPublicKey(address);
+            try {
+                console.debug('[CreateAccount] staged identity', {
+                    ownerPrefix: String(address).slice(0, 12),
+                    fromImport: !!existingSeed,
+                });
+            } catch (_) { /* noop */ }
         } catch (error) {
             setSubmitError("Key derivation failed: " + error.message);
         }
@@ -378,15 +397,24 @@ export function useCreateAccount({
         setStatusStartTime(Date.now());
         await new Promise(r => setTimeout(r, 50)); // Let React render
         try {
-            // Persist fresh credentials so TransactionHandler uses the correct signer
+            // Stage seed for create_user signing via in-memory handoff (do not wipe active vault).
+            const { id: signingHandoffId } = createHandoff({
+                purpose: 'create-user-signing',
+                seed: seedPhrase,
+                owner: publicKey,
+            });
             try {
-                seedVault.storeSeed(seedPhrase, 'insecure', null);
-                // Do not persist publicKey until confirmation
-            } catch (_) { }
+                console.debug('[CreateAccount] staged create-user handoff', {
+                    handoffId: signingHandoffId,
+                    ownerPrefix: String(publicKey).slice(0, 12),
+                });
+            } catch (_) { /* noop */ }
+            // Persist seed into vault only after success (plaintext default).
             // Defer to tx facade for PoW + relay
             const submittedReferrer = codeClean ? "" : referrerUsername;
             const result = await tx.createUser(usernameFinal, codeClean, submittedReferrer);
             if (!result || !result.success) {
+                clearHandoff(signingHandoffId);
                 const msg = String((result && result.error) || "Submit failed");
                 if (/admin insufficient balance/i.test(msg)) {
                     setSubmitError("Your account balance is too low to cover the transaction fee.");
@@ -412,8 +440,7 @@ export function useCreateAccount({
             }
 
             // Transaction broadcast succeeded (code=0 from BROADCAST_MODE_SYNC).
-            // Navigate to welcome and show seed phrase IMMEDIATELY — never gate
-            // seed phrase display on indexer confirmation. The account exists on-chain.
+            // Commit vault now (plaintext default), then welcome via in-memory handoff.
             const finalUsername = `Anon-${base}`;
             try {
                 Storage.remove('username_pending');
@@ -425,10 +452,18 @@ export function useCreateAccount({
                 localStorage.setItem('user_balance', String(localStorage.getItem('user_balance') || '0'));
             } catch (_) { }
             clearReferralAttribution();
+            if (handoffId) clearHandoff(handoffId);
+            clearHandoff(signingHandoffId);
+            await seedVault.storeSeed(seedPhrase, 'insecure', null);
+            const { id: welcomeHandoffId } = createHandoff({
+                purpose: 'welcome',
+                seed: seedPhrase,
+                owner: publicKey,
+            });
             navigate('/welcome', {
                 state: {
                     username: finalUsername,
-                    seedPhrase
+                    handoffId: welcomeHandoffId,
                 },
                 replace: true
             });

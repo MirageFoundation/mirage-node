@@ -14,7 +14,8 @@ import ContentTagBadge from "./components/ContentTagBadge";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { normalizeTag } from "../../utils/ContentTags";
-import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl, getVideoThumbnailUrl } from "../../utils/media";
+import { isLikelyImageUrl, isLikelyVideoUrl, getVideoThumbnailUrl } from "../../utils/media";
+import ExternalMediaGate from "../../components/ExternalMediaGate";
 import Storage from "../../utils/Storage";
 import { formatTimeStamp } from "../../logic/useViewPost";
 import { AWARD_TYPES } from "../../logic/usePostGifts";
@@ -930,9 +931,8 @@ function resolveCompactContent(post) {
     return { mediaUrl: null, body: rawBody.trim() };
 }
 
-/* Small photon-scaled thumbnail for the compact left column. Returns null
- * if we couldn't derive an image URL. Falls back to the DiceBear
- * identicon placeholder.
+/* Small thumbnail for the compact left column. Returns null if we couldn't
+ * derive an image URL. Falls back to the DiceBear identicon placeholder.
  *
  * Sources, in order:
  *   1. `post.thumbnail` (if it's an image URL)
@@ -944,45 +944,30 @@ function resolveCompactContent(post) {
 function getCompactThumb(post) {
     const thumb = post?.thumbnail;
     if (typeof thumb === 'string' && thumb.trim() && isLikelyImageUrl(thumb)) {
-        try { return buildPhotonUrl(thumb, { w: 144, h: 144 }); }
-        catch (_) { /* noop */ }
+        return thumb.trim();
     }
     if (Array.isArray(post?.media) && post.media.length > 0) {
         const first = post.media[0];
         if (typeof first === 'string' && isLikelyImageUrl(first)) {
-            try { return buildPhotonUrl(first, { w: 144, h: 144 }); }
-            catch (_) { /* noop */ }
+            return first;
         }
-        // Hosted video (Bunny/Cloudflare HLS) — derive the provider poster so
-        // video posts get a preview even before the indexer backfills thumbnail.
         if (typeof first === 'string' && isLikelyVideoUrl(first)) {
             const poster = getVideoThumbnailUrl(first);
-            if (poster) {
-                try { return buildPhotonUrl(poster, { w: 144, h: 144 }); }
-                catch (_) { return poster; }
-            }
+            if (poster) return poster;
         }
     }
     const rawBody = String(post?.content || '');
     const firstUrl = extractFirstUrl(rawBody);
     if (firstUrl && isLikelyImageUrl(firstUrl)) {
-        try { return buildPhotonUrl(firstUrl, { w: 144, h: 144 }); }
-        catch (_) { /* noop */ }
+        return firstUrl;
     }
     if (firstUrl && isLikelyVideoUrl(firstUrl)) {
         const poster = getVideoThumbnailUrl(firstUrl);
-        if (poster) {
-            try { return buildPhotonUrl(poster, { w: 144, h: 144 }); }
-            catch (_) { return poster; }
-        }
+        if (poster) return poster;
     }
-    // YouTube poster — works for plain links, /shorts, /embed, youtu.be.
     if (firstUrl) {
         const ytId = extractYoutubeId(firstUrl);
-        if (ytId) {
-            try { return buildPhotonUrl(youtubeThumbUrl(ytId), { w: 144, h: 144 }); }
-            catch (_) { return youtubeThumbUrl(ytId); }
-        }
+        if (ytId) return youtubeThumbUrl(ytId);
     }
     // Plain external link — show the source site's favicon. Marked with
     // a `__favicon` flag so the renderer can apply icon-style sizing
@@ -1006,16 +991,9 @@ function isCompactInteractive(target) {
 
 /* Thumbnail tile that gracefully falls back to the DiceBear identicon when
  * the derived image URL fails to load (404, blocked, non-image content,
- * dead Photon proxy, etc.). Without this fallback the row shows a blank
- * dark tile, which is what users were seeing on link posts.
- *
- * Some image responses succeed at the HTTP level but the body is a 0×0
- * pixel image (Photon occasionally returns this for unsupported
- * sources, and YouTube `hqdefault.jpg` returns a 120×90 \"no preview\"
- * placeholder for deleted/private videos). We treat any image that
- * resolves with `naturalWidth === 0` *or* lands at the YouTube 120×90
- * placeholder as a failure too, so those rows show the seeded
- * placeholder instead of an empty dark tile. */
+ * etc.). Without this fallback the row shows a blank dark tile.
+ * Resolves with naturalWidth === 0 or YouTube 120×90 placeholder as failure.
+ * Unknown-origin thumbnails are gated via ExternalMediaGate until click. */
 function CompactThumb({ thumb, to, label, onClick, address, username }) {
     const [failed, setFailed] = useState(false);
     const src = typeof thumb === 'string' ? thumb : (thumb && thumb.src) || null;
@@ -1051,14 +1029,18 @@ function CompactThumb({ thumb, to, label, onClick, address, username }) {
 
     return (
         <CompactThumbLink to={to} aria-label={label} onClick={onClick}>
-            <img
-                src={src}
-                alt=""
-                loading="lazy"
-                style={imgStyle}
-                onError={() => setFailed(true)}
-                onLoad={handleLoad}
-            />
+            <ExternalMediaGate url={src} mediaType="thumbnail">
+                {({ url }) => (
+                    <img
+                        src={url}
+                        alt=""
+                        loading="lazy"
+                        style={imgStyle}
+                        onError={() => setFailed(true)}
+                        onLoad={handleLoad}
+                    />
+                )}
+            </ExternalMediaGate>
         </CompactThumbLink>
     );
 }

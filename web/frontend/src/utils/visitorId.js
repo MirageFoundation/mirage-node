@@ -114,8 +114,8 @@ export function captureFirstTouchAttribution() {
             ...utm,
         };
         // Fire-and-forget; analytics must never block or break the page.
-        const base = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_BASE)
-            ? String(process.env.REACT_APP_API_BASE).replace(/\/$/, '').replace(/\/api$/, '') + '/api'
+        const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE)
+            ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, '').replace(/\/api$/, '') + '/api'
             : '/api';
         fetch(base.replace(/\/$/, '') + '/stats/visitor_attribution', {
             method: 'POST',
