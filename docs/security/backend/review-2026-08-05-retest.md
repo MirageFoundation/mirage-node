@@ -5,11 +5,11 @@
 **Retest state:** remediation committed as `b7c8b258` and released as **v1.32.1**; deployed to all four validators at **v1.32.2** on 2026-08-06. Chain-side remediation shipped in the **v1.32.0** consensus upgrade; the backend-only items landed on v1.32.1.
 **Scope of this document:** current status of every finding, the evidence for each claim, and the rationale for each item accepted rather than fixed. Where this document and the original disagree about present-day state, **this one is authoritative**; the original is preserved as written, with its line references frozen at its baseline.
 
-> **Later full review:** [`review-2026-08-06.md`](review-2026-08-06.md) re-audits the
-> backend after this remediation wave (baseline `v1.32.4` / `d9dbf87a`). Use that
-> document for new findings (notably the unfinished claim-before-pay half of C-2)
-> and for present-day urgency triage; this retest remains the record of how the
-> Aug 5 findings were closed.
+> **Later full reviews:** [`review-2026-08-06.md`](review-2026-08-06.md) and
+> [`review-2026-08-07.md`](review-2026-08-07.md) re-audit the backend after this
+> remediation wave. The Aug 6 payout residual (unfinished claim-before-pay) was
+> restated in Aug 7 and closed in [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md)
+> (v1.33.3). This retest remains the record of how the Aug 5 findings were closed.
 
 > **Count correction.** Earlier planning notes for this retest said "22 findings".
 > The review actually contains **25**. The 22 was a transcription of the "22 PoW
