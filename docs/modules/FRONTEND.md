@@ -724,7 +724,7 @@ The frontend only communicates with its own backend:
 - First-party visitor attribution (`X-Mirage-Visitor`) powers `/stats`; third-party GTM is not used
 - Recovery phrases use an in-memory onboarding handoff (never React Router `location.state`)
 - Transaction queue entries are owner-bound and drained on failure/sign-out
-- Unknown media origins are click-to-load; Photon/wsrv proxies are not used
+- Remote thumbnails load through the Photon/wsrv image proxies (`buildThumbProxy`), which keeps the viewer's IP off the origin host and applies the proxies' upstream abuse filtering; `mediaPolicy` rejects structurally unsafe URLs
 
 ---
 

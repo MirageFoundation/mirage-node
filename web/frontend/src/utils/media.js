@@ -357,6 +357,90 @@ export const getVideoThumbnailUrl = (rawUrl) => {
     }
 };
 
+// Photon (WordPress.com CDN) - works with redgifs and other domains wsrv blocks
+export const buildPhotonUrl = (src, { w, h } = {}) => {
+    try {
+        if (!src) return '';
+        const srcUrl = new URL(src);
+        // Photon format: https://i0.wp.com/{host}/{path}?w=X&h=Y&crop=1
+        // crop=1 ensures the image fills the dimensions (like object-fit: cover)
+        const photonUrl = new URL(`https://i0.wp.com/${srcUrl.host}${srcUrl.pathname}`);
+        if (w) photonUrl.searchParams.set('w', String(w));
+        if (h) photonUrl.searchParams.set('h', String(h));
+        if (w && h) photonUrl.searchParams.set('crop', '1');
+        return photonUrl.toString();
+    } catch (_) {
+        return src;
+    }
+};
+
+// wsrv.nl - fallback proxy (blocks some domains like redgifs)
+export const buildWsrvUrl = (src, { w, h, fit = 'cover', blur } = {}) => {
+    try {
+        if (!src) return '';
+        const url = new URL('https://wsrv.nl/');
+        const params = url.searchParams;
+        params.set('url', src);
+        if (w) params.set('w', String(w));
+        if (h) params.set('h', String(h));
+        if (fit) params.set('fit', fit);
+        if (typeof blur === 'number') params.set('blur', String(blur));
+        return url.toString();
+    } catch (_) {
+        return src;
+    }
+};
+
+export const buildBlurredWsrvUrl = (src, opts = {}) => {
+    const { blur = 24, ...rest } = opts || {};
+    return buildWsrvUrl(src, { ...rest, blur });
+};
+
+/**
+ * Pick the thumbnail proxy for a remote image.
+ *
+ * Photon is primary because it serves hosts wsrv blocks (e.g. redgifs), but it
+ * drops query strings, so URLs that carry one must go through wsrv instead.
+ * YouTube posters are served direct — both proxies rate-limit them.
+ *
+ * Callers render `src`, swap to `blurSrc` for sensitive tags, and on error can
+ * fall back from `photon` to wsrv using `original`.
+ *
+ * @param {string|null} src
+ * @param {{ w?: number, h?: number, blur?: number }} [opts]
+ * @returns {{ src: string|null, blurSrc: string|null, original: string|null, proxy: 'none'|'direct'|'photon'|'wsrv' }}
+ */
+export const buildThumbProxy = (src, { w = 240, h = 240, blur = 18 } = {}) => {
+    const original = typeof src === 'string' && src.trim() ? src.trim() : null;
+    if (!original) return { src: null, blurSrc: null, original: null, proxy: 'none' };
+
+    if (original.includes('img.youtube.com') || original.includes('i.ytimg.com')) {
+        return { src: original, blurSrc: original, original, proxy: 'direct' };
+    }
+    if (original.includes('?')) {
+        return {
+            src: buildWsrvUrl(original, { w, h }),
+            blurSrc: buildBlurredWsrvUrl(original, { w, h, blur }),
+            original,
+            proxy: 'wsrv',
+        };
+    }
+    return {
+        src: buildPhotonUrl(original, { w, h }),
+        blurSrc: buildPhotonUrl(original, { w, h }),
+        original,
+        proxy: 'photon',
+    };
+};
+
+/** wsrv fallback used when a Photon thumbnail fails to load. */
+export const buildThumbProxyFallback = (original, { w = 240, h = 240, blur = 18 } = {}) => ({
+    src: buildWsrvUrl(original, { w, h }),
+    blurSrc: buildBlurredWsrvUrl(original, { w, h, blur }),
+    original,
+    proxy: 'wsrv',
+});
+
 const _extractRedgifsId = (u) => {
     try {
         const host = (u.hostname || '').toLowerCase();

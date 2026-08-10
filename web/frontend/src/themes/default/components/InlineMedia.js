@@ -1,6 +1,5 @@
 import React from "react";
 import styled, { useTheme } from "styled-components";
-import ExternalMediaGate from "../../../components/ExternalMediaGate";
 import { normalizeRedgifsToMp4, extractRedgifsId, redgifsCanonicalWatchUrl, extractRumbleId, buildRumbleEmbedUrl } from "../../../utils/media";
 import { classifyMediaUrl } from "../../../utils/mediaPolicy";
 
@@ -43,35 +42,6 @@ function extractYoutubeId(rawUrl) {
         }
     } catch (_) { }
     return null;
-}
-
-function detectInlineMediaKind(rawUrl) {
-    if (!rawUrl || typeof rawUrl !== 'string') return 'text';
-    try {
-        if (extractRedgifsId(rawUrl)) return 'iframe';
-        if (extractYoutubeId(rawUrl)) return 'iframe';
-        if (extractRumbleId(rawUrl)) return 'iframe';
-        const resolved = normalizeRedgifsToMp4(rawUrl);
-        const base = (typeof window !== 'undefined' && window.location && window.location.origin)
-            ? window.location.origin
-            : 'http://localhost';
-        const u = new URL(resolved, base);
-        const scheme = u.protocol.toLowerCase().replace(':', '');
-        if (scheme !== 'http' && scheme !== 'https') return 'text';
-        const p = u.pathname.toLowerCase();
-        const host = u.hostname.toLowerCase();
-        const isImgDomain = host.endsWith('imagedelivery.net');
-        const isImgExt = /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(p);
-        if (isImgDomain || isImgExt) return 'image';
-        const isIframeStream = host === 'iframe.cloudflarestream.com';
-        const isStreamDomain = isIframeStream || host.endsWith('cloudflarestream.com') || host.endsWith('videodelivery.net');
-        const isHlsExt = /\.m3u8$/i.test(p);
-        const isVidExt = /\.(mp4|webm|ogv|mov|mkv|gifv)$/i.test(p);
-        if (isStreamDomain || isHlsExt || isVidExt) return 'video';
-        return 'link';
-    } catch (_) {
-        return 'text';
-    }
 }
 
 const StyledLink = styled.a`
@@ -606,23 +576,16 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
 }
 
 export default function InlineMedia(props) {
-    const kind = detectInlineMediaKind(props.url);
-    if (kind === 'iframe' || kind === 'image' || kind === 'video') {
-        const mediaType = kind === 'iframe' ? 'embed' : kind;
+    // Structurally unsafe URLs (non-http scheme, embedded credentials, control
+    // characters) never render; everything else loads directly.
+    if (props.url) {
         const classification = classifyMediaUrl(props.url);
-        try {
-            console.debug('[MediaPolicy] inline gate', {
-                hostname: classification.hostname || '',
-                provider: classification.provider,
-                kind: mediaType,
-                autoLoad: classification.autoLoad,
+        if (!classification.ok) {
+            console.debug('[MediaPolicy] inline rejected', {
+                reason: classification.reason,
             });
-        } catch (_) { /* noop */ }
-        return (
-            <ExternalMediaGate url={props.url} mediaType={mediaType}>
-                {() => <InlineMediaBody {...props} />}
-            </ExternalMediaGate>
-        );
+            return null;
+        }
     }
     return <InlineMediaBody {...props} />;
 }

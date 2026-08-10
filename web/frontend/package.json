@@ -30,7 +30,7 @@
         "dev": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export VITE_APP_VERSION=\"${VITE_APP_VERSION:-${GIT_BRANCH} (${GIT_HASH})}\"; vite'",
         "build": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export VITE_APP_VERSION=\"${VITE_APP_VERSION:-${GIT_BRANCH} (${GIT_HASH})}\"; vite build'",
         "preview": "vite preview",
-        "lint": "eslint src/utils/onboardingSession.js src/utils/sessionLifecycle.js src/utils/mediaPolicy.js src/utils/CryptoUtils.js src/components/ExternalMediaGate.js src/logic/useLogin.js src/logic/useWelcome.js src/logic/useSignOut.js tests scripts --max-warnings=0",
+        "lint": "eslint src/utils/onboardingSession.js src/utils/sessionLifecycle.js src/utils/mediaPolicy.js src/utils/CryptoUtils.js src/logic/useLogin.js src/logic/useWelcome.js src/logic/useSignOut.js tests scripts --max-warnings=0",
         "test": "vitest run",
         "test:watch": "vitest",
         "test:e2e": "playwright test --project=chromium-mocked",

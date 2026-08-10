@@ -1,9 +1,13 @@
 /**
  * Central media allowlist / classification.
- * Unknown origins must not auto-load; click-to-load is enforced by ExternalMediaGate.
+ *
+ * Remote thumbnails are routed through the Photon/wsrv image proxies (see
+ * buildThumbProxy in media.js), which also gives us their upstream abuse
+ * filtering. Classification here rejects structurally unsafe URLs and labels
+ * providers for logging.
  */
 
-/** @typedef {'same-origin'|'mirage-cdn'|'dicebear'|'giphy'|'youtube'|'redgifs'|'rumble'|'cloudflare-stream'|'unknown'|'invalid'} MediaProvider */
+/** @typedef {'same-origin'|'mirage-cdn'|'dicebear'|'giphy'|'youtube'|'redgifs'|'rumble'|'cloudflare-stream'|'image-proxy'|'unknown'|'invalid'} MediaProvider */
 
 const EXACT_HOSTS = new Map([
     ['api.dicebear.com', 'dicebear'],
@@ -31,6 +35,11 @@ const EXACT_HOSTS = new Map([
     ['iframe.cloudflarestream.com', 'cloudflare-stream'],
     ['videodelivery.net', 'cloudflare-stream'],
     ['mirage-img.b-cdn.net', 'mirage-cdn'],
+    ['wsrv.nl', 'image-proxy'],
+    ['i0.wp.com', 'image-proxy'],
+    ['i1.wp.com', 'image-proxy'],
+    ['i2.wp.com', 'image-proxy'],
+    ['i3.wp.com', 'image-proxy'],
 ]);
 
 const SUFFIX_HOSTS = [
@@ -40,9 +49,6 @@ const SUFFIX_HOSTS = [
     ['.b-cdn.net', 'mirage-cdn'],
     ['.redgifs.com', 'redgifs'],
 ];
-
-/** Hosts that must never be treated as trusted proxies for private URLs. */
-const DENIED_PROXY_HOSTS = new Set(['wsrv.nl', 'i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'i3.wp.com']);
 
 /**
  * @param {string} raw
@@ -87,11 +93,6 @@ export function classifyMediaUrl(raw) {
     if (!hostname) {
         return { ok: false, provider: 'invalid', reason: 'no-host', autoLoad: false };
     }
-    if (DENIED_PROXY_HOSTS.has(hostname)) {
-        logDecision(hostname, 'unknown', 'denied-proxy', false);
-        return { ok: true, url, hostname, provider: 'unknown', reason: 'denied-proxy', autoLoad: false };
-    }
-
     if (typeof window !== 'undefined' && window.location) {
         const originHost = String(window.location.hostname || '').toLowerCase();
         if (hostname === originHost || hostname === 'localhost' || hostname === '127.0.0.1') {
@@ -119,14 +120,6 @@ export function classifyMediaUrl(raw) {
 }
 
 /**
- * @param {string} raw
- * @returns {boolean}
- */
-export function shouldAutoLoadMedia(raw) {
-    return classifyMediaUrl(raw).autoLoad === true;
-}
-
-/**
  * @param {string} hostname
  * @param {string} provider
  * @param {string} reason
@@ -141,5 +134,4 @@ function logDecision(hostname, provider, reason, autoLoad) {
 export const MEDIA_POLICY = {
     EXACT_HOSTS,
     SUFFIX_HOSTS,
-    DENIED_PROXY_HOSTS,
 };

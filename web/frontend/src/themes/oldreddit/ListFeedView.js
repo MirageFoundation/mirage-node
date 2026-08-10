@@ -4,8 +4,7 @@ import { Link } from 'react-router-dom';
 import VoteSection from './components/VoteSection';
 import InlineMedia from './components/InlineMedia';
 import MarkdownRenderer from './components/MarkdownRenderer';
-import { isLikelyImageUrl, isLikelyVideoUrl } from '../../utils/media';
-import ExternalMediaGate from '../../components/ExternalMediaGate';
+import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl } from '../../utils/media';
 import { getAuthorColor } from '../../utils/tierColors';
 import Storage from '../../utils/Storage';
 import { normalizeTag } from '../../utils/ContentTags';
@@ -367,7 +366,10 @@ function formatAge(tsSec) {
 function getThumbUrl(post) {
     const thumb = post?.thumbnail;
     if (typeof thumb !== 'string' || thumb.trim().length === 0) return null;
-    if (isLikelyImageUrl(thumb)) return thumb.trim();
+    if (isLikelyImageUrl(thumb)) {
+        try { return buildPhotonUrl(thumb, { w: 140, h: 105 }); }
+        catch (_) { return null; }
+    }
     return null;
 }
 
@@ -489,11 +491,7 @@ function ListRow({ post, rank, state, updatePost, saved, onToggleSave, onHide, o
                 </VoteColumn>
                 {thumbUrl ? (
                     <Thumbnail to={linkTarget}>
-                        <ExternalMediaGate url={thumbUrl} mediaType="thumbnail">
-                            {({ url }) => (
-                                <img src={url} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
-                            )}
-                        </ExternalMediaGate>
+                        <img src={thumbUrl} alt="" loading="lazy" style={shouldBlur ? { filter: 'blur(8px)' } : undefined} />
                     </Thumbnail>
                 ) : null}
                 <ContentColumn>

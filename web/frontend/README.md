@@ -36,5 +36,5 @@ a node (e.g. `https://mirage.vote`). Leave empty for full-stack local mode.
 
 - Plaintext recovery-phrase storage is the intentional default; password/passkey/memory are optional.
 - Recovery phrases never travel through React Router `location.state` (in-memory handoff only).
-- Unknown media origins are click-to-load; Photon/wsrv proxies are not used.
+- Remote thumbnails go through the Photon/wsrv image proxies (Photon primary, wsrv for query-string URLs and as fallback); `mediaPolicy` rejects unsafe URLs.
 - PoW Argon2 is same-origin under `/pow/`.
