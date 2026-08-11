@@ -502,6 +502,8 @@ export default function AdminStatsDashboard() {
     const o = aggregate && aggregate.onchain;
     const r = aggregate && aggregate.retention;
     const series = (aggregate && aggregate.series) || [];
+    // Fixed 30-day baseline from the backend — independent of the selected window.
+    const dau = (aggregate && aggregate.dau30) || null;
     const trackingSince = (aggregate && aggregate.tracking_since) || null;
     const trackingSinceLabel = trackingSince ? formatDate(trackingSince) : null;
     // Active users is a derived total: every signed-in identity in the window,
@@ -599,6 +601,41 @@ export default function AdminStatsDashboard() {
 
             {!loading && !error && aggregate && (
                 <>
+                    <SectionHeader>Daily active users — last 30 days (fixed)</SectionHeader>
+                    <TileGrid>
+                        <MetricTile
+                            accent={ACCENT}
+                            value={formatNumber(dau ? dau.avg : 0, 1)}
+                            label="DAU · 30-day average"
+                            title="DAU (30-day average)"
+                            note={`Fixed 30-day window — the period selector above does not change it. Lurker half ${trackedSince}.`}
+                        >
+                            Signed-in users active on an average day, over the last 30 complete UTC days.
+                            Same population as <strong>Active users</strong> (Lurkers + Contributors), counted
+                            per day instead of per window, so it stays comparable however you set the period.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.contributors}
+                            value={formatNumber(dau ? dau.latest : 0)}
+                            label="DAU · yesterday"
+                            title="DAU (yesterday)"
+                            note="Last complete UTC day. Today is still building and is never counted."
+                        >
+                            Signed-in users active on the <strong>most recent complete day</strong> — read it
+                            against the 30-day average to see whether today's shape is normal.
+                        </MetricTile>
+                        <MetricTile
+                            accent={CHART_COLORS.lurkers}
+                            value={formatNumber(dau ? dau.peak : 0)}
+                            label="Peak DAU · 30 days"
+                            title="Peak DAU"
+                            note="Busiest single UTC day in the fixed 30-day window."
+                        >
+                            The <strong>best day</strong> of the last 30 — the ceiling the average is being
+                            pulled toward, and the reference point for whether a spike was actually a spike.
+                        </MetricTile>
+                    </TileGrid>
+
                     <SectionHeader>Audience</SectionHeader>
                     {windowEndsBeforeTracking && (
                         <Warn>This window ends before tracking began, so Lurkers and Visitors are 0 by definition — not a real reading. Contributors (and therefore the chain half of Active users) is still accurate.</Warn>
@@ -688,7 +725,7 @@ export default function AdminStatsDashboard() {
                                 ?
                                 <InfoPopup>
                                     <InfoTitle>Lurkers &amp; contributors per day</InfoTitle>
-                                    Signed-in activity stacked by UTC day (today's partial day dropped).
+                                    Signed-in activity stacked by whole UTC day (today's partial day dropped).
                                     <strong> Lurkers</strong> are Mirage-tracked — the dashed marker is the tracking
                                     start, and there's a gap before it. <strong>Contributors</strong> come from the chain.
                                     <InfoNote>{trackedSince}</InfoNote>
@@ -736,6 +773,11 @@ export default function AdminStatsDashboard() {
                                     {" "}<strong style={{ color: CHART_COLORS.retained }}>green</strong> = still active,
                                     {" "}<strong style={{ color: CHART_COLORS.churned }}>red</strong> = churned,
                                     {" "}<strong>grey</strong> = signed up &lt;7 days ago, too recent to judge.
+                                    <InfoNote>
+                                        Bars are whole UTC days: the first day counts from its own midnight even
+                                        when the selected period starts mid-day, so it can total slightly more
+                                        than the New users tile.
+                                    </InfoNote>
                                 </InfoPopup>
                             </InfoBadge>
                             <ChartTitle>New signups by day — D7 outcome</ChartTitle>

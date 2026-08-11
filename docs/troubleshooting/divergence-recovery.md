@@ -792,9 +792,9 @@ Now do §4 (the manual path does not restart the indexer for you), then §5.
 
 The indexer only runs its historical catch-up (`_catch_up()` in
 `indexer/main.py`) **at startup**. If it stayed up through the outage, it will
-happily tail new blocks over WebSocket — `last_processed_height` advances 1
-block per ~3 s, in lockstep with the head, and **the gap never closes** (and
-any blocks it indexed on the diverged fork are never rolled back). The symptom:
+happily tail new blocks over WebSocket — the indexed height advances 1 block
+per ~3 s, in lockstep with the head, and **the gap never closes** (and any
+blocks it indexed on the diverged fork are never rolled back). The symptom:
 "the number just goes up every 3 seconds" while the API stays 503.
 
 ```bash
@@ -807,9 +807,16 @@ On restart the indexer detects its DB is past/off the chain's real history,
 rolls back to the divergence point, and replays forward at ~4 blocks/s
 (~8 min per 2000 blocks). Watch the gap close:
 
+Read the height from `meta.last_height` — since v1.33.0 that is the only height
+authority, written in the same transaction as the block it describes. Do **not**
+use `indexer_state.last_processed_height`: nothing has written it since that
+change, so on a database predating v1.33.8 it sits frozen thousands of blocks
+back and looks exactly like an indexer that has stopped.
+
 ```bash
 ssh root@<sick-host> 'docker exec -u postgres mirage psql -d mirage_indexer -At -F" " -c \
-  "SELECT key, value FROM indexer_state WHERE key IN ('"'"'last_processed_height'"'"','"'"'chain_head_height'"'"') ORDER BY key;"'
+  "SELECT (SELECT value FROM meta WHERE key='"'"'last_height'"'"') AS indexed,
+          (SELECT value FROM indexer_state WHERE key='"'"'chain_head_height'"'"') AS head;"'
 ```
 
 The API flips to 200 when the gap is ≤10 blocks and `last_processed_time` is

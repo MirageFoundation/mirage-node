@@ -11,6 +11,7 @@ and event classification without a live DB.
 
 import os
 import sys
+import time
 
 from tests.common import (
     _pass,
@@ -282,6 +283,59 @@ def test_stats_pure(backend):
                 cur.execute("DELETE FROM stats_events WHERE visitor_hash = ANY(%s)", (hashes,))
                 cur.execute("DELETE FROM stats_visitors WHERE visitor_hash = ANY(%s)", (hashes,))
 
+    # Chart buckets are whole UTC days. A preset like "7d" starts mid-day, and
+    # the series used to count only that day's tail: on 2026-08-11 the leftmost
+    # bar (8/4) rendered as 0 while the chain held 6 signups that day, all of
+    # them before the 23:33 UTC cutoff. Exercises the real query, because the
+    # fix is which timestamp the SQL starts from.
+    now_real = int(time.time())
+    with st.connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT (created_at/%s)*%s AS d, COUNT(*), MIN(created_at) FROM profiles "
+                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0) "
+                "GROUP BY d ORDER BY COUNT(*) DESC, d DESC LIMIT 1",
+                (st.DAY, st.DAY, now_real - 120 * st.DAY, now_real),
+            )
+            busiest = cur.fetchone()
+    if not busiest or int(busiest[1] or 0) < 1:
+        _fail("stats.series_buckets_whole_days", "no signups in the last 120 days to exercise the day boundary")
+    else:
+        day, signups, first_at = int(busiest[0]), int(busiest[1]), int(busiest[2])
+        # Start strictly after that day's first signup, so a window-start-bound
+        # query must lose at least one and a day-bound query must lose none.
+        late_start = min(first_at + 1, day + st.DAY - 1)
+        buckets = st._daily_series(late_start, day + st.DAY - 1, now_real)
+        got = [b for b in buckets if b["t"] == day]
+        if len(buckets) == 1 and got and got[0]["new_users"] == signups:
+            _pass("stats.series_buckets_whole_days")
+        else:
+            _fail(
+                "stats.series_buckets_whole_days",
+                f"day={day} expected new_users={signups} from start={late_start}, got {buckets}",
+            )
+
+    # DAU summary arithmetic, including the empty case the aggregate hits when
+    # no node reports a dau30 block.
+    summary = st._summarize_dau([
+        {"t": 0, "contributors": 2, "lurkers": 3},
+        {"t": st.DAY, "contributors": 0, "lurkers": 0},
+        {"t": 2 * st.DAY, "contributors": 4, "lurkers": 1},
+    ])
+    empty = st._summarize_dau([])
+    dau_checks = [
+        [d["active"] for d in summary["days"]] == [5, 0, 5],
+        summary["avg"] == round(10 / 3, 1),
+        summary["peak"] == 5,
+        summary["latest"] == 5,
+        summary["window_days"] == 3,
+        empty["avg"] == 0.0 and empty["peak"] == 0 and empty["latest"] == 0 and empty["days"] == [],
+    ]
+    if all(dau_checks):
+        _pass("stats.dau_summary_math")
+    else:
+        _fail("stats.dau_summary_math", f"summary={summary} empty={empty} checks={dau_checks}")
+
     # Visitor hashing: deterministic, salted, None on empty.
     h1 = hash_visitor_id("abc")
     h2 = hash_visitor_id("abc")
@@ -353,6 +407,17 @@ def test_stats_pure(backend):
     servers[1]["stats"]["series"] = [
         {"t": 0, "new_users": 20, "posts": 0, "comments": 10, "lurkers": 10, "d7_eligible": 3, "d7_retained": 1}
     ]
+    # The fixed DAU baseline merges by the same two rules, then re-derives its
+    # average from merged days — averaging each node's average would weight a
+    # quiet node the same as a busy one.
+    servers[0]["stats"]["dau30"] = {"days": [
+        {"t": 0, "contributors": 5, "lurkers": 40},
+        {"t": 86400, "contributors": 3, "lurkers": 10},
+    ]}
+    servers[1]["stats"]["dau30"] = {"days": [
+        {"t": 0, "contributors": 5, "lurkers": 10},
+        {"t": 86400, "contributors": 3, "lurkers": 0},
+    ]}
     agg = st.aggregate_server_stats(servers, 0, 100)
     checks = [
         # tracked metrics SUM across nodes
@@ -378,6 +443,14 @@ def test_stats_pure(backend):
         # per-day D7 cohort outcome is chain-derived -> MAX
         agg["series"][0]["d7_eligible"] == 10,
         agg["series"][0]["d7_retained"] == 6,
+        # dau30: contributors max (5), lurkers summed (50) -> 55 active on day 0
+        agg["dau30"]["days"][0]["contributors"] == 5,
+        agg["dau30"]["days"][0]["lurkers"] == 50,
+        agg["dau30"]["days"][0]["active"] == 55,
+        agg["dau30"]["days"][1]["active"] == 13,
+        agg["dau30"]["avg"] == round(68 / 2, 1),
+        agg["dau30"]["peak"] == 55,
+        agg["dau30"]["latest"] == 13,
     ]
     if all(checks):
         _pass("stats.aggregate_math")

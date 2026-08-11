@@ -38,6 +38,9 @@ VISITOR_HEADER = "X-Mirage-Visitor"
 
 DAY = 86400
 
+# Lookback for the DAU baseline. Fixed, never derived from the selected window.
+DAU_WINDOW_DAYS = 30
+
 # Active-use signals: a request to one of these means the user is reading or
 # interacting with Mirage content, not just loading a shell or polling config.
 # Anything else under /api/ is a bare "visit".
@@ -657,49 +660,25 @@ def _campaigns(start: int, end: int, limit: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
-def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
-    """Per-day buckets across the window for charting. On-chain lines (new_users,
-    contributors, posts, comments) have full history; tracked lines (lurkers) only
-    populate after visitor tracking began. Each bucket also carries per-signup-day
-    D7 cohort retention (d7_retained / d7_eligible_users): of the users who signed
-    up that day whose 7-day horizon has elapsed, how many were still active at/after
-    signup+7d. Always returns one point per day so charts are dense."""
-    new_users_by_day: Dict[int, int] = {}
-    posts_by_day: Dict[int, Tuple[int, int, int]] = {}
-    contributors_by_day: Dict[int, set[str]] = {}
-    cohort: Dict[str, int] = {}
+def _contributors_by_day(start: int, end: int) -> Dict[int, set[str]]:
+    """Distinct on-chain posters/commenters per UTC day."""
+    out: Dict[int, set[str]] = {}
     with connect_db() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT (created_at/%s)*%s AS d, COUNT(*) FROM profiles "
-                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0) GROUP BY d",
-                (DAY, DAY, start, end),
-            )
-            new_users_by_day = {int(d): int(n) for d, n in cur.fetchall()}
-            cur.execute(
-                "SELECT (created_at/%s)*%s AS d, "
-                "COUNT(*) FILTER (WHERE COALESCE(target,'') = ''), "
-                "COUNT(*) FILTER (WHERE COALESCE(target,'') <> ''), "
-                "COUNT(DISTINCT LOWER(owner)) "
-                "FROM posts WHERE created_at BETWEEN %s AND %s GROUP BY d",
-                (DAY, DAY, start, end),
-            )
-            posts_by_day = {int(d): (int(p), int(c), int(ctrb)) for d, p, c, ctrb in cur.fetchall()}
             cur.execute(
                 "SELECT (created_at/%s)*%s AS d, LOWER(owner) "
                 "FROM posts WHERE created_at BETWEEN %s AND %s GROUP BY d, LOWER(owner)",
                 (DAY, DAY, start, end),
             )
             for d, owner in cur.fetchall():
-                contributors_by_day.setdefault(int(d), set()).add(str(owner).lower())
-            cur.execute(
-                "SELECT LOWER(owner), created_at FROM profiles "
-                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0)",
-                (start, end),
-            )
-            cohort = {r[0]: int(r[1]) for r in cur.fetchall()}
+                out.setdefault(int(d), set()).add(str(owner).lower())
+    return out
 
-    lurkers_by_day: Dict[int, int] = {}
+
+def _lurkers_by_day(start: int, end: int, contributors_by_day: Dict[int, set[str]]) -> Dict[int, int]:
+    """Signed-in identities with tracked engagement per UTC day, excluding that
+    day's contributors so the two categories never count the same person twice."""
+    out: Dict[int, int] = {}
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -715,7 +694,56 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
                 day_key = int(d)
                 ident_lc = str(ident or "").lower()
                 if has_addr and has_engagement and ident_lc not in contributors_by_day.get(day_key, set()):
-                    lurkers_by_day[day_key] = lurkers_by_day.get(day_key, 0) + 1
+                    out[day_key] = out.get(day_key, 0) + 1
+    return out
+
+
+def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
+    """Per-day buckets across the window for charting. On-chain lines (new_users,
+    contributors, posts, comments) have full history; tracked lines (lurkers) only
+    populate after visitor tracking began. Each bucket also carries per-signup-day
+    D7 cohort retention (d7_retained / d7_eligible_users): of the users who signed
+    up that day whose 7-day horizon has elapsed, how many were still active at/after
+    signup+7d. Always returns one point per day so charts are dense.
+
+    Buckets are whole UTC days, so the queries start at the first bucket's own
+    midnight rather than at the window start. A preset like "7d" starts at
+    now-7*24h, which is the middle of a day: counting only that day's tail
+    rendered the leftmost bar as a near-empty stub (2026-08-11, prod: 8/4 showed
+    0 of its 6 signups, because all 6 landed before the 23:33 UTC cutoff). The
+    window still governs which days are shown; it must not decide how much of a
+    shown day counts.
+    """
+    series_start = (start // DAY) * DAY
+    new_users_by_day: Dict[int, int] = {}
+    posts_by_day: Dict[int, Tuple[int, int, int]] = {}
+    cohort: Dict[str, int] = {}
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT (created_at/%s)*%s AS d, COUNT(*) FROM profiles "
+                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0) GROUP BY d",
+                (DAY, DAY, series_start, end),
+            )
+            new_users_by_day = {int(d): int(n) for d, n in cur.fetchall()}
+            cur.execute(
+                "SELECT (created_at/%s)*%s AS d, "
+                "COUNT(*) FILTER (WHERE COALESCE(target,'') = ''), "
+                "COUNT(*) FILTER (WHERE COALESCE(target,'') <> ''), "
+                "COUNT(DISTINCT LOWER(owner)) "
+                "FROM posts WHERE created_at BETWEEN %s AND %s GROUP BY d",
+                (DAY, DAY, series_start, end),
+            )
+            posts_by_day = {int(d): (int(p), int(c), int(ctrb)) for d, p, c, ctrb in cur.fetchall()}
+            cur.execute(
+                "SELECT LOWER(owner), created_at FROM profiles "
+                "WHERE created_at BETWEEN %s AND %s AND (deleted_at IS NULL OR deleted_at = 0)",
+                (series_start, end),
+            )
+            cohort = {r[0]: int(r[1]) for r in cur.fetchall()}
+
+    contributors_by_day = _contributors_by_day(series_start, end)
+    lurkers_by_day = _lurkers_by_day(series_start, end, contributors_by_day)
 
     # Last-active timestamp per cohort member (on-chain post/comment OR tracked
     # engagement), used to judge whether each signup was retained at D7.
@@ -755,7 +783,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
             d7_retained_by_day[day] = d7_retained_by_day.get(day, 0) + 1
 
     out: List[Dict[str, int]] = []
-    day = (start // DAY) * DAY
+    day = series_start
     last = (end // DAY) * DAY
     while day <= last:
         posts, comments, contributors = posts_by_day.get(day, (0, 0, 0))
@@ -773,6 +801,61 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
         )
         day += DAY
     return out
+
+
+def _summarize_dau(days: List[Dict[str, int]]) -> Dict[str, Any]:
+    """Attach active/avg/peak/latest to a per-day active series.
+
+    Split out from `_daily_active` because the fleet aggregate has to redo the
+    arithmetic after merging nodes: averaging each node's average would weight a
+    quiet node the same as a busy one.
+    """
+    rows = [
+        {
+            "t": int(d.get("t") or 0),
+            "contributors": int(d.get("contributors") or 0),
+            "lurkers": int(d.get("lurkers") or 0),
+            "active": int(d.get("contributors") or 0) + int(d.get("lurkers") or 0),
+        }
+        for d in days
+    ]
+    actives = [r["active"] for r in rows]
+    return {
+        "window_days": len(rows),
+        "days": rows,
+        "avg": round(sum(actives) / len(actives), 1) if actives else 0.0,
+        "peak": max(actives) if actives else 0,
+        "latest": actives[-1] if actives else 0,
+    }
+
+
+def _daily_active(now_ts: int) -> Dict[str, Any]:
+    """Signed-in actives per UTC day over the last `DAU_WINDOW_DAYS` complete days.
+
+    Takes no window on purpose. DAU is the baseline you read every other number
+    against, so it has to mean the same thing whichever period the selector is
+    on — a "DAU" that silently becomes a 24h total when you pick 24h and a
+    monthly total when you pick 30d is what made the dashboard's active-user
+    numbers unreadable in the first place.
+
+    Active = the same population as the Active users tile (contributors from the
+    chain + lurkers from tracked engagement), just resolved per day instead of
+    per window. Today is excluded because it is still building.
+    """
+    today = (now_ts // DAY) * DAY
+    start = today - DAU_WINDOW_DAYS * DAY
+    end = today - 1
+    contributors_by_day = _contributors_by_day(start, end)
+    lurkers_by_day = _lurkers_by_day(start, end, contributors_by_day)
+    days = [
+        {
+            "t": day,
+            "contributors": len(contributors_by_day.get(day, ())),
+            "lurkers": lurkers_by_day.get(day, 0),
+        }
+        for day in range(start, today, DAY)
+    ]
+    return _summarize_dau(days)
 
 
 def _tracking_since() -> Optional[int]:
@@ -834,6 +917,8 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
         "retention": _retention(start, end, now_ts),
         "campaigns": _campaigns(start, end),
         "series": _daily_series(start, end, now_ts),
+        # Fixed 30-day baseline, deliberately not scoped to [start, end].
+        "dau30": _daily_active(now_ts),
     }
 
 
@@ -870,6 +955,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
     cohort_size = 0
     ret = {"d7": [0, 0], "d14": [0, 0], "d30": [0, 0]}  # [eligible, retained] (max)
     series_by_day: Dict[int, Dict[str, int]] = {}
+    dau_by_day: Dict[int, Dict[str, int]] = {}
     for s in ok_servers:
         st = s.get("stats") or {}
         g = st.get("growth") or {}
@@ -906,6 +992,11 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
             agg_pt["lurkers"] += int(pt.get("lurkers") or 0)  # tracked → sum
             for f in ("new_users", "contributors", "posts", "comments", "d7_eligible", "d7_retained"):  # on-chain → max
                 agg_pt[f] = max(agg_pt[f], int(pt.get(f) or 0))
+        for pt in (st.get("dau30") or {}).get("days") or []:
+            t = int(pt.get("t") or 0)
+            agg_dau = dau_by_day.setdefault(t, {"t": t, "contributors": 0, "lurkers": 0})
+            agg_dau["lurkers"] += int(pt.get("lurkers") or 0)  # tracked → sum
+            agg_dau["contributors"] = max(agg_dau["contributors"], int(pt.get("contributors") or 0))  # on-chain → max
     retention = {"cohort_size": cohort_size}
     for k in ("d7", "d14", "d30"):
         eligible, retained = ret[k]
@@ -939,6 +1030,7 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
         },
         "retention": retention,
         "series": [series_by_day[t] for t in sorted(series_by_day)],
+        "dau30": _summarize_dau([dau_by_day[t] for t in sorted(dau_by_day)]),
     }
 
 
