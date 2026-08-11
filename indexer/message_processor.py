@@ -1963,7 +1963,18 @@ class MessageProcessor:
         if not first:
             logger.debug("[thumb] no URL found in content")
             return None
-        if urlparse(first).scheme not in ("http", "https"):
+        try:
+            scheme = urlparse(first).scheme
+        except ValueError:
+            # urlsplit raises on a malformed authority — an unbalanced "[" or "]"
+            # reads as a broken IPv6 literal. Nested markdown links produce this
+            # ("[a [b](https://)](https://)https://..." matches through the "]").
+            # Post content is untrusted: an unparseable URL is an unknown shape,
+            # not an indexer fault. Anything else here halts indexing chain-wide,
+            # since every node replays the same block.
+            logger.warning("[thumb] unparseable first URL, no thumbnail: %r", first)
+            return None
+        if scheme not in ("http", "https"):
             logger.debug("[thumb] first URL not http(s): %s", first)
             return None
         # Direct image

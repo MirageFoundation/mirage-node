@@ -137,6 +137,28 @@ func TestRunMiragedSupervisedScriptPresent(t *testing.T) {
 			"(it is the supervisor wrapper that auto-restarts miraged on panic)")
 }
 
+// TestRunIndexerSupervisedScriptPresent pins the indexer supervisor the same
+// way. Before 2026-08-11 the indexer ran as a bare `python3 indexer/main.py`
+// in its tmux window, so one fatal exception (a post that broke urlsplit)
+// stopped indexing on every node until an operator restarted it by hand.
+// Reverting entrypoint.sh to the bare invocation restores that outage mode.
+func TestRunIndexerSupervisedScriptPresent(t *testing.T) {
+	root := repoRoot(t)
+
+	supervised := filepath.Join(root, "deploy", "run_indexer_supervised.sh")
+	stat, err := os.Stat(supervised)
+	require.NoError(t, err, "deploy/run_indexer_supervised.sh must exist")
+	require.False(t, stat.IsDir())
+	require.Greater(t, stat.Size(), int64(0), "supervised wrapper must not be empty")
+
+	entrypoint := readRepoFile(t, "deploy/entrypoint.sh")
+	require.Contains(t, entrypoint, "run_indexer_supervised.sh",
+		"deploy/entrypoint.sh must reference run_indexer_supervised.sh "+
+			"(it is the supervisor wrapper that auto-restarts the indexer on crash)")
+	require.NotContains(t, entrypoint, "python3 indexer/main.py",
+		"deploy/entrypoint.sh must not launch the indexer unsupervised")
+}
+
 // TestHardenServerHasPerHostWeeklyUpgrade pins the v1.25.4-cycle
 // harden_server.sh change: dropped the unattended-upgrades fleet-wide
 // auto-reboot model and replaced it with a per-host mirage-weekly-upgrade

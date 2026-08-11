@@ -579,7 +579,7 @@ fi
 
 # Indexer (third) - uses wrapper script that waits for RPC
 tmux new-window -t "$SESSION" -n indexer -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 indexer/main.py" C-m
+tmux send-keys -t "$SESSION:indexer" "ROOT_DIR=\"$ROOT_DIR\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_indexer_supervised.sh\"" C-m
 
 # Backend (fourth)
 tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"

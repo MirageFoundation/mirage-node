@@ -694,6 +694,13 @@ def test_indexer_hardening(backend: str):
         ("https://news.example.com/some-article", None),
         ("no url at all here", None),
         ("ftp://example.com/pic.png", None),
+        # Nested markdown links: the URL regex runs through the "]", leaving an
+        # authority urlsplit reads as a broken IPv6 literal. This exact content
+        # halted the live indexer at height 6754167 — the block is on chain, so
+        # an unhandled raise here stops every node at the same height forever.
+        ("[link [text](https://)](https://)https://youtu.be/Wz_s1_D2-xQ", None),
+        ("https://exa]mple.com/pic.png", None),
+        ("https://[example.com/pic.png", None),
     ]
     bad_thumbs = []
     for content, expected in thumb_cases:

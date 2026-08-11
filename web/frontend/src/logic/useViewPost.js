@@ -1600,8 +1600,21 @@ export function useViewPost({
         if (!post || !post.post_id) return;
         const isRoot = !!(post.title && String(post.title).trim() !== '');
         // For comments edited via reply box, pull from replyText; fallback to editText for safety
-        const newContent = (state.posts[post.post_id]?.replyText || state.posts[post.post_id]?.editText || '').trim();
+        const editedText = (state.posts[post.post_id]?.replyText || state.posts[post.post_id]?.editText || '').trim();
+        // The edit box is the reply editor, so it carries the same GIF/sticker
+        // picker and upload attachments — prepend them exactly like handleSubmit
+        // does. Without this, swapping the GIF on a media-only comment leaves an
+        // empty body and the save is silently dropped by the guard below.
+        const attachedUrl = replyAttachedUrl[post.post_id];
+        const newContent = attachedUrl
+            ? (editedText ? `${attachedUrl}\n\n${editedText}` : attachedUrl)
+            : editedText;
         const newTitle = (state.posts[post.post_id]?.editTitle || '').trim();
+        console.debug('[ViewPostView] handleEditSubmit', {
+            postId: post.post_id,
+            textLen: editedText.length,
+            attachedUrl: attachedUrl || null
+        });
         if (newContent.length === 0) return;
         try {
             const changes = {
