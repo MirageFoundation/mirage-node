@@ -814,6 +814,7 @@ def init_backend_schema() -> None:
                 CREATE TABLE IF NOT EXISTS stats_visitors (
                     visitor_hash TEXT PRIMARY KEY,
                     address TEXT,
+                    address_bound_at BIGINT,
                     platform TEXT,
                     first_seen_at BIGINT NOT NULL,
                     last_seen_at BIGINT NOT NULL,
@@ -831,6 +832,11 @@ def init_backend_schema() -> None:
                 )
             """
             )
+            # When this device first proved it was signed in as `address`. Reads
+            # are unsigned, so an event carries no address of its own; this is
+            # what lets a read be attributed to a logged-in user without
+            # retroactively claiming the device's pre-login browsing.
+            cur.execute("ALTER TABLE stats_visitors ADD COLUMN IF NOT EXISTS address_bound_at BIGINT")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stats_visitors_address "
                 "ON stats_visitors(address) WHERE address IS NOT NULL"
@@ -845,6 +851,7 @@ def init_backend_schema() -> None:
                 {
                     "visitor_hash",
                     "address",
+                    "address_bound_at",
                     "platform",
                     "first_seen_at",
                     "last_seen_at",
@@ -892,6 +899,22 @@ def init_backend_schema() -> None:
             _assert_table_schema(
                 "stats_events",
                 {"id", "created_at", "event_type", "visitor_hash", "address", "path"},
+            )
+
+            # Backfill stats_visitors.address_bound_at from evidence only: the
+            # earliest event that carried this address for this device. Visitors
+            # bound with no such event stay NULL and get a timestamp on their
+            # next signed request, rather than being credited with history we
+            # cannot demonstrate. Runs here, after stats_events exists, so a
+            # fresh database initialises in one pass.
+            cur.execute(
+                """
+                UPDATE stats_visitors v SET address_bound_at = (
+                    SELECT MIN(e.created_at) FROM stats_events e
+                    WHERE e.visitor_hash = v.visitor_hash AND e.address = v.address
+                )
+                WHERE v.address IS NOT NULL AND v.address_bound_at IS NULL
+                """
             )
 
             # ── Fix SERIAL sequences after data migration ─────────────────

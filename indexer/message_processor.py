@@ -61,6 +61,43 @@ _INLINE_CODE_RE = re.compile(r"`[^`]+`")
 logger = logging.getLogger(__name__)
 
 
+def derive_from_content(label: str, fn, *args, default=None):
+    """Run a derivation over attacker-controlled content. Never raises.
+
+    Post content, titles and media URLs are arbitrary bytes chosen by whoever
+    paid for the transaction. Anything computed FROM them — thumbnail URLs,
+    mention parsing — is cosmetic enrichment, and no cosmetic value is worth
+    what an escaping exception costs: the offending block is already on chain,
+    so every node replays it and every node dies at the same height, forever,
+    including a fresh node syncing from genesis. One post took down the whole
+    network's indexing on 2026-08-11 (height 6754167, a nested markdown link
+    that made urlsplit raise) exactly this way.
+
+    This is not a fallback that hides a bug. It is the same rule `_handle_vote`
+    already applies to an unindexed vote target ("raising here would let anyone
+    halt every indexer on the network with one junk target"), applied to the
+    other half of the untrusted surface. The failure is logged with a full
+    traceback, so a derivation bug is loud — it just isn't fatal.
+
+    Deliberately NOT for state writes. DB writes, projections and counters must
+    still fail hard: a silently-skipped write yields a wrong index, which is
+    worse than a stopped one. Pass only pure functions of untrusted input here.
+    """
+    try:
+        return fn(*args)
+    except Exception:
+        logger.exception("[derive] %s failed on untrusted content; indexing continues without it", label)
+        return default
+
+
+def _parse_mentions(content: str) -> list[str]:
+    """Extract lowercased @usernames from post content. Pure, no I/O."""
+    # Strip fenced code blocks and inline code so @mentions inside code are ignored
+    stripped = _FENCED_CODE_RE.sub("", content)
+    stripped = _INLINE_CODE_RE.sub("", stripped)
+    return list({m.lower() for m in _MENTION_RE.findall(stripped)})
+
+
 def _vote_direction(value) -> int:
     """Normalize a stored vote value (float) to a direction in {-1, 0, 1}."""
     v = float(value or 0.0)
@@ -316,21 +353,18 @@ class MessageProcessor:
         # Thumbnail discovery for root posts only. Purely deterministic URL derivation —
         # no network I/O, so every node computes the same value from the same block.
         if not target:
-            try:
-                # v1.12.0: prefer media[0] for thumbnail if available
-                thumb = None
-                if media:
-                    thumb = self.discover_post_thumbnail(media[0])
-                if not thumb:
-                    # LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
-                    # Remove after March 2026 when all old posts have been migrated or expired.
-                    thumb = self.discover_post_thumbnail(content)
-                logger.debug("thumb derived tx=%s thumb=%s", txhash[:12], thumb)
-                if thumb:
-                    self.db.update_post_thumbnail(txhash, thumb)
-            except Exception:
-                logger.exception("Failed to derive thumbnail for post %s", txhash)
-                raise
+            # Derivation is total (see derive_from_content); the DB write below
+            # is a state write and still fails hard.
+            thumb = None
+            if media:
+                thumb = derive_from_content("thumbnail(media)", self.discover_post_thumbnail, media[0])
+            if not thumb:
+                # LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+                # Remove after March 2026 when all old posts have been migrated or expired.
+                thumb = derive_from_content("thumbnail(content)", self.discover_post_thumbnail, content)
+            logger.debug("thumb derived tx=%s thumb=%s", txhash[:12], thumb)
+            if thumb:
+                self.db.update_post_thumbnail(txhash, thumb)
 
         # existing shape may differ; always log insert/update
         if not existing or existing[:4] != (topic, title, content, target):
@@ -373,11 +407,9 @@ class MessageProcessor:
         """
         if not content or not post_txhash or not mentioner_address:
             return
-        # Strip fenced code blocks and inline code so @mentions inside code are ignored
-        stripped = _FENCED_CODE_RE.sub("", content)
-        stripped = _INLINE_CODE_RE.sub("", stripped)
-
-        raw_usernames = list({m.lower() for m in _MENTION_RE.findall(stripped)})
+        # Parsing runs over attacker-controlled text, so it is total; everything
+        # below it (resolution + inserts) is state work and still fails hard.
+        raw_usernames = derive_from_content("mentions", _parse_mentions, content, default=[])
         if not raw_usernames:
             return
 
@@ -864,13 +896,9 @@ class MessageProcessor:
 
         # Recompute thumbnail on root edits (content change). Deterministic derivation only.
         if is_root:
-            try:
-                thumb = self.discover_post_thumbnail(content)
-                logger.debug("thumb recomputed on edit override=%s thumb=%s", override, thumb)
-                self.db.update_post_thumbnail(override, thumb)
-            except Exception:
-                logger.exception("Failed to derive thumbnail for edit %s", tx_hash)
-                raise
+            thumb = derive_from_content("thumbnail(edit)", self.discover_post_thumbnail, content)
+            logger.debug("thumb recomputed on edit override=%s thumb=%s", override, thumb)
+            self.db.update_post_thumbnail(override, thumb)
 
         # Re-extract @mentions on edit (delete old, insert new)
         if owner and content:

@@ -209,6 +209,79 @@ def test_stats_pure(backend):
     else:
         _fail("stats.growth_buckets", f"expected (2, 1), got {buckets}")
 
+    # Reads are unsigned, so a logged-in reader's events carry no address of
+    # their own. Before the device binding was consulted, every one of them fell
+    # through to the logged-out branch: on Aug 10 2026 web lurkers went to zero
+    # fleet-wide and the same users inflated "logged-out visitors" instead. This
+    # exercises the real SQL, because the fix lives in the CTE, not in Python.
+    #
+    # Window sits far in the future so it can never overlap live traffic, and
+    # so the rows cannot move MIN(created_at) while they exist — _tracking_since
+    # reads that, and these categories run in parallel against a shared DB.
+    win_start, win_end = 4_000_000_000, 4_000_000_999
+    fixtures = [
+        # (visitor_hash, bound_at, [event times]) — one device bound mid-window
+        # with a read after the bind, one bound only after the window's reads.
+        ("t_bound_before", 4_000_000_500, [4_000_000_400, 4_000_000_600]),
+        ("t_bound_after", 4_000_000_900, [4_000_000_400]),
+    ]
+    try:
+        with st.connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                for vh, ba, times in fixtures:
+                    cur.execute(
+                        "INSERT INTO stats_visitors "
+                        "(visitor_hash, address, address_bound_at, platform, first_seen_at, last_seen_at) "
+                        "VALUES (%s, %s, %s, 'web', %s, %s) ON CONFLICT (visitor_hash) DO UPDATE SET "
+                        "address = EXCLUDED.address, address_bound_at = EXCLUDED.address_bound_at",
+                        (vh, f"mirage1{vh}", ba, win_start, win_end),
+                    )
+                    for t in times:
+                        cur.execute(
+                            "INSERT INTO stats_events (created_at, event_type, visitor_hash, address, path) "
+                            "VALUES (%s, 'engagement', %s, NULL, '/api/get_posts')",
+                            (t, vh),
+                        )
+        orig_contributors = st._contributor_addresses
+        try:
+            st._contributor_addresses = lambda _s, _e: set()
+            got = st._growth_visitors(win_start, win_end)
+        finally:
+            st._contributor_addresses = orig_contributors
+        # The device bound mid-window is a lurker (its post-bind read counts);
+        # the one bound later is still just a logged-out visitor.
+        if got == (1, 1):
+            _pass("stats.lurker_uses_device_binding")
+        else:
+            _fail("stats.lurker_uses_device_binding", f"expected (1 visitor, 1 lurker), got {got}")
+
+        # Same rows with no bind timestamp reproduce the broken state exactly:
+        # both logged-in readers read as logged-out visitors. This is also the
+        # standing limit of the fix — a device we cannot date the bind for stays
+        # invisible until it signs something, rather than being credited with
+        # history we cannot demonstrate.
+        with st.connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE stats_visitors SET address_bound_at = NULL WHERE visitor_hash = ANY(%s)",
+                    ([f[0] for f in fixtures],),
+                )
+        try:
+            st._contributor_addresses = lambda _s, _e: set()
+            undated = st._growth_visitors(win_start, win_end)
+        finally:
+            st._contributor_addresses = orig_contributors
+        if undated == (2, 0):
+            _pass("stats.lurker_requires_dated_binding")
+        else:
+            _fail("stats.lurker_requires_dated_binding", f"expected (2 visitors, 0 lurkers), got {undated}")
+    finally:
+        hashes = [f[0] for f in fixtures]
+        with st.connect_backend_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM stats_events WHERE visitor_hash = ANY(%s)", (hashes,))
+                cur.execute("DELETE FROM stats_visitors WHERE visitor_hash = ANY(%s)", (hashes,))
+
     # Visitor hashing: deterministic, salted, None on empty.
     h1 = hash_visitor_id("abc")
     h2 = hash_visitor_id("abc")

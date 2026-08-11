@@ -65,6 +65,17 @@ _event_cache: dict[str, int] = {}
 _event_cache_lock = threading.Lock()
 _event_cache_last_cleanup = 0
 
+# stats_visitors.address_bound_at on upsert: keep the first bind, except when
+# the device switches accounts — then the new address was bound now, and the
+# previous account's window ends here. A row arriving without an address (every
+# unsigned read) leaves the stored value untouched.
+_BOUND_AT_ON_CONFLICT = (
+    "CASE WHEN EXCLUDED.address IS NOT NULL "
+    "AND EXCLUDED.address IS DISTINCT FROM stats_visitors.address "
+    "THEN EXCLUDED.address_bound_at "
+    "ELSE COALESCE(stats_visitors.address_bound_at, EXCLUDED.address_bound_at) END"
+)
+
 
 # ── Identity ────────────────────────────────────────────────────────────────
 
@@ -201,15 +212,17 @@ def bind_verified_request_identity(path: str) -> None:
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                INSERT INTO stats_visitors (visitor_hash, address, platform, first_seen_at, last_seen_at)
-                VALUES (%s, %s, %s, %s, %s)
+                f"""
+                INSERT INTO stats_visitors
+                    (visitor_hash, address, address_bound_at, platform, first_seen_at, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (visitor_hash) DO UPDATE SET
                     address = EXCLUDED.address,
                     last_seen_at = EXCLUDED.last_seen_at,
-                    platform = COALESCE(stats_visitors.platform, EXCLUDED.platform)
+                    platform = COALESCE(stats_visitors.platform, EXCLUDED.platform),
+                    address_bound_at = {_BOUND_AT_ON_CONFLICT}
                 """,
-                (visitor_hash, address, platform, now_ts, now_ts),
+                (visitor_hash, address, now_ts, platform, now_ts, now_ts),
             )
 
 
@@ -232,28 +245,32 @@ def _persist_event(
             )
             if visitor_hash:
                 cur.execute(
-                    """
-                    INSERT INTO stats_visitors (visitor_hash, address, platform, first_seen_at, last_seen_at)
-                    VALUES (%s, %s, %s, %s, %s)
+                    f"""
+                    INSERT INTO stats_visitors
+                        (visitor_hash, address, address_bound_at, platform, first_seen_at, last_seen_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (visitor_hash) DO UPDATE SET
                         last_seen_at = EXCLUDED.last_seen_at,
                         platform = COALESCE(stats_visitors.platform, EXCLUDED.platform),
-                        address = COALESCE(EXCLUDED.address, stats_visitors.address)
+                        address = COALESCE(EXCLUDED.address, stats_visitors.address),
+                        address_bound_at = {_BOUND_AT_ON_CONFLICT}
                     """,
-                    (visitor_hash, address, platform, now_ts, now_ts),
+                    (visitor_hash, address, now_ts if address else None, platform, now_ts, now_ts),
                 )
             elif address:
                 # Authed client with no visitor header (e.g. v1 mobile). Track the
                 # address as its own identity so logged-in DAU/retention still work.
                 cur.execute(
                     """
-                    INSERT INTO stats_visitors (visitor_hash, address, platform, first_seen_at, last_seen_at)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO stats_visitors
+                        (visitor_hash, address, address_bound_at, platform, first_seen_at, last_seen_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (visitor_hash) DO UPDATE SET
                         last_seen_at = EXCLUDED.last_seen_at,
-                        platform = COALESCE(stats_visitors.platform, EXCLUDED.platform)
+                        platform = COALESCE(stats_visitors.platform, EXCLUDED.platform),
+                        address_bound_at = COALESCE(stats_visitors.address_bound_at, EXCLUDED.address_bound_at)
                     """,
-                    (f"addr:{address}", address, platform, now_ts, now_ts),
+                    (f"addr:{address}", address, now_ts, platform, now_ts, now_ts),
                 )
 
 
@@ -328,8 +345,15 @@ def _resolved_event_cte() -> str:
     """SQL CTE that resolves each event to its canonical identity.
 
     identity = event address, else the address the visitor is now bound to,
-    else the raw visitor hash. ``has_addr`` means this event itself was logged-in,
-    so old anonymous events do not become active users after later signup.
+    else the raw visitor hash.
+
+    ``has_addr`` means the event was made by a logged-in user. An event proves
+    that itself only when the request was signed, which reads never are — so
+    requiring it would count every logged-in reader as a logged-out visitor.
+    The second clause reads the device's binding instead, restricted to events
+    at or after the bind: that keeps a device's pre-login browsing out of the
+    logged-in counts, so old anonymous events still do not become active users
+    after a later signup.
 
     The address on a profile-view event is the profile being looked at, not the
     viewer, so it is nulled out here: rows recorded while the query address was
@@ -337,10 +361,13 @@ def _resolved_event_cte() -> str:
     logged-in counts with everyone who got viewed.
     """
     viewer_addr = "(CASE WHEN e.path LIKE '/api/get_profile%%' THEN NULL ELSE e.address END)"
+    bound_before_event = (
+        "(v.address IS NOT NULL AND v.address_bound_at IS NOT NULL AND e.created_at >= v.address_bound_at)"
+    )
     return (
         "SELECT COALESCE(" + viewer_addr + ", v.address, e.visitor_hash) AS ident, "
         "e.event_type, e.created_at, "
-        "(" + viewer_addr + " IS NOT NULL) AS has_addr "
+        "(" + viewer_addr + " IS NOT NULL OR " + bound_before_event + ") AS has_addr "
         "FROM stats_events e LEFT JOIN stats_visitors v ON v.visitor_hash = e.visitor_hash "
         "WHERE e.created_at BETWEEN %s AND %s"
     )

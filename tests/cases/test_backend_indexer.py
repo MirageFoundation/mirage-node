@@ -715,6 +715,95 @@ def test_indexer_hardening(backend: str):
     else:
         _pass("indexer_hardening.thumbnail_deterministic", cases=len(thumb_cases))
 
+    # ── No derivation over untrusted content may ever raise ──────────────
+    #
+    # On 2026-08-11 one post halted indexing on every node at height 6754167:
+    # urlsplit raised on a nested markdown link and the exception escaped
+    # discover_post_thumbnail. The block is on chain, so every node replays it
+    # and dies at the same height — a permanent, network-wide DoS for the cost
+    # of a single post. Enumerating known-bad URLs is not enough; the property
+    # under test is that NOTHING derived from post content can throw.
+
+    hostile = [
+        # The live payload that caused the outage, plus the shapes around it.
+        "[link [text](https://)](https://)https://youtu.be/Wz_s1_D2-xQ",
+        "[a](https://)[b](https://)https://x.com/y",
+        "https://",
+        "https://[",
+        "https://]",
+        "https://[/",
+        "https://a]b.com/pic.png",
+        "https://[a.com/pic.png",
+        "https://[[]]/pic.png",
+        "https://user@[v1.fe80::a]/pic.png",
+        # Ports and authorities urlsplit validates lazily.
+        "https://[::1]:notaport/pic.png",
+        "https://example.com:99999999/pic.png",
+        "https://example.com:-1/pic.png",
+        # Control characters and encoding tricks.
+        "https://exa\x00mple.com/pic.png",
+        "https://exam\nple.com/pic.png",
+        "https://ex\tample.com/pic.png",
+        "https://%00%01%02.com/pic.png",
+        "https://xn--/pic.png",
+        "https://\u0001\u0002.com/pic.gif",
+        # Unicode / IDNA / bidi.
+        "https://\u202eexample.com/pic.png",
+        "https://ex\u0430mple.com/pic.png",
+        "https://😀.example.com/pic.gif",
+        # Size and repetition.
+        "https://" + "a" * 5000 + ".com/pic.png",
+        "https://example.com/" + "../" * 2000 + "pic.png",
+        "https://" + "[" * 500 + "example.com/pic.png",
+        "https://example.com/?" + "w=1&" * 5000,
+        # Scheme confusion.
+        "https:///pic.png",
+        "https://:@/pic.png",
+        "https://@@@/pic.png",
+        "HTTPS://EXAMPLE.COM/PIC.PNG",
+        # Empty-ish inputs.
+        "",
+        " ",
+        "\x00",
+        "@" * 1000,
+        "`" * 1000,
+        "```" + "@user " * 1000,
+    ]
+
+    derive_failures = []
+    for payload in hostile:
+        try:
+            proc.discover_post_thumbnail(payload)
+        except Exception as exc:
+            derive_failures.append(f"thumbnail({payload[:40]!r}): {type(exc).__name__}: {exc}")
+        try:
+            mp_module._parse_mentions(payload)
+        except Exception as exc:
+            derive_failures.append(f"mentions({payload[:40]!r}): {type(exc).__name__}: {exc}")
+        try:
+            DatabaseManager._extract_media_meta([payload])
+        except Exception as exc:
+            derive_failures.append(f"media_meta({payload[:40]!r}): {type(exc).__name__}: {exc}")
+
+    if derive_failures:
+        _fail("indexer_hardening.untrusted_derivation_never_raises", "; ".join(derive_failures[:5]))
+    else:
+        _pass("indexer_hardening.untrusted_derivation_never_raises", payloads=len(hostile))
+
+    # The chokepoint itself must swallow and log, so a derivation added later
+    # is safe by construction as long as it is routed through it.
+    def _boom(_):
+        raise ValueError("derivation exploded")
+
+    try:
+        swallowed = mp_module.derive_from_content("test", _boom, "x", default="fallback-marker")
+        if swallowed == "fallback-marker":
+            _pass("indexer_hardening.derive_chokepoint_swallows")
+        else:
+            _fail("indexer_hardening.derive_chokepoint_swallows", f"returned {swallowed!r}")
+    except Exception as exc:
+        _fail("indexer_hardening.derive_chokepoint_swallows", f"raised {type(exc).__name__}: {exc}")
+
     # The point of H-5 is that no fetch happens at all, so assert the capability
     # is absent rather than trying to observe a request that should never occur.
     leaked_modules = [
@@ -1156,6 +1245,26 @@ def test_indexer_hardening(backend: str):
         _fail("indexer_hardening.message_processor_no_http", f"found {http_imports}")
     else:
         _pass("indexer_hardening.message_processor_no_http")
+
+    # Every derivation over post content must go through derive_from_content.
+    # The guard inside a single derivation only protects the payloads someone
+    # thought of; routing the call sites is what makes the next derivation safe
+    # by default. A direct call here is how the 2026-08-11 outage happened.
+    unrouted = []
+    for lineno, line in enumerate(mp_src.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("def "):
+            continue
+        for fn_name in ("discover_post_thumbnail(", "_parse_mentions("):
+            if fn_name in line and "derive_from_content" not in line:
+                unrouted.append(f"{fn_name.rstrip('(')} at message_processor.py:{lineno}")
+    if unrouted:
+        _fail(
+            "indexer_hardening.derivations_routed_through_chokepoint",
+            f"called directly instead of via derive_from_content: {unrouted}",
+        )
+    else:
+        _pass("indexer_hardening.derivations_routed_through_chokepoint")
 
     # ── I-3: obsolete queue/config surface is gone ───────────────────────
 

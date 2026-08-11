@@ -925,7 +925,14 @@ class DatabaseManager:
                 h = int(qs["h"][0]) if "h" in qs else 0
                 entry = DatabaseManager._sanitize_wh(w, h)
             except (TypeError, ValueError, KeyError, IndexError):
+                # Expected shapes of garbage in an attacker-supplied URL.
                 pass
+            except Exception:
+                # Media URLs are attacker-controlled, so the list above is a
+                # guess about which shapes exist. Missing w/h costs a layout
+                # hint; an escaping raise stops indexing on every node at the
+                # same block. Unexpected, so it keeps the traceback.
+                logger.exception("[media_meta] unparseable media URL, no dimensions: %r", url)
             meta.append(entry)
         return meta
 
