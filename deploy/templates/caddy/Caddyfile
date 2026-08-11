@@ -154,7 +154,10 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 
 		# Security headers (wallet origin)
 		header {
-			Referrer-Policy "no-referrer"
+			# strict-origin-when-cross-origin (not no-referrer): YouTube embeds
+			# require a Referer and return Error 153 when it is stripped.
+			# Cross-origin still only sends the origin, never path/query.
+			Referrer-Policy "strict-origin-when-cross-origin"
 			X-Content-Type-Options "nosniff"
 			X-Frame-Options "DENY"
 			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"

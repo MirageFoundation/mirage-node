@@ -337,7 +337,9 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
             );
         }
 
-        // YouTube embed
+        // YouTube embed — referrerPolicy must send an origin. YouTube Error 153
+        // ("Video player configuration error") is returned when Referer is stripped
+        // (document or iframe Referrer-Policy: no-referrer).
         const youtubeId = extractYoutubeId(url);
         if (youtubeId) {
             const embedUrl = autoPlay
@@ -351,7 +353,7 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
                         title="YouTube video"
                         allow={youtubeAllow(autoPlay)}
                         allowFullScreen
-                        referrerPolicy="no-referrer"
+                        referrerPolicy="strict-origin-when-cross-origin"
                         sandbox={IFRAME_SANDBOX}
                         loading="lazy"
                         frameBorder="0"
